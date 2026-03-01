@@ -36,7 +36,11 @@ describe('AuthGuard', () => {
       },
     } as ConfigService
 
-    guard = new AuthGuard(reflector, configService)
+    const authService = {
+      verifyAccessToken: jest.fn(),
+    }
+
+    guard = new AuthGuard(reflector, configService, authService as never)
   })
 
   it('should allow public routes', async () => {

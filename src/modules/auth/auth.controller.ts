@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { AuthService } from './auth.service'
-import { AuthCallbackSchema, type AuthCallbackDto } from './dto/auth-callback.dto'
+import { AuthLoginSchema, type AuthLoginDto } from './dto/auth-login.dto'
 import { AuthRefreshSchema, type AuthRefreshDto } from './dto/auth-refresh.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Public } from '../../common/decorators/public.decorator'
@@ -14,10 +14,12 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @Post('callback')
-  @UsePipes(new ZodValidationPipe(AuthCallbackSchema))
-  async callback(@Body() dto: AuthCallbackDto): Promise<{ accessToken: string; user: JwtPayload }> {
-    return this.authService.exchangeCode(dto.code, dto.redirect_uri)
+  @Post('login')
+  @UsePipes(new ZodValidationPipe(AuthLoginSchema))
+  async login(
+    @Body() dto: AuthLoginDto
+  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
+    return this.authService.login(dto.email, dto.password)
   }
 
   @ApiBearerAuth()
@@ -26,10 +28,12 @@ export class AuthController {
     return user
   }
 
-  @ApiBearerAuth()
+  @Public()
   @Post('refresh')
   @UsePipes(new ZodValidationPipe(AuthRefreshSchema))
-  async refresh(@Body() dto: AuthRefreshDto): Promise<{ accessToken: string }> {
-    return this.authService.refreshToken(dto.refreshToken)
+  async refresh(
+    @Body() dto: AuthRefreshDto
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    return this.authService.refreshTokens(dto.refreshToken)
   }
 }

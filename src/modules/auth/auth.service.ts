@@ -1,4 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import * as bcrypt from 'bcryptjs'
+import * as jwt from 'jsonwebtoken'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -6,33 +9,107 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name)
+  private readonly jwtSecret: string
+  private readonly accessExpiry: jwt.SignOptions['expiresIn']
+  private readonly refreshExpiry: jwt.SignOptions['expiresIn']
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService
+  ) {
+    this.jwtSecret = this.configService.get<string>('JWT_SECRET', '')
+    this.accessExpiry = this.configService.get<string>(
+      'JWT_ACCESS_EXPIRY',
+      '15m'
+    ) as jwt.SignOptions['expiresIn']
+    this.refreshExpiry = this.configService.get<string>(
+      'JWT_REFRESH_EXPIRY',
+      '7d'
+    ) as jwt.SignOptions['expiresIn']
+  }
 
-  async exchangeCode(
-    code: string,
-    _redirectUri: string
-  ): Promise<{ accessToken: string; user: JwtPayload }> {
-    // In production, this would exchange the authorization code with the OIDC provider
-    // For now, return a mock response based on the code
-    this.logger.debug(`Exchanging code: ${code.slice(0, 8)}...`)
+  async login(
+    email: string,
+    password: string
+  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
+    const tenantUser = await this.prisma.tenantUser.findFirst({
+      where: { email },
+      include: { tenant: true },
+    })
 
-    const mockUser: JwtPayload = {
-      sub: 'mock-user-001',
-      email: 'analyst@auraspear.io',
-      tenantId: 'aura-finance',
-      role: UserRole.SOC_ANALYST_L2,
+    if (!tenantUser?.passwordHash) {
+      throw new UnauthorizedException('Invalid email or password')
     }
 
-    return {
-      accessToken: `mock-jwt-${Date.now()}`,
-      user: mockUser,
+    const valid = await bcrypt.compare(password, tenantUser.passwordHash)
+    if (!valid) {
+      throw new UnauthorizedException('Invalid email or password')
+    }
+
+    const payload: JwtPayload = {
+      sub: tenantUser.id,
+      email: tenantUser.email,
+      tenantId: tenantUser.tenant.slug,
+      role: tenantUser.role as UserRole,
+    }
+
+    const accessToken = this.signAccessToken(payload)
+    const refreshToken = this.signRefreshToken(payload)
+
+    return { accessToken, refreshToken, user: payload }
+  }
+
+  signAccessToken(payload: JwtPayload): string {
+    const { iat: _iat, exp: _exp, ...clean } = payload
+    return jwt.sign(clean, this.jwtSecret, { expiresIn: this.accessExpiry })
+  }
+
+  signRefreshToken(payload: JwtPayload): string {
+    const { iat: _iat, exp: _exp, ...clean } = payload
+    return jwt.sign(clean, this.jwtSecret, { expiresIn: this.refreshExpiry })
+  }
+
+  verifyAccessToken(token: string): JwtPayload {
+    try {
+      return jwt.verify(token, this.jwtSecret) as JwtPayload
+    } catch {
+      throw new UnauthorizedException('Invalid or expired access token')
     }
   }
 
-  async refreshToken(_refreshToken: string): Promise<{ accessToken: string }> {
-    // In production, validate refresh token and issue new access token
-    return { accessToken: `mock-jwt-refreshed-${Date.now()}` }
+  verifyRefreshToken(token: string): JwtPayload {
+    try {
+      return jwt.verify(token, this.jwtSecret) as JwtPayload
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token')
+    }
+  }
+
+  async refreshTokens(
+    refreshToken: string
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    const payload = this.verifyRefreshToken(refreshToken)
+
+    const user = await this.prisma.tenantUser.findUnique({
+      where: { id: payload.sub },
+      include: { tenant: true },
+    })
+
+    if (!user) {
+      throw new UnauthorizedException('User no longer exists')
+    }
+
+    const newPayload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      tenantId: user.tenant.slug,
+      role: user.role as UserRole,
+    }
+
+    return {
+      accessToken: this.signAccessToken(newPayload),
+      refreshToken: this.signRefreshToken(newPayload),
+    }
   }
 
   async findOrCreateUser(

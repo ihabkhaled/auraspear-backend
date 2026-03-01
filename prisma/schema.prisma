@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -71,12 +72,13 @@ model Tenant {
 // ─── Users & Membership ──────────────────────────────────────
 
 model TenantUser {
-  id       String   @id @default(uuid()) @db.Uuid
-  tenantId String   @map("tenant_id") @db.Uuid
-  oidcSub  String   @map("oidc_sub") @db.VarChar(255)
-  email    String   @db.VarChar(320)
-  name     String   @db.VarChar(255)
-  role     UserRole @default(SOC_ANALYST_L1)
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  oidcSub      String?  @map("oidc_sub") @db.VarChar(255)
+  email        String   @db.VarChar(320)
+  name         String   @db.VarChar(255)
+  role         UserRole @default(SOC_ANALYST_L1)
+  passwordHash String?  @map("password_hash") @db.VarChar(255)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -84,6 +86,7 @@ model TenantUser {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, oidcSub])
+  @@unique([tenantId, email])
   @@index([tenantId])
   @@map("tenant_users")
 }

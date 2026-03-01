@@ -9,11 +9,16 @@ export const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().default(''),
 
-  // OIDC
-  OIDC_ISSUER_URL: z.string().url(),
-  OIDC_AUDIENCE: z.string(),
-  OIDC_JWKS_URI: z.string().url(),
-  OIDC_CLIENT_ID: z.string(),
+  // OIDC (optional — only needed when using OIDC auth)
+  OIDC_ISSUER_URL: z.string().url().optional(),
+  OIDC_AUDIENCE: z.string().optional(),
+  OIDC_JWKS_URI: z.string().url().optional(),
+  OIDC_CLIENT_ID: z.string().optional(),
+
+  // JWT (for email/password auth)
+  JWT_SECRET: z.string().min(32),
+  JWT_ACCESS_EXPIRY: z.string().default('15m'),
+  JWT_REFRESH_EXPIRY: z.string().default('7d'),
 
   // Application
   PORT: z.coerce.number().default(4000),

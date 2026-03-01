@@ -225,7 +225,7 @@ On every commit, the following checks run automatically on staged files:
 Configuration:
 
 - `.husky/pre-commit` runs `npm run lint-staged`
-- `.lintstagedrc.cjs` — Uses `npm run` scripts for Windows compatibility
+- `.lintstagedrc.cjs` — Uses `npm run` scripts
 - `.husky/install.mjs` — Skips Husky install in CI/production/Vercel/GitHub Actions
 
 ---

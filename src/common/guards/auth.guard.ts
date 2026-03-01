@@ -4,11 +4,12 @@ import {
   Injectable,
   UnauthorizedException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Reflector } from '@nestjs/core'
-import * as jwt from 'jsonwebtoken'
-import jwksClient from 'jwks-rsa'
+import { AuthService } from '../../modules/auth/auth.service'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { UserRole } from '../interfaces/authenticated-request.interface'
 import type {
@@ -19,27 +20,15 @@ import type {
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name)
-  private readonly client: jwksClient.JwksClient
-  private readonly audience: string
-  private readonly issuer: string
   private readonly isDev: boolean
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService: AuthService
   ) {
     this.isDev = this.configService.get('NODE_ENV') !== 'production'
-    this.audience = this.configService.get('OIDC_AUDIENCE', 'api://auraspear-soc')
-    this.issuer = this.configService.get('OIDC_ISSUER_URL', '')
-
-    this.client = jwksClient({
-      jwksUri:
-        this.configService.get<string>('OIDC_JWKS_URI') ??
-        'https://login.microsoftonline.com/common/discovery/v2.0/keys',
-      cache: true,
-      rateLimit: true,
-      jwksRequestsPerMinute: 10,
-    })
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -56,7 +45,6 @@ export class AuthGuard implements CanActivate {
     const authHeader = request.headers.authorization
 
     if (!authHeader?.startsWith('Bearer ')) {
-      // In dev mode, inject a mock user for testing without OIDC
       if (this.isDev && !authHeader) {
         request.user = this.getDevUser(request)
         return true
@@ -67,7 +55,7 @@ export class AuthGuard implements CanActivate {
     const token = authHeader.slice(7)
 
     try {
-      const decoded = await this.verifyToken(token)
+      const decoded = this.authService.verifyAccessToken(token)
       request.user = decoded
       return true
     } catch (error) {
@@ -76,41 +64,11 @@ export class AuthGuard implements CanActivate {
     }
   }
 
-  private async verifyToken(token: string): Promise<JwtPayload> {
-    return new Promise((resolve, reject) => {
-      jwt.verify(
-        token,
-        (header, callback) => {
-          this.client.getSigningKey(header.kid, (error, key) => {
-            if (error) {
-              callback(error)
-              return
-            }
-            callback(null, key?.getPublicKey())
-          })
-        },
-        {
-          audience: this.audience,
-          issuer: this.issuer || undefined,
-          algorithms: ['RS256'],
-        },
-        (error, decoded) => {
-          if (error) {
-            reject(error)
-            return
-          }
-          resolve(decoded as JwtPayload)
-        }
-      )
-    })
-  }
-
   private getDevUser(request: AuthenticatedRequest): JwtPayload {
-    // Allow dev headers to override role/tenant for testing
     const tenantId = (request.headers['x-tenant-id'] as string | undefined) ?? 'dev-tenant-001'
     const role =
       (request.headers['x-role'] as string | undefined as UserRole | undefined) ??
-      UserRole.TENANT_ADMIN
+      UserRole.GLOBAL_ADMIN
 
     return {
       sub: 'dev-user-001',

@@ -52,10 +52,9 @@ services:
       NODE_ENV: production
       LOG_LEVEL: info
       CORS_ORIGINS: http://localhost:3000
-      OIDC_ISSUER_URL: https://login.microsoftonline.com/common/v2.0
-      OIDC_AUDIENCE: api://auraspear-soc
-      OIDC_JWKS_URI: https://login.microsoftonline.com/common/discovery/v2.0/keys
-      OIDC_CLIENT_ID: change-me
+      JWT_SECRET: change-me-generate-a-64-char-hex-key-for-jwt-signing
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY: 7d
       CONFIG_ENCRYPTION_KEY: change-me-generate-a-64-char-hex-key-for-production
 
 volumes:
