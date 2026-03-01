@@ -4,35 +4,35 @@ import {
   type ExecutionContext,
   type NestInterceptor,
   Logger,
-} from '@nestjs/common';
-import { type Observable, tap } from 'rxjs';
-import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface';
-import { PrismaService } from '../../prisma/prisma.service';
+} from '@nestjs/common'
+import { type Observable, tap } from 'rxjs'
+import { PrismaService } from '../../prisma/prisma.service'
+import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface'
 
-const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
-  private readonly logger = new Logger(AuditInterceptor.name);
+  private readonly logger = new Logger(AuditInterceptor.name)
 
   constructor(private readonly prisma: PrismaService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const method = request.method;
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>()
+    const { method } = request
 
     if (!MUTATION_METHODS.has(method)) {
-      return next.handle();
+      return next.handle()
     }
 
-    const user = request.user;
-    const tenantId = user?.tenantId;
-    const handler = context.getHandler().name;
-    const controller = context.getClass().name;
+    const { user } = request
+    const tenantId = user?.tenantId
+    const handler = context.getHandler().name
+    const controller = context.getClass().name
 
     return next.handle().pipe(
       tap(() => {
-        if (!tenantId || !user) return;
+        if (!tenantId || !user) return
 
         this.prisma.auditLog
           .create({
@@ -48,9 +48,9 @@ export class AuditInterceptor implements NestInterceptor {
             },
           })
           .catch((error: unknown) => {
-            this.logger.error('Failed to write audit log', error);
-          });
-      }),
-    );
+            this.logger.error('Failed to write audit log', error)
+          })
+      })
+    )
   }
 }

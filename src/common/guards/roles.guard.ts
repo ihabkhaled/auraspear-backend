@@ -3,14 +3,14 @@ import {
   type ExecutionContext,
   ForbiddenException,
   Injectable,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../decorators/roles.decorator';
+} from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { ROLES_KEY } from '../decorators/roles.decorator'
 import {
   type JwtPayload,
   ROLE_HIERARCHY,
   type UserRole,
-} from '../interfaces/authenticated-request.interface';
+} from '../interfaces/authenticated-request.interface'
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -20,34 +20,34 @@ export class RolesGuard implements CanActivate {
     const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
-    ]);
+    ])
 
     if (!requiredRoles || requiredRoles.length === 0) {
-      return true;
+      return true
     }
 
-    const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
-    const user = request.user;
+    const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>()
+    const { user } = request
 
     if (!user?.role) {
-      throw new ForbiddenException('Insufficient permissions');
+      throw new ForbiddenException('Insufficient permissions')
     }
 
-    const userRoleIndex = ROLE_HIERARCHY.indexOf(user.role);
+    const userRoleIndex = ROLE_HIERARCHY.indexOf(user.role)
 
     if (userRoleIndex === -1) {
-      throw new ForbiddenException('Unknown role');
+      throw new ForbiddenException('Unknown role')
     }
 
-    const hasPermission = requiredRoles.some((requiredRole) => {
-      const requiredIndex = ROLE_HIERARCHY.indexOf(requiredRole);
-      return requiredIndex !== -1 && userRoleIndex <= requiredIndex;
-    });
+    const hasPermission = requiredRoles.some(requiredRole => {
+      const requiredIndex = ROLE_HIERARCHY.indexOf(requiredRole)
+      return requiredIndex !== -1 && userRoleIndex <= requiredIndex
+    })
 
     if (!hasPermission) {
-      throw new ForbiddenException('Insufficient permissions for this action');
+      throw new ForbiddenException('Insufficient permissions for this action')
     }
 
-    return true;
+    return true
   }
 }

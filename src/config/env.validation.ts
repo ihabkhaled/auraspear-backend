@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod'
 
 export const envSchema = z.object({
   // Database
@@ -34,17 +34,17 @@ export const envSchema = z.object({
   AWS_REGION: z.string().default('us-east-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
-});
+})
 
-export type EnvConfig = z.infer<typeof envSchema>;
+export type EnvConfig = z.infer<typeof envSchema>
 
 export function validateEnv(config: Record<string, unknown>): EnvConfig {
-  const result = envSchema.safeParse(config);
+  const result = envSchema.safeParse(config)
   if (!result.success) {
     const formatted = result.error.issues
-      .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)
-      .join('\n');
-    throw new Error(`Environment validation failed:\n${formatted}`);
+      .map(issue => `  ${issue.path.join('.')}: ${issue.message}`)
+      .join('\n')
+    throw new Error(`Environment validation failed:\n${formatted}`)
   }
-  return result.data;
+  return result.data
 }

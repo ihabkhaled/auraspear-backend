@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common'
 
 const PRIVATE_RANGES = [
   /^127\./,
@@ -12,42 +12,42 @@ const PRIVATE_RANGES = [
   /^fe80:/i,
   /^::1$/,
   /^localhost$/i,
-];
+]
 
 export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
-  let parsed: URL;
+  let parsed: URL
   try {
-    parsed = new URL(urlString);
+    parsed = new URL(urlString)
   } catch {
-    throw new BadRequestException('Invalid URL format');
+    throw new BadRequestException('Invalid URL format')
   }
 
   // Only allow HTTPS in production
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new BadRequestException('Only HTTP(S) URLs are allowed');
+    throw new BadRequestException('Only HTTP(S) URLs are allowed')
   }
 
   // Block private/internal IPs
-  const hostname = parsed.hostname;
+  const { hostname } = parsed
   for (const pattern of PRIVATE_RANGES) {
     if (pattern.test(hostname)) {
-      throw new BadRequestException('URLs pointing to private/internal networks are not allowed');
+      throw new BadRequestException('URLs pointing to private/internal networks are not allowed')
     }
   }
 
   // If allowlist provided, enforce it
   if (allowedHosts && allowedHosts.length > 0) {
     const isAllowed = allowedHosts.some(
-      (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
-    );
+      allowed => hostname === allowed || hostname.endsWith(`.${allowed}`)
+    )
     if (!isAllowed) {
-      throw new BadRequestException(`Host '${hostname}' is not in the allowed list`);
+      throw new BadRequestException(`Host '${hostname}' is not in the allowed list`)
     }
   }
 
-  return parsed;
+  return parsed
 }
 
 export function isPrivateHost(hostname: string): boolean {
-  return PRIVATE_RANGES.some((pattern) => pattern.test(hostname));
+  return PRIVATE_RANGES.some(pattern => pattern.test(hostname))
 }

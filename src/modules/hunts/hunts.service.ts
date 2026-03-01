@@ -1,40 +1,40 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { RunHuntDto } from './dto/run-hunt.dto';
-import { JwtPayload } from '../../common/interfaces/authenticated-request.interface';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { RunHuntDto } from './dto/run-hunt.dto'
+import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import { PrismaService } from '../../prisma/prisma.service'
 
-interface HuntEvent {
-  id: string;
-  timestamp: string;
-  severity: string;
-  eventId: string;
-  sourceIp: string;
-  user: string;
-  description: string;
+export interface HuntEvent {
+  id: string
+  timestamp: string
+  severity: string
+  eventId: string
+  sourceIp: string
+  user: string
+  description: string
 }
 
-interface HuntRunResult {
-  id: string;
-  tenantId: string;
-  query: string;
-  timeRange: string;
-  description: string | null;
-  status: 'running' | 'completed' | 'error';
-  startedAt: string;
-  completedAt: string | null;
-  startedBy: string;
-  eventsFound: number;
-  events: HuntEvent[];
-  reasoning: string[];
+export interface HuntRunResult {
+  id: string
+  tenantId: string
+  query: string
+  timeRange: string
+  description: string | null
+  status: 'running' | 'completed' | 'error'
+  startedAt: string
+  completedAt: string | null
+  startedBy: string
+  eventsFound: number
+  events: HuntEvent[]
+  reasoning: string[]
 }
 
 @Injectable()
 export class HuntsService {
-  private readonly logger = new Logger(HuntsService.name);
+  private readonly logger = new Logger(HuntsService.name)
 
   /** In-memory store for mock hunt runs (per tenant). */
-  private readonly huntRuns: Map<string, HuntRunResult> = new Map();
+  private readonly huntRuns: Map<string, HuntRunResult> = new Map()
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -43,12 +43,10 @@ export class HuntsService {
    * In production this would submit a query to OpenSearch / Wazuh Indexer.
    */
   async runHunt(dto: RunHuntDto, user: JwtPayload): Promise<HuntRunResult> {
-    const huntId = randomUUID();
-    const now = new Date().toISOString();
+    const huntId = randomUUID()
+    const now = new Date().toISOString()
 
-    this.logger.log(
-      `User ${user.email} started hunt "${dto.query}" for tenant ${user.tenantId}`,
-    );
+    this.logger.log(`User ${user.email} started hunt "${dto.query}" for tenant ${user.tenantId}`)
 
     // Persist the query as a saved_query if Prisma table exists
     try {
@@ -60,13 +58,13 @@ export class HuntsService {
           query: dto.query,
           createdBy: user.sub,
         },
-      });
+      })
     } catch {
       // Table may not exist yet; fall through to mock
-      this.logger.warn('saved_queries table not available; using in-memory store');
+      this.logger.warn('saved_queries table not available; using in-memory store')
     }
 
-    const mockEvents = this.generateMockHuntEvents(dto.query);
+    const mockEvents = this.generateMockHuntEvents(dto.query)
 
     const result: HuntRunResult = {
       id: huntId,
@@ -87,55 +85,53 @@ export class HuntsService {
         `Found ${mockEvents.length} matching events across log sources`,
         'Cross-referencing with MITRE ATT&CK framework',
       ],
-    };
+    }
 
-    this.huntRuns.set(huntId, result);
-    return result;
+    this.huntRuns.set(huntId, result)
+    return result
   }
 
   /**
    * Lists all hunt runs for a given tenant.
    */
   async listHuntRuns(tenantId: string): Promise<Omit<HuntRunResult, 'events'>[]> {
-    const runs: Omit<HuntRunResult, 'events'>[] = [];
+    const runs: Omit<HuntRunResult, 'events'>[] = []
 
     for (const run of this.huntRuns.values()) {
       if (run.tenantId === tenantId) {
-        const { events: _events, ...rest } = run;
-        runs.push(rest);
+        const { events: _events, ...rest } = run
+        runs.push(rest)
       }
     }
 
     // Add some default mock runs if none exist yet for this tenant
     if (runs.length === 0) {
-      return this.getDefaultMockRuns(tenantId);
+      return this.getDefaultMockRuns(tenantId)
     }
 
-    return runs.sort(
-      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-    );
+    return runs.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
   }
 
   /**
    * Gets a single hunt run by ID, scoped to the tenant.
    */
   async getHuntRun(id: string, tenantId: string): Promise<HuntRunResult> {
-    const run = this.huntRuns.get(id);
+    const run = this.huntRuns.get(id)
 
-    if (!run || run.tenantId !== tenantId) {
+    if (run?.tenantId !== tenantId) {
       // Check default mocks
-      const defaults = this.getDefaultMockRuns(tenantId);
-      const defaultRun = defaults.find((r) => r.id === id);
+      const defaults = this.getDefaultMockRuns(tenantId)
+      const defaultRun = defaults.find(r => r.id === id)
       if (defaultRun) {
         return {
           ...defaultRun,
           events: this.generateMockHuntEvents('brute force dc-01'),
-        };
+        }
       }
-      throw new NotFoundException(`Hunt run ${id} not found`);
+      throw new NotFoundException(`Hunt run ${id} not found`)
     }
 
-    return run;
+    return run
   }
 
   private getDefaultMockRuns(tenantId: string): Omit<HuntRunResult, 'events'>[] {
@@ -195,12 +191,12 @@ export class HuntsService {
           'Activity consistent with emergency maintenance',
         ],
       },
-    ];
+    ]
   }
 
   private generateMockHuntEvents(query: string): HuntEvent[] {
-    const lowerQuery = query.toLowerCase();
-    const now = new Date();
+    const lowerQuery = query.toLowerCase()
+    const now = new Date()
 
     if (lowerQuery.includes('4625') || lowerQuery.includes('brute')) {
       return [
@@ -247,12 +243,17 @@ export class HuntsService {
           eventId: 'EVT-4740',
           sourceIp: '10.0.6.33',
           user: 'm.jones',
-          description: 'Account lockout triggered - 15 failed login attempts from internal workstation',
+          description:
+            'Account lockout triggered - 15 failed login attempts from internal workstation',
         },
-      ];
+      ]
     }
 
-    if (lowerQuery.includes('t1071') || lowerQuery.includes('c2') || lowerQuery.includes('beacon')) {
+    if (
+      lowerQuery.includes('t1071') ||
+      lowerQuery.includes('c2') ||
+      lowerQuery.includes('beacon')
+    ) {
       return [
         {
           id: 'he-c2-001',
@@ -279,9 +280,10 @@ export class HuntsService {
           eventId: 'EVT-DNS',
           sourceIp: '10.0.6.17',
           user: 'SYSTEM',
-          description: 'DNS tunneling detected - high entropy TXT record queries to data.exfil-cdn.net',
+          description:
+            'DNS tunneling detected - high entropy TXT record queries to data.exfil-cdn.net',
         },
-      ];
+      ]
     }
 
     // Default generic hunt events
@@ -293,7 +295,8 @@ export class HuntsService {
         eventId: 'EVT-4624',
         sourceIp: '10.0.5.42',
         user: 'svc-sql',
-        description: 'Kerberos service ticket requested with RC4 encryption - potential Kerberoasting',
+        description:
+          'Kerberos service ticket requested with RC4 encryption - potential Kerberoasting',
       },
       {
         id: 'he-gen-002',
@@ -322,6 +325,6 @@ export class HuntsService {
         user: 'svc-backup',
         description: 'Successful NTLM network logon (Type 3) to db-primary',
       },
-    ];
+    ]
   }
 }

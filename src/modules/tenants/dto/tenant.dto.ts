@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod'
 
 export const CreateTenantSchema = z.object({
   name: z.string().min(1).max(255),
@@ -7,15 +7,15 @@ export const CreateTenantSchema = z.object({
     .min(1)
     .max(100)
     .regex(/^[\da-z-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
-});
+})
 
-export type CreateTenantDto = z.infer<typeof CreateTenantSchema>;
+export type CreateTenantDto = z.infer<typeof CreateTenantSchema>
 
 export const UpdateTenantSchema = z.object({
   name: z.string().min(1).max(255).optional(),
-});
+})
 
-export type UpdateTenantDto = z.infer<typeof UpdateTenantSchema>;
+export type UpdateTenantDto = z.infer<typeof UpdateTenantSchema>
 
 export const AddUserSchema = z.object({
   oidcSub: z.string().min(1),
@@ -29,9 +29,9 @@ export const AddUserSchema = z.object({
     'THREAT_HUNTER',
     'EXECUTIVE_READONLY',
   ]),
-});
+})
 
-export type AddUserDto = z.infer<typeof AddUserSchema>;
+export type AddUserDto = z.infer<typeof AddUserSchema>
 
 export const UpdateUserRoleSchema = z.object({
   role: z.enum([
@@ -42,6 +42,6 @@ export const UpdateUserRoleSchema = z.object({
     'THREAT_HUNTER',
     'EXECUTIVE_READONLY',
   ]),
-});
+})
 
-export type UpdateUserRoleDto = z.infer<typeof UpdateUserRoleSchema>;
+export type UpdateUserRoleDto = z.infer<typeof UpdateUserRoleSchema>

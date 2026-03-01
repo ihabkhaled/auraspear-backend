@@ -1,12 +1,8 @@
-import {
-  Controller,
-  Get,
-  UseGuards,
-} from '@nestjs/common';
-import { HealthService } from './health.service';
-import { AuthGuard } from '../../common/guards/auth.guard';
-import { TenantGuard } from '../../common/guards/tenant.guard';
-import { Public } from '../../common/decorators/public.decorator';
+import { Controller, Get, UseGuards } from '@nestjs/common'
+import { HealthService } from './health.service'
+import { Public } from '../../common/decorators/public.decorator'
+import { AuthGuard } from '../../common/guards/auth.guard'
+import { TenantGuard } from '../../common/guards/tenant.guard'
 
 @Controller('health')
 export class HealthController {
@@ -19,7 +15,7 @@ export class HealthController {
   @Get()
   @Public()
   async getOverallHealth() {
-    return this.healthService.getOverallHealth();
+    return this.healthService.getOverallHealth()
   }
 
   /**
@@ -29,7 +25,7 @@ export class HealthController {
   @Get('wazuh')
   @UseGuards(AuthGuard, TenantGuard)
   async getWazuhHealth() {
-    return this.healthService.checkWazuh();
+    return this.healthService.checkWazuh()
   }
 
   /**
@@ -39,7 +35,7 @@ export class HealthController {
   @Get('indexer')
   @UseGuards(AuthGuard, TenantGuard)
   async getIndexerHealth() {
-    return this.healthService.checkIndexer();
+    return this.healthService.checkIndexer()
   }
 
   /**
@@ -49,7 +45,7 @@ export class HealthController {
   @Get('logstash')
   @UseGuards(AuthGuard, TenantGuard)
   async getLogstashHealth() {
-    return this.healthService.checkLogstash();
+    return this.healthService.checkLogstash()
   }
 
   /**
@@ -59,6 +55,6 @@ export class HealthController {
   @Get('misp')
   @UseGuards(AuthGuard, TenantGuard)
   async getMispHealth() {
-    return this.healthService.checkMisp();
+    return this.healthService.checkMisp()
   }
 }

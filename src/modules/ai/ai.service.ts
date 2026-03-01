@@ -1,48 +1,44 @@
-import {
-  Injectable,
-  Logger,
-  ForbiddenException,
-} from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { AiHuntDto } from './dto/ai-hunt.dto';
-import { AiInvestigateDto } from './dto/ai-investigate.dto';
-import { JwtPayload } from '../../common/interfaces/authenticated-request.interface';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto'
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common'
+import { AiHuntDto } from './dto/ai-hunt.dto'
+import { AiInvestigateDto } from './dto/ai-investigate.dto'
+import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import { PrismaService } from '../../prisma/prisma.service'
 
 /* ------------------------------------------------------------------ */
 /* Response types                                                      */
 /* ------------------------------------------------------------------ */
 
-interface AiTokenUsage {
-  input: number;
-  output: number;
+export interface AiTokenUsage {
+  input: number
+  output: number
 }
 
-interface AiResponse {
-  result: string;
-  reasoning: string[];
-  confidence: number;
-  model: string;
-  tokensUsed: AiTokenUsage;
+export interface AiResponse {
+  result: string
+  reasoning: string[]
+  confidence: number
+  model: string
+  tokensUsed: AiTokenUsage
 }
 
 interface AiAuditRecord {
-  id: string;
-  tenantId: string;
-  userId: string;
-  action: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs: number;
-  status: 'success' | 'error';
-  createdAt: string;
+  id: string
+  tenantId: string
+  userId: string
+  action: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  latencyMs: number
+  status: 'success' | 'error'
+  createdAt: string
 }
 
 @Injectable()
 export class AiService {
-  private readonly logger = new Logger(AiService.name);
-  private readonly MODEL = 'anthropic.claude-3-sonnet';
+  private readonly logger = new Logger(AiService.name)
+  private readonly MODEL = 'anthropic.claude-3-sonnet'
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -58,19 +54,19 @@ export class AiService {
           type: 'bedrock',
           enabled: true,
         },
-      });
+      })
 
       if (!connector) {
         throw new ForbiddenException(
-          'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.',
-        );
+          'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.'
+        )
       }
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        throw error;
+        throw error
       }
       // If Prisma table doesn't exist, allow AI in mock mode
-      this.logger.warn('connector_configs table not available; allowing AI in mock mode');
+      this.logger.warn('connector_configs table not available; allowing AI in mock mode')
     }
   }
 
@@ -90,14 +86,14 @@ export class AiService {
           outputTokens: record.outputTokens,
           durationMs: record.latencyMs,
         },
-      });
+      })
     } catch {
-      this.logger.warn('ai_audit_logs table not available; audit record stored in memory only');
+      this.logger.warn('ai_audit_logs table not available; audit record stored in memory only')
     }
 
     this.logger.log(
-      `AI Audit: ${record.action} by ${record.userId} | ${record.model} | ${record.inputTokens}+${record.outputTokens} tokens | ${record.latencyMs}ms | ${record.status}`,
-    );
+      `AI Audit: ${record.action} by ${record.userId} | ${record.model} | ${record.inputTokens}+${record.outputTokens} tokens | ${record.latencyMs}ms | ${record.status}`
+    )
   }
 
   /* ---------------------------------------------------------------- */
@@ -105,10 +101,10 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   async aiHunt(dto: AiHuntDto, user: JwtPayload): Promise<AiResponse> {
-    await this.ensureAiEnabled(user.tenantId);
+    await this.ensureAiEnabled(user.tenantId)
 
-    const startTime = Date.now();
-    const auditId = randomUUID();
+    const startTime = Date.now()
+    const auditId = randomUUID()
 
     // Mock AI response for threat hunting
     const response: AiResponse = {
@@ -127,9 +123,9 @@ export class AiService {
         input: 1247,
         output: 2156,
       },
-    };
+    }
 
-    const latencyMs = Date.now() - startTime + 1200; // simulate model latency
+    const latencyMs = Date.now() - startTime + 1200 // simulate model latency
 
     await this.logAudit({
       id: auditId,
@@ -142,9 +138,9 @@ export class AiService {
       latencyMs,
       status: 'success',
       createdAt: new Date().toISOString(),
-    });
+    })
 
-    return response;
+    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -152,10 +148,10 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   async aiInvestigate(dto: AiInvestigateDto, user: JwtPayload): Promise<AiResponse> {
-    await this.ensureAiEnabled(user.tenantId);
+    await this.ensureAiEnabled(user.tenantId)
 
-    const startTime = Date.now();
-    const auditId = randomUUID();
+    const startTime = Date.now()
+    const auditId = randomUUID()
 
     const response: AiResponse = {
       result: this.generateInvestigationResponse(dto.alertId),
@@ -174,9 +170,9 @@ export class AiService {
         input: 1834,
         output: 2891,
       },
-    };
+    }
 
-    const latencyMs = Date.now() - startTime + 1500;
+    const latencyMs = Date.now() - startTime + 1500
 
     await this.logAudit({
       id: auditId,
@@ -189,23 +185,20 @@ export class AiService {
       latencyMs,
       status: 'success',
       createdAt: new Date().toISOString(),
-    });
+    })
 
-    return response;
+    return response
   }
 
   /* ---------------------------------------------------------------- */
   /* Explainable AI Output                                             */
   /* ---------------------------------------------------------------- */
 
-  async aiExplain(
-    body: { prompt: string },
-    user: JwtPayload,
-  ): Promise<AiResponse> {
-    await this.ensureAiEnabled(user.tenantId);
+  async aiExplain(body: { prompt: string }, user: JwtPayload): Promise<AiResponse> {
+    await this.ensureAiEnabled(user.tenantId)
 
-    const startTime = Date.now();
-    const auditId = randomUUID();
+    const startTime = Date.now()
+    const auditId = randomUUID()
 
     const response: AiResponse = {
       result: this.generateExplainResponse(body.prompt),
@@ -222,9 +215,9 @@ export class AiService {
         input: 892,
         output: 1654,
       },
-    };
+    }
 
-    const latencyMs = Date.now() - startTime + 900;
+    const latencyMs = Date.now() - startTime + 900
 
     await this.logAudit({
       id: auditId,
@@ -237,9 +230,9 @@ export class AiService {
       latencyMs,
       status: 'success',
       createdAt: new Date().toISOString(),
-    });
+    })
 
-    return response;
+    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -247,9 +240,13 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   private generateHuntResponse(query: string): string {
-    const lowerQuery = query.toLowerCase();
+    const lowerQuery = query.toLowerCase()
 
-    if (lowerQuery.includes('brute') || lowerQuery.includes('4625') || lowerQuery.includes('login')) {
+    if (
+      lowerQuery.includes('brute') ||
+      lowerQuery.includes('4625') ||
+      lowerQuery.includes('login')
+    ) {
       return `## Threat Hunt Analysis: Brute Force Activity
 
 **Hypothesis:** An external threat actor is conducting credential-based attacks against authentication services.
@@ -265,7 +262,7 @@ export class AiService {
 - Monitor for successful authentications from the same IP range
 - Review VPN and remote access logs for the same time window
 
-**MITRE ATT&CK Coverage:** T1110.001 (Password Guessing), T1110.003 (Password Spraying)`;
+**MITRE ATT&CK Coverage:** T1110.001 (Password Guessing), T1110.003 (Password Spraying)`
     }
 
     if (lowerQuery.includes('c2') || lowerQuery.includes('beacon') || lowerQuery.includes('dns')) {
@@ -283,7 +280,7 @@ export class AiService {
 - Domain update-service.xyz registered 3 days ago (DGA indicator)
 - Encoded payloads observed in DNS TXT records
 
-**MITRE ATT&CK Coverage:** T1071 (Application Layer Protocol), T1048 (Exfiltration Over Alternative Protocol), T1568 (Dynamic Resolution)`;
+**MITRE ATT&CK Coverage:** T1071 (Application Layer Protocol), T1048 (Exfiltration Over Alternative Protocol), T1568 (Dynamic Resolution)`
     }
 
     return `## Threat Hunt Analysis
@@ -301,7 +298,7 @@ export class AiService {
 2. \`${query} | timechart span=1h count\` - Temporal analysis
 3. \`${query} AND rule.mitre.id:* | stats count by rule.mitre.id\` - ATT&CK mapping
 
-**MITRE ATT&CK Coverage:** Multiple techniques may apply -- review mapped events for specific coverage.`;
+**MITRE ATT&CK Coverage:** Multiple techniques may apply -- review mapped events for specific coverage.`
   }
 
   private generateInvestigationResponse(alertId: string): string {
@@ -333,7 +330,7 @@ This alert indicates a genuine security event that warrants immediate investigat
 **MITRE ATT&CK Mapping:**
 - Tactic: Initial Access, Credential Access
 - Techniques: T1110 (Brute Force), T1078 (Valid Accounts)
-- Detection: DS0015 (Application Log), DS0028 (Logon Session)`;
+- Detection: DS0015 (Application Log), DS0028 (Logon Session)`
   }
 
   private generateExplainResponse(prompt: string): string {
@@ -364,6 +361,6 @@ This security finding involves indicators of potential adversary activity within
 **Recommended Learning Resources:**
 - MITRE ATT&CK Navigator: Map detected techniques to your coverage matrix
 - SIGMA Rules Repository: Review and tune detection logic for similar patterns
-- NIST SP 800-61r2: Incident handling guidance for this type of activity`;
+- NIST SP 800-61r2: Incident handling guidance for this type of activity`
   }
 }

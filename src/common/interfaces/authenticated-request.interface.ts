@@ -1,4 +1,4 @@
-import type { Request } from 'express';
+import type { Request } from 'express'
 
 export enum UserRole {
   GLOBAL_ADMIN = 'GLOBAL_ADMIN',
@@ -20,17 +20,17 @@ export const ROLE_HIERARCHY: UserRole[] = [
   UserRole.THREAT_HUNTER,
   UserRole.SOC_ANALYST_L1,
   UserRole.EXECUTIVE_READONLY,
-];
+]
 
 export interface JwtPayload {
-  sub: string;
-  email: string;
-  tenantId: string;
-  role: UserRole;
-  iat?: number;
-  exp?: number;
+  sub: string
+  email: string
+  tenantId: string
+  role: UserRole
+  iat?: number
+  exp?: number
 }
 
 export interface AuthenticatedRequest extends Request {
-  user: JwtPayload;
+  user: JwtPayload
 }

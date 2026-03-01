@@ -1,9 +1,9 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { Public } from '../../common/decorators/public.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface';
-import { AuthService } from './auth.service';
+import { Controller, Get, Post, Body } from '@nestjs/common'
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { AuthService } from './auth.service'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Public } from '../../common/decorators/public.decorator'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -13,22 +13,20 @@ export class AuthController {
   @Public()
   @Post('callback')
   async callback(
-    @Body() body: { code: string; redirect_uri: string },
+    @Body() body: { code: string; redirect_uri: string }
   ): Promise<{ accessToken: string; user: JwtPayload }> {
-    return this.authService.exchangeCode(body.code, body.redirect_uri);
+    return this.authService.exchangeCode(body.code, body.redirect_uri)
   }
 
   @ApiBearerAuth()
   @Get('me')
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
-    return user;
+    return user
   }
 
   @ApiBearerAuth()
   @Post('refresh')
-  async refresh(
-    @Body() body: { refreshToken: string },
-  ): Promise<{ accessToken: string }> {
-    return this.authService.refreshToken(body.refreshToken);
+  async refresh(@Body() body: { refreshToken: string }): Promise<{ accessToken: string }> {
+    return this.authService.refreshToken(body.refreshToken)
   }
 }

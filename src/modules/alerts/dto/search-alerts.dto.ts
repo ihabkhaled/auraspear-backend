@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod'
 
 export const SearchAlertsSchema = z.object({
   query: z.string().default('*'),
@@ -10,6 +10,6 @@ export const SearchAlertsSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   sortBy: z.string().default('timestamp'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
-});
+})
 
-export type SearchAlertsDto = z.infer<typeof SearchAlertsSchema>;
+export type SearchAlertsDto = z.infer<typeof SearchAlertsSchema>

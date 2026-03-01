@@ -1,33 +1,33 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { SearchAlertsDto } from './dto/search-alerts.dto';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import type { SearchAlertsDto } from './dto/search-alerts.dto'
 
-interface Alert {
-  id: string;
-  tenantId: string;
-  title: string;
-  description: string;
-  severity: string;
-  status: string;
-  source: string;
-  ruleId: string;
-  mitreTactic: string;
-  mitreTechnique: string;
-  sourceIp: string;
-  destIp: string;
-  agent: string;
-  timestamp: string;
-  acknowledgedBy?: string;
-  acknowledgedAt?: string;
-  resolution?: string;
-  closedAt?: string;
+export interface Alert {
+  id: string
+  tenantId: string
+  title: string
+  description: string
+  severity: string
+  status: string
+  source: string
+  ruleId: string
+  mitreTactic: string
+  mitreTechnique: string
+  sourceIp: string
+  destIp: string
+  agent: string
+  timestamp: string
+  acknowledgedBy?: string
+  acknowledgedAt?: string
+  resolution?: string
+  closedAt?: string
 }
 
-interface PaginatedResult {
-  data: Alert[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
+export interface PaginatedResult {
+  data: Alert[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 const MOCK_ALERTS: Alert[] = [
@@ -143,48 +143,48 @@ const MOCK_ALERTS: Alert[] = [
     agent: 'web-app-01',
     timestamp: '2024-12-15T10:45:00Z',
   },
-];
+]
 
 @Injectable()
 export class AlertsService {
-  private readonly logger = new Logger(AlertsService.name);
-  private readonly alerts: Alert[] = [...MOCK_ALERTS];
+  private readonly logger = new Logger(AlertsService.name)
+  private readonly alerts: Alert[] = [...MOCK_ALERTS]
 
   async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedResult> {
-    let filtered = this.alerts.filter((a) => a.tenantId === tenantId);
+    let filtered = this.alerts.filter(a => a.tenantId === tenantId)
 
     if (query.severity) {
-      filtered = filtered.filter((a) => a.severity === query.severity);
+      filtered = filtered.filter(a => a.severity === query.severity)
     }
 
     if (query.status) {
-      filtered = filtered.filter((a) => a.status === query.status);
+      filtered = filtered.filter(a => a.status === query.status)
     }
 
     if (query.query && query.query !== '*') {
-      const q = query.query.toLowerCase();
+      const q = query.query.toLowerCase()
       filtered = filtered.filter(
-        (a) =>
+        a =>
           a.title.toLowerCase().includes(q) ||
           a.description.toLowerCase().includes(q) ||
           a.sourceIp.includes(q) ||
-          a.destIp.includes(q),
-      );
+          a.destIp.includes(q)
+      )
     }
 
     // Sort
-    const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+    const sortOrder = query.sortOrder === 'asc' ? 1 : -1
     filtered.sort((a, b) => {
-      const aValue = a[query.sortBy as keyof Alert] ?? '';
-      const bValue = b[query.sortBy as keyof Alert] ?? '';
-      return String(aValue).localeCompare(String(bValue)) * sortOrder;
-    });
+      const aValue = a[query.sortBy as keyof Alert] ?? ''
+      const bValue = b[query.sortBy as keyof Alert] ?? ''
+      return String(aValue).localeCompare(String(bValue)) * sortOrder
+    })
 
-    const total = filtered.length;
-    const page = query.page;
-    const pageSize = query.pageSize;
-    const start = (page - 1) * pageSize;
-    const data = filtered.slice(start, start + pageSize);
+    const total = filtered.length
+    const { page } = query
+    const { pageSize } = query
+    const start = (page - 1) * pageSize
+    const data = filtered.slice(start, start + pageSize)
 
     return {
       data,
@@ -192,47 +192,39 @@ export class AlertsService {
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
-    };
+    }
   }
 
   async findById(tenantId: string, id: string): Promise<Alert> {
-    const alert = this.alerts.find((a) => a.id === id && a.tenantId === tenantId);
-    if (!alert) throw new NotFoundException('Alert not found');
-    return alert;
+    const alert = this.alerts.find(a => a.id === id && a.tenantId === tenantId)
+    if (!alert) throw new NotFoundException('Alert not found')
+    return alert
   }
 
-  async acknowledge(
-    tenantId: string,
-    id: string,
-    email: string,
-  ): Promise<Alert> {
-    const alert = await this.findById(tenantId, id);
-    alert.status = 'acknowledged';
-    alert.acknowledgedBy = email;
-    alert.acknowledgedAt = new Date().toISOString();
-    return alert;
+  async acknowledge(tenantId: string, id: string, email: string): Promise<Alert> {
+    const alert = await this.findById(tenantId, id)
+    alert.status = 'acknowledged'
+    alert.acknowledgedBy = email
+    alert.acknowledgedAt = new Date().toISOString()
+    return alert
   }
 
   async investigate(
     tenantId: string,
     id: string,
-    notes?: string,
+    notes?: string
   ): Promise<Alert & { investigation: string }> {
-    const alert = await this.findById(tenantId, id);
-    alert.status = 'in_progress';
-    this.logger.debug(`Investigation started for alert ${id}${notes ? `: ${notes}` : ''}`);
-    return { ...alert, investigation: 'Investigation started' };
+    const alert = await this.findById(tenantId, id)
+    alert.status = 'in_progress'
+    this.logger.debug(`Investigation started for alert ${id}${notes ? `: ${notes}` : ''}`)
+    return { ...alert, investigation: 'Investigation started' }
   }
 
-  async close(
-    tenantId: string,
-    id: string,
-    resolution: string,
-  ): Promise<Alert> {
-    const alert = await this.findById(tenantId, id);
-    alert.status = 'closed';
-    alert.resolution = resolution;
-    alert.closedAt = new Date().toISOString();
-    return alert;
+  async close(tenantId: string, id: string, resolution: string): Promise<Alert> {
+    const alert = await this.findById(tenantId, id)
+    alert.status = 'closed'
+    alert.resolution = resolution
+    alert.closedAt = new Date().toISOString()
+    return alert
   }
 }

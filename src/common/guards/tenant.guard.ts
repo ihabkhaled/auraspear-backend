@@ -3,10 +3,10 @@ import {
   type ExecutionContext,
   ForbiddenException,
   Injectable,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import type { JwtPayload } from '../interfaces/authenticated-request.interface';
+} from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
+import type { JwtPayload } from '../interfaces/authenticated-request.interface'
 
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -16,19 +16,19 @@ export class TenantGuard implements CanActivate {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
-    ]);
+    ])
 
     if (isPublic) {
-      return true;
+      return true
     }
 
-    const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
-    const user = request.user;
+    const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>()
+    const { user } = request
 
     if (!user?.tenantId) {
-      throw new ForbiddenException('Tenant context required');
+      throw new ForbiddenException('Tenant context required')
     }
 
-    return true;
+    return true
   }
 }

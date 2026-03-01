@@ -1,38 +1,38 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../prisma/prisma.service';
-import { encrypt, decrypt } from '../../common/utils/encryption.util';
-import { maskSecrets } from '../../common/utils/mask.util';
-import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto';
-import { WazuhService } from './services/wazuh.service';
-import { OpenSearchService } from './services/opensearch.service';
-import { MispService } from './services/misp.service';
-import { ShuffleService } from './services/shuffle.service';
-import { BedrockService } from './services/bedrock.service';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { BedrockService } from './services/bedrock.service'
+import { MispService } from './services/misp.service'
+import { OpenSearchService } from './services/opensearch.service'
+import { ShuffleService } from './services/shuffle.service'
+import { WazuhService } from './services/wazuh.service'
+import { encrypt, decrypt } from '../../common/utils/encryption.util'
+import { maskSecrets } from '../../common/utils/mask.util'
+import { PrismaService } from '../../prisma/prisma.service'
+import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 
-interface ConnectorResponse {
-  type: string;
-  name: string;
-  enabled: boolean;
-  authType: string;
-  config: Record<string, unknown>;
-  lastTestAt: Date | null;
-  lastTestOk: boolean | null;
-  lastError: string | null;
+export interface ConnectorResponse {
+  type: string
+  name: string
+  enabled: boolean
+  authType: string
+  config: Record<string, unknown>
+  lastTestAt: Date | null
+  lastTestOk: boolean | null
+  lastError: string | null
 }
 
-interface TestResult {
-  type: string;
-  ok: boolean;
-  latencyMs: number;
-  details: string;
-  testedAt: string;
+export interface TestResult {
+  type: string
+  ok: boolean
+  latencyMs: number
+  details: string
+  testedAt: string
 }
 
 @Injectable()
 export class ConnectorsService {
-  private readonly logger = new Logger(ConnectorsService.name);
-  private readonly encryptionKey: string;
+  private readonly logger = new Logger(ConnectorsService.name)
+  private readonly encryptionKey: string
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,12 +41,9 @@ export class ConnectorsService {
     private readonly openSearchService: OpenSearchService,
     private readonly mispService: MispService,
     private readonly shuffleService: ShuffleService,
-    private readonly bedrockService: BedrockService,
+    private readonly bedrockService: BedrockService
   ) {
-    this.encryptionKey = this.configService.get<string>(
-      'CONFIG_ENCRYPTION_KEY',
-      'a'.repeat(64),
-    );
+    this.encryptionKey = this.configService.get<string>('CONFIG_ENCRYPTION_KEY', 'a'.repeat(64))
   }
 
   async findAll(tenantId: string): Promise<ConnectorResponse[]> {
@@ -54,30 +51,41 @@ export class ConnectorsService {
       const configs = await this.prisma.connectorConfig.findMany({
         where: { tenantId },
         orderBy: { type: 'asc' },
-      });
+      })
 
-      return configs.map((c) => ({
-        type: c.type,
-        name: c.name,
-        enabled: c.enabled,
-        authType: c.authType,
-        config: maskSecrets(this.decryptConfig(c.encryptedConfig)),
-        lastTestAt: c.lastTestAt,
-        lastTestOk: c.lastTestOk,
-        lastError: c.lastError,
-      }));
+      return configs.map(
+        (c: {
+          type: string
+          name: string
+          enabled: boolean
+          authType: string
+          encryptedConfig: string
+          lastTestAt: Date | null
+          lastTestOk: boolean | null
+          lastError: string | null
+        }) => ({
+          type: c.type,
+          name: c.name,
+          enabled: c.enabled,
+          authType: c.authType,
+          config: maskSecrets(this.decryptConfig(c.encryptedConfig)),
+          lastTestAt: c.lastTestAt,
+          lastTestOk: c.lastTestOk,
+          lastError: c.lastError,
+        })
+      )
     } catch {
-      this.logger.warn('Prisma unavailable, returning empty list');
-      return [];
+      this.logger.warn('Prisma unavailable, returning empty list')
+      return []
     }
   }
 
   async findByType(tenantId: string, type: string): Promise<ConnectorResponse> {
     const config = await this.prisma.connectorConfig.findUnique({
       where: { tenantId_type: { tenantId, type: type as never } },
-    });
+    })
 
-    if (!config) throw new NotFoundException(`Connector '${type}' not found`);
+    if (!config) throw new NotFoundException(`Connector '${type}' not found`)
 
     return {
       type: config.type,
@@ -88,11 +96,11 @@ export class ConnectorsService {
       lastTestAt: config.lastTestAt,
       lastTestOk: config.lastTestOk,
       lastError: config.lastError,
-    };
+    }
   }
 
   async create(tenantId: string, dto: CreateConnectorDto): Promise<ConnectorResponse> {
-    const encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey);
+    const encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey)
 
     const config = await this.prisma.connectorConfig.create({
       data: {
@@ -103,7 +111,7 @@ export class ConnectorsService {
         authType: dto.authType as never,
         encryptedConfig,
       },
-    });
+    })
 
     return {
       type: config.type,
@@ -114,32 +122,32 @@ export class ConnectorsService {
       lastTestAt: null,
       lastTestOk: null,
       lastError: null,
-    };
+    }
   }
 
   async update(
     tenantId: string,
     type: string,
-    dto: UpdateConnectorDto,
+    dto: UpdateConnectorDto
   ): Promise<ConnectorResponse> {
     const existing = await this.prisma.connectorConfig.findUnique({
       where: { tenantId_type: { tenantId, type: type as never } },
-    });
+    })
 
-    if (!existing) throw new NotFoundException(`Connector '${type}' not found`);
+    if (!existing) throw new NotFoundException(`Connector '${type}' not found`)
 
-    const updateData: Record<string, unknown> = {};
-    if (dto.name !== undefined) updateData.name = dto.name;
-    if (dto.enabled !== undefined) updateData.enabled = dto.enabled;
-    if (dto.authType !== undefined) updateData.authType = dto.authType;
+    const updateData: Record<string, unknown> = {}
+    if (dto.name !== undefined) updateData.name = dto.name
+    if (dto.enabled !== undefined) updateData.enabled = dto.enabled
+    if (dto.authType !== undefined) updateData.authType = dto.authType
     if (dto.config !== undefined) {
-      updateData.encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey);
+      updateData.encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey)
     }
 
     const updated = await this.prisma.connectorConfig.update({
       where: { tenantId_type: { tenantId, type: type as never } },
       data: updateData,
-    });
+    })
 
     return {
       type: updated.type,
@@ -150,85 +158,85 @@ export class ConnectorsService {
       lastTestAt: updated.lastTestAt,
       lastTestOk: updated.lastTestOk,
       lastError: updated.lastError,
-    };
+    }
   }
 
   async remove(tenantId: string, type: string): Promise<{ deleted: boolean }> {
     await this.prisma.connectorConfig.delete({
       where: { tenantId_type: { tenantId, type: type as never } },
-    });
-    return { deleted: true };
+    })
+    return { deleted: true }
   }
 
   async toggle(
     tenantId: string,
     type: string,
-    enabled: boolean,
+    enabled: boolean
   ): Promise<{ type: string; enabled: boolean }> {
     await this.prisma.connectorConfig.update({
       where: { tenantId_type: { tenantId, type: type as never } },
       data: { enabled },
-    });
-    return { type, enabled };
+    })
+    return { type, enabled }
   }
 
   async testConnection(tenantId: string, type: string): Promise<TestResult> {
     const config = await this.prisma.connectorConfig.findUnique({
       where: { tenantId_type: { tenantId, type: type as never } },
-    });
+    })
 
-    if (!config) throw new NotFoundException(`Connector '${type}' not found`);
+    if (!config) throw new NotFoundException(`Connector '${type}' not found`)
 
-    const decryptedConfig = this.decryptConfig(config.encryptedConfig);
-    const start = Date.now();
+    const decryptedConfig = this.decryptConfig(config.encryptedConfig)
+    const start = Date.now()
 
-    let ok = false;
-    let details = '';
+    let ok = false
+    let details = ''
 
     try {
       switch (type) {
         case 'wazuh': {
-          const result = await this.wazuhService.testConnection(decryptedConfig);
-          ok = result.ok;
-          details = result.details;
-          break;
+          const result = await this.wazuhService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
         }
         case 'graylog':
         case 'velociraptor':
         case 'grafana':
         case 'influxdb': {
-          const result = await this.openSearchService.testConnection(type, decryptedConfig);
-          ok = result.ok;
-          details = result.details;
-          break;
+          const result = await this.openSearchService.testConnection(type, decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
         }
         case 'misp': {
-          const result = await this.mispService.testConnection(decryptedConfig);
-          ok = result.ok;
-          details = result.details;
-          break;
+          const result = await this.mispService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
         }
         case 'shuffle': {
-          const result = await this.shuffleService.testConnection(decryptedConfig);
-          ok = result.ok;
-          details = result.details;
-          break;
+          const result = await this.shuffleService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
         }
         case 'bedrock': {
-          const result = await this.bedrockService.testConnection(decryptedConfig);
-          ok = result.ok;
-          details = result.details;
-          break;
+          const result = await this.bedrockService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
         }
         default:
-          details = `Unknown connector type: ${type}`;
+          details = `Unknown connector type: ${type}`
       }
     } catch (error) {
-      details = error instanceof Error ? error.message : 'Connection test failed';
+      details = error instanceof Error ? error.message : 'Connection test failed'
     }
 
-    const latencyMs = Date.now() - start;
-    const testedAt = new Date();
+    const latencyMs = Date.now() - start
+    const testedAt = new Date()
 
     await this.prisma.connectorConfig.update({
       where: { tenantId_type: { tenantId, type: type as never } },
@@ -237,26 +245,26 @@ export class ConnectorsService {
         lastTestOk: ok,
         lastError: ok ? null : details,
       },
-    });
+    })
 
-    return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() };
+    return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
   }
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {
     try {
-      const raw = JSON.parse(encryptedConfig) as Record<string, unknown>;
-      if ('placeholder' in raw) return raw;
-      return raw;
+      const raw = JSON.parse(encryptedConfig) as Record<string, unknown>
+      if ('placeholder' in raw) return raw
+      return raw
     } catch {
       // Try decrypting
     }
 
     try {
-      const decrypted = decrypt(encryptedConfig, this.encryptionKey);
-      return JSON.parse(decrypted) as Record<string, unknown>;
+      const decrypted = decrypt(encryptedConfig, this.encryptionKey)
+      return JSON.parse(decrypted) as Record<string, unknown>
     } catch {
-      this.logger.warn('Failed to decrypt connector config, returning empty');
-      return {};
+      this.logger.warn('Failed to decrypt connector config, returning empty')
+      return {}
     }
   }
 }

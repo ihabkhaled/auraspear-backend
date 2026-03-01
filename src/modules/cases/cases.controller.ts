@@ -9,20 +9,20 @@ import {
   Query,
   UseGuards,
   UsePipes,
-} from '@nestjs/common';
-import { CasesService } from './cases.service';
-import { CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto';
-import { UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto';
-import { LinkAlertDto, LinkAlertSchema } from './dto/link-alert.dto';
-import { CreateNoteDto, CreateNoteSchema } from './dto/create-note.dto';
-import { AuthGuard } from '../../common/guards/auth.guard';
-import { TenantGuard } from '../../common/guards/tenant.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { TenantId } from '../../common/decorators/tenant-id.decorator';
-import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
-import { JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface';
+} from '@nestjs/common'
+import { CasesService } from './cases.service'
+import { CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
+import { CreateNoteDto, CreateNoteSchema } from './dto/create-note.dto'
+import { LinkAlertDto, LinkAlertSchema } from './dto/link-alert.dto'
+import { UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Roles } from '../../common/decorators/roles.decorator'
+import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { AuthGuard } from '../../common/guards/auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
+import { TenantGuard } from '../../common/guards/tenant.guard'
+import { JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 
 @Controller('cases')
 @UseGuards(AuthGuard, TenantGuard)
@@ -37,13 +37,13 @@ export class CasesController {
   async listCases(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query('limit') limit?: string
   ) {
     return this.casesService.listCases(
       tenantId,
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 20,
-    );
+      page ? Number.parseInt(page, 10) : 1,
+      limit ? Number.parseInt(limit, 10) : 20
+    )
   }
 
   /**
@@ -54,11 +54,8 @@ export class CasesController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L1)
   @UsePipes(new ZodValidationPipe(CreateCaseSchema))
-  async createCase(
-    @Body() dto: CreateCaseDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.casesService.createCase(dto, user);
+  async createCase(@Body() dto: CreateCaseDto, @CurrentUser() user: JwtPayload) {
+    return this.casesService.createCase(dto, user)
   }
 
   /**
@@ -66,11 +63,8 @@ export class CasesController {
    * Get a single case by ID.
    */
   @Get(':id')
-  async getCaseById(
-    @Param('id') id: string,
-    @TenantId() tenantId: string,
-  ) {
-    return this.casesService.getCaseById(id, tenantId);
+  async getCaseById(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.casesService.getCaseById(id, tenantId)
   }
 
   /**
@@ -84,9 +78,9 @@ export class CasesController {
   async updateCase(
     @Param('id') id: string,
     @Body() dto: UpdateCaseDto,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: JwtPayload
   ) {
-    return this.casesService.updateCase(id, dto, user);
+    return this.casesService.updateCase(id, dto, user)
   }
 
   /**
@@ -96,11 +90,8 @@ export class CasesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
-  async deleteCase(
-    @Param('id') id: string,
-    @TenantId() tenantId: string,
-  ) {
-    return this.casesService.deleteCase(id, tenantId);
+  async deleteCase(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.casesService.deleteCase(id, tenantId)
   }
 
   /**
@@ -112,9 +103,9 @@ export class CasesController {
   async linkAlert(
     @Param('id') id: string,
     @Body() dto: LinkAlertDto,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: JwtPayload
   ) {
-    return this.casesService.linkAlert(id, dto, user);
+    return this.casesService.linkAlert(id, dto, user)
   }
 
   /**
@@ -122,11 +113,8 @@ export class CasesController {
    * Get all notes for a case.
    */
   @Get(':id/notes')
-  async getCaseNotes(
-    @Param('id') id: string,
-    @TenantId() tenantId: string,
-  ) {
-    return this.casesService.getCaseNotes(id, tenantId);
+  async getCaseNotes(@Param('id') id: string, @TenantId() tenantId: string) {
+    return this.casesService.getCaseNotes(id, tenantId)
   }
 
   /**
@@ -138,8 +126,8 @@ export class CasesController {
   async addCaseNote(
     @Param('id') id: string,
     @Body() dto: CreateNoteDto,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: JwtPayload
   ) {
-    return this.casesService.addCaseNote(id, dto, user);
+    return this.casesService.addCaseNote(id, dto, user)
   }
 }

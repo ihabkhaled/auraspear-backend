@@ -1,45 +1,43 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common'
 
 interface TestResult {
-  ok: boolean;
-  details: string;
+  ok: boolean
+  details: string
 }
 
 @Injectable()
 export class WazuhService {
-  private readonly logger = new Logger(WazuhService.name);
+  private readonly logger = new Logger(WazuhService.name)
 
-  async testConnection(
-    config: Record<string, unknown>,
-  ): Promise<TestResult> {
-    this.logger.debug('Testing Wazuh connection');
+  async testConnection(config: Record<string, unknown>): Promise<TestResult> {
+    this.logger.debug('Testing Wazuh connection')
 
     // Mock: simulate API call to Wazuh Manager /security/user/authenticate
-    await this.simulateLatency();
+    await this.simulateLatency()
 
-    const baseUrl = config.baseUrl as string | undefined;
+    const baseUrl = config.baseUrl as string | undefined
     if (!baseUrl) {
-      return { ok: false, details: 'Wazuh base URL not configured' };
+      return { ok: false, details: 'Wazuh base URL not configured' }
     }
 
     return {
       ok: true,
       details: `Wazuh Manager v4.9.0 reachable at ${baseUrl}. Cluster: active, Agents: 247 connected.`,
-    };
+    }
   }
 
   async getAlerts(
     _config: Record<string, unknown>,
     _tenantIndex: string,
-    _query: string,
+    _query: string
   ): Promise<unknown[]> {
     // In production, query Wazuh API /alerts
-    return [];
+    return []
   }
 
   private simulateLatency(): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, 150 + Math.random() * 200);
-    });
+    return new Promise(resolve => {
+      setTimeout(resolve, 150 + Math.random() * 200)
+    })
   }
 }

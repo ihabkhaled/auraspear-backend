@@ -1,12 +1,12 @@
-import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { TenantId } from '../../common/decorators/tenant-id.decorator';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRole } from '../../common/interfaces/authenticated-request.interface';
-import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface';
-import { AlertsService } from './alerts.service';
-import type { SearchAlertsDto } from './dto/search-alerts.dto';
+import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common'
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { AlertsService } from './alerts.service'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Roles } from '../../common/decorators/roles.decorator'
+import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import type { SearchAlertsDto } from './dto/search-alerts.dto'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @ApiTags('alerts')
 @ApiBearerAuth()
@@ -15,19 +15,13 @@ export class AlertsController {
   constructor(private readonly alertsService: AlertsService) {}
 
   @Get()
-  async search(
-    @TenantId() tenantId: string,
-    @Query() query: SearchAlertsDto,
-  ) {
-    return this.alertsService.search(tenantId, query);
+  async search(@TenantId() tenantId: string, @Query() query: SearchAlertsDto) {
+    return this.alertsService.search(tenantId, query)
   }
 
   @Get(':id')
-  async getById(
-    @TenantId() tenantId: string,
-    @Param('id') id: string,
-  ) {
-    return this.alertsService.findById(tenantId, id);
+  async getById(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.alertsService.findById(tenantId, id)
   }
 
   @Post(':id/acknowledge')
@@ -35,9 +29,9 @@ export class AlertsController {
   async acknowledge(
     @TenantId() tenantId: string,
     @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: JwtPayload
   ) {
-    return this.alertsService.acknowledge(tenantId, id, user.email);
+    return this.alertsService.acknowledge(tenantId, id, user.email)
   }
 
   @Post(':id/investigate')
@@ -45,9 +39,9 @@ export class AlertsController {
   async investigate(
     @TenantId() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { notes?: string },
+    @Body() body: { notes?: string }
   ) {
-    return this.alertsService.investigate(tenantId, id, body.notes);
+    return this.alertsService.investigate(tenantId, id, body.notes)
   }
 
   @Post(':id/close')
@@ -55,8 +49,8 @@ export class AlertsController {
   async close(
     @TenantId() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { resolution: string },
+    @Body() body: { resolution: string }
   ) {
-    return this.alertsService.close(tenantId, id, body.resolution);
+    return this.alertsService.close(tenantId, id, body.resolution)
   }
 }

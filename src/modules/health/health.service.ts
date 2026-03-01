@@ -1,34 +1,34 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common'
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
-interface ServiceHealthResult {
-  service: string;
-  status: 'healthy' | 'degraded' | 'down' | 'maintenance';
-  latencyMs: number;
-  version: string;
-  uptime: number;
-  lastCheck: string;
-  details?: Record<string, unknown>;
+export interface ServiceHealthResult {
+  service: string
+  status: 'healthy' | 'degraded' | 'down' | 'maintenance'
+  latencyMs: number
+  version: string
+  uptime: number
+  lastCheck: string
+  details?: Record<string, unknown>
 }
 
-interface OverallHealth {
-  status: 'healthy' | 'degraded' | 'down';
-  timestamp: string;
-  version: string;
+export interface OverallHealth {
+  status: 'healthy' | 'degraded' | 'down'
+  timestamp: string
+  version: string
   services: {
-    total: number;
-    healthy: number;
-    degraded: number;
-    down: number;
-  };
+    total: number
+    healthy: number
+    degraded: number
+    down: number
+  }
 }
 
 @Injectable()
 export class HealthService {
-  private readonly logger = new Logger(HealthService.name);
+  private readonly logger = new Logger(HealthService.name)
 
   /**
    * GET /health
@@ -41,17 +41,17 @@ export class HealthService {
       this.checkIndexer(),
       this.checkLogstash(),
       this.checkMisp(),
-    ]);
+    ])
 
-    const healthy = services.filter((s) => s.status === 'healthy').length;
-    const degraded = services.filter((s) => s.status === 'degraded').length;
-    const down = services.filter((s) => s.status === 'down').length;
+    const healthy = services.filter(s => s.status === 'healthy').length
+    const degraded = services.filter(s => s.status === 'degraded').length
+    const down = services.filter(s => s.status === 'down').length
 
-    let overallStatus: 'healthy' | 'degraded' | 'down' = 'healthy';
+    let overallStatus: 'healthy' | 'degraded' | 'down' = 'healthy'
     if (down > 0) {
-      overallStatus = 'down';
+      overallStatus = 'down'
     } else if (degraded > 0) {
-      overallStatus = 'degraded';
+      overallStatus = 'degraded'
     }
 
     return {
@@ -64,7 +64,7 @@ export class HealthService {
         degraded,
         down,
       },
-    };
+    }
   }
 
   /**
@@ -72,12 +72,10 @@ export class HealthService {
    * In production, would make an HTTP call to the Wazuh API.
    */
   async checkWazuh(): Promise<ServiceHealthResult> {
-    const startTime = Date.now();
-
     // Simulated health check
-    const latencyMs = this.simulateLatency(8, 45);
+    const latencyMs = this.simulateLatency(8, 45)
 
-    this.logger.debug(`Wazuh health check completed in ${latencyMs}ms`);
+    this.logger.debug(`Wazuh health check completed in ${latencyMs}ms`)
 
     return {
       service: 'Wazuh Manager',
@@ -94,7 +92,7 @@ export class HealthService {
         ruleset: '4.9.2-r1',
         queueUtilization: '23%',
       },
-    };
+    }
   }
 
   /**
@@ -102,9 +100,9 @@ export class HealthService {
    * In production, would call the OpenSearch _cluster/health API.
    */
   async checkIndexer(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(5, 30);
+    const latencyMs = this.simulateLatency(5, 30)
 
-    this.logger.debug(`Indexer health check completed in ${latencyMs}ms`);
+    this.logger.debug(`Indexer health check completed in ${latencyMs}ms`)
 
     return {
       service: 'Wazuh Indexer (OpenSearch)',
@@ -129,7 +127,7 @@ export class HealthService {
         documentCount: '18.4M',
         storeSizeGb: 42.7,
       },
-    };
+    }
   }
 
   /**
@@ -137,9 +135,9 @@ export class HealthService {
    * In production, would call the Logstash monitoring API.
    */
   async checkLogstash(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(10, 50);
+    const latencyMs = this.simulateLatency(10, 50)
 
-    this.logger.debug(`Logstash health check completed in ${latencyMs}ms`);
+    this.logger.debug(`Logstash health check completed in ${latencyMs}ms`)
 
     return {
       service: 'Logstash',
@@ -161,7 +159,7 @@ export class HealthService {
         heapUsedPercent: 61,
         uptime: '14d 7h 23m',
       },
-    };
+    }
   }
 
   /**
@@ -169,9 +167,9 @@ export class HealthService {
    * In production, would call the MISP REST API.
    */
   async checkMisp(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(15, 80);
+    const latencyMs = this.simulateLatency(15, 80)
 
-    this.logger.debug(`MISP health check completed in ${latencyMs}ms`);
+    this.logger.debug(`MISP health check completed in ${latencyMs}ms`)
 
     return {
       service: 'MISP',
@@ -193,13 +191,13 @@ export class HealthService {
         taxonomyCount: 15,
         galaxyCount: 42,
       },
-    };
+    }
   }
 
   /**
    * Simulate realistic network latency for mock health checks.
    */
   private simulateLatency(minMs: number, maxMs: number): number {
-    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
   }
 }

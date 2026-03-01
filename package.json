@@ -10,10 +10,18 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",
-    "lint:fix": "eslint 'src/**/*.ts' 'test/**/*.ts' --fix",
-    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,json,yml,yaml}\" \"test/**/*.ts\" \"*.{json,md,mjs,cjs}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,json,yml,yaml}\" \"test/**/*.ts\" \"*.{json,md,mjs,cjs}\"",
+    "typecheck": "tsc --noEmit --pretty",
+    "typecheck:watch": "tsc --noEmit --pretty --watch",
+    "validate": "npm run typecheck && npm run lint:strict && npm run format:check",
+    "validate:fix": "npm run lint:fix && npm run format",
+    "lint:mkdir": "node -e \"require('fs').mkdirSync('eslint-reports',{recursive:true})\"",
+    "lint-report-all": "npm run lint:mkdir && eslint . -f json -o eslint-reports/eslint-all-report.json",
+    "lint-report-ts": "npm run lint:mkdir && eslint \"src/**/*.ts\" -f json -o eslint-reports/eslint-ts-report.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -26,8 +34,8 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d",
-    "typecheck": "tsc --noEmit",
-    "prepare": "husky"
+    "prepare": "node .husky/install.mjs",
+    "lint-staged": "lint-staged --concurrent false"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -55,6 +63,7 @@
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
+    "@eslint/js": "^9.39.3",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
@@ -63,28 +72,38 @@
     "@types/jsonwebtoken": "^9.0.0",
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "cross-env": "^10.1.0",
     "eslint": "^9.0.0",
+    "eslint-plugin-import-x": "^4.16.1",
     "eslint-plugin-security": "^4.0.0",
     "eslint-plugin-unicorn": "^63.0.0",
-    "husky": "^9.0.0",
+    "husky": "^9.1.7",
     "jest": "^29.0.0",
-    "lint-staged": "^15.0.0",
-    "prettier": "^3.0.0",
+    "lint-staged": "^16.3.1",
+    "prettier": "^3.8.1",
     "prisma": "^6.0.0",
     "ts-jest": "^29.0.0",
     "ts-node": "^10.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": ".",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.ts$": "ts-jest"
     },
-    "collectCoverageFrom": ["src/**/*.ts", "!src/main.ts"],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/main.ts"
+    ],
     "coverageDirectory": "./coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {

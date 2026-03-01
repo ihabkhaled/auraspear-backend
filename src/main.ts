@@ -1,30 +1,30 @@
-import { NestFactory } from '@nestjs/core';
-import { Logger } from 'nestjs-pino';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import helmet from 'helmet';
-import { AppModule } from './app.module';
-import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { NestFactory } from '@nestjs/core'
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
+import helmet from 'helmet'
+import { Logger } from 'nestjs-pino'
+import { AppModule } from './app.module'
+import { GlobalExceptionFilter } from './common/filters/http-exception.filter'
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true })
 
   // Structured logging
-  app.useLogger(app.get(Logger));
+  app.useLogger(app.get(Logger))
 
   // Security headers
-  app.use(helmet());
+  app.use(helmet())
 
   // CORS
-  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()) ?? [
+  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map(o => o.trim()) ?? [
     'http://localhost:3000',
-  ];
-  app.enableCors({ origin: corsOrigins, credentials: true });
+  ]
+  app.enableCors({ origin: corsOrigins, credentials: true })
 
   // Global prefix
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1')
 
   // Global exception filter
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter())
 
   // Swagger
   if (process.env.NODE_ENV !== 'production') {
@@ -43,14 +43,14 @@ async function bootstrap(): Promise<void> {
       .addTag('intel', 'Threat intelligence')
       .addTag('ai', 'AI/Bedrock endpoints')
       .addTag('health', 'Health checks')
-      .build();
+      .build()
 
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api/docs', app, document);
+    const document = SwaggerModule.createDocument(app, config)
+    SwaggerModule.setup('api/docs', app, document)
   }
 
-  const port = process.env.PORT ?? 4000;
-  await app.listen(port);
+  const port = process.env.PORT ?? 4000
+  await app.listen(port)
 }
 
-void bootstrap();
+void bootstrap()

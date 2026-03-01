@@ -1,21 +1,21 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import type { UserRole } from '../../common/interfaces/authenticated-request.interface';
-import type { CreateTenantDto, UpdateTenantDto, AddUserDto } from './dto/tenant.dto';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common'
+import { PrismaService } from '../../prisma/prisma.service'
+import type { CreateTenantDto, UpdateTenantDto, AddUserDto } from './dto/tenant.dto'
+import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
 
-interface TenantRecord {
-  id: string;
-  name: string;
-  slug: string;
-  createdAt: Date;
+export interface TenantRecord {
+  id: string
+  name: string
+  slug: string
+  createdAt: Date
 }
 
-interface UserRecord {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  createdAt: Date;
+export interface UserRecord {
+  id: string
+  email: string
+  name: string
+  role: string
+  createdAt: Date
 }
 
 // Mock data fallback
@@ -28,33 +28,33 @@ const MOCK_TENANTS: TenantRecord[] = [
     slug: 'aura-enterprise',
     createdAt: new Date('2024-03-10'),
   },
-];
+]
 
 @Injectable()
 export class TenantsService {
-  private readonly logger = new Logger(TenantsService.name);
+  private readonly logger = new Logger(TenantsService.name)
 
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(): Promise<TenantRecord[]> {
     try {
-      return await this.prisma.tenant.findMany({ orderBy: { name: 'asc' } });
+      return await this.prisma.tenant.findMany({ orderBy: { name: 'asc' } })
     } catch {
-      this.logger.warn('Prisma unavailable, returning mock tenants');
-      return MOCK_TENANTS;
+      this.logger.warn('Prisma unavailable, returning mock tenants')
+      return MOCK_TENANTS
     }
   }
 
   async findById(id: string): Promise<TenantRecord> {
     try {
-      const tenant = await this.prisma.tenant.findUnique({ where: { id } });
-      if (!tenant) throw new NotFoundException('Tenant not found');
-      return tenant;
+      const tenant = await this.prisma.tenant.findUnique({ where: { id } })
+      if (!tenant) throw new NotFoundException('Tenant not found')
+      return tenant
     } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      const mock = MOCK_TENANTS.find((t) => t.id === id || t.slug === id);
-      if (!mock) throw new NotFoundException('Tenant not found');
-      return mock;
+      if (error instanceof NotFoundException) throw error
+      const mock = MOCK_TENANTS.find(t => t.id === id || t.slug === id)
+      if (!mock) throw new NotFoundException('Tenant not found')
+      return mock
     }
   }
 
@@ -62,23 +62,23 @@ export class TenantsService {
     try {
       return await this.prisma.tenant.create({
         data: { name: dto.name, slug: dto.slug },
-      });
+      })
     } catch (error) {
-      const message = error instanceof Error ? error.message : '';
+      const message = error instanceof Error ? error.message : ''
       if (message.includes('Unique constraint')) {
-        throw new ConflictException('Tenant slug already exists');
+        throw new ConflictException('Tenant slug already exists')
       }
-      throw error;
+      throw error
     }
   }
 
   async update(id: string, dto: UpdateTenantDto): Promise<TenantRecord> {
-    return this.prisma.tenant.update({ where: { id }, data: dto });
+    return this.prisma.tenant.update({ where: { id }, data: dto })
   }
 
   async remove(id: string): Promise<{ deleted: boolean }> {
-    await this.prisma.tenant.delete({ where: { id } });
-    return { deleted: true };
+    await this.prisma.tenant.delete({ where: { id } })
+    return { deleted: true }
   }
 
   async findUsers(tenantId: string): Promise<UserRecord[]> {
@@ -86,23 +86,22 @@ export class TenantsService {
       const users = await this.prisma.tenantUser.findMany({
         where: { tenantId },
         orderBy: { name: 'asc' },
-      });
-      return users.map((u) => ({
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        createdAt: u.createdAt,
-      }));
+      })
+      return users.map(
+        (u: { id: string; email: string; name: string; role: string; createdAt: Date }) => ({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          createdAt: u.createdAt,
+        })
+      )
     } catch {
-      return [];
+      return []
     }
   }
 
-  async addUser(
-    tenantId: string,
-    dto: AddUserDto,
-  ): Promise<UserRecord> {
+  async addUser(tenantId: string, dto: AddUserDto): Promise<UserRecord> {
     const user = await this.prisma.tenantUser.create({
       data: {
         tenantId,
@@ -111,27 +110,23 @@ export class TenantsService {
         name: dto.name,
         role: dto.role as UserRole,
       },
-    });
+    })
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       createdAt: user.createdAt,
-    };
+    }
   }
 
-  async updateUserRole(
-    tenantId: string,
-    userId: string,
-    role: string,
-  ): Promise<UserRecord> {
+  async updateUserRole(tenantId: string, userId: string, role: string): Promise<UserRecord> {
     const user = await this.prisma.tenantUser.update({
       where: { id: userId },
       data: { role: role as UserRole },
-    });
+    })
     if (user.tenantId !== tenantId) {
-      throw new NotFoundException('User not found in this tenant');
+      throw new NotFoundException('User not found in this tenant')
     }
     return {
       id: user.id,
@@ -139,18 +134,15 @@ export class TenantsService {
       name: user.name,
       role: user.role,
       createdAt: user.createdAt,
-    };
+    }
   }
 
-  async removeUser(
-    tenantId: string,
-    userId: string,
-  ): Promise<{ deleted: boolean }> {
-    const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } });
-    if (!user || user.tenantId !== tenantId) {
-      throw new NotFoundException('User not found in this tenant');
+  async removeUser(tenantId: string, userId: string): Promise<{ deleted: boolean }> {
+    const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
+    if (user?.tenantId !== tenantId) {
+      throw new NotFoundException('User not found in this tenant')
     }
-    await this.prisma.tenantUser.delete({ where: { id: userId } });
-    return { deleted: true };
+    await this.prisma.tenantUser.delete({ where: { id: userId } })
+    return { deleted: true }
   }
 }

@@ -1,15 +1,8 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
-import { IntelService } from './intel.service';
-import { AuthGuard } from '../../common/guards/auth.guard';
-import { TenantGuard } from '../../common/guards/tenant.guard';
-import { TenantId } from '../../common/decorators/tenant-id.decorator';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { IntelService } from './intel.service'
+import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { AuthGuard } from '../../common/guards/auth.guard'
+import { TenantGuard } from '../../common/guards/tenant.guard'
 
 @Controller('ti')
 @UseGuards(AuthGuard, TenantGuard)
@@ -22,7 +15,7 @@ export class IntelController {
    */
   @Get('events/recent')
   async getRecentEvents(@TenantId() tenantId: string) {
-    return this.intelService.getRecentEvents(tenantId);
+    return this.intelService.getRecentEvents(tenantId)
   }
 
   /**
@@ -30,11 +23,8 @@ export class IntelController {
    * Search IOCs by value, type, source, or severity.
    */
   @Get('iocs/search')
-  async searchIOCs(
-    @Query('q') query: string,
-    @TenantId() tenantId: string,
-  ) {
-    return this.intelService.searchIOCs(query ?? '', tenantId);
+  async searchIOCs(@Query('q') query: string, @TenantId() tenantId: string) {
+    return this.intelService.searchIOCs(query ?? '', tenantId)
   }
 
   /**
@@ -43,11 +33,8 @@ export class IntelController {
    * Body: { alertIds: string[] }
    */
   @Post('iocs/match-alerts')
-  async matchIOCsAgainstAlerts(
-    @Body() body: { alertIds: string[] },
-    @TenantId() tenantId: string,
-  ) {
-    const alertIds = Array.isArray(body.alertIds) ? body.alertIds : [];
-    return this.intelService.matchIOCsAgainstAlerts(alertIds, tenantId);
+  async matchIOCsAgainstAlerts(@Body() body: { alertIds: string[] }, @TenantId() tenantId: string) {
+    const alertIds = Array.isArray(body.alertIds) ? body.alertIds : []
+    return this.intelService.matchIOCsAgainstAlerts(alertIds, tenantId)
   }
 }
