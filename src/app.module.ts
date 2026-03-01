@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'
 import { LoggerModule } from 'nestjs-pino'
+import { AppController } from './app.controller'
 import { AuthGuard } from './common/guards/auth.guard'
 import { RolesGuard } from './common/guards/roles.guard'
 import { TenantGuard } from './common/guards/tenant.guard'
@@ -21,6 +22,7 @@ import { TenantsModule } from './modules/tenants/tenants.module'
 import { PrismaModule } from './prisma/prisma.module'
 
 @Module({
+  controllers: [AppController],
   imports: [
     // Configuration
     ConfigModule.forRoot({

@@ -25,8 +25,8 @@ async function bootstrap(): Promise<void> {
   ]
   app.enableCors({ origin: corsOrigins, credentials: true })
 
-  // Global prefix
-  app.setGlobalPrefix('api/v1')
+  // Global prefix (exclude root route)
+  app.setGlobalPrefix('api/v1', { exclude: ['/'] })
 
   // Global exception filter
   app.useGlobalFilters(new GlobalExceptionFilter())
