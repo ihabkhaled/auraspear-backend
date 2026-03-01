@@ -22,8 +22,8 @@ export function decrypt(encryptedString: string, keyHex: string): string {
     throw new Error('Invalid encrypted format')
   }
 
-  const [ivBase64, authTagBase64, ciphertextBase64] = parts
-  if (!ivBase64 || !authTagBase64 || !ciphertextBase64) {
+  const [ivBase64, authTagBase64, ciphertextBase64 = ''] = parts
+  if (!ivBase64 || !authTagBase64) {
     throw new Error('Invalid encrypted format: missing parts')
   }
 

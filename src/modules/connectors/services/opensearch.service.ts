@@ -1,9 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-
-interface TestResult {
-  ok: boolean
-  details: string
-}
+import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class OpenSearchService {

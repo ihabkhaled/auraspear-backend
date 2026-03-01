@@ -4,23 +4,7 @@ import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
-
-/* ------------------------------------------------------------------ */
-/* Response types                                                      */
-/* ------------------------------------------------------------------ */
-
-export interface AiTokenUsage {
-  input: number
-  output: number
-}
-
-export interface AiResponse {
-  result: string
-  reasoning: string[]
-  confidence: number
-  model: string
-  tokensUsed: AiTokenUsage
-}
+import type { AiResponse } from './ai.types'
 
 interface AiAuditRecord {
   id: string

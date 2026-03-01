@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query, UseGuards, UsePipes } from '@nestjs/common'
+import { MatchIocsSchema, type MatchIocsDto } from './dto/match-iocs.dto'
 import { IntelService } from './intel.service'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 
 @Controller('ti')
 @UseGuards(AuthGuard, TenantGuard)
@@ -33,8 +35,8 @@ export class IntelController {
    * Body: { alertIds: string[] }
    */
   @Post('iocs/match-alerts')
-  async matchIOCsAgainstAlerts(@Body() body: { alertIds: string[] }, @TenantId() tenantId: string) {
-    const alertIds = Array.isArray(body.alertIds) ? body.alertIds : []
-    return this.intelService.matchIOCsAgainstAlerts(alertIds, tenantId)
+  @UsePipes(new ZodValidationPipe(MatchIocsSchema))
+  async matchIOCsAgainstAlerts(@Body() dto: MatchIocsDto, @TenantId() tenantId: string) {
+    return this.intelService.matchIOCsAgainstAlerts(dto.alertIds, tenantId)
   }
 }

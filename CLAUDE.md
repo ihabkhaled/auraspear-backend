@@ -225,7 +225,7 @@ On every commit, the following checks run automatically on staged files:
 Configuration:
 
 - `.husky/pre-commit` runs `npm run lint-staged`
-- `.lintstagedrc.cjs` — Windows-compatible config with `tsc.cmd` fallback
+- `.lintstagedrc.cjs` — Uses `npm run` scripts for Windows compatibility
 - `.husky/install.mjs` — Skips Husky install in CI/production/Vercel/GitHub Actions
 
 ---
@@ -260,7 +260,6 @@ src/
 +-- main.ts                 # Application bootstrap
 +-- common/
 |   +-- decorators/         # @CurrentUser, @Roles, @Public, @TenantId
-|   +-- dto/                # Shared DTOs (pagination, etc.)
 |   +-- filters/            # Exception filters
 |   +-- guards/             # AuthGuard, TenantGuard, RolesGuard
 |   +-- interceptors/       # AuditInterceptor
@@ -270,17 +269,32 @@ src/
 +-- config/                 # env.validation.ts (Zod env schema)
 +-- modules/
 |   +-- ai/                 # AI-powered analysis endpoints
+|   |   +-- dto/            # ai-hunt.dto, ai-investigate.dto, ai-explain.dto
+|   |   +-- ai.types.ts     # AiTokenUsage, AiResponse
 |   +-- alerts/             # Alert management (Wazuh alerts)
+|   |   +-- dto/            # search-alerts.dto, investigate-alert.dto, close-alert.dto
+|   |   +-- alerts.types.ts # Alert, PaginatedResult
 |   +-- auth/               # Authentication (OIDC callback, token exchange)
+|   |   +-- dto/            # auth-callback.dto, auth-refresh.dto
 |   +-- cases/              # Case management (CRUD, notes, linked alerts)
+|   |   +-- dto/            # create-case.dto, update-case.dto, create-note.dto, link-alert.dto
+|   |   +-- cases.types.ts  # CaseRecord, CaseNote, PaginatedCases, etc.
 |   +-- connectors/         # Connector management + service adapters
+|   |   +-- dto/            # connector.dto, toggle-connector.dto
 |   |   +-- services/       # wazuh, opensearch, misp, shuffle, bedrock adapters
+|   |   +-- connectors.types.ts # ConnectorResponse, TestResult, ConnectorTestResult
 |   +-- dashboards/         # Dashboard aggregation endpoints
 |   +-- health/             # Health check endpoints
+|   |   +-- health.types.ts # ServiceHealthResult, OverallHealth
 |   +-- hunts/              # Threat hunting endpoints
+|   |   +-- dto/            # run-hunt.dto
+|   |   +-- hunts.types.ts  # HuntEvent, HuntRunResult
 |   +-- intel/              # Threat intelligence (MISP integration)
+|   |   +-- dto/            # match-iocs.dto
+|   |   +-- intel.types.ts  # MISPEvent, IOCSearchResult, IOCMatchResult
 |   +-- tenants/            # Tenant management
-|   +-- users/              # User management
+|   |   +-- dto/            # tenant.dto
+|   |   +-- tenants.types.ts # TenantRecord, UserRecord
 +-- prisma/
     +-- prisma.module.ts
     +-- prisma.service.ts
@@ -413,7 +427,10 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 - All files use **kebab-case**: `auth.guard.ts`, `create-case.dto.ts`, `ssrf.util.ts`
 - Modules follow NestJS conventions: `*.module.ts`, `*.controller.ts`, `*.service.ts`
 - DTOs in `dto/` subdirectory per module
-- Connector service adapters in `modules/connectors/services/`
+- Type/interface files: `<module>.types.ts` at the module root (e.g. `alerts.types.ts`)
+- Exported domain types go in `*.types.ts`, NOT in service files
+- Internal-only interfaces (not used outside the file) stay in the service file
+- Connector adapter services share types from `connectors.types.ts`
 
 ---
 

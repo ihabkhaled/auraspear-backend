@@ -7,6 +7,7 @@ import {
   UpdateConnectorSchema,
   type UpdateConnectorDto,
 } from './dto/connector.dto'
+import { ToggleConnectorSchema, type ToggleConnectorDto } from './dto/toggle-connector.dto'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
@@ -60,11 +61,12 @@ export class ConnectorsController {
 
   @Post(':type/toggle')
   @Roles(UserRole.SOC_ANALYST_L2)
+  @UsePipes(new ZodValidationPipe(ToggleConnectorSchema))
   async toggle(
     @TenantId() tenantId: string,
     @Param('type') type: string,
-    @Body() body: { enabled: boolean }
+    @Body() dto: ToggleConnectorDto
   ) {
-    return this.connectorsService.toggle(tenantId, type, body.enabled)
+    return this.connectorsService.toggle(tenantId, type, dto.enabled)
   }
 }

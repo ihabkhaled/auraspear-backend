@@ -8,26 +8,8 @@ import { WazuhService } from './services/wazuh.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
 import { maskSecrets } from '../../common/utils/mask.util'
 import { PrismaService } from '../../prisma/prisma.service'
+import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
-
-export interface ConnectorResponse {
-  type: string
-  name: string
-  enabled: boolean
-  authType: string
-  config: Record<string, unknown>
-  lastTestAt: Date | null
-  lastTestOk: boolean | null
-  lastError: string | null
-}
-
-export interface TestResult {
-  type: string
-  ok: boolean
-  latencyMs: number
-  details: string
-  testedAt: string
-}
 
 @Injectable()
 export class ConnectorsService {

@@ -1,0 +1,23 @@
+export interface ConnectorResponse {
+  type: string
+  name: string
+  enabled: boolean
+  authType: string
+  config: Record<string, unknown>
+  lastTestAt: Date | null
+  lastTestOk: boolean | null
+  lastError: string | null
+}
+
+/** Base test result returned by individual connector adapters. */
+export interface TestResult {
+  ok: boolean
+  details: string
+}
+
+/** Extended test result returned by ConnectorsService.testConnection(). */
+export interface ConnectorTestResult extends TestResult {
+  type: string
+  latencyMs: number
+  testedAt: string
+}

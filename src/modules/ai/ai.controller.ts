@@ -1,5 +1,6 @@
 import { Body, Controller, Post, UseGuards, UsePipes } from '@nestjs/common'
 import { AiService } from './ai.service'
+import { AiExplainSchema, type AiExplainDto } from './dto/ai-explain.dto'
 import { AiHuntDto, AiHuntSchema } from './dto/ai-hunt.dto'
 import { AiInvestigateDto, AiInvestigateSchema } from './dto/ai-investigate.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -42,7 +43,8 @@ export class AiController {
    * connector with aiEnabled=true.
    */
   @Post('explain')
-  async aiExplain(@Body() body: { prompt: string }, @CurrentUser() user: JwtPayload) {
-    return this.aiService.aiExplain(body, user)
+  @UsePipes(new ZodValidationPipe(AiExplainSchema))
+  async aiExplain(@Body() dto: AiExplainDto, @CurrentUser() user: JwtPayload) {
+    return this.aiService.aiExplain(dto, user)
   }
 }

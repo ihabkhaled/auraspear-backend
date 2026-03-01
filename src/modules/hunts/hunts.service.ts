@@ -3,31 +3,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { RunHuntDto } from './dto/run-hunt.dto'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
-
-export interface HuntEvent {
-  id: string
-  timestamp: string
-  severity: string
-  eventId: string
-  sourceIp: string
-  user: string
-  description: string
-}
-
-export interface HuntRunResult {
-  id: string
-  tenantId: string
-  query: string
-  timeRange: string
-  description: string | null
-  status: 'running' | 'completed' | 'error'
-  startedAt: string
-  completedAt: string | null
-  startedBy: string
-  eventsFound: number
-  events: HuntEvent[]
-  reasoning: string[]
-}
+import type { HuntEvent, HuntRunResult } from './hunts.types'
 
 @Injectable()
 export class HuntsService {

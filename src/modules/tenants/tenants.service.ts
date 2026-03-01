@@ -1,22 +1,8 @@
 import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CreateTenantDto, UpdateTenantDto, AddUserDto } from './dto/tenant.dto'
+import type { TenantRecord, UserRecord } from './tenants.types'
 import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
-
-export interface TenantRecord {
-  id: string
-  name: string
-  slug: string
-  createdAt: Date
-}
-
-export interface UserRecord {
-  id: string
-  email: string
-  name: string
-  role: string
-  createdAt: Date
-}
 
 // Mock data fallback
 const MOCK_TENANTS: TenantRecord[] = [

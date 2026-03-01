@@ -42,7 +42,7 @@ export class AuditInterceptor implements NestInterceptor {
               role: user.role,
               action: `${method} ${handler}`,
               resource: controller,
-              resourceId: request.params?.id ?? null,
+              resourceId: typeof request.params?.id === 'string' ? request.params.id : null,
               details: null,
               ipAddress: request.ip ?? null,
             },
