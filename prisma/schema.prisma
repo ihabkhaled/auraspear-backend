@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum UserRole {
+  GLOBAL_ADMIN
+  TENANT_ADMIN
+  SOC_ANALYST_L2
+  SOC_ANALYST_L1
+  THREAT_HUNTER
+  EXECUTIVE_READONLY
+}
+
+enum ConnectorType {
+  wazuh
+  graylog
+  velociraptor
+  grafana
+  influxdb
+  misp
+  shuffle
+  bedrock
+}
+
+enum AuthType {
+  basic
+  api_key
+  token
+  iam
+}
+
+enum CaseStatus {
+  open
+  in_progress
+  closed
+}
+
+enum CaseSeverity {
+  critical
+  high
+  medium
+  low
+}
+
+// ─── Tenants ─────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  slug      String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users            TenantUser[]
+  connectorConfigs ConnectorConfig[]
+  cases            Case[]
+  auditLogs        AuditLog[]
+  aiAuditLogs      AiAuditLog[]
+  savedQueries     SavedQuery[]
+
+  @@map("tenants")
+}
+
+// ─── Users & Membership ──────────────────────────────────────
+
+model TenantUser {
+  id       String   @id @default(uuid()) @db.Uuid
+  tenantId String   @map("tenant_id") @db.Uuid
+  oidcSub  String   @map("oidc_sub") @db.VarChar(255)
+  email    String   @db.VarChar(320)
+  name     String   @db.VarChar(255)
+  role     UserRole @default(SOC_ANALYST_L1)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, oidcSub])
+  @@index([tenantId])
+  @@map("tenant_users")
+}
+
+// ─── Connector Configurations ────────────────────────────────
+
+model ConnectorConfig {
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId      String        @map("tenant_id") @db.Uuid
+  type          ConnectorType
+  name          String        @db.VarChar(255)
+  enabled       Boolean       @default(false)
+  authType      AuthType      @default(basic) @map("auth_type")
+  encryptedConfig String      @map("encrypted_config") @db.Text
+  lastTestAt    DateTime?     @map("last_test_at")
+  lastTestOk    Boolean?      @map("last_test_ok")
+  lastError     String?       @map("last_error") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type])
+  @@index([tenantId])
+  @@map("connector_configs")
+}
+
+// ─── Cases ───────────────────────────────────────────────────
+
+model Case {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  title       String       @db.VarChar(500)
+  description String?      @db.Text
+  severity    CaseSeverity @default(medium)
+  status      CaseStatus   @default(open)
+  ownerUserId String?      @map("owner_user_id") @db.Uuid
+  linkedAlerts String[]    @default([]) @map("linked_alerts")
+  closedAt    DateTime?    @map("closed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notes  CaseNote[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("cases")
+}
+
+model CaseNote {
+  id     String @id @default(uuid()) @db.Uuid
+  caseId String @map("case_id") @db.Uuid
+  author String @db.VarChar(320)
+  body   String @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_notes")
+}
+
+// ─── Audit Logs ──────────────────────────────────────────────
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  actor         String   @db.VarChar(320)
+  role          UserRole
+  action        String   @db.VarChar(100)
+  resource      String   @db.VarChar(255)
+  resourceId    String?  @map("resource_id") @db.VarChar(255)
+  details       String?  @db.Text
+  ipAddress     String?  @map("ip_address") @db.VarChar(45)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─── AI Audit Logs ───────────────────────────────────────────
+
+model AiAuditLog {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  actor      String @db.VarChar(320)
+  action     String @db.VarChar(100)
+  model      String @db.VarChar(100)
+  inputTokens  Int  @default(0) @map("input_tokens")
+  outputTokens Int  @default(0) @map("output_tokens")
+  prompt     String? @db.Text
+  response   String? @db.Text
+  durationMs Int?   @map("duration_ms")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("ai_audit_logs")
+}
+
+// ─── Saved Queries (Threat Hunting) ──────────────────────────
+
+model SavedQuery {
+  id          String @id @default(uuid()) @db.Uuid
+  tenantId    String @map("tenant_id") @db.Uuid
+  name        String @db.VarChar(255)
+  query       String @db.Text
+  description String? @db.Text
+  createdBy   String @map("created_by") @db.VarChar(320)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("saved_queries")
+}

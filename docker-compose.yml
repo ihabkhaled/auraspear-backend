@@ -1,0 +1,62 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auraspear-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: auraspear_soc
+      POSTGRES_USER: auraspear
+      POSTGRES_PASSWORD: auraspear_secret
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U auraspear -d auraspear_soc']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: auraspear-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auraspear-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '4000:4000'
+    environment:
+      DATABASE_URL: postgresql://auraspear:auraspear_secret@postgres:5432/auraspear_soc?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 4000
+      NODE_ENV: production
+      LOG_LEVEL: info
+      CORS_ORIGINS: http://localhost:3000
+      OIDC_ISSUER_URL: https://login.microsoftonline.com/common/v2.0
+      OIDC_AUDIENCE: api://auraspear-soc
+      OIDC_JWKS_URI: https://login.microsoftonline.com/common/discovery/v2.0/keys
+      OIDC_CLIENT_ID: change-me
+      CONFIG_ENCRYPTION_KEY: change-me-generate-a-64-char-hex-key-for-production
+
+volumes:
+  pgdata:
