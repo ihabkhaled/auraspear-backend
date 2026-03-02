@@ -174,13 +174,12 @@ export class AlertsService {
 
     const result = await this.wazuhService.searchAlerts(config, esQuery)
 
-    let ingested = 0
-    for (const rawHit of result.hits) {
-      const hit = rawHit as Record<string, unknown>
-      const source = (hit._source ?? hit) as Record<string, unknown>
-      const externalId = (hit._id ?? source.id) as string
+    const upsertResults = await Promise.allSettled(
+      result.hits.map(rawHit => {
+        const hit = rawHit as Record<string, unknown>
+        const source = (hit._source ?? hit) as Record<string, unknown>
+        const externalId = (hit._id ?? source.id) as string
 
-      try {
         const rule = source.rule as Record<string, unknown> | undefined
         const agent = source.agent as Record<string, unknown> | undefined
         const data = source.data as Record<string, unknown> | undefined
@@ -197,7 +196,7 @@ export class AlertsService {
 
         const severity = this.mapWazuhLevel(rule?.level as number | undefined)
 
-        await this.prisma.alert.upsert({
+        return this.prisma.alert.upsert({
           where: { tenantId_externalId: { tenantId, externalId } },
           create: {
             tenantId,
@@ -221,10 +220,15 @@ export class AlertsService {
             rawEvent: source as Prisma.InputJsonValue,
           },
         })
+      })
+    )
 
+    let ingested = 0
+    for (const upsertResult of upsertResults) {
+      if (upsertResult.status === 'fulfilled') {
         ingested++
-      } catch (error) {
-        this.logger.warn(`Failed to ingest alert ${externalId}: ${(error as Error).message}`)
+      } else {
+        this.logger.warn(`Failed to ingest alert: ${(upsertResult.reason as Error).message}`)
       }
     }
 

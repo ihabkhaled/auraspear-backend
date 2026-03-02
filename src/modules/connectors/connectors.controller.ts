@@ -12,6 +12,7 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { ConnectorResponse, ConnectorTestResult } from './connectors.types'
 
 @ApiTags('connectors')
 @ApiBearerAuth()
@@ -20,12 +21,15 @@ export class ConnectorsController {
   constructor(private readonly connectorsService: ConnectorsService) {}
 
   @Get()
-  async list(@TenantId() tenantId: string) {
+  async list(@TenantId() tenantId: string): Promise<ConnectorResponse[]> {
     return this.connectorsService.findAll(tenantId)
   }
 
   @Get(':type')
-  async getByType(@TenantId() tenantId: string, @Param('type') type: string) {
+  async getByType(
+    @TenantId() tenantId: string,
+    @Param('type') type: string
+  ): Promise<ConnectorResponse> {
     return this.connectorsService.findByType(tenantId, type)
   }
 
@@ -34,7 +38,7 @@ export class ConnectorsController {
   async create(
     @TenantId() tenantId: string,
     @Body(new ZodValidationPipe(CreateConnectorSchema)) dto: CreateConnectorDto
-  ) {
+  ): Promise<ConnectorResponse> {
     return this.connectorsService.create(tenantId, dto)
   }
 
@@ -44,19 +48,25 @@ export class ConnectorsController {
     @TenantId() tenantId: string,
     @Param('type') type: string,
     @Body(new ZodValidationPipe(UpdateConnectorSchema)) dto: UpdateConnectorDto
-  ) {
+  ): Promise<ConnectorResponse> {
     return this.connectorsService.update(tenantId, type, dto)
   }
 
   @Delete(':type')
   @Roles(UserRole.TENANT_ADMIN)
-  async remove(@TenantId() tenantId: string, @Param('type') type: string) {
+  async remove(
+    @TenantId() tenantId: string,
+    @Param('type') type: string
+  ): Promise<{ deleted: boolean }> {
     return this.connectorsService.remove(tenantId, type)
   }
 
   @Post(':type/test')
   @Roles(UserRole.SOC_ANALYST_L2)
-  async test(@TenantId() tenantId: string, @Param('type') type: string) {
+  async test(
+    @TenantId() tenantId: string,
+    @Param('type') type: string
+  ): Promise<ConnectorTestResult> {
     return this.connectorsService.testConnection(tenantId, type)
   }
 
@@ -66,7 +76,7 @@ export class ConnectorsController {
     @TenantId() tenantId: string,
     @Param('type') type: string,
     @Body(new ZodValidationPipe(ToggleConnectorSchema)) dto: ToggleConnectorDto
-  ) {
+  ): Promise<{ type: string; enabled: boolean }> {
     return this.connectorsService.toggle(tenantId, type, dto.enabled)
   }
 }

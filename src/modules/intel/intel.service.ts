@@ -236,7 +236,10 @@ export class IntelService {
   /**
    * Build Prisma upsert arguments for MISP events.
    */
-  private buildEventUpserts(tenantId: string, rawEvents: unknown[]) {
+  private buildEventUpserts(
+    tenantId: string,
+    rawEvents: unknown[]
+  ): Array<Prisma.IntelMispEventUpsertArgs> {
     const upserts: Array<Prisma.IntelMispEventUpsertArgs> = []
 
     for (const rawEvent of rawEvents) {
@@ -286,7 +289,10 @@ export class IntelService {
   /**
    * Build Prisma upsert arguments for IOC attributes.
    */
-  private buildIOCUpserts(tenantId: string, rawAttributes: unknown[]) {
+  private buildIOCUpserts(
+    tenantId: string,
+    rawAttributes: unknown[]
+  ): Array<Prisma.IntelIOCUpsertArgs> {
     const upserts: Array<Prisma.IntelIOCUpsertArgs> = []
 
     for (const rawAttribute of rawAttributes) {

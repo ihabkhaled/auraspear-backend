@@ -198,51 +198,59 @@ export class ConnectorsService {
     try {
       switch (type) {
         case 'wazuh': {
-          const result = await this.wazuhService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: wazuhOk, details: wazuhDetails } =
+            await this.wazuhService.testConnection(decryptedConfig)
+          ok = wazuhOk
+          details = wazuhDetails
           break
         }
         case 'graylog': {
-          const result = await this.graylogService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: graylogOk, details: graylogDetails } =
+            await this.graylogService.testConnection(decryptedConfig)
+          ok = graylogOk
+          details = graylogDetails
           break
         }
         case 'velociraptor': {
-          const result = await this.velociraptorService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: velociraptorOk, details: velociraptorDetails } =
+            await this.velociraptorService.testConnection(decryptedConfig)
+          ok = velociraptorOk
+          details = velociraptorDetails
           break
         }
         case 'grafana': {
-          const result = await this.grafanaService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: grafanaOk, details: grafanaDetails } =
+            await this.grafanaService.testConnection(decryptedConfig)
+          ok = grafanaOk
+          details = grafanaDetails
           break
         }
         case 'influxdb': {
-          const result = await this.influxdbService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: influxdbOk, details: influxdbDetails } =
+            await this.influxdbService.testConnection(decryptedConfig)
+          ok = influxdbOk
+          details = influxdbDetails
           break
         }
         case 'misp': {
-          const result = await this.mispService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: mispOk, details: mispDetails } =
+            await this.mispService.testConnection(decryptedConfig)
+          ok = mispOk
+          details = mispDetails
           break
         }
         case 'shuffle': {
-          const result = await this.shuffleService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: shuffleOk, details: shuffleDetails } =
+            await this.shuffleService.testConnection(decryptedConfig)
+          ok = shuffleOk
+          details = shuffleDetails
           break
         }
         case 'bedrock': {
-          const result = await this.bedrockService.testConnection(decryptedConfig)
-          ok = result.ok
-          details = result.details
+          const { ok: bedrockOk, details: bedrockDetails } =
+            await this.bedrockService.testConnection(decryptedConfig)
+          ok = bedrockOk
+          details = bedrockDetails
           break
         }
         default:

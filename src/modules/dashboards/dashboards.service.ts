@@ -11,7 +11,17 @@ export class DashboardsService {
     private readonly connectorsService: ConnectorsService
   ) {}
 
-  async getSummary(tenantId: string) {
+  async getSummary(tenantId: string): Promise<{
+    tenantId: string
+    totalAlerts: number
+    criticalAlerts: number
+    highAlerts: number
+    openCases: number
+    alertsLast24h: number
+    resolvedLast24h: number
+    meanTimeToRespond: string
+    connectedSources: number
+  }> {
     const [
       totalAlerts,
       criticalAlerts,
@@ -63,7 +73,21 @@ export class DashboardsService {
     }
   }
 
-  async getAlertTrend(tenantId: string, days: number) {
+  async getAlertTrend(
+    tenantId: string,
+    days: number
+  ): Promise<{
+    tenantId: string
+    days: number
+    trend: Array<{
+      date: string
+      critical: number
+      high: number
+      medium: number
+      low: number
+      info: number
+    }>
+  }> {
     const since = new Date()
     since.setDate(since.getDate() - days)
 
@@ -100,7 +124,10 @@ export class DashboardsService {
     return { tenantId, days, trend: [...trendMap.values()] }
   }
 
-  async getSeverityDistribution(tenantId: string) {
+  async getSeverityDistribution(tenantId: string): Promise<{
+    tenantId: string
+    distribution: Array<{ severity: string; count: number; percentage: number }>
+  }> {
     const counts = await this.prisma.alert.groupBy({
       by: ['severity'],
       where: { tenantId },
@@ -118,7 +145,10 @@ export class DashboardsService {
     return { tenantId, distribution }
   }
 
-  async getMitreTopTechniques(tenantId: string) {
+  async getMitreTopTechniques(tenantId: string): Promise<{
+    tenantId: string
+    techniques: Array<{ id: string; count: number }>
+  }> {
     const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
       SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
       FROM alerts
@@ -137,7 +167,10 @@ export class DashboardsService {
     }
   }
 
-  async getTopTargetedAssets(tenantId: string) {
+  async getTopTargetedAssets(tenantId: string): Promise<{
+    tenantId: string
+    assets: Array<{ hostname: string; alertCount: number; criticalCount: number; lastSeen: Date }>
+  }> {
     const results = await this.prisma.$queryRaw<
       Array<{ hostname: string; alert_count: bigint; critical_count: bigint; last_seen: Date }>
     >`
@@ -164,7 +197,16 @@ export class DashboardsService {
     }
   }
 
-  async getPipelineHealth(tenantId: string) {
+  async getPipelineHealth(tenantId: string): Promise<{
+    tenantId: string
+    pipelines: Array<{
+      name: string
+      type: string
+      status: string
+      lastChecked: Date | null
+      lastError: string | null
+    }>
+  }> {
     const connectors = await this.prisma.connectorConfig.findMany({
       where: { tenantId, enabled: true },
       select: {

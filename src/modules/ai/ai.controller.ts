@@ -8,6 +8,7 @@ import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { AiResponse } from './ai.types'
 
 @Controller('ai')
 @UseGuards(AuthGuard, TenantGuard)
@@ -21,7 +22,7 @@ export class AiController {
    */
   @Post('hunt')
   @UsePipes(new ZodValidationPipe(AiHuntSchema))
-  async aiHunt(@Body() dto: AiHuntDto, @CurrentUser() user: JwtPayload) {
+  async aiHunt(@Body() dto: AiHuntDto, @CurrentUser() user: JwtPayload): Promise<AiResponse> {
     return this.aiService.aiHunt(dto, user)
   }
 
@@ -32,7 +33,10 @@ export class AiController {
    */
   @Post('investigate')
   @UsePipes(new ZodValidationPipe(AiInvestigateSchema))
-  async aiInvestigate(@Body() dto: AiInvestigateDto, @CurrentUser() user: JwtPayload) {
+  async aiInvestigate(
+    @Body() dto: AiInvestigateDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<AiResponse> {
     return this.aiService.aiInvestigate(dto, user)
   }
 
@@ -44,7 +48,7 @@ export class AiController {
    */
   @Post('explain')
   @UsePipes(new ZodValidationPipe(AiExplainSchema))
-  async aiExplain(@Body() dto: AiExplainDto, @CurrentUser() user: JwtPayload) {
+  async aiExplain(@Body() dto: AiExplainDto, @CurrentUser() user: JwtPayload): Promise<AiResponse> {
     return this.aiService.aiExplain(dto, user)
   }
 }

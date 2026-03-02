@@ -46,9 +46,9 @@ export const envSchema = z.object({
   AWS_BEDROCK_MODEL_ID: z.string().default('anthropic.claude-3-sonnet-20240229-v1:0'),
 })
 
-export type EnvConfig = z.infer<typeof envSchema>
+export type EnvironmentConfig = z.infer<typeof envSchema>
 
-export function validateEnv(config: Record<string, unknown>): EnvConfig {
+export function validateEnvironment(config: Record<string, unknown>): EnvironmentConfig {
   const result = envSchema.safeParse(config)
   if (!result.success) {
     const formatted = result.error.issues

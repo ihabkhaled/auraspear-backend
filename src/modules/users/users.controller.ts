@@ -7,6 +7,22 @@ import { UsersService } from './users.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type { Tenant, TenantUser, UserPreference } from '@prisma/client'
+
+type UserProfile = Omit<TenantUser, 'passwordHash'> & {
+  tenant: Tenant | null
+  preference: UserPreference | null
+}
+
+type UserPreferenceOrDefault =
+  | UserPreference
+  | {
+      userId: string
+      theme: string
+      language: string
+      notificationsEmail: boolean
+      notificationsInApp: boolean
+    }
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -15,7 +31,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('profile')
-  async getProfile(@CurrentUser() user: JwtPayload) {
+  async getProfile(@CurrentUser() user: JwtPayload): Promise<UserProfile> {
     return this.usersService.getProfile(user.sub)
   }
 
@@ -23,7 +39,7 @@ export class UsersController {
   async updateProfile(
     @Body(new ZodValidationPipe(UpdateProfileSchema)) dto: UpdateProfileDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserProfile> {
     return this.usersService.updateProfile(user.sub, dto)
   }
 
@@ -31,12 +47,12 @@ export class UsersController {
   async changePassword(
     @Body(new ZodValidationPipe(ChangePasswordSchema)) dto: ChangePasswordDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ changed: boolean }> {
     return this.usersService.changePassword(user.sub, dto)
   }
 
   @Get('preferences')
-  async getPreferences(@CurrentUser() user: JwtPayload) {
+  async getPreferences(@CurrentUser() user: JwtPayload): Promise<UserPreferenceOrDefault> {
     return this.usersService.getPreferences(user.sub)
   }
 
@@ -44,7 +60,7 @@ export class UsersController {
   async updatePreferences(
     @Body(new ZodValidationPipe(UpdatePreferencesSchema)) dto: UpdatePreferencesDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserPreference> {
     return this.usersService.updatePreferences(user.sub, dto)
   }
 }

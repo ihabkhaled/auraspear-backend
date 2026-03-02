@@ -9,6 +9,7 @@ import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } from './hunts.types'
 
 @Controller('hunts')
 @UseGuards(AuthGuard, TenantGuard)
@@ -21,7 +22,7 @@ export class HuntsController {
   async runHunt(
     @Body(new ZodValidationPipe(RunHuntSchema)) dto: RunHuntDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<HuntSessionRecord> {
     return this.huntsService.runHunt(user.tenantId, dto, user.email)
   }
 
@@ -30,7 +31,7 @@ export class HuntsController {
     @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ) {
+  ): Promise<PaginatedHuntSessions> {
     return this.huntsService.listRuns(
       tenantId,
       page ? Number.parseInt(page, 10) : 1,
@@ -39,7 +40,10 @@ export class HuntsController {
   }
 
   @Get('runs/:id')
-  async getRunDetails(@Param('id') id: string, @TenantId() tenantId: string) {
+  async getRunDetails(
+    @Param('id') id: string,
+    @TenantId() tenantId: string
+  ): Promise<HuntSessionRecord> {
     return this.huntsService.getRun(tenantId, id)
   }
 
@@ -48,7 +52,7 @@ export class HuntsController {
     @Param('id') id: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ) {
+  ): Promise<PaginatedHuntEvents> {
     return this.huntsService.getEvents(
       id,
       page ? Number.parseInt(page, 10) : 1,

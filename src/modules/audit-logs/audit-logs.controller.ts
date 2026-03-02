@@ -5,6 +5,7 @@ import { SearchAuditLogsSchema } from './dto/search-audit-logs.dto'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import type { PaginatedAuditLogs } from './audit-logs.types'
 
 @ApiTags('audit-logs')
 @ApiBearerAuth()
@@ -14,7 +15,10 @@ export class AuditLogsController {
 
   @Get()
   @Roles(UserRole.TENANT_ADMIN)
-  async search(@TenantId() tenantId: string, @Query() rawQuery: Record<string, string>) {
+  async search(
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<PaginatedAuditLogs> {
     const query = SearchAuditLogsSchema.parse(rawQuery)
     return this.auditLogsService.search(tenantId, query)
   }

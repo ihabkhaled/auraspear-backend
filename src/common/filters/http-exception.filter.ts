@@ -69,9 +69,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     // Fall back to a status-based messageKey if none was provided
-    if (!messageKey) {
-      messageKey = statusToMessageKey(status)
-    }
+    messageKey ??= statusToMessageKey(status)
 
     const errorResponse: ErrorResponse = {
       statusCode: status,

@@ -71,12 +71,11 @@ export function connectorFetch(
           // Not JSON, keep as string
         }
 
-        const responseHeaders: Record<string, string> = {}
-        for (const [key, value] of Object.entries(res.headers)) {
-          if (typeof value === 'string') {
-            responseHeaders[key] = value
-          }
-        }
+        const responseHeaders: Record<string, string> = Object.fromEntries(
+          Object.entries(res.headers).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string'
+          )
+        )
 
         resolve({
           status: res.statusCode ?? 0,

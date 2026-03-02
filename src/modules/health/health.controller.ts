@@ -3,6 +3,7 @@ import { ApiTags } from '@nestjs/swagger'
 import { HealthService } from './health.service'
 import { Public } from '../../common/decorators/public.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import type { OverallHealth, ServiceHealthResult } from './health.types'
 
 @ApiTags('health')
 @Controller('health')
@@ -15,7 +16,7 @@ export class HealthController {
    */
   @Get()
   @Public()
-  async getOverallHealth() {
+  async getOverallHealth(): Promise<OverallHealth> {
     const health = await this.healthService.getOverallHealth()
 
     if (health.status === 'down') {
@@ -34,7 +35,7 @@ export class HealthController {
    * All connector health for the authenticated tenant.
    */
   @Get('services')
-  async getServicesHealth(@TenantId() tenantId: string) {
+  async getServicesHealth(@TenantId() tenantId: string): Promise<ServiceHealthResult[]> {
     return this.healthService.getAllServiceHealth(tenantId)
   }
 }

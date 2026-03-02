@@ -16,6 +16,7 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
 
 @ApiTags('tenants')
 @ApiBearerAuth()
@@ -25,19 +26,19 @@ export class TenantsController {
 
   @Get()
   @Roles(UserRole.GLOBAL_ADMIN)
-  async listTenants() {
+  async listTenants(): Promise<TenantWithCounts[]> {
     return this.tenantsService.findAll()
   }
 
   @Post()
   @Roles(UserRole.GLOBAL_ADMIN)
   @UsePipes(new ZodValidationPipe(CreateTenantSchema))
-  async createTenant(@Body() dto: CreateTenantDto) {
+  async createTenant(@Body() dto: CreateTenantDto): Promise<TenantRecord> {
     return this.tenantsService.create(dto)
   }
 
   @Get('current')
-  async getCurrentTenant(@TenantId() tenantId: string) {
+  async getCurrentTenant(@TenantId() tenantId: string): Promise<TenantWithCounts> {
     return this.tenantsService.findById(tenantId)
   }
 
@@ -46,13 +47,13 @@ export class TenantsController {
   async updateTenant(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateTenantSchema)) dto: UpdateTenantDto
-  ) {
+  ): Promise<TenantRecord> {
     return this.tenantsService.update(id, dto)
   }
 
   @Delete(':id')
   @Roles(UserRole.GLOBAL_ADMIN)
-  async deleteTenant(@Param('id') id: string) {
+  async deleteTenant(@Param('id') id: string): Promise<{ deleted: boolean }> {
     return this.tenantsService.remove(id)
   }
 
@@ -60,7 +61,7 @@ export class TenantsController {
 
   @Get(':id/users')
   @Roles(UserRole.TENANT_ADMIN)
-  async listUsers(@Param('id') tenantId: string) {
+  async listUsers(@Param('id') tenantId: string): Promise<UserRecord[]> {
     return this.tenantsService.findUsers(tenantId)
   }
 
@@ -70,7 +71,7 @@ export class TenantsController {
     @Param('id') tenantId: string,
     @Body(new ZodValidationPipe(AddUserSchema)) dto: AddUserDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserRecord> {
     return this.tenantsService.addUser(tenantId, dto, user.role)
   }
 
@@ -81,7 +82,7 @@ export class TenantsController {
     @Param('userId') userId: string,
     @Body(new ZodValidationPipe(UpdateUserSchema)) dto: UpdateUserDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserRecord> {
     return this.tenantsService.updateUser(tenantId, userId, dto, user.role, user.sub)
   }
 
@@ -91,7 +92,7 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ deleted: boolean }> {
     return this.tenantsService.removeUser(tenantId, userId, user.role, user.sub)
   }
 
@@ -101,7 +102,7 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserRecord> {
     return this.tenantsService.restoreUser(tenantId, userId, user.role)
   }
 
@@ -111,7 +112,7 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserRecord> {
     return this.tenantsService.blockUser(tenantId, userId, user.role, user.sub)
   }
 
@@ -121,7 +122,7 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<UserRecord> {
     return this.tenantsService.unblockUser(tenantId, userId, user.role)
   }
 }

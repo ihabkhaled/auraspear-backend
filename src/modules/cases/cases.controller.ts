@@ -12,6 +12,8 @@ import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { CaseRecord, PaginatedCases } from './cases.types'
+import type { CaseNote } from '@prisma/client'
 
 @Controller('cases')
 @UseGuards(AuthGuard, TenantGuard)
@@ -23,7 +25,7 @@ export class CasesController {
     @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ) {
+  ): Promise<PaginatedCases> {
     return this.casesService.listCases(
       tenantId,
       page ? Number.parseInt(page, 10) : 1,
@@ -37,12 +39,12 @@ export class CasesController {
   async createCase(
     @Body(new ZodValidationPipe(CreateCaseSchema)) dto: CreateCaseDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<CaseRecord> {
     return this.casesService.createCase(dto, user)
   }
 
   @Get(':id')
-  async getCaseById(@Param('id') id: string, @TenantId() tenantId: string) {
+  async getCaseById(@Param('id') id: string, @TenantId() tenantId: string): Promise<CaseRecord> {
     return this.casesService.getCaseById(id, tenantId)
   }
 
@@ -53,14 +55,17 @@ export class CasesController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateCaseSchema)) dto: UpdateCaseDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<CaseRecord> {
     return this.casesService.updateCase(id, dto, user)
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
-  async deleteCase(@Param('id') id: string, @TenantId() tenantId: string) {
+  async deleteCase(
+    @Param('id') id: string,
+    @TenantId() tenantId: string
+  ): Promise<{ deleted: boolean }> {
     return this.casesService.deleteCase(id, tenantId)
   }
 
@@ -69,12 +74,12 @@ export class CasesController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(LinkAlertSchema)) dto: LinkAlertDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<CaseRecord> {
     return this.casesService.linkAlert(id, dto, user)
   }
 
   @Get(':id/notes')
-  async getCaseNotes(@Param('id') id: string, @TenantId() tenantId: string) {
+  async getCaseNotes(@Param('id') id: string, @TenantId() tenantId: string): Promise<CaseNote[]> {
     return this.casesService.getCaseNotes(id, tenantId)
   }
 
@@ -83,7 +88,7 @@ export class CasesController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateNoteSchema)) dto: CreateNoteDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<CaseNote> {
     return this.casesService.addCaseNote(id, dto, user)
   }
 }

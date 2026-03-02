@@ -7,6 +7,7 @@ import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { PaginatedMispEvents, PaginatedIOCs, IOCMatchResult } from './intel.types'
 
 @Controller('ti')
 @UseGuards(AuthGuard, TenantGuard)
@@ -22,7 +23,7 @@ export class IntelController {
     @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ) {
+  ): Promise<PaginatedMispEvents> {
     return this.intelService.getRecentEvents(tenantId, Number(page) || 1, Number(limit) || 20)
   }
 
@@ -37,7 +38,7 @@ export class IntelController {
     @Query('type') type?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
-  ) {
+  ): Promise<PaginatedIOCs> {
     return this.intelService.searchIOCs(
       tenantId,
       query ?? '',
@@ -54,7 +55,10 @@ export class IntelController {
    */
   @Post('iocs/match-alerts')
   @UsePipes(new ZodValidationPipe(MatchIocsSchema))
-  async matchIOCsAgainstAlerts(@Body() dto: MatchIocsDto, @TenantId() tenantId: string) {
+  async matchIOCsAgainstAlerts(
+    @Body() dto: MatchIocsDto,
+    @TenantId() tenantId: string
+  ): Promise<IOCMatchResult[]> {
     return this.intelService.matchIOCsAgainstAlerts(tenantId, dto.alertIds)
   }
 
@@ -65,7 +69,9 @@ export class IntelController {
    */
   @Post('sync/misp')
   @Roles(UserRole.TENANT_ADMIN)
-  async syncFromMisp(@TenantId() tenantId: string) {
+  async syncFromMisp(
+    @TenantId() tenantId: string
+  ): Promise<{ eventsUpserted: number; iocsUpserted: number }> {
     return this.intelService.syncFromMisp(tenantId)
   }
 }

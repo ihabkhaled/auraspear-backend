@@ -5,6 +5,12 @@ import { PrismaService } from '../../prisma/prisma.service'
 import type { ChangePasswordDto } from './dto/change-password.dto'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UpdateProfileDto } from './dto/update-profile.dto'
+import type { Tenant, TenantUser, UserPreference } from '@prisma/client'
+
+type UserProfile = Omit<TenantUser, 'passwordHash'> & {
+  tenant: Tenant | null
+  preference: UserPreference | null
+}
 
 const BCRYPT_SALT_ROUNDS = 12
 
@@ -25,7 +31,7 @@ export class UsersService {
   /* GET PROFILE                                                       */
   /* ---------------------------------------------------------------- */
 
-  async getProfile(userId: string) {
+  async getProfile(userId: string): Promise<UserProfile> {
     const user = await this.prisma.tenantUser.findUnique({
       where: { id: userId },
       include: {
@@ -46,7 +52,7 @@ export class UsersService {
   /* UPDATE PROFILE                                                    */
   /* ---------------------------------------------------------------- */
 
-  async updateProfile(userId: string, dto: UpdateProfileDto) {
+  async updateProfile(userId: string, dto: UpdateProfileDto): Promise<UserProfile> {
     const user = await this.prisma.tenantUser.findUnique({
       where: { id: userId },
     })
@@ -83,7 +89,7 @@ export class UsersService {
   /* CHANGE PASSWORD                                                   */
   /* ---------------------------------------------------------------- */
 
-  async changePassword(userId: string, dto: ChangePasswordDto) {
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ changed: boolean }> {
     const user = await this.prisma.tenantUser.findUnique({
       where: { id: userId },
     })
@@ -116,7 +122,18 @@ export class UsersService {
   /* GET PREFERENCES                                                   */
   /* ---------------------------------------------------------------- */
 
-  async getPreferences(userId: string) {
+  async getPreferences(
+    userId: string
+  ): Promise<
+    | UserPreference
+    | {
+        userId: string
+        theme: string
+        language: string
+        notificationsEmail: boolean
+        notificationsInApp: boolean
+      }
+  > {
     const user = await this.prisma.tenantUser.findUnique({
       where: { id: userId },
     })
@@ -140,7 +157,7 @@ export class UsersService {
   /* UPDATE PREFERENCES                                                */
   /* ---------------------------------------------------------------- */
 
-  async updatePreferences(userId: string, dto: UpdatePreferencesDto) {
+  async updatePreferences(userId: string, dto: UpdatePreferencesDto): Promise<UserPreference> {
     const user = await this.prisma.tenantUser.findUnique({
       where: { id: userId },
     })

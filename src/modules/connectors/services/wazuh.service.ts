@@ -32,16 +32,16 @@ export class WazuhService {
       const token = await this.authenticate(managerUrl, username, password, config)
 
       // Verify token by getting manager info
-      const infoRes = await connectorFetch(`${managerUrl}/manager/info`, {
+      const infoResponse = await connectorFetch(`${managerUrl}/manager/info`, {
         headers: { Authorization: `Bearer ${token}` },
         rejectUnauthorized: config.verifyTls !== false,
       })
 
-      if (infoRes.status !== 200) {
-        return { ok: false, details: `Wazuh Manager returned status ${infoRes.status}` }
+      if (infoResponse.status !== 200) {
+        return { ok: false, details: `Wazuh Manager returned status ${infoResponse.status}` }
       }
 
-      const info = infoRes.data as Record<string, unknown>
+      const info = infoResponse.data as Record<string, unknown>
       const data = (info.data as Record<string, unknown>) ?? info
       const version = (data.api_version ?? data.version ?? 'unknown') as string
 

@@ -9,6 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { PaginatedAlerts, AlertRecord } from './alerts.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @ApiTags('alerts')
@@ -18,13 +19,16 @@ export class AlertsController {
   constructor(private readonly alertsService: AlertsService) {}
 
   @Get()
-  async search(@TenantId() tenantId: string, @Query() rawQuery: Record<string, string>) {
+  async search(
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<PaginatedAlerts> {
     const query = SearchAlertsSchema.parse(rawQuery)
     return this.alertsService.search(tenantId, query)
   }
 
   @Get(':id')
-  async getById(@TenantId() tenantId: string, @Param('id') id: string) {
+  async getById(@TenantId() tenantId: string, @Param('id') id: string): Promise<AlertRecord> {
     return this.alertsService.findById(tenantId, id)
   }
 
@@ -34,7 +38,7 @@ export class AlertsController {
     @TenantId() tenantId: string,
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<AlertRecord> {
     return this.alertsService.acknowledge(tenantId, id, user.email)
   }
 
@@ -44,7 +48,7 @@ export class AlertsController {
     @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body(new ZodValidationPipe(InvestigateAlertSchema)) dto: InvestigateAlertDto
-  ) {
+  ): Promise<AlertRecord> {
     return this.alertsService.investigate(tenantId, id, dto.notes)
   }
 
@@ -55,13 +59,13 @@ export class AlertsController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CloseAlertSchema)) dto: CloseAlertDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<AlertRecord> {
     return this.alertsService.close(tenantId, id, dto.resolution, user.email)
   }
 
   @Post('ingest/wazuh')
   @Roles(UserRole.TENANT_ADMIN)
-  async ingestFromWazuh(@TenantId() tenantId: string) {
+  async ingestFromWazuh(@TenantId() tenantId: string): Promise<{ ingested: number }> {
     return this.alertsService.ingestFromWazuh(tenantId)
   }
 }
