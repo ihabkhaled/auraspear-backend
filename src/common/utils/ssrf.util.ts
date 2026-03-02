@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common'
+import { BusinessException } from '../exceptions/business.exception'
 
 const PRIVATE_RANGES = [
   /^127\./,
@@ -19,19 +19,27 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   try {
     parsed = new URL(urlString)
   } catch {
-    throw new BadRequestException('Invalid URL format')
+    throw new BusinessException(400, 'Invalid URL format', 'errors.ssrf.invalidUrl')
   }
 
   // Only allow HTTPS in production
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new BadRequestException('Only HTTP(S) URLs are allowed')
+    throw new BusinessException(
+      400,
+      'Only HTTP(S) URLs are allowed',
+      'errors.ssrf.unsupportedProtocol'
+    )
   }
 
   // Block private/internal IPs
   const { hostname } = parsed
   for (const pattern of PRIVATE_RANGES) {
     if (pattern.test(hostname)) {
-      throw new BadRequestException('URLs pointing to private/internal networks are not allowed')
+      throw new BusinessException(
+        400,
+        'URLs pointing to private/internal networks are not allowed',
+        'errors.ssrf.privateNetwork'
+      )
     }
   }
 
@@ -41,7 +49,11 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
       allowed => hostname === allowed || hostname.endsWith(`.${allowed}`)
     )
     if (!isAllowed) {
-      throw new BadRequestException(`Host '${hostname}' is not in the allowed list`)
+      throw new BusinessException(
+        400,
+        `Host '${hostname}' is not in the allowed list`,
+        'errors.ssrf.hostNotAllowed'
+      )
     }
   }
 

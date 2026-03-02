@@ -1,8 +1,12 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
+import * as bcrypt from 'bcryptjs'
+import { BusinessException } from '../../common/exceptions/business.exception'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { CreateTenantDto, UpdateTenantDto, AddUserDto } from './dto/tenant.dto'
-import type { TenantRecord, UserRecord } from './tenants.types'
-import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import type { CreateTenantDto, UpdateTenantDto, AddUserDto, UpdateUserDto } from './dto/tenant.dto'
+import type { TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
+
+const BCRYPT_SALT_ROUNDS = 12
 
 // Mock data fallback
 const MOCK_TENANTS: TenantRecord[] = [
@@ -22,25 +26,74 @@ export class TenantsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(): Promise<TenantRecord[]> {
+  async findAll(): Promise<TenantWithCounts[]> {
     try {
-      return await this.prisma.tenant.findMany({ orderBy: { name: 'asc' } })
+      const tenants = await this.prisma.tenant.findMany({
+        orderBy: { name: 'asc' },
+        include: {
+          _count: {
+            select: {
+              users: true,
+              alerts: true,
+              cases: true,
+            },
+          },
+        },
+      })
+      return tenants.map(t => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        createdAt: t.createdAt,
+        userCount: t._count.users,
+        alertCount: t._count.alerts,
+        caseCount: t._count.cases,
+      }))
     } catch {
       this.logger.warn('Prisma unavailable, returning mock tenants')
-      return MOCK_TENANTS
+      return MOCK_TENANTS.map(t => ({
+        ...t,
+        userCount: 0,
+        alertCount: 0,
+        caseCount: 0,
+      }))
     }
   }
 
-  async findById(id: string): Promise<TenantRecord> {
+  async findById(id: string): Promise<TenantWithCounts> {
     try {
-      const tenant = await this.prisma.tenant.findUnique({ where: { id } })
-      if (!tenant) throw new NotFoundException('Tenant not found')
-      return tenant
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: { users: true, alerts: true, cases: true },
+          },
+        },
+      })
+      if (!tenant) {
+        throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
+      }
+      return {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        createdAt: tenant.createdAt,
+        userCount: tenant._count.users,
+        alertCount: tenant._count.alerts,
+        caseCount: tenant._count.cases,
+      }
     } catch (error) {
-      if (error instanceof NotFoundException) throw error
+      if (error instanceof BusinessException) throw error
       const mock = MOCK_TENANTS.find(t => t.id === id || t.slug === id)
-      if (!mock) throw new NotFoundException('Tenant not found')
-      return mock
+      if (!mock) {
+        throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
+      }
+      return {
+        ...mock,
+        userCount: 0,
+        alertCount: 0,
+        caseCount: 0,
+      }
     }
   }
 
@@ -52,7 +105,11 @@ export class TenantsService {
     } catch (error) {
       const message = error instanceof Error ? error.message : ''
       if (message.includes('Unique constraint')) {
-        throw new ConflictException('Tenant slug already exists')
+        throw new BusinessException(
+          409,
+          'Tenant slug already exists',
+          'errors.tenants.slugConflict'
+        )
       }
       throw error
     }
@@ -73,28 +130,51 @@ export class TenantsService {
         where: { tenantId },
         orderBy: { name: 'asc' },
       })
-      return users.map(
-        (u: { id: string; email: string; name: string; role: string; createdAt: Date }) => ({
-          id: u.id,
-          email: u.email,
-          name: u.name,
-          role: u.role,
-          createdAt: u.createdAt,
-        })
-      )
+      return users.map(u => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        status: u.status,
+        lastLoginAt: u.lastLoginAt,
+        mfaEnabled: u.mfaEnabled,
+        isProtected: u.isProtected,
+        createdAt: u.createdAt,
+      }))
     } catch {
       return []
     }
   }
 
-  async addUser(tenantId: string, dto: AddUserDto): Promise<UserRecord> {
+  async addUser(tenantId: string, dto: AddUserDto, callerRole: UserRole): Promise<UserRecord> {
+    if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can create Global Admin users',
+        'errors.tenants.cannotAssignGlobalAdmin'
+      )
+    }
+
+    const existing = await this.prisma.tenantUser.findFirst({
+      where: { tenantId, email: dto.email },
+    })
+    if (existing) {
+      throw new BusinessException(
+        409,
+        'Email already exists in this tenant',
+        'errors.tenants.emailExists'
+      )
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+
     const user = await this.prisma.tenantUser.create({
       data: {
         tenantId,
-        oidcSub: dto.oidcSub,
         email: dto.email,
         name: dto.name,
         role: dto.role as UserRole,
+        passwordHash,
       },
     })
     return {
@@ -102,33 +182,276 @@ export class TenantsService {
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
+      lastLoginAt: user.lastLoginAt,
+      mfaEnabled: user.mfaEnabled,
+      isProtected: user.isProtected,
       createdAt: user.createdAt,
     }
   }
 
-  async updateUserRole(tenantId: string, userId: string, role: string): Promise<UserRecord> {
+  async updateUser(
+    tenantId: string,
+    userId: string,
+    dto: UpdateUserDto,
+    callerRole: UserRole,
+    callerId: string
+  ): Promise<UserRecord> {
+    if (callerId === userId && dto.role !== undefined) {
+      throw new BusinessException(
+        403,
+        'Cannot change your own role',
+        'errors.tenants.cannotModifySelf'
+      )
+    }
+
+    const existing = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
+    if (existing?.tenantId !== tenantId) {
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
+    }
+
+    if (existing.isProtected && dto.role !== undefined && dto.role !== existing.role) {
+      throw new BusinessException(
+        403,
+        'Cannot change the role of a protected user',
+        'errors.tenants.userProtected'
+      )
+    }
+
+    if (existing.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can modify Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+
+    if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can assign the Global Admin role',
+        'errors.tenants.cannotAssignGlobalAdmin'
+      )
+    }
+
+    const updateData: Record<string, unknown> = {}
+    if (dto.name !== undefined) {
+      updateData.name = dto.name
+    }
+    if (dto.role !== undefined) {
+      updateData.role = dto.role
+    }
+    if (dto.password !== undefined) {
+      updateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+    }
+
     const user = await this.prisma.tenantUser.update({
       where: { id: userId },
-      data: { role: role as UserRole },
+      data: updateData,
     })
-    if (user.tenantId !== tenantId) {
-      throw new NotFoundException('User not found in this tenant')
-    }
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
+      status: user.status,
+      lastLoginAt: user.lastLoginAt,
+      mfaEnabled: user.mfaEnabled,
+      isProtected: user.isProtected,
       createdAt: user.createdAt,
     }
   }
 
-  async removeUser(tenantId: string, userId: string): Promise<{ deleted: boolean }> {
+  async removeUser(
+    tenantId: string,
+    userId: string,
+    callerRole: UserRole,
+    callerId: string
+  ): Promise<{ deleted: boolean }> {
+    if (callerId === userId) {
+      throw new BusinessException(
+        403,
+        'Cannot delete your own account',
+        'errors.tenants.cannotDeleteSelf'
+      )
+    }
+
     const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
     if (user?.tenantId !== tenantId) {
-      throw new NotFoundException('User not found in this tenant')
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
     }
-    await this.prisma.tenantUser.delete({ where: { id: userId } })
+
+    if (user.isProtected) {
+      throw new BusinessException(
+        403,
+        'This user is protected and cannot be deleted',
+        'errors.tenants.userProtected'
+      )
+    }
+
+    if (user.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can remove Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+
+    // Soft delete: set status to inactive
+    await this.prisma.tenantUser.update({
+      where: { id: userId },
+      data: { status: 'inactive' },
+    })
     return { deleted: true }
+  }
+
+  async restoreUser(tenantId: string, userId: string, callerRole: UserRole): Promise<UserRecord> {
+    const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
+    if (user?.tenantId !== tenantId) {
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
+    }
+
+    if (user.status !== 'inactive') {
+      throw new BusinessException(400, 'User is not deleted', 'errors.tenants.userNotDeleted')
+    }
+
+    if (user.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can restore Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+
+    const updated = await this.prisma.tenantUser.update({
+      where: { id: userId },
+      data: { status: 'active' },
+    })
+    return {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role,
+      status: updated.status,
+      lastLoginAt: updated.lastLoginAt,
+      mfaEnabled: updated.mfaEnabled,
+      isProtected: updated.isProtected,
+      createdAt: updated.createdAt,
+    }
+  }
+
+  async blockUser(
+    tenantId: string,
+    userId: string,
+    callerRole: UserRole,
+    callerId: string
+  ): Promise<UserRecord> {
+    if (callerId === userId) {
+      throw new BusinessException(
+        403,
+        'Cannot block your own account',
+        'errors.tenants.cannotBlockSelf'
+      )
+    }
+
+    const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
+    if (user?.tenantId !== tenantId) {
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
+    }
+
+    if (user.isProtected) {
+      throw new BusinessException(
+        403,
+        'This user is protected and cannot be blocked',
+        'errors.tenants.userProtected'
+      )
+    }
+
+    if (user.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can block Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+
+    if (user.status === 'suspended') {
+      throw new BusinessException(
+        400,
+        'User is already blocked',
+        'errors.tenants.userAlreadyBlocked'
+      )
+    }
+
+    const updated = await this.prisma.tenantUser.update({
+      where: { id: userId },
+      data: { status: 'suspended' },
+    })
+    return {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role,
+      status: updated.status,
+      lastLoginAt: updated.lastLoginAt,
+      mfaEnabled: updated.mfaEnabled,
+      isProtected: updated.isProtected,
+      createdAt: updated.createdAt,
+    }
+  }
+
+  async unblockUser(tenantId: string, userId: string, callerRole: UserRole): Promise<UserRecord> {
+    const user = await this.prisma.tenantUser.findUnique({ where: { id: userId } })
+    if (user?.tenantId !== tenantId) {
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
+    }
+
+    if (user.status !== 'suspended') {
+      throw new BusinessException(400, 'User is not blocked', 'errors.tenants.userNotBlocked')
+    }
+
+    if (user.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Only Global Admin can unblock Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+
+    const updated = await this.prisma.tenantUser.update({
+      where: { id: userId },
+      data: { status: 'active' },
+    })
+    return {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role,
+      status: updated.status,
+      lastLoginAt: updated.lastLoginAt,
+      mfaEnabled: updated.mfaEnabled,
+      isProtected: updated.isProtected,
+      createdAt: updated.createdAt,
+    }
   }
 }

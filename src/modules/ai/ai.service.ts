@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { AiResponse } from './ai.types'
@@ -41,12 +42,14 @@ export class AiService {
       })
 
       if (!connector) {
-        throw new ForbiddenException(
-          'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.'
+        throw new BusinessException(
+          403,
+          'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.',
+          'errors.ai.notEnabled'
         )
       }
     } catch (error) {
-      if (error instanceof ForbiddenException) {
+      if (error instanceof BusinessException) {
         throw error
       }
       // If Prisma table doesn't exist, allow AI in mock mode

@@ -1,202 +1,320 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
-import type { Alert, PaginatedResult } from './alerts.types'
+import { BusinessException } from '../../common/exceptions/business.exception'
+import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { PrismaService } from '../../prisma/prisma.service'
+import { ConnectorsService } from '../connectors/connectors.service'
+import { WazuhService } from '../connectors/services/wazuh.service'
+import type { PaginatedAlerts, AlertRecord } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
-
-const MOCK_ALERTS: Alert[] = [
-  {
-    id: 'alert-001',
-    tenantId: 'aura-finance',
-    title: 'Brute Force Attack Detected',
-    description: 'Multiple failed SSH login attempts from 203.0.113.42',
-    severity: 'high',
-    status: 'new',
-    source: 'wazuh',
-    ruleId: 'T1110.001',
-    mitreTactic: 'Credential Access',
-    mitreTechnique: 'Brute Force: Password Guessing',
-    sourceIp: '203.0.113.42',
-    destIp: '10.0.1.15',
-    agent: 'web-server-01',
-    timestamp: '2024-12-15T14:30:00Z',
-  },
-  {
-    id: 'alert-002',
-    tenantId: 'aura-finance',
-    title: 'Suspicious PowerShell Execution',
-    description: 'Encoded PowerShell command with download cradle detected',
-    severity: 'critical',
-    status: 'new',
-    source: 'wazuh',
-    ruleId: 'T1059.001',
-    mitreTactic: 'Execution',
-    mitreTechnique: 'Command and Scripting: PowerShell',
-    sourceIp: '10.0.2.34',
-    destIp: '185.220.101.1',
-    agent: 'workstation-042',
-    timestamp: '2024-12-15T15:12:00Z',
-  },
-  {
-    id: 'alert-003',
-    tenantId: 'aura-finance',
-    title: 'Data Exfiltration via DNS',
-    description: 'Unusually high DNS query volume to suspicious domain',
-    severity: 'critical',
-    status: 'acknowledged',
-    source: 'graylog',
-    ruleId: 'T1048.003',
-    mitreTactic: 'Exfiltration',
-    mitreTechnique: 'Exfiltration Over Alternative Protocol: DNS',
-    sourceIp: '10.0.3.88',
-    destIp: '198.51.100.77',
-    agent: 'db-server-02',
-    timestamp: '2024-12-15T13:45:00Z',
-  },
-  {
-    id: 'alert-004',
-    tenantId: 'aura-health',
-    title: 'Privilege Escalation Attempt',
-    description: 'Local privilege escalation via sudo misconfiguration',
-    severity: 'high',
-    status: 'new',
-    source: 'wazuh',
-    ruleId: 'T1548.003',
-    mitreTactic: 'Privilege Escalation',
-    mitreTechnique: 'Abuse Elevation Control: Sudo',
-    sourceIp: '10.1.0.22',
-    destIp: '10.1.0.22',
-    agent: 'linux-app-03',
-    timestamp: '2024-12-15T16:00:00Z',
-  },
-  {
-    id: 'alert-005',
-    tenantId: 'aura-health',
-    title: 'Lateral Movement via RDP',
-    description: 'RDP session from non-standard source to critical server',
-    severity: 'medium',
-    status: 'new',
-    source: 'velociraptor',
-    ruleId: 'T1021.001',
-    mitreTactic: 'Lateral Movement',
-    mitreTechnique: 'Remote Services: RDP',
-    sourceIp: '10.1.2.55',
-    destIp: '10.1.0.5',
-    agent: 'dc-01',
-    timestamp: '2024-12-15T12:30:00Z',
-  },
-  {
-    id: 'alert-006',
-    tenantId: 'aura-enterprise',
-    title: 'Malware C2 Beacon',
-    description: 'Periodic HTTP POST requests matching known C2 pattern',
-    severity: 'critical',
-    status: 'in_progress',
-    source: 'wazuh',
-    ruleId: 'T1071.001',
-    mitreTactic: 'Command and Control',
-    mitreTechnique: 'Application Layer Protocol: HTTP',
-    sourceIp: '10.2.1.99',
-    destIp: '45.33.32.156',
-    agent: 'endpoint-177',
-    timestamp: '2024-12-15T11:15:00Z',
-  },
-  {
-    id: 'alert-007',
-    tenantId: 'aura-enterprise',
-    title: 'SQL Injection Attempt',
-    description: 'Union-based SQL injection detected on login endpoint',
-    severity: 'high',
-    status: 'new',
-    source: 'graylog',
-    ruleId: 'T1190',
-    mitreTactic: 'Initial Access',
-    mitreTechnique: 'Exploit Public-Facing Application',
-    sourceIp: '203.0.113.100',
-    destIp: '10.2.0.10',
-    agent: 'web-app-01',
-    timestamp: '2024-12-15T10:45:00Z',
-  },
-]
+import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name)
-  private readonly alerts: Alert[] = [...MOCK_ALERTS]
 
-  async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedResult> {
-    let filtered = this.alerts.filter(a => a.tenantId === tenantId)
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly connectorsService: ConnectorsService,
+    private readonly wazuhService: WazuhService
+  ) {}
+
+  async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedAlerts> {
+    const where: Prisma.AlertWhereInput = { tenantId }
 
     if (query.severity) {
-      filtered = filtered.filter(a => a.severity === query.severity)
+      where.severity = query.severity as Prisma.EnumAlertSeverityFilter
     }
 
     if (query.status) {
-      filtered = filtered.filter(a => a.status === query.status)
+      where.status = query.status as Prisma.EnumAlertStatusFilter
+    }
+
+    if (query.source) {
+      where.source = query.source
+    }
+
+    if (query.from || query.to) {
+      where.timestamp = {}
+      if (query.from) {
+        where.timestamp.gte = new Date(query.from)
+      }
+      if (query.to) {
+        where.timestamp.lte = new Date(query.to)
+      }
     }
 
     if (query.query && query.query !== '*') {
-      const q = query.query.toLowerCase()
-      filtered = filtered.filter(
-        a =>
-          a.title.toLowerCase().includes(q) ||
-          a.description.toLowerCase().includes(q) ||
-          a.sourceIp.includes(q) ||
-          a.destIp.includes(q)
-      )
+      where.OR = [
+        { title: { contains: query.query, mode: 'insensitive' } },
+        { description: { contains: query.query, mode: 'insensitive' } },
+        { sourceIp: { contains: query.query } },
+        { destinationIp: { contains: query.query } },
+        { agentName: { contains: query.query, mode: 'insensitive' } },
+        { ruleName: { contains: query.query, mode: 'insensitive' } },
+      ]
     }
 
-    // Sort
-    const sortOrder = query.sortOrder === 'asc' ? 1 : -1
-    filtered.sort((a, b) => {
-      const aValue = a[query.sortBy as keyof Alert] ?? ''
-      const bValue = b[query.sortBy as keyof Alert] ?? ''
-      return String(aValue).localeCompare(String(bValue)) * sortOrder
-    })
+    const orderBy: Prisma.AlertOrderByWithRelationInput = {}
+    const sortField = query.sortBy as keyof Prisma.AlertOrderByWithRelationInput
+    orderBy[sortField] = query.sortOrder
 
-    const total = filtered.length
-    const { page } = query
-    const { pageSize } = query
-    const start = (page - 1) * pageSize
-    const data = filtered.slice(start, start + pageSize)
+    const [data, total] = await Promise.all([
+      this.prisma.alert.findMany({
+        where,
+        orderBy,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      this.prisma.alert.count({ where }),
+    ])
 
     return {
       data,
-      total,
-      page,
-      pageSize,
-      totalPages: Math.ceil(total / pageSize),
+      pagination: buildPaginationMeta(query.page, query.limit, total),
     }
   }
 
-  async findById(tenantId: string, id: string): Promise<Alert> {
-    const alert = this.alerts.find(a => a.id === id && a.tenantId === tenantId)
-    if (!alert) throw new NotFoundException('Alert not found')
+  async findById(tenantId: string, id: string): Promise<AlertRecord> {
+    const alert = await this.prisma.alert.findFirst({
+      where: { id, tenantId },
+    })
+
+    if (!alert) {
+      throw new NotFoundException('Alert not found')
+    }
+
     return alert
   }
 
-  async acknowledge(tenantId: string, id: string, email: string): Promise<Alert> {
+  async acknowledge(tenantId: string, id: string, email: string): Promise<AlertRecord> {
     const alert = await this.findById(tenantId, id)
-    alert.status = 'acknowledged'
-    alert.acknowledgedBy = email
-    alert.acknowledgedAt = new Date().toISOString()
-    return alert
+
+    if (alert.status === 'closed' || alert.status === 'resolved') {
+      throw new BusinessException(
+        400,
+        'Cannot acknowledge a closed alert',
+        'errors.alerts.alreadyClosed'
+      )
+    }
+
+    return this.prisma.alert.update({
+      where: { id },
+      data: {
+        status: 'acknowledged',
+        acknowledgedBy: email,
+        acknowledgedAt: new Date(),
+      },
+    })
   }
 
-  async investigate(
+  async investigate(tenantId: string, id: string, _notes?: string): Promise<AlertRecord> {
+    const alert = await this.findById(tenantId, id)
+
+    if (alert.status === 'closed' || alert.status === 'resolved') {
+      throw new BusinessException(
+        400,
+        'Cannot investigate a closed alert',
+        'errors.alerts.alreadyClosed'
+      )
+    }
+
+    return this.prisma.alert.update({
+      where: { id },
+      data: { status: 'in_progress' },
+    })
+  }
+
+  async close(
     tenantId: string,
     id: string,
-    notes?: string
-  ): Promise<Alert & { investigation: string }> {
-    const alert = await this.findById(tenantId, id)
-    alert.status = 'in_progress'
-    this.logger.debug(`Investigation started for alert ${id}${notes ? `: ${notes}` : ''}`)
-    return { ...alert, investigation: 'Investigation started' }
+    resolution: string,
+    email: string
+  ): Promise<AlertRecord> {
+    await this.findById(tenantId, id)
+
+    return this.prisma.alert.update({
+      where: { id },
+      data: {
+        status: 'closed',
+        resolution,
+        closedAt: new Date(),
+        closedBy: email,
+      },
+    })
   }
 
-  async close(tenantId: string, id: string, resolution: string): Promise<Alert> {
-    const alert = await this.findById(tenantId, id)
-    alert.status = 'closed'
-    alert.resolution = resolution
-    alert.closedAt = new Date().toISOString()
-    return alert
+  /**
+   * Ingest alerts from Wazuh Indexer via Elasticsearch DSL.
+   * Fetches recent alerts and upserts them into the database.
+   */
+  async ingestFromWazuh(tenantId: string): Promise<{ ingested: number }> {
+    const config = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
+    if (!config) {
+      throw new BusinessException(
+        400,
+        'Wazuh connector not configured or disabled',
+        'errors.alerts.connectorNotConfigured'
+      )
+    }
+
+    const now = new Date()
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+    const esQuery = {
+      size: 500,
+      query: {
+        bool: {
+          must: [
+            { range: { timestamp: { gte: oneDayAgo.toISOString(), lte: now.toISOString() } } },
+          ],
+        },
+      },
+      sort: [{ timestamp: { order: 'desc' } }],
+    }
+
+    const result = await this.wazuhService.searchAlerts(config, esQuery)
+
+    let ingested = 0
+    for (const rawHit of result.hits) {
+      const hit = rawHit as Record<string, unknown>
+      const source = (hit._source ?? hit) as Record<string, unknown>
+      const externalId = (hit._id ?? source.id) as string
+
+      try {
+        const rule = source.rule as Record<string, unknown> | undefined
+        const agent = source.agent as Record<string, unknown> | undefined
+        const data = source.data as Record<string, unknown> | undefined
+
+        const mitreTechniques: string[] = []
+        const mitreTactics: string[] = []
+        const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
+        if (mitreInfo) {
+          const ids = mitreInfo.id as string[] | undefined
+          const tactics = mitreInfo.tactic as string[] | undefined
+          if (ids) mitreTechniques.push(...ids)
+          if (tactics) mitreTactics.push(...tactics)
+        }
+
+        const severity = this.mapWazuhLevel(rule?.level as number | undefined)
+
+        await this.prisma.alert.upsert({
+          where: { tenantId_externalId: { tenantId, externalId } },
+          create: {
+            tenantId,
+            externalId,
+            title: (rule?.description ?? source.rule_description ?? 'Wazuh Alert') as string,
+            description: JSON.stringify(source),
+            severity,
+            status: 'new_alert',
+            source: 'wazuh',
+            ruleName: (rule?.description ?? null) as string | null,
+            ruleId: (rule?.id ?? null) as string | null,
+            agentName: (agent?.name ?? null) as string | null,
+            sourceIp: (data?.srcip ?? source.src_ip ?? null) as string | null,
+            destinationIp: (data?.dstip ?? source.dst_ip ?? null) as string | null,
+            mitreTactics,
+            mitreTechniques,
+            rawEvent: source as Prisma.InputJsonValue,
+            timestamp: new Date((source.timestamp ?? now) as string),
+          },
+          update: {
+            rawEvent: source as Prisma.InputJsonValue,
+          },
+        })
+
+        ingested++
+      } catch (error) {
+        this.logger.warn(`Failed to ingest alert ${externalId}: ${(error as Error).message}`)
+      }
+    }
+
+    this.logger.log(`Ingested ${ingested} alerts from Wazuh for tenant ${tenantId}`)
+    return { ingested }
+  }
+
+  /**
+   * Get alert severity distribution counts for dashboard.
+   */
+  async getCountsBySeverity(tenantId: string): Promise<Record<string, number>> {
+    const counts = await this.prisma.alert.groupBy({
+      by: ['severity'],
+      where: { tenantId },
+      _count: true,
+    })
+
+    const result: Record<string, number> = {}
+    for (const c of counts) {
+      result[c.severity] = c._count
+    }
+    return result
+  }
+
+  /**
+   * Get alert trend over days for dashboard.
+   */
+  async getTrend(
+    tenantId: string,
+    days: number = 30
+  ): Promise<Array<{ date: string; count: number }>> {
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+
+    const results = await this.prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
+      SELECT DATE(timestamp) as date, COUNT(*)::bigint as count
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
+      GROUP BY DATE(timestamp)
+      ORDER BY date ASC
+    `
+
+    return results.map(r => ({ date: r.date, count: Number(r.count) }))
+  }
+
+  /**
+   * Get MITRE technique counts for dashboard.
+   */
+  async getMitreTechniqueCounts(
+    tenantId: string
+  ): Promise<Array<{ technique: string; count: number }>> {
+    const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
+      SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid
+      GROUP BY technique
+      ORDER BY count DESC
+      LIMIT 15
+    `
+
+    return results.map(r => ({ technique: r.technique, count: Number(r.count) }))
+  }
+
+  /**
+   * Get top targeted assets by alert count.
+   */
+  async getTopTargetedAssets(
+    tenantId: string,
+    limit: number = 10
+  ): Promise<Array<{ asset: string; count: number }>> {
+    const results = await this.prisma.$queryRaw<Array<{ asset: string; count: bigint }>>`
+      SELECT agent_name as asset, COUNT(*)::bigint as count
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
+      GROUP BY agent_name
+      ORDER BY count DESC
+      LIMIT ${limit}
+    `
+
+    return results.map(r => ({ asset: r.asset, count: Number(r.count) }))
+  }
+
+  private mapWazuhLevel(
+    level: number | undefined
+  ): 'critical' | 'high' | 'medium' | 'low' | 'info' {
+    if (!level) return 'info'
+    if (level >= 12) return 'critical'
+    if (level >= 8) return 'high'
+    if (level >= 5) return 'medium'
+    if (level >= 3) return 'low'
+    return 'info'
   }
 }

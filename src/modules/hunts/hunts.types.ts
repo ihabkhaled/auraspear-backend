@@ -1,24 +1,6 @@
-export interface HuntEvent {
-  id: string
-  timestamp: string
-  severity: string
-  eventId: string
-  sourceIp: string
-  user: string
-  description: string
-}
+import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
+import type { HuntSession, HuntEvent } from '@prisma/client'
 
-export interface HuntRunResult {
-  id: string
-  tenantId: string
-  query: string
-  timeRange: string
-  description: string | null
-  status: 'running' | 'completed' | 'error'
-  startedAt: string
-  completedAt: string | null
-  startedBy: string
-  eventsFound: number
-  events: HuntEvent[]
-  reasoning: string[]
-}
+export type HuntSessionRecord = HuntSession & { events: HuntEvent[] }
+export type PaginatedHuntSessions = PaginatedResponse<HuntSession>
+export type PaginatedHuntEvents = PaginatedResponse<HuntEvent>

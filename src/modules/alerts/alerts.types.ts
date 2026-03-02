@@ -1,28 +1,6 @@
-export interface Alert {
-  id: string
-  tenantId: string
-  title: string
-  description: string
-  severity: string
-  status: string
-  source: string
-  ruleId: string
-  mitreTactic: string
-  mitreTechnique: string
-  sourceIp: string
-  destIp: string
-  agent: string
-  timestamp: string
-  acknowledgedBy?: string
-  acknowledgedAt?: string
-  resolution?: string
-  closedAt?: string
-}
+import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
+import type { Alert } from '@prisma/client'
 
-export interface PaginatedResult {
-  data: Alert[]
-  total: number
-  page: number
-  pageSize: number
-  totalPages: number
-}
+export type AlertRecord = Alert
+
+export type PaginatedAlerts = PaginatedResponse<AlertRecord>

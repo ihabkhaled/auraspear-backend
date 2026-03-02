@@ -18,9 +18,9 @@ export const UpdateTenantSchema = z.object({
 export type UpdateTenantDto = z.infer<typeof UpdateTenantSchema>
 
 export const AddUserSchema = z.object({
-  oidcSub: z.string().min(1),
   email: z.string().email(),
   name: z.string().min(1).max(255),
+  password: z.string().min(8).max(128),
   role: z.enum([
     'GLOBAL_ADMIN',
     'TENANT_ADMIN',
@@ -33,15 +33,19 @@ export const AddUserSchema = z.object({
 
 export type AddUserDto = z.infer<typeof AddUserSchema>
 
-export const UpdateUserRoleSchema = z.object({
-  role: z.enum([
-    'GLOBAL_ADMIN',
-    'TENANT_ADMIN',
-    'SOC_ANALYST_L2',
-    'SOC_ANALYST_L1',
-    'THREAT_HUNTER',
-    'EXECUTIVE_READONLY',
-  ]),
+export const UpdateUserSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  role: z
+    .enum([
+      'GLOBAL_ADMIN',
+      'TENANT_ADMIN',
+      'SOC_ANALYST_L2',
+      'SOC_ANALYST_L1',
+      'THREAT_HUNTER',
+      'EXECUTIVE_READONLY',
+    ])
+    .optional(),
+  password: z.string().min(8).max(128).optional(),
 })
 
-export type UpdateUserRoleDto = z.infer<typeof UpdateUserRoleSchema>
+export type UpdateUserDto = z.infer<typeof UpdateUserSchema>

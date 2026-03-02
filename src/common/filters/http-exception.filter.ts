@@ -11,9 +11,27 @@ import type { Response } from 'express'
 interface ErrorResponse {
   statusCode: number
   message: string | string[]
+  messageKey: string
+  errors?: string[]
   error: string
   timestamp: string
   path: string
+}
+
+const STATUS_MESSAGE_KEYS: Record<number, string> = {
+  [HttpStatus.BAD_REQUEST]: 'errors.badRequest',
+  [HttpStatus.UNAUTHORIZED]: 'errors.unauthorized',
+  [HttpStatus.FORBIDDEN]: 'errors.forbidden',
+  [HttpStatus.NOT_FOUND]: 'errors.notFound',
+  [HttpStatus.CONFLICT]: 'errors.conflict',
+  [HttpStatus.UNPROCESSABLE_ENTITY]: 'errors.validationFailed',
+  [HttpStatus.TOO_MANY_REQUESTS]: 'errors.tooManyRequests',
+  [HttpStatus.INTERNAL_SERVER_ERROR]: 'errors.internalError',
+  [HttpStatus.SERVICE_UNAVAILABLE]: 'errors.serviceUnavailable',
+}
+
+function statusToMessageKey(status: number): string {
+  return STATUS_MESSAGE_KEYS[status] ?? 'errors.internalError'
 }
 
 @Catch()
@@ -28,6 +46,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR
     let message: string | string[] = 'Internal server error'
     let error = 'Internal Server Error'
+    let messageKey: string | undefined
+    let errors: string[] | undefined
 
     if (exception instanceof HttpException) {
       status = exception.getStatus()
@@ -39,6 +59,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         const responseObject = exceptionResponse as Record<string, unknown>
         message = (responseObject.message as string | string[]) ?? exception.message
         error = (responseObject.error as string) ?? 'Error'
+        messageKey = responseObject.messageKey as string | undefined
+        errors = responseObject.errors as string[] | undefined
       }
     } else if (exception instanceof Error) {
       this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack)
@@ -46,12 +68,23 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       this.logger.error('Unknown exception', exception)
     }
 
+    // Fall back to a status-based messageKey if none was provided
+    if (!messageKey) {
+      messageKey = statusToMessageKey(status)
+    }
+
     const errorResponse: ErrorResponse = {
       statusCode: status,
       message,
+      messageKey,
       error,
       timestamp: new Date().toISOString(),
       path: request.url,
+    }
+
+    // Include field-level validation errors when present
+    if (errors && errors.length > 0) {
+      errorResponse.errors = errors
     }
 
     response.status(status).json(errorResponse)

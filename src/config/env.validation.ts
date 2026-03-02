@@ -29,16 +29,21 @@ export const envSchema = z.object({
   // Encryption
   CONFIG_ENCRYPTION_KEY: z.string().min(32),
 
-  // Connector defaults (optional)
-  WAZUH_BASE_URL: z.string().url().optional(),
-  OPENSEARCH_BASE_URL: z.string().url().optional(),
+  // Connector defaults (optional — per-tenant config stored in DB)
+  WAZUH_MANAGER_URL: z.string().url().optional(),
+  WAZUH_INDEXER_URL: z.string().url().optional(),
+  GRAYLOG_BASE_URL: z.string().url().optional(),
+  VELOCIRAPTOR_BASE_URL: z.string().url().optional(),
+  GRAFANA_BASE_URL: z.string().url().optional(),
+  INFLUXDB_BASE_URL: z.string().url().optional(),
   MISP_BASE_URL: z.string().url().optional(),
   SHUFFLE_BASE_URL: z.string().url().optional(),
 
-  // AWS
+  // AWS (for Bedrock AI module)
   AWS_REGION: z.string().default('us-east-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  AWS_BEDROCK_MODEL_ID: z.string().default('anthropic.claude-3-sonnet-20240229-v1:0'),
 })
 
 export type EnvConfig = z.infer<typeof envSchema>

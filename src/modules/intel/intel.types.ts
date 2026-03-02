@@ -1,38 +1,18 @@
-export interface MISPTag {
-  id: string
-  name: string
-  color: string
-}
+import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
+import type { IntelIOC, IntelMispEvent } from '@prisma/client'
 
-export interface MISPEvent {
-  id: string
-  eventId: string
-  organization: string
-  threatLevel: string
-  info: string
-  date: string
-  tags: MISPTag[]
-  attributeCount: number
-  published: boolean
-}
-
-export interface IOCSearchResult {
-  id: string
-  iocValue: string
-  iocType: string
-  source: string
-  hitCount: number
-  lastSeen: string
-  severity: string
-}
+export type IOCRecord = IntelIOC
+export type MispEventRecord = IntelMispEvent
+export type PaginatedIOCs = PaginatedResponse<IOCRecord>
+export type PaginatedMispEvents = PaginatedResponse<MispEventRecord>
 
 export interface IOCMatchResult {
   alertId: string
-  matchedIOCs: {
+  matchedIOCs: Array<{
     iocValue: string
     iocType: string
     source: string
     severity: string
-  }[]
+  }>
   matchCount: number
 }

@@ -1,178 +1,133 @@
 import { Injectable, Logger } from '@nestjs/common'
-import type { ServiceHealthResult, OverallHealth } from './health.types'
+import { ConfigService } from '@nestjs/config'
+import Redis from 'ioredis'
+import { PrismaService } from '../../prisma/prisma.service'
+import { ConnectorsService } from '../connectors/connectors.service'
+import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
 
 @Injectable()
 export class HealthService {
   private readonly logger = new Logger(HealthService.name)
 
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly connectorsService: ConnectorsService
+  ) {}
+
   /**
    * GET /health
-   * Overall system health -- aggregates status of all services.
+   * Overall system health -- checks database and Redis connectivity.
    * This endpoint is public (no auth required).
    */
   async getOverallHealth(): Promise<OverallHealth> {
-    const services = await Promise.all([
-      this.checkWazuh(),
-      this.checkIndexer(),
-      this.checkLogstash(),
-      this.checkMisp(),
-    ])
+    const [database, redis] = await Promise.all([this.checkDatabase(), this.checkRedis()])
 
-    const healthy = services.filter(s => s.status === 'healthy').length
-    const degraded = services.filter(s => s.status === 'degraded').length
-    const down = services.filter(s => s.status === 'down').length
-
-    let overallStatus: 'healthy' | 'degraded' | 'down' = 'healthy'
-    if (down > 0) {
-      overallStatus = 'down'
-    } else if (degraded > 0) {
-      overallStatus = 'degraded'
+    let status: 'healthy' | 'degraded' | 'down' = 'healthy'
+    if (database.status === 'down' && redis.status === 'down') {
+      status = 'down'
+    } else if (database.status === 'down' || redis.status === 'down') {
+      status = 'degraded'
     }
 
     return {
-      status: overallStatus,
+      status,
       timestamp: new Date().toISOString(),
       version: '1.0.0',
-      services: {
-        total: services.length,
-        healthy,
-        degraded,
-        down,
-      },
+      checks: { database, redis },
     }
   }
 
   /**
-   * Check Wazuh Manager connectivity and return health status.
-   * In production, would make an HTTP call to the Wazuh API.
+   * GET /health/services
+   * Iterates tenant's enabled connectors and pings each one via ConnectorsService.
    */
-  async checkWazuh(): Promise<ServiceHealthResult> {
-    // Simulated health check
-    const latencyMs = this.simulateLatency(8, 45)
+  async getAllServiceHealth(tenantId: string): Promise<ServiceHealthResult[]> {
+    const connectors = await this.connectorsService.getEnabledConnectors(tenantId)
 
-    this.logger.debug(`Wazuh health check completed in ${latencyMs}ms`)
+    const results = await Promise.all(
+      connectors.map(async (connector): Promise<ServiceHealthResult> => {
+        try {
+          const test = await this.connectorsService.testConnection(tenantId, connector.type)
 
-    return {
-      service: 'Wazuh Manager',
-      status: 'healthy',
-      latencyMs,
-      version: '4.9.2',
-      uptime: 99.97,
-      lastCheck: new Date().toISOString(),
-      details: {
-        activationAgents: 47,
-        totalAgents: 52,
-        eventsPerSecond: 2450,
-        clusterStatus: 'green',
-        ruleset: '4.9.2-r1',
-        queueUtilization: '23%',
-      },
+          let status: 'healthy' | 'degraded' | 'down' = 'down'
+          if (test.ok) {
+            status = test.latencyMs > 3000 ? 'degraded' : 'healthy'
+          }
+
+          return {
+            name: connector.name,
+            type: connector.type,
+            status,
+            latencyMs: test.latencyMs,
+          }
+        } catch (error) {
+          this.logger.error(
+            `Health check failed for connector ${connector.type}: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`
+          )
+          return {
+            name: connector.name,
+            type: connector.type,
+            status: 'down',
+            latencyMs: -1,
+          }
+        }
+      })
+    )
+
+    return results
+  }
+
+  /**
+   * Ping the database with a simple SELECT 1 query.
+   */
+  private async checkDatabase(): Promise<ComponentCheck> {
+    const start = Date.now()
+    try {
+      await this.prisma.$queryRawUnsafe('SELECT 1')
+      return { status: 'healthy', latencyMs: Date.now() - start }
+    } catch (error) {
+      this.logger.error(
+        `Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+      return { status: 'down', latencyMs: Date.now() - start }
     }
   }
 
   /**
-   * Check OpenSearch / Wazuh Indexer connectivity and return health status.
-   * In production, would call the OpenSearch _cluster/health API.
+   * Ping Redis to verify connectivity.
    */
-  async checkIndexer(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(5, 30)
+  private async checkRedis(): Promise<ComponentCheck> {
+    const start = Date.now()
+    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
+    const port = this.configService.get<number>('REDIS_PORT', 6379)
+    const password = this.configService.get<string>('REDIS_PASSWORD', '')
 
-    this.logger.debug(`Indexer health check completed in ${latencyMs}ms`)
+    const redis = new Redis({
+      host,
+      port,
+      password: password || undefined,
+      connectTimeout: 5000,
+      lazyConnect: true,
+    })
 
-    return {
-      service: 'Wazuh Indexer (OpenSearch)',
-      status: 'healthy',
-      latencyMs,
-      version: '2.14.0',
-      uptime: 99.95,
-      lastCheck: new Date().toISOString(),
-      details: {
-        clusterName: 'auraspear-prod',
-        clusterStatus: 'green',
-        numberOfNodes: 3,
-        numberOfDataNodes: 3,
-        activeShards: 142,
-        activePrimaryShards: 71,
-        relocatingShards: 0,
-        unassignedShards: 0,
-        pendingTasks: 0,
-        diskUsage: '67.3%',
-        heapUsage: '54.2%',
-        indexCount: 24,
-        documentCount: '18.4M',
-        storeSizeGb: 42.7,
-      },
+    try {
+      await redis.connect()
+      await redis.ping()
+      return { status: 'healthy', latencyMs: Date.now() - start }
+    } catch (error) {
+      this.logger.error(
+        `Redis health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+      return { status: 'down', latencyMs: Date.now() - start }
+    } finally {
+      try {
+        redis.disconnect()
+      } catch {
+        // ignore disconnect errors
+      }
     }
-  }
-
-  /**
-   * Check Logstash connectivity and return health status.
-   * In production, would call the Logstash monitoring API.
-   */
-  async checkLogstash(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(10, 50)
-
-    this.logger.debug(`Logstash health check completed in ${latencyMs}ms`)
-
-    return {
-      service: 'Logstash',
-      status: 'healthy',
-      latencyMs,
-      version: '8.12.2',
-      uptime: 99.91,
-      lastCheck: new Date().toISOString(),
-      details: {
-        pipelineWorkers: 4,
-        pipelineBatchSize: 125,
-        eventsIn: 2450,
-        eventsOut: 2448,
-        eventsFiltered: 2,
-        queueType: 'persisted',
-        queueCapacity: '1GB',
-        queueUtilization: '12%',
-        cpuPercent: 34,
-        heapUsedPercent: 61,
-        uptime: '14d 7h 23m',
-      },
-    }
-  }
-
-  /**
-   * Check MISP connectivity and return health status.
-   * In production, would call the MISP REST API.
-   */
-  async checkMisp(): Promise<ServiceHealthResult> {
-    const latencyMs = this.simulateLatency(15, 80)
-
-    this.logger.debug(`MISP health check completed in ${latencyMs}ms`)
-
-    return {
-      service: 'MISP',
-      status: 'healthy',
-      latencyMs,
-      version: '2.4.185',
-      uptime: 99.88,
-      lastCheck: new Date().toISOString(),
-      details: {
-        organizationCount: 12,
-        eventCount: 1847,
-        attributeCount: 24563,
-        userCount: 8,
-        correlationsEnabled: true,
-        feedsActive: 6,
-        feedsTotal: 8,
-        lastFeedPull: '2026-03-01T14:00:00Z',
-        warninglistEnabled: true,
-        taxonomyCount: 15,
-        galaxyCount: 42,
-      },
-    }
-  }
-
-  /**
-   * Simulate realistic network latency for mock health checks.
-   */
-  private simulateLatency(minMs: number, maxMs: number): number {
-    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
   }
 }

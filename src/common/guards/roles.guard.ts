@@ -1,11 +1,7 @@
-import {
-  type CanActivate,
-  type ExecutionContext,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common'
+import { type CanActivate, type ExecutionContext, Injectable } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { ROLES_KEY } from '../decorators/roles.decorator'
+import { BusinessException } from '../exceptions/business.exception'
 import {
   type JwtPayload,
   ROLE_HIERARCHY,
@@ -30,13 +26,17 @@ export class RolesGuard implements CanActivate {
     const { user } = request
 
     if (!user?.role) {
-      throw new ForbiddenException('Insufficient permissions')
+      throw new BusinessException(
+        403,
+        'Insufficient permissions',
+        'errors.auth.insufficientPermissions'
+      )
     }
 
     const userRoleIndex = ROLE_HIERARCHY.indexOf(user.role)
 
     if (userRoleIndex === -1) {
-      throw new ForbiddenException('Unknown role')
+      throw new BusinessException(403, 'Unknown role', 'errors.auth.unknownRole')
     }
 
     const hasPermission = requiredRoles.some(requiredRole => {
@@ -45,7 +45,11 @@ export class RolesGuard implements CanActivate {
     })
 
     if (!hasPermission) {
-      throw new ForbiddenException('Insufficient permissions for this action')
+      throw new BusinessException(
+        403,
+        'Insufficient permissions for this action',
+        'errors.auth.insufficientPermissions'
+      )
     }
 
     return true

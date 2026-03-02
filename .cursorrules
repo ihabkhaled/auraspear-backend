@@ -1,0 +1,69 @@
+# AuraSpear SOC Backend — Cursor Rules
+
+## Tech Stack
+- NestJS 11 + TypeScript strict mode
+- PostgreSQL via Prisma ORM
+- Redis via ioredis
+- Zod for DTO validation (no class-validator)
+- JWT auth with access/refresh tokens
+- Helmet, Throttler, SSRF protection
+- AES-256-GCM encryption for connector configs
+
+## Absolute Rules — NEVER Violate
+
+1. NEVER use `any` — use `unknown`, generics, or proper types
+2. NEVER disable ESLint rules — no `// eslint-disable`, no `@ts-ignore`
+3. NEVER use `==` or `!=` — always `===` and `!==`
+4. NEVER use `var` — use `const` or `let`
+5. NEVER use `!` (non-null assertion) — use proper null checks
+6. NEVER use `console.log` — use NestJS Logger service
+7. NEVER use `eval()`, `new Function()`, or `setTimeout('code')`
+8. NEVER return data from another tenant — every query MUST be scoped by tenantId
+9. NEVER use string concatenation — use template literals
+10. NEVER use `Buffer()` constructor — use `Buffer.alloc()` or `Buffer.from()`
+11. NEVER import without `node:` prefix — use `node:crypto`, `node:fs`, etc.
+12. NEVER use plain text string literals for comparisons — always use enums
+13. NEVER define interfaces/types inline in service/controller files — move to `*.types.ts`
+14. NEVER define constants inline — move to constants files
+15. Seeders MUST be idempotent — use upsert or skipDuplicates, safe for production
+16. NEVER use `@UsePipes()` at method level when `@Param()` is present — apply pipe on `@Body()` directly: `@Body(new ZodValidationPipe(Schema)) dto: Dto`
+17. EVERY exception MUST use `BusinessException` with specific `messageKey` — never throw raw NestJS exceptions (UnauthorizedException, etc.)
+18. EVERY API error response MUST include `messageKey` for frontend i18n — pattern: `errors.<module>.<specificAction>`
+19. NEVER use `@Query()` with a DTO type directly — parse manually: `Schema.parse(rawQuery)`
+
+## Architecture
+- Pattern: Backend-for-Frontend (BFF)
+- Frontend never calls Wazuh/OpenSearch/MISP directly
+- All connector configs encrypted at rest (AES-256-GCM)
+- Multi-tenant with row-level isolation via tenantId FK
+
+## Error Handling
+- Always use `BusinessException(status, message, 'errors.module.key')` for business errors
+- GlobalExceptionFilter catches all exceptions and ensures messageKey is present
+- Status-based fallback messageKeys exist but specific keys are preferred
+- ZodValidationPipe returns field-level errors in `errors[]` array
+
+## File Organization
+- Enums: `src/common/interfaces/` or module-level `*.types.ts`
+- Types: `<module>.types.ts` or `src/common/interfaces/`
+- Constants: `src/common/constants/` or module-level
+- DTOs: `<module>/dto/*.dto.ts` (Zod schemas + inferred types)
+
+## Validation
+- All DTOs use Zod schemas (not class-validator)
+- Apply ZodValidationPipe on `@Body()` parameter, not method level
+- For `@Query()` params: parse manually with `Schema.parse(rawQuery)` or use individual `@Query('key')` params
+- Number coercion: `z.coerce.number()` for query string values
+
+## Database
+- All queries scoped by tenantId
+- Use Prisma client with proper transaction handling
+- Raw SQL only for complex aggregations (GROUP BY, unnest, etc.)
+- Seed data must be idempotent (upsert/skipDuplicates)
+
+## Security
+- SSRF protection via `validateUrl()` utility
+- All connector configs encrypted before storage
+- JWT tokens verified on every request via AuthGuard
+- Role-based access via RolesGuard with hierarchy check
+- Tenant isolation via TenantGuard

@@ -2,12 +2,15 @@ import { z } from 'zod'
 
 export const SearchAlertsSchema = z.object({
   query: z.string().default('*'),
-  severity: z.enum(['critical', 'high', 'medium', 'low']).optional(),
-  status: z.enum(['new', 'acknowledged', 'in_progress', 'resolved', 'closed']).optional(),
+  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
+  status: z
+    .enum(['new_alert', 'acknowledged', 'in_progress', 'resolved', 'closed', 'false_positive'])
+    .optional(),
+  source: z.string().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   sortBy: z.string().default('timestamp'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 })

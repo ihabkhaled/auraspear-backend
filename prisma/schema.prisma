@@ -50,6 +50,35 @@ enum CaseSeverity {
   low
 }
 
+enum AlertSeverity {
+  critical
+  high
+  medium
+  low
+  info
+}
+
+enum AlertStatus {
+  new_alert
+  acknowledged
+  in_progress
+  resolved
+  closed
+  false_positive
+}
+
+enum HuntSessionStatus {
+  running
+  completed
+  error
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
 // ─── Tenants ─────────────────────────────────────────────────
 
 model Tenant {
@@ -65,6 +94,10 @@ model Tenant {
   auditLogs        AuditLog[]
   aiAuditLogs      AiAuditLog[]
   savedQueries     SavedQuery[]
+  alerts           Alert[]
+  intelIocs        IntelIOC[]
+  intelMispEvents  IntelMispEvent[]
+  huntSessions     HuntSession[]
 
   @@map("tenants")
 }
@@ -72,18 +105,23 @@ model Tenant {
 // ─── Users & Membership ──────────────────────────────────────
 
 model TenantUser {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  oidcSub      String?  @map("oidc_sub") @db.VarChar(255)
-  email        String   @db.VarChar(320)
-  name         String   @db.VarChar(255)
-  role         UserRole @default(SOC_ANALYST_L1)
-  passwordHash String?  @map("password_hash") @db.VarChar(255)
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  oidcSub      String?    @map("oidc_sub") @db.VarChar(255)
+  email        String     @db.VarChar(320)
+  name         String     @db.VarChar(255)
+  role         UserRole   @default(SOC_ANALYST_L1)
+  status       UserStatus @default(active)
+  passwordHash String?    @map("password_hash") @db.VarChar(255)
+  lastLoginAt  DateTime?  @map("last_login_at")
+  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  isProtected  Boolean    @default(false) @map("is_protected")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  preference UserPreference?
 
   @@unique([tenantId, oidcSub])
   @@unique([tenantId, email])
@@ -91,19 +129,37 @@ model TenantUser {
   @@map("tenant_users")
 }
 
+// ─── User Preferences ────────────────────────────────────────
+
+model UserPreference {
+  id                 String  @id @default(uuid()) @db.Uuid
+  userId             String  @unique @map("user_id") @db.Uuid
+  theme              String  @default("system") @db.VarChar(20)
+  language           String  @default("en") @db.VarChar(10)
+  notificationsEmail Boolean @default(true) @map("notifications_email")
+  notificationsInApp Boolean @default(true) @map("notifications_in_app")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user TenantUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
 // ─── Connector Configurations ────────────────────────────────
 
 model ConnectorConfig {
-  id            String        @id @default(uuid()) @db.Uuid
-  tenantId      String        @map("tenant_id") @db.Uuid
-  type          ConnectorType
-  name          String        @db.VarChar(255)
-  enabled       Boolean       @default(false)
-  authType      AuthType      @default(basic) @map("auth_type")
-  encryptedConfig String      @map("encrypted_config") @db.Text
-  lastTestAt    DateTime?     @map("last_test_at")
-  lastTestOk    Boolean?      @map("last_test_ok")
-  lastError     String?       @map("last_error") @db.Text
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @map("tenant_id") @db.Uuid
+  type            ConnectorType
+  name            String        @db.VarChar(255)
+  enabled         Boolean       @default(false)
+  authType        AuthType      @default(basic) @map("auth_type")
+  encryptedConfig String        @map("encrypted_config") @db.Text
+  lastTestAt      DateTime?     @map("last_test_at")
+  lastTestOk      Boolean?      @map("last_test_ok")
+  lastError       String?       @map("last_error") @db.Text
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -115,24 +171,66 @@ model ConnectorConfig {
   @@map("connector_configs")
 }
 
-// ─── Cases ───────────────────────────────────────────────────
+// ─── Alerts ──────────────────────────────────────────────────
 
-model Case {
-  id          String       @id @default(uuid()) @db.Uuid
-  tenantId    String       @map("tenant_id") @db.Uuid
-  title       String       @db.VarChar(500)
-  description String?      @db.Text
-  severity    CaseSeverity @default(medium)
-  status      CaseStatus   @default(open)
-  ownerUserId String?      @map("owner_user_id") @db.Uuid
-  linkedAlerts String[]    @default([]) @map("linked_alerts")
-  closedAt    DateTime?    @map("closed_at")
+model Alert {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @map("tenant_id") @db.Uuid
+  externalId      String?       @map("external_id") @db.VarChar(500)
+  title           String        @db.VarChar(1000)
+  description     String?       @db.Text
+  severity        AlertSeverity @default(medium)
+  status          AlertStatus   @default(new_alert)
+  source          String        @db.VarChar(50)
+  ruleName        String?       @map("rule_name") @db.VarChar(500)
+  ruleId          String?       @map("rule_id") @db.VarChar(100)
+  agentName       String?       @map("agent_name") @db.VarChar(255)
+  sourceIp        String?       @map("source_ip") @db.VarChar(45)
+  destinationIp   String?       @map("destination_ip") @db.VarChar(45)
+  mitreTactics    String[]      @default([]) @map("mitre_tactics")
+  mitreTechniques String[]      @default([]) @map("mitre_techniques")
+  rawEvent        Json?         @map("raw_event")
+  acknowledgedBy  String?       @map("acknowledged_by") @db.VarChar(320)
+  acknowledgedAt  DateTime?     @map("acknowledged_at")
+  resolution      String?       @db.Text
+  closedAt        DateTime?     @map("closed_at")
+  closedBy        String?       @map("closed_by") @db.VarChar(320)
+  timestamp       DateTime      @default(now())
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  notes  CaseNote[]
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, severity])
+  @@index([tenantId, status])
+  @@index([tenantId, timestamp])
+  @@index([tenantId, source])
+  @@map("alerts")
+}
+
+// ─── Cases ───────────────────────────────────────────────────
+
+model Case {
+  id           String       @id @default(uuid()) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  caseNumber   String       @unique @map("case_number") @db.VarChar(20)
+  title        String       @db.VarChar(500)
+  description  String?      @db.Text
+  severity     CaseSeverity @default(medium)
+  status       CaseStatus   @default(open)
+  ownerUserId  String?      @map("owner_user_id") @db.Uuid
+  createdBy    String?      @map("created_by") @db.VarChar(320)
+  linkedAlerts String[]     @default([]) @map("linked_alerts")
+  closedAt     DateTime?    @map("closed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notes    CaseNote[]
+  timeline CaseTimeline[]
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -153,18 +251,124 @@ model CaseNote {
   @@map("case_notes")
 }
 
+model CaseTimeline {
+  id          String @id @default(uuid()) @db.Uuid
+  caseId      String @map("case_id") @db.Uuid
+  type        String @db.VarChar(50)
+  actor       String @db.VarChar(320)
+  description String @db.Text
+
+  timestamp DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([caseId, timestamp])
+  @@map("case_timeline")
+}
+
+// ─── Threat Intel ────────────────────────────────────────────
+
+model IntelIOC {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  iocValue  String   @map("ioc_value") @db.VarChar(1000)
+  iocType   String   @map("ioc_type") @db.VarChar(50)
+  source    String   @db.VarChar(100)
+  severity  String   @db.VarChar(20)
+  hitCount  Int      @default(0) @map("hit_count")
+  firstSeen DateTime @default(now()) @map("first_seen")
+  lastSeen  DateTime @default(now()) @map("last_seen")
+  tags      String[] @default([])
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, iocValue, iocType])
+  @@index([tenantId])
+  @@index([tenantId, iocType])
+  @@map("intel_iocs")
+}
+
+model IntelMispEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  mispEventId    String   @map("misp_event_id") @db.VarChar(100)
+  organization   String   @db.VarChar(255)
+  threatLevel    String   @map("threat_level") @db.VarChar(20)
+  info           String   @db.Text
+  date           DateTime
+  tags           Json     @default("[]")
+  attributeCount Int      @default(0) @map("attribute_count")
+  published      Boolean  @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, mispEventId])
+  @@index([tenantId])
+  @@map("intel_misp_events")
+}
+
+// ─── Threat Hunting ──────────────────────────────────────────
+
+model HuntSession {
+  id          String            @id @default(uuid()) @db.Uuid
+  tenantId    String            @map("tenant_id") @db.Uuid
+  query       String            @db.Text
+  status      HuntSessionStatus @default(running)
+  startedAt   DateTime          @default(now()) @map("started_at")
+  completedAt DateTime?         @map("completed_at")
+  startedBy   String            @map("started_by") @db.VarChar(320)
+  eventsFound Int               @default(0) @map("events_found")
+  reasoning   String[]          @default([])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  events HuntEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, startedAt])
+  @@map("hunt_sessions")
+}
+
+model HuntEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  huntSessionId String   @map("hunt_session_id") @db.Uuid
+  timestamp     DateTime @default(now())
+  severity      String   @db.VarChar(20)
+  eventId       String   @map("event_id") @db.VarChar(255)
+  sourceIp      String?  @map("source_ip") @db.VarChar(45)
+  user          String?  @db.VarChar(320)
+  description   String   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  huntSession HuntSession @relation(fields: [huntSessionId], references: [id], onDelete: Cascade)
+
+  @@index([huntSessionId])
+  @@map("hunt_events")
+}
+
 // ─── Audit Logs ──────────────────────────────────────────────
 
 model AuditLog {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @map("tenant_id") @db.Uuid
-  actor         String   @db.VarChar(320)
-  role          UserRole
-  action        String   @db.VarChar(100)
-  resource      String   @db.VarChar(255)
-  resourceId    String?  @map("resource_id") @db.VarChar(255)
-  details       String?  @db.Text
-  ipAddress     String?  @map("ip_address") @db.VarChar(45)
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  actor      String   @db.VarChar(320)
+  role       UserRole
+  action     String   @db.VarChar(100)
+  resource   String   @db.VarChar(255)
+  resourceId String?  @map("resource_id") @db.VarChar(255)
+  details    String?  @db.Text
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -178,16 +382,16 @@ model AuditLog {
 // ─── AI Audit Logs ───────────────────────────────────────────
 
 model AiAuditLog {
-  id         String @id @default(uuid()) @db.Uuid
-  tenantId   String @map("tenant_id") @db.Uuid
-  actor      String @db.VarChar(320)
-  action     String @db.VarChar(100)
-  model      String @db.VarChar(100)
-  inputTokens  Int  @default(0) @map("input_tokens")
-  outputTokens Int  @default(0) @map("output_tokens")
-  prompt     String? @db.Text
-  response   String? @db.Text
-  durationMs Int?   @map("duration_ms")
+  id           String  @id @default(uuid()) @db.Uuid
+  tenantId     String  @map("tenant_id") @db.Uuid
+  actor        String  @db.VarChar(320)
+  action       String  @db.VarChar(100)
+  model        String  @db.VarChar(100)
+  inputTokens  Int     @default(0) @map("input_tokens")
+  outputTokens Int     @default(0) @map("output_tokens")
+  prompt       String? @db.Text
+  response     String? @db.Text
+  durationMs   Int?    @map("duration_ms")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -201,12 +405,12 @@ model AiAuditLog {
 // ─── Saved Queries (Threat Hunting) ──────────────────────────
 
 model SavedQuery {
-  id          String @id @default(uuid()) @db.Uuid
-  tenantId    String @map("tenant_id") @db.Uuid
-  name        String @db.VarChar(255)
-  query       String @db.Text
+  id          String  @id @default(uuid()) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
+  name        String  @db.VarChar(255)
+  query       String  @db.Text
   description String? @db.Text
-  createdBy   String @map("created_by") @db.VarChar(320)
+  createdBy   String  @map("created_by") @db.VarChar(320)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

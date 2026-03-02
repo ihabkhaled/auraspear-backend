@@ -1,38 +1,128 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { connectorFetch } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class MispService {
   private readonly logger = new Logger(MispService.name)
 
+  /**
+   * Test MISP connection.
+   * GET /servers/getPyMISPVersion.json with Authorization header.
+   */
   async testConnection(config: Record<string, unknown>): Promise<TestResult> {
-    this.logger.debug('Testing MISP connection')
-
-    await this.simulateLatency()
-
-    const baseUrl = config.mispUrl ?? config.baseUrl
+    const baseUrl = (config.mispUrl ?? config.baseUrl) as string | undefined
     if (!baseUrl) {
       return { ok: false, details: 'MISP URL not configured' }
     }
 
-    return {
-      ok: true,
-      details: `MISP v2.4.178 reachable at ${baseUrl}. Events: 12,847, Feeds: 23 active.`,
+    const authKey = (config.authKey ?? config.apiKey) as string | undefined
+    if (!authKey) {
+      return { ok: false, details: 'MISP auth key not configured' }
+    }
+
+    try {
+      const res = await connectorFetch(`${baseUrl}/servers/getPyMISPVersion.json`, {
+        headers: {
+          Authorization: authKey,
+          Accept: 'application/json',
+        },
+        rejectUnauthorized: config.verifyTls !== false,
+      })
+
+      if (res.status !== 200) {
+        return { ok: false, details: `MISP returned status ${res.status}` }
+      }
+
+      const body = res.data as Record<string, unknown>
+      const version = body.version as string | undefined
+
+      return {
+        ok: true,
+        details: `MISP reachable at ${baseUrl}. PyMISP version: ${version ?? 'unknown'}.`,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connection failed'
+      this.logger.warn(`MISP connection test failed: ${message}`)
+      return { ok: false, details: message }
     }
   }
 
-  async getEvents(_config: Record<string, unknown>, _limit: number): Promise<unknown[]> {
-    // In production, call MISP REST API /events
-    return []
+  /**
+   * Get recent events from MISP.
+   */
+  async getEvents(config: Record<string, unknown>, limit: number = 20): Promise<unknown[]> {
+    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
+    const authKey = (config.authKey ?? config.apiKey) as string
+
+    const res = await connectorFetch(
+      `${baseUrl}/events/index?limit=${limit}&sort=date&direction=desc`,
+      {
+        headers: {
+          Authorization: authKey,
+          Accept: 'application/json',
+        },
+        rejectUnauthorized: config.verifyTls !== false,
+      }
+    )
+
+    if (res.status !== 200) {
+      throw new Error(`MISP events fetch failed: status ${res.status}`)
+    }
+
+    return (res.data ?? []) as unknown[]
   }
 
-  async searchIocs(_config: Record<string, unknown>, _query: string): Promise<unknown[]> {
-    return []
-  }
+  /**
+   * Search attributes (IOCs) in MISP.
+   */
+  async searchAttributes(
+    config: Record<string, unknown>,
+    searchParameters: Record<string, unknown>
+  ): Promise<unknown[]> {
+    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
+    const authKey = (config.authKey ?? config.apiKey) as string
 
-  private simulateLatency(): Promise<void> {
-    return new Promise(resolve => {
-      setTimeout(resolve, 200 + Math.random() * 300)
+    const res = await connectorFetch(`${baseUrl}/attributes/restSearch`, {
+      method: 'POST',
+      headers: {
+        Authorization: authKey,
+        Accept: 'application/json',
+      },
+      body: searchParameters,
+      rejectUnauthorized: config.verifyTls !== false,
     })
+
+    if (res.status !== 200) {
+      throw new Error(`MISP attribute search failed: status ${res.status}`)
+    }
+
+    const body = res.data as Record<string, unknown>
+    const response = body.response as Record<string, unknown> | undefined
+    const attribute = response?.Attribute as unknown[] | undefined
+    return attribute ?? []
+  }
+
+  /**
+   * Get a single MISP event by ID.
+   */
+  async getEvent(config: Record<string, unknown>, eventId: string): Promise<unknown> {
+    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
+    const authKey = (config.authKey ?? config.apiKey) as string
+
+    const res = await connectorFetch(`${baseUrl}/events/view/${eventId}`, {
+      headers: {
+        Authorization: authKey,
+        Accept: 'application/json',
+      },
+      rejectUnauthorized: config.verifyTls !== false,
+    })
+
+    if (res.status !== 200) {
+      throw new Error(`MISP event fetch failed: status ${res.status}`)
+    }
+
+    const body = res.data as Record<string, unknown>
+    return body.Event ?? body
   }
 }

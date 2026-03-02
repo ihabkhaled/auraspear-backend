@@ -11,6 +11,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor'
 import { validateEnv as validateEnvironment } from './config/env.validation'
 import { AiModule } from './modules/ai/ai.module'
 import { AlertsModule } from './modules/alerts/alerts.module'
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CasesModule } from './modules/cases/cases.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
@@ -19,6 +20,7 @@ import { HealthModule } from './modules/health/health.module'
 import { HuntsModule } from './modules/hunts/hunts.module'
 import { IntelModule } from './modules/intel/intel.module'
 import { TenantsModule } from './modules/tenants/tenants.module'
+import { UsersModule } from './modules/users/users.module'
 import { PrismaModule } from './prisma/prisma.module'
 
 @Module({
@@ -50,12 +52,14 @@ import { PrismaModule } from './prisma/prisma.module'
     TenantsModule,
     ConnectorsModule,
     AlertsModule,
+    AuditLogsModule,
     DashboardsModule,
     HuntsModule,
     CasesModule,
     IntelModule,
     AiModule,
     HealthModule,
+    UsersModule,
   ],
   providers: [
     // Global guards (order matters: auth → tenant → roles)

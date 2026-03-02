@@ -1,7 +1,8 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -38,18 +39,36 @@ export class AuthService {
     })
 
     if (!tenantUser?.passwordHash) {
-      throw new UnauthorizedException('Invalid email or password')
+      throw new BusinessException(
+        401,
+        'Invalid email or password',
+        'errors.auth.invalidCredentials'
+      )
     }
 
     const valid = await bcrypt.compare(password, tenantUser.passwordHash)
     if (!valid) {
-      throw new UnauthorizedException('Invalid email or password')
+      throw new BusinessException(
+        401,
+        'Invalid email or password',
+        'errors.auth.invalidCredentials'
+      )
     }
+
+    if (tenantUser.status !== 'active') {
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
+
+    await this.prisma.tenantUser.update({
+      where: { id: tenantUser.id },
+      data: { lastLoginAt: new Date() },
+    })
 
     const payload: JwtPayload = {
       sub: tenantUser.id,
       email: tenantUser.email,
-      tenantId: tenantUser.tenant.slug,
+      tenantId: tenantUser.tenantId,
+      tenantSlug: tenantUser.tenant.slug,
       role: tenantUser.role as UserRole,
     }
 
@@ -73,7 +92,11 @@ export class AuthService {
     try {
       return jwt.verify(token, this.jwtSecret) as JwtPayload
     } catch {
-      throw new UnauthorizedException('Invalid or expired access token')
+      throw new BusinessException(
+        401,
+        'Invalid or expired access token',
+        'errors.auth.invalidAccessToken'
+      )
     }
   }
 
@@ -81,7 +104,11 @@ export class AuthService {
     try {
       return jwt.verify(token, this.jwtSecret) as JwtPayload
     } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token')
+      throw new BusinessException(
+        401,
+        'Invalid or expired refresh token',
+        'errors.auth.invalidRefreshToken'
+      )
     }
   }
 
@@ -96,19 +123,39 @@ export class AuthService {
     })
 
     if (!user) {
-      throw new UnauthorizedException('User no longer exists')
+      throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
+    }
+
+    if (user.status !== 'active') {
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
     const newPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
-      tenantId: user.tenant.slug,
+      tenantId: user.tenantId,
+      tenantSlug: user.tenant.slug,
       role: user.role as UserRole,
     }
 
     return {
       accessToken: this.signAccessToken(newPayload),
       refreshToken: this.signRefreshToken(newPayload),
+    }
+  }
+
+  async validateUserActive(userId: string): Promise<void> {
+    const user = await this.prisma.tenantUser.findUnique({
+      where: { id: userId },
+      select: { status: true },
+    })
+
+    if (!user) {
+      throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
+    }
+
+    if (user.status !== 'active') {
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
 
@@ -133,7 +180,7 @@ export class AuthService {
       return { id: user.id, role: user.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
-      throw new UnauthorizedException('Unable to provision user')
+      throw new BusinessException(401, 'Unable to provision user', 'errors.auth.provisionFailed')
     }
   }
 }

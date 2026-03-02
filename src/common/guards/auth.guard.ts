@@ -2,7 +2,6 @@ import {
   type CanActivate,
   type ExecutionContext,
   Injectable,
-  UnauthorizedException,
   Logger,
   Inject,
   forwardRef,
@@ -10,7 +9,9 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { Reflector } from '@nestjs/core'
 import { AuthService } from '../../modules/auth/auth.service'
+import { PrismaService } from '../../prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
+import { BusinessException } from '../exceptions/business.exception'
 import { UserRole } from '../interfaces/authenticated-request.interface'
 import type {
   JwtPayload,
@@ -26,7 +27,8 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => AuthService))
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly prisma: PrismaService
   ) {
     this.isDev = this.configService.get('NODE_ENV') !== 'production'
   }
@@ -49,18 +51,45 @@ export class AuthGuard implements CanActivate {
         request.user = this.getDevUser(request)
         return true
       }
-      throw new UnauthorizedException('Missing or invalid Authorization header')
+      throw new BusinessException(
+        401,
+        'Missing or invalid Authorization header',
+        'errors.auth.missingToken'
+      )
     }
 
     const token = authHeader.slice(7)
 
     try {
       const decoded = this.authService.verifyAccessToken(token)
+
+      // Verify user still exists and is active
+      await this.authService.validateUserActive(decoded.sub)
+
       request.user = decoded
+
+      // Allow GLOBAL_ADMIN to switch tenant context via X-Tenant-Id header
+      if (decoded.role === UserRole.GLOBAL_ADMIN) {
+        const headerTenantId = request.headers['x-tenant-id'] as string | undefined
+        if (headerTenantId && headerTenantId !== decoded.tenantId) {
+          const tenantExists = await this.prisma.tenant.findUnique({
+            where: { id: headerTenantId },
+            select: { id: true },
+          })
+          if (!tenantExists) {
+            throw new BusinessException(400, 'Invalid tenant ID', 'errors.tenants.notFound')
+          }
+          request.user = { ...decoded, tenantId: headerTenantId }
+        }
+      }
+
       return true
     } catch (error) {
+      if (error instanceof BusinessException) {
+        throw error
+      }
       this.logger.warn(`JWT verification failed: ${(error as Error).message}`)
-      throw new UnauthorizedException('Invalid or expired token')
+      throw new BusinessException(401, 'Invalid or expired token', 'errors.auth.expiredToken')
     }
   }
 
@@ -74,6 +103,7 @@ export class AuthGuard implements CanActivate {
       sub: 'dev-user-001',
       email: 'dev@auraspear.local',
       tenantId,
+      tenantSlug: 'dev-tenant',
       role,
     }
   }

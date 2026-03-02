@@ -1,21 +1,21 @@
 export interface ServiceHealthResult {
-  service: string
-  status: 'healthy' | 'degraded' | 'down' | 'maintenance'
+  name: string
+  type: string
+  status: 'healthy' | 'degraded' | 'down'
   latencyMs: number
-  version: string
-  uptime: number
-  lastCheck: string
-  details?: Record<string, unknown>
 }
 
 export interface OverallHealth {
   status: 'healthy' | 'degraded' | 'down'
   timestamp: string
   version: string
-  services: {
-    total: number
-    healthy: number
-    degraded: number
-    down: number
+  checks: {
+    database: ComponentCheck
+    redis: ComponentCheck
   }
+}
+
+export interface ComponentCheck {
+  status: 'healthy' | 'down'
+  latencyMs: number
 }

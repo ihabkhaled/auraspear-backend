@@ -1,368 +1,373 @@
 import { Injectable, Logger } from '@nestjs/common'
-import type { MISPEvent, IOCSearchResult, IOCMatchResult } from './intel.types'
+import { BusinessException } from '../../common/exceptions/business.exception'
+import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { PrismaService } from '../../prisma/prisma.service'
+import { ConnectorsService } from '../connectors/connectors.service'
+import { MispService } from '../connectors/services/misp.service'
+import type { PaginatedMispEvents, PaginatedIOCs, IOCMatchResult } from './intel.types'
+import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class IntelService {
   private readonly logger = new Logger(IntelService.name)
 
-  /**
-   * Returns recent MISP events (mock data, tenant-scoped).
-   * In production this would call MispConnectorService.getEvents().
-   */
-  async getRecentEvents(tenantId: string): Promise<MISPEvent[]> {
-    this.logger.log(`Fetching recent MISP events for tenant ${tenantId}`)
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly connectorsService: ConnectorsService,
+    private readonly mispService: MispService
+  ) {}
 
-    return [
-      {
-        id: 'misp-001',
-        eventId: 'MISP-8842',
-        organization: 'CIRCL',
-        threatLevel: 'high',
-        info: 'APT29 - Cozy Bear Campaign Targeting Government Infrastructure',
-        date: '2026-02-28',
-        tags: [
-          { id: 'tag-001', name: 'tlp:red', color: '#cc0033' },
-          { id: 'tag-002', name: 'misp-galaxy:threat-actor="APT29"', color: '#0088cc' },
-          { id: 'tag-003', name: 'misp-galaxy:mitre-attack-pattern="T1071"', color: '#2b2b2b' },
-        ],
-        attributeCount: 47,
-        published: true,
-      },
-      {
-        id: 'misp-002',
-        eventId: 'MISP-8839',
-        organization: 'CERT-EU',
-        threatLevel: 'high',
-        info: 'LockBit 3.0 Ransomware - New TTPs and IOCs',
-        date: '2026-02-27',
-        tags: [
-          { id: 'tag-004', name: 'tlp:amber', color: '#ffc000' },
-          { id: 'tag-005', name: 'misp-galaxy:ransomware="LockBit"', color: '#cc0033' },
-          { id: 'tag-006', name: 'misp-galaxy:mitre-attack-pattern="T1486"', color: '#2b2b2b' },
-        ],
-        attributeCount: 89,
-        published: true,
-      },
-      {
-        id: 'misp-003',
-        eventId: 'MISP-8835',
-        organization: 'AlienVault OTX',
-        threatLevel: 'medium',
-        info: 'Cobalt Strike Infrastructure - February 2026 Update',
-        date: '2026-02-26',
-        tags: [
-          { id: 'tag-007', name: 'tlp:green', color: '#33b35a' },
-          { id: 'tag-008', name: 'misp-galaxy:tool="Cobalt Strike"', color: '#6633cc' },
-          { id: 'tag-009', name: 'type:OSINT', color: '#004466' },
-        ],
-        attributeCount: 156,
-        published: true,
-      },
-      {
-        id: 'misp-004',
-        eventId: 'MISP-8830',
-        organization: 'MISP Community',
-        threatLevel: 'high',
-        info: 'Brute Force Campaign - SSH/RDP Botnet Infrastructure',
-        date: '2026-02-25',
-        tags: [
-          { id: 'tag-010', name: 'tlp:green', color: '#33b35a' },
-          { id: 'tag-011', name: 'misp-galaxy:mitre-attack-pattern="T1110"', color: '#2b2b2b' },
-          { id: 'tag-012', name: 'type:OSINT', color: '#004466' },
-        ],
-        attributeCount: 234,
-        published: true,
-      },
-      {
-        id: 'misp-005',
-        eventId: 'MISP-8825',
-        organization: 'US-CERT',
-        threatLevel: 'high',
-        info: 'APT41 - Winnti Group Supply Chain Compromise',
-        date: '2026-02-24',
-        tags: [
-          { id: 'tag-013', name: 'tlp:amber', color: '#ffc000' },
-          { id: 'tag-014', name: 'misp-galaxy:threat-actor="APT41"', color: '#0088cc' },
-          { id: 'tag-015', name: 'misp-galaxy:mitre-attack-pattern="T1195"', color: '#2b2b2b' },
-        ],
-        attributeCount: 63,
-        published: true,
-      },
-      {
-        id: 'misp-006',
-        eventId: 'MISP-8820',
-        organization: 'SANS ISC',
-        threatLevel: 'medium',
-        info: 'Phishing Campaign Using Invoice-Themed Lures - Q1 2026',
-        date: '2026-02-23',
-        tags: [
-          { id: 'tag-016', name: 'tlp:white', color: '#ffffff' },
-          { id: 'tag-017', name: 'misp-galaxy:mitre-attack-pattern="T1566"', color: '#2b2b2b' },
-          { id: 'tag-018', name: 'type:OSINT', color: '#004466' },
-        ],
-        attributeCount: 42,
-        published: true,
-      },
-      {
-        id: 'misp-007',
-        eventId: 'MISP-8815',
-        organization: 'Mandiant',
-        threatLevel: 'high',
-        info: 'Volt Typhoon - Critical Infrastructure Targeting',
-        date: '2026-02-22',
-        tags: [
-          { id: 'tag-019', name: 'tlp:amber', color: '#ffc000' },
-          { id: 'tag-020', name: 'misp-galaxy:threat-actor="Volt Typhoon"', color: '#0088cc' },
-          { id: 'tag-021', name: 'misp-galaxy:mitre-attack-pattern="T1053"', color: '#2b2b2b' },
-        ],
-        attributeCount: 78,
-        published: true,
-      },
-      {
-        id: 'misp-008',
-        eventId: 'MISP-8810',
-        organization: 'CrowdStrike',
-        threatLevel: 'medium',
-        info: 'Tor Exit Node Infrastructure Update - February 2026',
-        date: '2026-02-21',
-        tags: [
-          { id: 'tag-022', name: 'tlp:green', color: '#33b35a' },
-          { id: 'tag-023', name: 'misp-galaxy:mitre-attack-pattern="T1090"', color: '#2b2b2b' },
-          { id: 'tag-024', name: 'type:OSINT', color: '#004466' },
-        ],
-        attributeCount: 512,
-        published: true,
-      },
-      {
-        id: 'misp-009',
-        eventId: 'MISP-8805',
-        organization: 'CIRCL',
-        threatLevel: 'low',
-        info: 'DNS Tunneling Tools and Infrastructure Indicators',
-        date: '2026-02-20',
-        tags: [
-          { id: 'tag-025', name: 'tlp:white', color: '#ffffff' },
-          { id: 'tag-026', name: 'misp-galaxy:mitre-attack-pattern="T1048"', color: '#2b2b2b' },
-        ],
-        attributeCount: 28,
-        published: true,
-      },
-      {
-        id: 'misp-010',
-        eventId: 'MISP-8800',
-        organization: 'Recorded Future',
-        threatLevel: 'medium',
-        info: 'Kerberoasting and AS-REP Roasting Detection Indicators',
-        date: '2026-02-19',
-        tags: [
-          { id: 'tag-027', name: 'tlp:green', color: '#33b35a' },
-          { id: 'tag-028', name: 'misp-galaxy:mitre-attack-pattern="T1558"', color: '#2b2b2b' },
-          { id: 'tag-029', name: 'type:OSINT', color: '#004466' },
-        ],
-        attributeCount: 35,
-        published: false,
-      },
-    ]
+  /**
+   * Returns recent MISP events from the database, paginated.
+   */
+  async getRecentEvents(
+    tenantId: string,
+    page: number = 1,
+    limit: number = 20
+  ): Promise<PaginatedMispEvents> {
+    const where: Prisma.IntelMispEventWhereInput = { tenantId }
+
+    const [data, total] = await Promise.all([
+      this.prisma.intelMispEvent.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.intelMispEvent.count({ where }),
+    ])
+
+    return {
+      data,
+      pagination: buildPaginationMeta(page, limit, total),
+    }
   }
 
   /**
-   * Search IOCs by query string (mock data, tenant-scoped).
-   * In production this would call MispConnectorService.searchAttributes().
+   * Search IOCs by value, with optional type filter. Uses iLike on iocValue.
    */
-  async searchIOCs(query: string, tenantId: string): Promise<IOCSearchResult[]> {
-    this.logger.log(`Searching IOCs for "${query}" in tenant ${tenantId}`)
+  async searchIOCs(
+    tenantId: string,
+    query: string,
+    type?: string,
+    page: number = 1,
+    limit: number = 20
+  ): Promise<PaginatedIOCs> {
+    const where: Prisma.IntelIOCWhereInput = { tenantId, active: true }
 
-    const allIOCs: IOCSearchResult[] = [
-      {
-        id: 'ioc-001',
-        iocValue: '198.51.100.22',
-        iocType: 'ip-dst',
-        source: 'MISP-8830',
-        hitCount: 523,
-        lastSeen: '2026-03-01T13:25:00Z',
-        severity: 'critical',
-      },
-      {
-        id: 'ioc-002',
-        iocValue: '185.220.101.34',
-        iocType: 'ip-dst',
-        source: 'MISP-8810',
-        hitCount: 142,
-        lastSeen: '2026-03-01T10:05:00Z',
-        severity: 'high',
-      },
-      {
-        id: 'ioc-003',
-        iocValue: 'update-service.xyz',
-        iocType: 'domain',
-        source: 'MISP-8842',
-        hitCount: 340,
-        lastSeen: '2026-03-01T10:05:00Z',
-        severity: 'high',
-      },
-      {
-        id: 'ioc-004',
-        iocValue: 'data.exfil-cdn.net',
-        iocType: 'domain',
-        source: 'MISP-8805',
-        hitCount: 340,
-        lastSeen: '2026-02-28T18:55:00Z',
-        severity: 'high',
-      },
-      {
-        id: 'ioc-005',
-        iocValue: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6abcd',
-        iocType: 'sha256',
-        source: 'MISP-8839',
-        hitCount: 1,
-        lastSeen: '2026-03-01T12:48:00Z',
-        severity: 'critical',
-      },
-      {
-        id: 'ioc-006',
-        iocValue: '185.220.100.252',
-        iocType: 'ip-dst',
-        source: 'MISP-8810',
-        hitCount: 3,
-        lastSeen: '2026-02-27T12:55:00Z',
-        severity: 'medium',
-      },
-      {
-        id: 'ioc-007',
-        iocValue: 'supplier-update.com',
-        iocType: 'domain',
-        source: 'MISP-8820',
-        hitCount: 1,
-        lastSeen: '2026-02-25T18:10:00Z',
-        severity: 'medium',
-      },
-      {
-        id: 'ioc-008',
-        iocValue: '203.0.113.45',
-        iocType: 'ip-src',
-        source: 'MISP-8830',
-        hitCount: 15,
-        lastSeen: '2026-03-01T14:32:00Z',
-        severity: 'high',
-      },
-      {
-        id: 'ioc-009',
-        iocValue: 'e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6',
-        iocType: 'sha256',
-        source: 'MISP-8835',
-        hitCount: 1,
-        lastSeen: '2026-02-26T14:00:00Z',
-        severity: 'high',
-      },
-      {
-        id: 'ioc-010',
-        iocValue: '10.0.5.42',
-        iocType: 'ip-src',
-        source: 'MISP-8800',
-        hitCount: 47,
-        lastSeen: '2026-02-26T14:25:00Z',
-        severity: 'medium',
-      },
-    ]
-
-    if (!query || query.trim().length === 0) {
-      return allIOCs
+    if (query && query.trim().length > 0) {
+      where.iocValue = { contains: query, mode: 'insensitive' }
     }
 
-    const lowerQuery = query.toLowerCase()
-    return allIOCs.filter(
-      ioc =>
-        ioc.iocValue.toLowerCase().includes(lowerQuery) ||
-        ioc.iocType.toLowerCase().includes(lowerQuery) ||
-        ioc.source.toLowerCase().includes(lowerQuery) ||
-        ioc.severity.toLowerCase().includes(lowerQuery)
-    )
+    if (type) {
+      where.iocType = type
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.intelIOC.findMany({
+        where,
+        orderBy: { lastSeen: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.intelIOC.count({ where }),
+    ])
+
+    return {
+      data,
+      pagination: buildPaginationMeta(page, limit, total),
+    }
   }
 
   /**
-   * Match IOCs against a list of alert IDs (mock data).
-   * In production this would cross-reference MISP attributes
-   * with alert fields from OpenSearch.
+   * Cross-reference IOC values against alert sourceIp/destinationIp fields.
+   * Finds active IOCs for the tenant and checks which ones match the
+   * source or destination IP of the given alerts.
    */
-  async matchIOCsAgainstAlerts(alertIds: string[], tenantId: string): Promise<IOCMatchResult[]> {
-    this.logger.log(`Matching IOCs against ${alertIds.length} alerts for tenant ${tenantId}`)
-
-    // Simulated IOC matches per alert
-    const mockMatches: Record<string, IOCMatchResult> = {
-      'alert-001': {
-        alertId: 'alert-001',
-        matchedIOCs: [
-          { iocValue: '203.0.113.45', iocType: 'ip-src', source: 'MISP-8830', severity: 'high' },
-        ],
-        matchCount: 1,
-      },
-      'alert-002': {
-        alertId: 'alert-002',
-        matchedIOCs: [
-          {
-            iocValue: '198.51.100.22',
-            iocType: 'ip-dst',
-            source: 'MISP-8830',
-            severity: 'critical',
-          },
-        ],
-        matchCount: 1,
-      },
-      'alert-003': {
-        alertId: 'alert-003',
-        matchedIOCs: [
-          {
-            iocValue: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6abcd',
-            iocType: 'sha256',
-            source: 'MISP-8839',
-            severity: 'critical',
-          },
-        ],
-        matchCount: 1,
-      },
-      'alert-005': {
-        alertId: 'alert-005',
-        matchedIOCs: [
-          {
-            iocValue: 'update-service.xyz',
-            iocType: 'domain',
-            source: 'MISP-8842',
-            severity: 'high',
-          },
-          { iocValue: '185.220.101.34', iocType: 'ip-dst', source: 'MISP-8810', severity: 'high' },
-        ],
-        matchCount: 2,
-      },
-      'alert-010': {
-        alertId: 'alert-010',
-        matchedIOCs: [
-          {
-            iocValue: 'data.exfil-cdn.net',
-            iocType: 'domain',
-            source: 'MISP-8805',
-            severity: 'high',
-          },
-        ],
-        matchCount: 1,
-      },
-      'alert-015': {
-        alertId: 'alert-015',
-        matchedIOCs: [
-          { iocValue: '10.0.5.42', iocType: 'ip-src', source: 'MISP-8800', severity: 'medium' },
-        ],
-        matchCount: 1,
-      },
-    }
-
-    return alertIds.map(alertId => {
-      if (mockMatches[alertId]) {
-        return mockMatches[alertId]
-      }
-      return {
-        alertId,
-        matchedIOCs: [],
-        matchCount: 0,
-      }
+  async matchIOCsAgainstAlerts(tenantId: string, alertIds: string[]): Promise<IOCMatchResult[]> {
+    const alerts = await this.prisma.alert.findMany({
+      where: { tenantId, id: { in: alertIds } },
+      select: { id: true, sourceIp: true, destinationIp: true },
     })
+
+    // Collect all unique IP addresses from the alerts
+    const ipSet = new Set<string>()
+    for (const alert of alerts) {
+      if (alert.sourceIp) {
+        ipSet.add(alert.sourceIp)
+      }
+      if (alert.destinationIp) {
+        ipSet.add(alert.destinationIp)
+      }
+    }
+
+    const ips = [...ipSet]
+
+    // Find IOCs whose values match any of the collected IPs
+    const matchingIOCs =
+      ips.length > 0
+        ? await this.prisma.intelIOC.findMany({
+            where: {
+              tenantId,
+              active: true,
+              iocValue: { in: ips },
+            },
+          })
+        : []
+
+    // Build a lookup map: IP -> IOC records
+    const iocByValue = new Map<
+      string,
+      Array<{ iocValue: string; iocType: string; source: string; severity: string }>
+    >()
+    for (const ioc of matchingIOCs) {
+      const existing = iocByValue.get(ioc.iocValue) ?? []
+      existing.push({
+        iocValue: ioc.iocValue,
+        iocType: ioc.iocType,
+        source: ioc.source,
+        severity: ioc.severity,
+      })
+      iocByValue.set(ioc.iocValue, existing)
+    }
+
+    // Map each alert to its matched IOCs
+    return alertIds.map(alertId => {
+      const alert = alerts.find(a => a.id === alertId)
+      if (!alert) {
+        return { alertId, matchedIOCs: [], matchCount: 0 }
+      }
+
+      const matched: Array<{
+        iocValue: string
+        iocType: string
+        source: string
+        severity: string
+      }> = []
+
+      if (alert.sourceIp && iocByValue.has(alert.sourceIp)) {
+        matched.push(...(iocByValue.get(alert.sourceIp) ?? []))
+      }
+      if (alert.destinationIp && iocByValue.has(alert.destinationIp)) {
+        matched.push(...(iocByValue.get(alert.destinationIp) ?? []))
+      }
+
+      // Deduplicate by iocValue + iocType
+      const seen = new Set<string>()
+      const deduped = matched.filter(entry => {
+        const key = `${entry.iocValue}:${entry.iocType}`
+        if (seen.has(key)) {
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+
+      return { alertId, matchedIOCs: deduped, matchCount: deduped.length }
+    })
+  }
+
+  /**
+   * Sync events and IOCs from a MISP instance into the local database.
+   * Fetches events via MispService, upserts IntelMispEvent rows,
+   * then fetches attributes and upserts IntelIOC rows.
+   */
+  async syncFromMisp(tenantId: string): Promise<{ eventsUpserted: number; iocsUpserted: number }> {
+    const config = await this.connectorsService.getDecryptedConfig(tenantId, 'misp')
+    if (!config) {
+      throw new BusinessException(
+        400,
+        'MISP connector not configured or disabled',
+        'errors.intel.mispNotConfigured'
+      )
+    }
+
+    let eventsUpserted = 0
+    let iocsUpserted = 0
+
+    try {
+      // --- Sync events ---
+      const rawEvents = await this.mispService.getEvents(config, 50)
+      const eventUpserts = this.buildEventUpserts(tenantId, rawEvents)
+      const eventResults = await Promise.allSettled(
+        eventUpserts.map(upsert => this.prisma.intelMispEvent.upsert(upsert))
+      )
+
+      for (const result of eventResults) {
+        if (result.status === 'fulfilled') {
+          eventsUpserted++
+        }
+      }
+
+      // --- Sync attributes (IOCs) ---
+      const attributes = await this.mispService.searchAttributes(config, {
+        limit: 500,
+        page: 1,
+        type: ['ip-src', 'ip-dst', 'domain', 'hostname', 'md5', 'sha1', 'sha256', 'url'],
+      })
+
+      const iocUpserts = this.buildIOCUpserts(tenantId, attributes)
+      const iocResults = await Promise.allSettled(
+        iocUpserts.map(upsert => this.prisma.intelIOC.upsert(upsert))
+      )
+
+      for (const result of iocResults) {
+        if (result.status === 'fulfilled') {
+          iocsUpserted++
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.error(`MISP sync failed for tenant ${tenantId}: ${message}`)
+
+      if (error instanceof BusinessException) {
+        throw error
+      }
+
+      throw new BusinessException(502, `MISP sync failed: ${message}`, 'errors.intel.syncFailed')
+    }
+
+    this.logger.log(
+      `MISP sync complete for tenant ${tenantId}: ${eventsUpserted} events, ${iocsUpserted} IOCs`
+    )
+    return { eventsUpserted, iocsUpserted }
+  }
+
+  /**
+   * Build Prisma upsert arguments for MISP events.
+   */
+  private buildEventUpserts(tenantId: string, rawEvents: unknown[]) {
+    const upserts: Array<Prisma.IntelMispEventUpsertArgs> = []
+
+    for (const rawEvent of rawEvents) {
+      const event = rawEvent as Record<string, unknown>
+      const mispEventId = String(event.id ?? event.event_id ?? '')
+      if (!mispEventId) {
+        continue
+      }
+
+      const tags = (event.Tag ?? event.tags ?? []) as unknown[]
+      const orgInfo = event.Orgc as Record<string, unknown> | undefined
+      const organization = String(orgInfo?.name ?? event.org ?? event.orgc_name ?? 'Unknown')
+      const threatLevel = this.mapThreatLevel(event.threat_level_id as string | number | undefined)
+      const info = String(event.info ?? '')
+      const date = new Date(String(event.date ?? new Date().toISOString()))
+      const attributeCount = Number(event.attribute_count ?? 0)
+      const published = Boolean(event.published)
+
+      upserts.push({
+        where: { tenantId_mispEventId: { tenantId, mispEventId } },
+        create: {
+          tenantId,
+          mispEventId,
+          organization,
+          threatLevel,
+          info,
+          date,
+          tags: tags as Prisma.InputJsonValue,
+          attributeCount,
+          published,
+        },
+        update: {
+          organization,
+          threatLevel,
+          info,
+          date,
+          tags: tags as Prisma.InputJsonValue,
+          attributeCount,
+          published,
+        },
+      })
+    }
+
+    return upserts
+  }
+
+  /**
+   * Build Prisma upsert arguments for IOC attributes.
+   */
+  private buildIOCUpserts(tenantId: string, rawAttributes: unknown[]) {
+    const upserts: Array<Prisma.IntelIOCUpsertArgs> = []
+
+    for (const rawAttribute of rawAttributes) {
+      const attribute = rawAttribute as Record<string, unknown>
+      const iocValue = String(attribute.value ?? '')
+      const iocType = String(attribute.type ?? 'unknown')
+
+      if (!iocValue) {
+        continue
+      }
+
+      const attributeTags = (attribute.Tag ?? []) as Array<Record<string, unknown>>
+      const tagNames = attributeTags.map(tag => String(tag.name ?? '')).filter(Boolean)
+
+      // Derive source from event_id
+      const eventId = attribute.event_id as string | undefined
+      const source = eventId ? `MISP-${eventId}` : 'MISP'
+      const severity = this.mapAttributeSeverity(attribute)
+
+      const firstSeen = new Date(
+        String(attribute.first_seen ?? attribute.timestamp ?? new Date().toISOString())
+      )
+      const lastSeen = new Date(
+        String(attribute.last_seen ?? attribute.timestamp ?? new Date().toISOString())
+      )
+
+      upserts.push({
+        where: { tenantId_iocValue_iocType: { tenantId, iocValue, iocType } },
+        create: {
+          tenantId,
+          iocValue,
+          iocType,
+          source,
+          severity,
+          hitCount: 0,
+          firstSeen,
+          lastSeen,
+          tags: tagNames,
+          active: true,
+        },
+        update: {
+          source,
+          severity,
+          lastSeen,
+          tags: tagNames,
+        },
+      })
+    }
+
+    return upserts
+  }
+
+  /**
+   * Map MISP threat_level_id (1-4) to a human-readable string.
+   * 1 = high, 2 = medium, 3 = low, 4 = undefined
+   */
+  private mapThreatLevel(level: string | number | undefined): string {
+    const parsed = Number(level)
+    if (parsed === 1) return 'high'
+    if (parsed === 2) return 'medium'
+    if (parsed === 3) return 'low'
+    return 'undefined'
+  }
+
+  /**
+   * Derive a severity label from MISP attribute metadata.
+   * Uses IDS flag and category as heuristics.
+   */
+  private mapAttributeSeverity(attribute: Record<string, unknown>): string {
+    const toIds = attribute.to_ids as boolean | undefined
+    const category = String(attribute.category ?? '').toLowerCase()
+
+    if (toIds && (category.includes('payload') || category.includes('artifacts'))) {
+      return 'critical'
+    }
+    if (toIds) {
+      return 'high'
+    }
+    if (category.includes('network') || category.includes('external')) {
+      return 'medium'
+    }
+    return 'low'
   }
 }

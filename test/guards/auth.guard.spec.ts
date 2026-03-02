@@ -1,6 +1,7 @@
-import { type ExecutionContext, UnauthorizedException } from '@nestjs/common'
+import { type ExecutionContext } from '@nestjs/common'
 import { type ConfigService } from '@nestjs/config'
 import { Reflector } from '@nestjs/core'
+import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { AuthGuard } from '../../src/common/guards/auth.guard'
 
 function createMockContext(user?: Record<string, unknown>, authHeader?: string): ExecutionContext {
@@ -38,9 +39,16 @@ describe('AuthGuard', () => {
 
     const authService = {
       verifyAccessToken: jest.fn(),
+      validateUserActive: jest.fn(),
     }
 
-    guard = new AuthGuard(reflector, configService, authService as never)
+    const prismaService = {
+      tenant: {
+        findUnique: jest.fn(),
+      },
+    }
+
+    guard = new AuthGuard(reflector, configService, authService as never, prismaService as never)
   })
 
   it('should allow public routes', async () => {
@@ -57,9 +65,9 @@ describe('AuthGuard', () => {
     expect(result).toBe(true)
   })
 
-  it('should throw UnauthorizedException for non-Bearer auth header', async () => {
+  it('should throw BusinessException for non-Bearer auth header', async () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(false)
     const context = createMockContext(undefined, 'Basic abc123')
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException)
+    await expect(guard.canActivate(context)).rejects.toThrow(BusinessException)
   })
 })

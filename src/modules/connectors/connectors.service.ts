@@ -1,10 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { BedrockService } from './services/bedrock.service'
+import { GrafanaService } from './services/grafana.service'
+import { GraylogService } from './services/graylog.service'
+import { InfluxDBService } from './services/influxdb.service'
 import { MispService } from './services/misp.service'
-import { OpenSearchService } from './services/opensearch.service'
 import { ShuffleService } from './services/shuffle.service'
+import { VelociraptorService } from './services/velociraptor.service'
 import { WazuhService } from './services/wazuh.service'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
 import { maskSecrets } from '../../common/utils/mask.util'
 import { PrismaService } from '../../prisma/prisma.service'
@@ -20,7 +24,10 @@ export class ConnectorsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly wazuhService: WazuhService,
-    private readonly openSearchService: OpenSearchService,
+    private readonly graylogService: GraylogService,
+    private readonly velociraptorService: VelociraptorService,
+    private readonly grafanaService: GrafanaService,
+    private readonly influxdbService: InfluxDBService,
     private readonly mispService: MispService,
     private readonly shuffleService: ShuffleService,
     private readonly bedrockService: BedrockService
@@ -29,37 +36,32 @@ export class ConnectorsService {
   }
 
   async findAll(tenantId: string): Promise<ConnectorResponse[]> {
-    try {
-      const configs = await this.prisma.connectorConfig.findMany({
-        where: { tenantId },
-        orderBy: { type: 'asc' },
-      })
+    const configs = await this.prisma.connectorConfig.findMany({
+      where: { tenantId },
+      orderBy: { type: 'asc' },
+    })
 
-      return configs.map(
-        (c: {
-          type: string
-          name: string
-          enabled: boolean
-          authType: string
-          encryptedConfig: string
-          lastTestAt: Date | null
-          lastTestOk: boolean | null
-          lastError: string | null
-        }) => ({
-          type: c.type,
-          name: c.name,
-          enabled: c.enabled,
-          authType: c.authType,
-          config: maskSecrets(this.decryptConfig(c.encryptedConfig)),
-          lastTestAt: c.lastTestAt,
-          lastTestOk: c.lastTestOk,
-          lastError: c.lastError,
-        })
-      )
-    } catch {
-      this.logger.warn('Prisma unavailable, returning empty list')
-      return []
-    }
+    return configs.map(
+      (c: {
+        type: string
+        name: string
+        enabled: boolean
+        authType: string
+        encryptedConfig: string
+        lastTestAt: Date | null
+        lastTestOk: boolean | null
+        lastError: string | null
+      }) => ({
+        type: c.type,
+        name: c.name,
+        enabled: c.enabled,
+        authType: c.authType,
+        config: maskSecrets(this.decryptConfig(c.encryptedConfig)),
+        lastTestAt: c.lastTestAt,
+        lastTestOk: c.lastTestOk,
+        lastError: c.lastError,
+      })
+    )
   }
 
   async findByType(tenantId: string, type: string): Promise<ConnectorResponse> {
@@ -67,7 +69,13 @@ export class ConnectorsService {
       where: { tenantId_type: { tenantId, type: type as never } },
     })
 
-    if (!config) throw new NotFoundException(`Connector '${type}' not found`)
+    if (!config) {
+      throw new BusinessException(
+        404,
+        `Connector '${type}' not found`,
+        'errors.connectors.notFound'
+      )
+    }
 
     return {
       type: config.type,
@@ -116,7 +124,13 @@ export class ConnectorsService {
       where: { tenantId_type: { tenantId, type: type as never } },
     })
 
-    if (!existing) throw new NotFoundException(`Connector '${type}' not found`)
+    if (!existing) {
+      throw new BusinessException(
+        404,
+        `Connector '${type}' not found`,
+        'errors.connectors.notFound'
+      )
+    }
 
     const updateData: Record<string, unknown> = {}
     if (dto.name !== undefined) updateData.name = dto.name
@@ -167,7 +181,13 @@ export class ConnectorsService {
       where: { tenantId_type: { tenantId, type: type as never } },
     })
 
-    if (!config) throw new NotFoundException(`Connector '${type}' not found`)
+    if (!config) {
+      throw new BusinessException(
+        404,
+        `Connector '${type}' not found`,
+        'errors.connectors.notFound'
+      )
+    }
 
     const decryptedConfig = this.decryptConfig(config.encryptedConfig)
     const start = Date.now()
@@ -183,11 +203,26 @@ export class ConnectorsService {
           details = result.details
           break
         }
-        case 'graylog':
-        case 'velociraptor':
-        case 'grafana':
+        case 'graylog': {
+          const result = await this.graylogService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
+        }
+        case 'velociraptor': {
+          const result = await this.velociraptorService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
+        }
+        case 'grafana': {
+          const result = await this.grafanaService.testConnection(decryptedConfig)
+          ok = result.ok
+          details = result.details
+          break
+        }
         case 'influxdb': {
-          const result = await this.openSearchService.testConnection(type, decryptedConfig)
+          const result = await this.influxdbService.testConnection(decryptedConfig)
           ok = result.ok
           details = result.details
           break
@@ -230,6 +265,47 @@ export class ConnectorsService {
     })
 
     return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
+  }
+
+  /**
+   * Get decrypted config for a connector (used by other modules).
+   */
+  async getDecryptedConfig(
+    tenantId: string,
+    type: string
+  ): Promise<Record<string, unknown> | null> {
+    const config = await this.prisma.connectorConfig.findUnique({
+      where: { tenantId_type: { tenantId, type: type as never } },
+    })
+
+    if (!config?.enabled) return null
+
+    return this.decryptConfig(config.encryptedConfig)
+  }
+
+  /**
+   * Check if a connector is enabled for a tenant.
+   */
+  async isEnabled(tenantId: string, type: string): Promise<boolean> {
+    const config = await this.prisma.connectorConfig.findUnique({
+      where: { tenantId_type: { tenantId, type: type as never } },
+      select: { enabled: true },
+    })
+
+    return config?.enabled ?? false
+  }
+
+  /**
+   * Get all enabled connectors for a tenant.
+   */
+  async getEnabledConnectors(tenantId: string): Promise<Array<{ type: string; name: string }>> {
+    const configs = await this.prisma.connectorConfig.findMany({
+      where: { tenantId, enabled: true },
+      select: { type: true, name: true },
+      orderBy: { type: 'asc' },
+    })
+
+    return configs.map(c => ({ type: c.type, name: c.name }))
   }
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {

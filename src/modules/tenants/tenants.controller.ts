@@ -7,13 +7,14 @@ import {
   type UpdateTenantDto,
   AddUserSchema,
   type AddUserDto,
-  UpdateUserRoleSchema,
-  type UpdateUserRoleDto,
+  UpdateUserSchema,
+  type UpdateUserDto,
 } from './dto/tenant.dto'
 import { TenantsService } from './tenants.service'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 
 @ApiTags('tenants')
@@ -42,8 +43,10 @@ export class TenantsController {
 
   @Patch(':id')
   @Roles(UserRole.TENANT_ADMIN)
-  @UsePipes(new ZodValidationPipe(UpdateTenantSchema))
-  async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
+  async updateTenant(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateTenantSchema)) dto: UpdateTenantDto
+  ) {
     return this.tenantsService.update(id, dto)
   }
 
@@ -63,25 +66,62 @@ export class TenantsController {
 
   @Post(':id/users')
   @Roles(UserRole.TENANT_ADMIN)
-  @UsePipes(new ZodValidationPipe(AddUserSchema))
-  async addUser(@Param('id') tenantId: string, @Body() dto: AddUserDto) {
-    return this.tenantsService.addUser(tenantId, dto)
+  async addUser(
+    @Param('id') tenantId: string,
+    @Body(new ZodValidationPipe(AddUserSchema)) dto: AddUserDto,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.tenantsService.addUser(tenantId, dto, user.role)
   }
 
-  @Patch(':tenantId/users/:userId/role')
+  @Patch(':tenantId/users/:userId')
   @Roles(UserRole.TENANT_ADMIN)
-  @UsePipes(new ZodValidationPipe(UpdateUserRoleSchema))
-  async updateUserRole(
+  async updateUser(
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
-    @Body() dto: UpdateUserRoleDto
+    @Body(new ZodValidationPipe(UpdateUserSchema)) dto: UpdateUserDto,
+    @CurrentUser() user: JwtPayload
   ) {
-    return this.tenantsService.updateUserRole(tenantId, userId, dto.role)
+    return this.tenantsService.updateUser(tenantId, userId, dto, user.role, user.sub)
   }
 
   @Delete(':tenantId/users/:userId')
   @Roles(UserRole.TENANT_ADMIN)
-  async removeUser(@Param('tenantId') tenantId: string, @Param('userId') userId: string) {
-    return this.tenantsService.removeUser(tenantId, userId)
+  async removeUser(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.tenantsService.removeUser(tenantId, userId, user.role, user.sub)
+  }
+
+  @Post(':tenantId/users/:userId/restore')
+  @Roles(UserRole.TENANT_ADMIN)
+  async restoreUser(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.tenantsService.restoreUser(tenantId, userId, user.role)
+  }
+
+  @Post(':tenantId/users/:userId/block')
+  @Roles(UserRole.TENANT_ADMIN)
+  async blockUser(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.tenantsService.blockUser(tenantId, userId, user.role, user.sub)
+  }
+
+  @Post(':tenantId/users/:userId/unblock')
+  @Roles(UserRole.TENANT_ADMIN)
+  async unblockUser(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.tenantsService.unblockUser(tenantId, userId, user.role)
   }
 }

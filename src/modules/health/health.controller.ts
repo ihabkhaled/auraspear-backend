@@ -1,60 +1,40 @@
-import { Controller, Get, UseGuards } from '@nestjs/common'
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import { HealthService } from './health.service'
 import { Public } from '../../common/decorators/public.decorator'
-import { AuthGuard } from '../../common/guards/auth.guard'
-import { TenantGuard } from '../../common/guards/tenant.guard'
+import { TenantId } from '../../common/decorators/tenant-id.decorator'
 
+@ApiTags('health')
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   /**
    * GET /health
-   * Overall system health status. Public endpoint -- no auth required.
+   * Overall system health status (DB + Redis). Public endpoint -- no auth required.
    */
   @Get()
   @Public()
   async getOverallHealth() {
-    return this.healthService.getOverallHealth()
+    const health = await this.healthService.getOverallHealth()
+
+    if (health.status === 'down') {
+      throw new ServiceUnavailableException({
+        message: 'System is down',
+        messageKey: 'errors.health.serviceUnavailable',
+        ...health,
+      })
+    }
+
+    return health
   }
 
   /**
-   * GET /health/wazuh
-   * Wazuh Manager health check. Requires authentication.
+   * GET /health/services
+   * All connector health for the authenticated tenant.
    */
-  @Get('wazuh')
-  @UseGuards(AuthGuard, TenantGuard)
-  async getWazuhHealth() {
-    return this.healthService.checkWazuh()
-  }
-
-  /**
-   * GET /health/indexer
-   * OpenSearch / Wazuh Indexer health check. Requires authentication.
-   */
-  @Get('indexer')
-  @UseGuards(AuthGuard, TenantGuard)
-  async getIndexerHealth() {
-    return this.healthService.checkIndexer()
-  }
-
-  /**
-   * GET /health/logstash
-   * Logstash health check. Requires authentication.
-   */
-  @Get('logstash')
-  @UseGuards(AuthGuard, TenantGuard)
-  async getLogstashHealth() {
-    return this.healthService.checkLogstash()
-  }
-
-  /**
-   * GET /health/misp
-   * MISP threat intelligence platform health check. Requires authentication.
-   */
-  @Get('misp')
-  @UseGuards(AuthGuard, TenantGuard)
-  async getMispHealth() {
-    return this.healthService.checkMisp()
+  @Get('services')
+  async getServicesHealth(@TenantId() tenantId: string) {
+    return this.healthService.getAllServiceHealth(tenantId)
   }
 }

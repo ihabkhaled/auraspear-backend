@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common'
+import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { validateUrl, isPrivateHost } from '../../src/common/utils/ssrf.util'
 
 describe('SSRF Protection', () => {
@@ -14,40 +14,40 @@ describe('SSRF Protection', () => {
     })
 
     it('should reject invalid URLs', () => {
-      expect(() => validateUrl('not-a-url')).toThrow(BadRequestException)
+      expect(() => validateUrl('not-a-url')).toThrow(BusinessException)
     })
 
     it('should reject private IP 127.0.0.1', () => {
-      expect(() => validateUrl('http://127.0.0.1:8080')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://127.0.0.1:8080')).toThrow(BusinessException)
     })
 
     it('should reject private IP 10.x.x.x', () => {
-      expect(() => validateUrl('http://10.0.1.5:9200')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://10.0.1.5:9200')).toThrow(BusinessException)
     })
 
     it('should reject private IP 192.168.x.x', () => {
-      expect(() => validateUrl('http://192.168.1.1')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://192.168.1.1')).toThrow(BusinessException)
     })
 
     it('should reject private IP 172.16.x.x', () => {
-      expect(() => validateUrl('http://172.16.0.1')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://172.16.0.1')).toThrow(BusinessException)
     })
 
     it('should reject localhost', () => {
-      expect(() => validateUrl('http://localhost:4000')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://localhost:4000')).toThrow(BusinessException)
     })
 
     it('should reject link-local addresses', () => {
-      expect(() => validateUrl('http://169.254.169.254')).toThrow(BadRequestException)
+      expect(() => validateUrl('http://169.254.169.254')).toThrow(BusinessException)
     })
 
     it('should reject FTP protocol', () => {
-      expect(() => validateUrl('ftp://files.example.com')).toThrow(BadRequestException)
+      expect(() => validateUrl('ftp://files.example.com')).toThrow(BusinessException)
     })
 
     it('should enforce allowlist when provided', () => {
       const allowed = ['wazuh.corp.com', 'misp.corp.com']
-      expect(() => validateUrl('https://evil.com', allowed)).toThrow(BadRequestException)
+      expect(() => validateUrl('https://evil.com', allowed)).toThrow(BusinessException)
       expect(validateUrl('https://wazuh.corp.com', allowed).hostname).toBe('wazuh.corp.com')
     })
 

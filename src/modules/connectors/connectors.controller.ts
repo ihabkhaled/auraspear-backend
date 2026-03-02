@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UsePipes } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { ConnectorsService } from './connectors.service'
 import {
@@ -31,18 +31,19 @@ export class ConnectorsController {
 
   @Post()
   @Roles(UserRole.TENANT_ADMIN)
-  @UsePipes(new ZodValidationPipe(CreateConnectorSchema))
-  async create(@TenantId() tenantId: string, @Body() dto: CreateConnectorDto) {
+  async create(
+    @TenantId() tenantId: string,
+    @Body(new ZodValidationPipe(CreateConnectorSchema)) dto: CreateConnectorDto
+  ) {
     return this.connectorsService.create(tenantId, dto)
   }
 
   @Patch(':type')
   @Roles(UserRole.SOC_ANALYST_L2)
-  @UsePipes(new ZodValidationPipe(UpdateConnectorSchema))
   async update(
     @TenantId() tenantId: string,
     @Param('type') type: string,
-    @Body() dto: UpdateConnectorDto
+    @Body(new ZodValidationPipe(UpdateConnectorSchema)) dto: UpdateConnectorDto
   ) {
     return this.connectorsService.update(tenantId, type, dto)
   }
@@ -61,11 +62,10 @@ export class ConnectorsController {
 
   @Post(':type/toggle')
   @Roles(UserRole.SOC_ANALYST_L2)
-  @UsePipes(new ZodValidationPipe(ToggleConnectorSchema))
   async toggle(
     @TenantId() tenantId: string,
     @Param('type') type: string,
-    @Body() dto: ToggleConnectorDto
+    @Body(new ZodValidationPipe(ToggleConnectorSchema)) dto: ToggleConnectorDto
   ) {
     return this.connectorsService.toggle(tenantId, type, dto.enabled)
   }

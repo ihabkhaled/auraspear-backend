@@ -1,120 +1,189 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
+import { PrismaService } from '../../prisma/prisma.service'
+import { ConnectorsService } from '../connectors/connectors.service'
 
 @Injectable()
 export class DashboardsService {
+  private readonly logger = new Logger(DashboardsService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly connectorsService: ConnectorsService
+  ) {}
+
   async getSummary(tenantId: string) {
+    const [
+      totalAlerts,
+      criticalAlerts,
+      highAlerts,
+      openCases,
+      alertsLast24h,
+      resolvedLast24h,
+      avgResolutionTime,
+    ] = await Promise.all([
+      this.prisma.alert.count({ where: { tenantId } }),
+      this.prisma.alert.count({ where: { tenantId, severity: 'critical' } }),
+      this.prisma.alert.count({ where: { tenantId, severity: 'high' } }),
+      this.prisma.case.count({ where: { tenantId, status: { in: ['open', 'in_progress'] } } }),
+      this.prisma.alert.count({
+        where: {
+          tenantId,
+          timestamp: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+      this.prisma.alert.count({
+        where: {
+          tenantId,
+          status: { in: ['resolved', 'closed'] },
+          closedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+      this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
+        SELECT AVG(EXTRACT(EPOCH FROM (closed_at - timestamp)) * 1000)::float as avg_ms
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid AND closed_at IS NOT NULL
+      `,
+    ])
+
+    const avgMs = avgResolutionTime[0]?.avg_ms ?? 0
+    const mttrMinutes = Math.round(avgMs / 60_000)
+
+    const enabledConnectors = await this.connectorsService.getEnabledConnectors(tenantId)
+
     return {
       tenantId,
-      totalAlerts: 1247,
-      criticalAlerts: 23,
-      highAlerts: 89,
-      openCases: 12,
-      meanTimeToDetect: '4m 32s',
-      meanTimeToRespond: '18m 15s',
-      alertsLast24h: 156,
-      resolvedLast24h: 142,
-      activeAgents: 247,
-      connectedSources: 6,
+      totalAlerts,
+      criticalAlerts,
+      highAlerts,
+      openCases,
+      alertsLast24h,
+      resolvedLast24h,
+      meanTimeToRespond: mttrMinutes > 0 ? `${mttrMinutes}m` : 'N/A',
+      connectedSources: enabledConnectors.length,
     }
   }
 
   async getAlertTrend(tenantId: string, days: number) {
-    const trend = []
-    const now = Date.now()
-    for (let index = days - 1; index >= 0; index--) {
-      const date = new Date(now - index * 86_400_000)
-      trend.push({
-        date: date.toISOString().split('T')[0],
-        critical: Math.floor(Math.random() * 8) + 1,
-        high: Math.floor(Math.random() * 20) + 5,
-        medium: Math.floor(Math.random() * 40) + 15,
-        low: Math.floor(Math.random() * 60) + 20,
-      })
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+
+    const results = await this.prisma.$queryRaw<
+      Array<{ date: string; severity: string; count: bigint }>
+    >`
+      SELECT DATE(timestamp)::text as date, severity, COUNT(*)::bigint as count
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
+      GROUP BY DATE(timestamp), severity
+      ORDER BY date ASC
+    `
+
+    // Pivot into { date, critical, high, medium, low, info }
+    const trendMap = new Map<
+      string,
+      { date: string; critical: number; high: number; medium: number; low: number; info: number }
+    >()
+
+    for (const r of results) {
+      if (!trendMap.has(r.date)) {
+        trendMap.set(r.date, { date: r.date, critical: 0, high: 0, medium: 0, low: 0, info: 0 })
+      }
+      const entry = trendMap.get(r.date)
+      if (entry) {
+        const sev = r.severity
+        if (sev in entry && sev !== 'date') {
+          const mutable = entry as Record<string, string | number>
+          mutable[sev] = Number(r.count)
+        }
+      }
     }
-    return { tenantId, days, trend }
+
+    return { tenantId, days, trend: [...trendMap.values()] }
   }
 
   async getSeverityDistribution(tenantId: string) {
-    return {
-      tenantId,
-      distribution: [
-        { severity: 'critical', count: 23, percentage: 1.8 },
-        { severity: 'high', count: 89, percentage: 7.1 },
-        { severity: 'medium', count: 412, percentage: 33 },
-        { severity: 'low', count: 723, percentage: 58 },
-      ],
-    }
+    const counts = await this.prisma.alert.groupBy({
+      by: ['severity'],
+      where: { tenantId },
+      _count: true,
+    })
+
+    const total = counts.reduce((sum, c) => sum + c._count, 0)
+
+    const distribution = counts.map(c => ({
+      severity: c.severity,
+      count: c._count,
+      percentage: total > 0 ? Math.round((c._count / total) * 1000) / 10 : 0,
+    }))
+
+    return { tenantId, distribution }
   }
 
   async getMitreTopTechniques(tenantId: string) {
+    const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
+      SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid
+      GROUP BY technique
+      ORDER BY count DESC
+      LIMIT 10
+    `
+
     return {
       tenantId,
-      techniques: [
-        { id: 'T1059.001', name: 'PowerShell', tactic: 'Execution', count: 145 },
-        { id: 'T1110.001', name: 'Password Guessing', tactic: 'Credential Access', count: 98 },
-        { id: 'T1071.001', name: 'Web Protocols', tactic: 'Command and Control', count: 87 },
-        {
-          id: 'T1548.003',
-          name: 'Sudo and Sudo Caching',
-          tactic: 'Privilege Escalation',
-          count: 65,
-        },
-        {
-          id: 'T1190',
-          name: 'Exploit Public-Facing Application',
-          tactic: 'Initial Access',
-          count: 54,
-        },
-        { id: 'T1048.003', name: 'DNS Exfiltration', tactic: 'Exfiltration', count: 42 },
-        { id: 'T1021.001', name: 'RDP', tactic: 'Lateral Movement', count: 38 },
-        { id: 'T1078', name: 'Valid Accounts', tactic: 'Defense Evasion', count: 31 },
-      ],
+      techniques: results.map(r => ({
+        id: r.technique,
+        count: Number(r.count),
+      })),
     }
   }
 
   async getTopTargetedAssets(tenantId: string) {
+    const results = await this.prisma.$queryRaw<
+      Array<{ hostname: string; alert_count: bigint; critical_count: bigint; last_seen: Date }>
+    >`
+      SELECT
+        agent_name as hostname,
+        COUNT(*)::bigint as alert_count,
+        COUNT(*) FILTER (WHERE severity = 'critical')::bigint as critical_count,
+        MAX(timestamp) as last_seen
+      FROM alerts
+      WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
+      GROUP BY agent_name
+      ORDER BY alert_count DESC
+      LIMIT 10
+    `
+
     return {
       tenantId,
-      assets: [
-        {
-          hostname: 'web-server-01',
-          alertCount: 87,
-          criticalCount: 5,
-          lastSeen: '2024-12-15T14:30:00Z',
-        },
-        { hostname: 'dc-01', alertCount: 65, criticalCount: 8, lastSeen: '2024-12-15T12:30:00Z' },
-        {
-          hostname: 'db-server-02',
-          alertCount: 54,
-          criticalCount: 3,
-          lastSeen: '2024-12-15T13:45:00Z',
-        },
-        {
-          hostname: 'workstation-042',
-          alertCount: 42,
-          criticalCount: 12,
-          lastSeen: '2024-12-15T15:12:00Z',
-        },
-        {
-          hostname: 'endpoint-177',
-          alertCount: 38,
-          criticalCount: 2,
-          lastSeen: '2024-12-15T11:15:00Z',
-        },
-      ],
+      assets: results.map(r => ({
+        hostname: r.hostname,
+        alertCount: Number(r.alert_count),
+        criticalCount: Number(r.critical_count),
+        lastSeen: r.last_seen,
+      })),
     }
   }
 
   async getPipelineHealth(tenantId: string) {
-    return {
-      tenantId,
-      pipelines: [
-        { name: 'Wazuh Ingestion', status: 'healthy', eps: 1247, lag: '0s' },
-        { name: 'Graylog Processing', status: 'healthy', eps: 890, lag: '2s' },
-        { name: 'OpenSearch Indexing', status: 'healthy', eps: 2100, lag: '1s' },
-        { name: 'MISP Feed Sync', status: 'healthy', eps: 12, lag: '0s' },
-        { name: 'Shuffle Automation', status: 'degraded', eps: 45, lag: '15s' },
-      ],
-    }
+    const connectors = await this.prisma.connectorConfig.findMany({
+      where: { tenantId, enabled: true },
+      select: {
+        type: true,
+        name: true,
+        lastTestAt: true,
+        lastTestOk: true,
+        lastError: true,
+      },
+    })
+
+    const pipelines = connectors.map(c => ({
+      name: c.name,
+      type: c.type,
+      status: c.lastTestOk === true ? 'healthy' : c.lastTestOk === false ? 'down' : 'unknown',
+      lastChecked: c.lastTestAt,
+      lastError: c.lastError,
+    }))
+
+    return { tenantId, pipelines }
   }
 }

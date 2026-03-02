@@ -1,5 +1,6 @@
-import { type ExecutionContext, ForbiddenException } from '@nestjs/common'
+import { type ExecutionContext } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
+import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { RolesGuard } from '../../src/common/guards/roles.guard'
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
 
@@ -45,13 +46,13 @@ describe('RolesGuard', () => {
   it('should deny EXECUTIVE_READONLY access to TENANT_ADMIN route', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.TENANT_ADMIN])
     const context = createMockContext(UserRole.EXECUTIVE_READONLY)
-    expect(() => guard.canActivate(context)).toThrow(ForbiddenException)
+    expect(() => guard.canActivate(context)).toThrow(BusinessException)
   })
 
   it('should deny SOC_ANALYST_L1 access to TENANT_ADMIN route', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.TENANT_ADMIN])
     const context = createMockContext(UserRole.SOC_ANALYST_L1)
-    expect(() => guard.canActivate(context)).toThrow(ForbiddenException)
+    expect(() => guard.canActivate(context)).toThrow(BusinessException)
   })
 
   it('should allow THREAT_HUNTER access to THREAT_HUNTER route', () => {

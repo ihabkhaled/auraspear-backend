@@ -13,6 +13,17 @@
 9. **NEVER use string concatenation** — Use template literals (`prefer-template: warn`).
 10. **NEVER use `Buffer()` constructor** — Use `Buffer.alloc()` or `Buffer.from()`.
 11. **NEVER import without `node:` prefix** — Use `node:crypto`, `node:fs`, `node:path` etc. (`unicorn/prefer-node-protocol`).
+12. **NEVER use plain text string literals for comparisons/assignments** — Always use enums. Enums live in `src/common/interfaces/` or module-level `*.types.ts`. Export and import them.
+13. **NEVER define interfaces/types inline in service or controller files** — Move them to `<module>.types.ts` or `src/common/interfaces/`. Exception: DTOs in `dto/` files are fine.
+14. **NEVER define constants inline in service/controller files** — Move shared constants to `src/common/constants/` or module-level constants files.
+15. **Seeders MUST be idempotent** — Use `upsert` or `createMany({ skipDuplicates: true })`. Seeders must be safe for `npm run start:prod` and never crash on duplicate data.
+16. **NEVER use `@UsePipes()` at method level when `@Param()` is present** — It runs the pipe on ALL parameters including path params, causing validation to fail. Apply the pipe directly on `@Body()`: `@Body(new ZodValidationPipe(Schema)) dto: Dto`.
+17. **EVERY exception MUST use `BusinessException` with a specific `messageKey`** — Never throw raw `UnauthorizedException`, `NotFoundException`, `ForbiddenException`, etc. Always use `throw new BusinessException(status, message, 'errors.module.specificKey')` so the frontend can show localized error messages via `t(messageKey)`.
+18. **EVERY API response error MUST include `messageKey`** — The GlobalExceptionFilter ensures this. Use `BusinessException` for all business-logic errors. The `messageKey` follows the pattern `errors.<module>.<specificAction>` (e.g., `errors.auth.invalidCredentials`, `errors.connectors.notFound`).
+19. **NEVER use `@Query()` with a DTO type directly** — NestJS passes raw query strings without Zod validation. Always parse manually: `const query = Schema.parse(rawQuery)` or use individual `@Query('key')` params with explicit number coercion.
+20. **NEVER allow deletion/blocking/role-change of protected users** — Users with `isProtected: true` (seeded GLOBAL_ADMIN) cannot be deleted, blocked, suspended, or have their role changed. Always check `isProtected` before these operations.
+21. **NEVER hard-delete users** — Use soft delete (set `status: 'inactive'`). Provide restore functionality. Blocked users get `status: 'suspended'`.
+22. **NEVER allow self-deletion or self-blocking** — Check `callerId !== userId` before delete/block operations.
 
 ---
 
@@ -233,11 +244,14 @@ Configuration:
 ## Key Principles
 
 1. **Multi-tenant isolation**: Every query MUST be scoped by `tenantId`. Never return data from another tenant.
-2. **RBAC enforcement**: Use `@Roles()` decorator on every mutation endpoint. Guard chain: `AuthGuard` -> `TenantGuard` -> `RolesGuard`.
+2. **RBAC enforcement**: Use `@Roles()` decorator on every mutation endpoint. Guard chain: `AuthGuard` (JWT verify + DB active check + GLOBAL_ADMIN tenant switch) → `TenantGuard` → `RolesGuard`.
 3. **Zod for validation**: All DTOs use Zod schemas via `ZodValidationPipe`. No class-validator.
 4. **Secrets encrypted at rest**: Connector configs stored via AES-256-GCM encryption (`src/common/utils/encryption.util.ts`).
 5. **SSRF protection**: All user-supplied URLs validated against allowlist before any outbound request (`src/common/utils/ssrf.util.ts`).
 6. **Audit logging**: All mutations automatically logged via `AuditInterceptor`.
+7. **Auth guard validates user on every request**: After JWT verification, the guard calls `validateUserActive(userId)` which checks the user still exists and has `status: 'active'`. Blocked/deleted users get 401.
+8. **GLOBAL_ADMIN tenant switching**: The auth guard reads the `X-Tenant-Id` header. If the user is `GLOBAL_ADMIN` and the header contains a valid tenant ID different from the JWT's, `request.user.tenantId` is overridden. This makes `@TenantId()` return the switched tenant automatically. Non-GLOBAL_ADMIN users cannot switch tenants.
+9. **Soft delete + restore pattern**: User deletion sets `status` to `inactive`, not database deletion. Blocking sets `status` to `suspended`. Both are reversible with restore/unblock endpoints.
 
 ---
 
@@ -249,6 +263,38 @@ Configuration:
 4. `THREAT_HUNTER`
 5. `SOC_ANALYST_L1`
 6. `EXECUTIVE_READONLY`
+
+> **Protected users**: The seeded GLOBAL_ADMIN users have `isProtected: true` in the database. They cannot be deleted, blocked, or have their role changed by anyone, including other GLOBAL_ADMIN users. The `isProtected` flag is set during seed and should never be set manually.
+
+---
+
+## User Management Patterns
+
+### Soft Delete
+
+- `DELETE /tenants/:id/users/:userId` → sets `status: 'inactive'` (not hard delete)
+- `POST /tenants/:id/users/:userId/restore` → sets `status: 'active'`
+
+### Block/Unblock
+
+- `POST /tenants/:id/users/:userId/block` → sets `status: 'suspended'`
+- `POST /tenants/:id/users/:userId/unblock` → sets `status: 'active'`
+
+### Validation Rules
+
+- Cannot delete/block yourself (`callerId !== userId`)
+- Cannot delete/block/modify protected users (`isProtected: true`)
+- Protected user role cannot be changed
+- All operations require `TENANT_ADMIN` or higher role
+- All changes are audit-logged
+
+### User Statuses
+
+| Status      | Meaning      | Can Login | Restorable      |
+| ----------- | ------------ | --------- | --------------- |
+| `active`    | Normal state | Yes       | N/A             |
+| `inactive`  | Soft-deleted | No (401)  | Yes (`restore`) |
+| `suspended` | Blocked      | No (401)  | Yes (`unblock`) |
 
 ---
 
@@ -294,7 +340,10 @@ src/
 |   |   +-- intel.types.ts  # MISPEvent, IOCSearchResult, IOCMatchResult
 |   +-- tenants/            # Tenant management
 |   |   +-- dto/            # tenant.dto
-|   |   +-- tenants.types.ts # TenantRecord, UserRecord
+|   |   +-- tenants.types.ts # TenantRecord, UserRecord (isProtected field)
+|   +-- users/              # User profile + preferences
+|   |   +-- dto/            # update-profile.dto, change-password.dto, update-preferences.dto
+|   |   +-- users.types.ts  # UserProfile, UserPreference
 +-- prisma/
     +-- prisma.module.ts
     +-- prisma.service.ts
@@ -391,6 +440,8 @@ export class AlertsController {
   }
 }
 ```
+
+> **Note on GLOBAL_ADMIN tenant switching**: `@TenantId()` automatically returns the switched tenant ID when a GLOBAL_ADMIN sends an `X-Tenant-Id` header. Controllers do not need special handling — the auth guard performs the override on `request.user.tenantId` before the controller runs.
 
 ### Service Pattern
 
