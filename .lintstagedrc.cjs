@@ -3,16 +3,13 @@ const buildLintCommand = () => 'npm run lint:fix'
 const buildPrettierCommand = () => 'npm run format'
 
 module.exports = {
-  '*.ts': (files) => {
+  '*.ts': files => {
     if (!files.length) return []
 
-    return [
-      buildLintCommand(),
-      buildTscCommand(),
-    ]
+    return [buildLintCommand(), buildTscCommand()]
   },
 
-  '*.{ts,json,md,yml,yaml}': (files) => {
+  '*.{ts,json,md,yml,yaml}': files => {
     if (!files.length) return []
 
     return [buildPrettierCommand()]
