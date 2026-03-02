@@ -18,19 +18,21 @@ export class IntelService {
   ) {}
 
   /**
-   * Returns recent MISP events from the database, paginated.
+   * Returns recent MISP events from the database, paginated and optionally sorted.
    */
   async getRecentEvents(
     tenantId: string,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    sortBy?: string,
+    sortOrder?: string
   ): Promise<PaginatedMispEvents> {
     const where: Prisma.IntelMispEventWhereInput = { tenantId }
 
     const [data, total] = await Promise.all([
       this.prisma.intelMispEvent.findMany({
         where,
-        orderBy: { date: 'desc' },
+        orderBy: this.buildMispOrderBy(sortBy, sortOrder),
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -44,14 +46,18 @@ export class IntelService {
   }
 
   /**
-   * Search IOCs by value, with optional type filter. Uses iLike on iocValue.
+   * Search IOCs by value, with optional type and source filters.
+   * Supports sorting by any IOC field.
    */
   async searchIOCs(
     tenantId: string,
     query: string,
     type?: string,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    sortBy?: string,
+    sortOrder?: string,
+    source?: string
   ): Promise<PaginatedIOCs> {
     const where: Prisma.IntelIOCWhereInput = { tenantId, active: true }
 
@@ -63,10 +69,14 @@ export class IntelService {
       where.iocType = type
     }
 
+    if (source) {
+      where.source = { contains: source, mode: 'insensitive' }
+    }
+
     const [data, total] = await Promise.all([
       this.prisma.intelIOC.findMany({
         where,
-        orderBy: { lastSeen: 'desc' },
+        orderBy: this.buildIOCOrderBy(sortBy, sortOrder),
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -343,6 +353,60 @@ export class IntelService {
     }
 
     return upserts
+  }
+
+  /**
+   * Build Prisma orderBy for IntelIOC queries.
+   * Allowed sort fields: lastSeen, firstSeen, hitCount, severity, iocType, iocValue, source.
+   */
+  private buildIOCOrderBy(
+    sortBy?: string,
+    sortOrder?: string
+  ): Prisma.IntelIOCOrderByWithRelationInput {
+    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    switch (sortBy) {
+      case 'lastSeen':
+        return { lastSeen: order }
+      case 'firstSeen':
+        return { firstSeen: order }
+      case 'hitCount':
+        return { hitCount: order }
+      case 'severity':
+        return { severity: order }
+      case 'iocType':
+        return { iocType: order }
+      case 'iocValue':
+        return { iocValue: order }
+      case 'source':
+        return { source: order }
+      default:
+        return { lastSeen: 'desc' }
+    }
+  }
+
+  /**
+   * Build Prisma orderBy for IntelMispEvent queries.
+   * Allowed sort fields: date, organization, threatLevel, attributeCount, published.
+   */
+  private buildMispOrderBy(
+    sortBy?: string,
+    sortOrder?: string
+  ): Prisma.IntelMispEventOrderByWithRelationInput {
+    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    switch (sortBy) {
+      case 'date':
+        return { date: order }
+      case 'organization':
+        return { organization: order }
+      case 'threatLevel':
+        return { threatLevel: order }
+      case 'attributeCount':
+        return { attributeCount: order }
+      case 'published':
+        return { published: order }
+      default:
+        return { date: 'desc' }
+    }
   }
 
   /**

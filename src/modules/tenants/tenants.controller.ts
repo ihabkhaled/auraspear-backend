@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UsePipes } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import {
   CreateTenantSchema,
@@ -16,7 +16,7 @@ import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
+import type { TenantMember, TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
 
 @ApiTags('tenants')
 @ApiBearerAuth()
@@ -42,6 +42,12 @@ export class TenantsController {
     return this.tenantsService.findById(tenantId)
   }
 
+  /** Lightweight member list for assignee pickers — any authenticated user. */
+  @Get('current/members')
+  async getCurrentTenantMembers(@TenantId() tenantId: string): Promise<TenantMember[]> {
+    return this.tenantsService.findMembers(tenantId)
+  }
+
   @Patch(':id')
   @Roles(UserRole.TENANT_ADMIN)
   async updateTenant(
@@ -61,8 +67,14 @@ export class TenantsController {
 
   @Get(':id/users')
   @Roles(UserRole.TENANT_ADMIN)
-  async listUsers(@Param('id') tenantId: string): Promise<UserRecord[]> {
-    return this.tenantsService.findUsers(tenantId)
+  async listUsers(
+    @Param('id') tenantId: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
+    @Query('role') role?: string,
+    @Query('status') status?: string
+  ): Promise<UserRecord[]> {
+    return this.tenantsService.findUsers(tenantId, sortBy, sortOrder, role, status)
   }
 
   @Post(':id/users')

@@ -5,6 +5,7 @@ import { UserRole } from '../../common/interfaces/authenticated-request.interfac
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CreateTenantDto, UpdateTenantDto, AddUserDto, UpdateUserDto } from './dto/tenant.dto'
 import type { TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
+import type { Prisma, UserStatus } from '@prisma/client'
 
 const BCRYPT_SALT_ROUNDS = 12
 
@@ -124,11 +125,27 @@ export class TenantsService {
     return { deleted: true }
   }
 
-  async findUsers(tenantId: string): Promise<UserRecord[]> {
+  async findUsers(
+    tenantId: string,
+    sortBy?: string,
+    sortOrder?: string,
+    role?: string,
+    status?: string
+  ): Promise<UserRecord[]> {
     try {
+      const where: Prisma.TenantUserWhereInput = { tenantId }
+
+      if (role) {
+        where.role = role as UserRole
+      }
+
+      if (status) {
+        where.status = status as UserStatus
+      }
+
       const users = await this.prisma.tenantUser.findMany({
-        where: { tenantId },
-        orderBy: { name: 'asc' },
+        where,
+        orderBy: this.buildUserOrderBy(sortBy, sortOrder),
       })
       return users.map(u => ({
         id: u.id,
@@ -143,6 +160,40 @@ export class TenantsService {
       }))
     } catch {
       return []
+    }
+  }
+
+  /** Lightweight user list for assignee pickers — available to any authenticated user. */
+  async findMembers(tenantId: string): Promise<Array<{ id: string; name: string; email: string }>> {
+    try {
+      return await this.prisma.tenantUser.findMany({
+        where: { tenantId, status: 'active' },
+        select: { id: true, name: true, email: true },
+        orderBy: { name: 'asc' },
+      })
+    } catch {
+      return []
+    }
+  }
+
+  private buildUserOrderBy(
+    sortBy?: string,
+    sortOrder?: string
+  ): Prisma.TenantUserOrderByWithRelationInput {
+    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    switch (sortBy) {
+      case 'name':
+        return { name: order }
+      case 'role':
+        return { role: order }
+      case 'status':
+        return { status: order }
+      case 'lastLoginAt':
+        return { lastLoginAt: order }
+      case 'createdAt':
+        return { createdAt: order }
+      default:
+        return { name: 'asc' }
     }
   }
 

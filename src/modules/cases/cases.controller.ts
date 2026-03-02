@@ -24,12 +24,22 @@ export class CasesController {
   async listCases(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
+    @Query('status') status?: string,
+    @Query('severity') severity?: string,
+    @Query('query') query?: string
   ): Promise<PaginatedCases> {
     return this.casesService.listCases(
       tenantId,
       page ? Number.parseInt(page, 10) : 1,
-      limit ? Number.parseInt(limit, 10) : 20
+      limit ? Number.parseInt(limit, 10) : 20,
+      sortBy,
+      sortOrder,
+      status,
+      severity,
+      query
     )
   }
 

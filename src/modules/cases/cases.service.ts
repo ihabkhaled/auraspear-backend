@@ -8,7 +8,7 @@ import type { CreateNoteDto } from './dto/create-note.dto'
 import type { LinkAlertDto } from './dto/link-alert.dto'
 import type { UpdateCaseDto } from './dto/update-case.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { CaseNote } from '@prisma/client'
+import type { CaseNote, CaseStatus, CaseSeverity, Prisma } from '@prisma/client'
 
 @Injectable()
 export class CasesService {
@@ -16,26 +16,119 @@ export class CasesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  private async resolveOwner(
+    ownerUserId: string | null
+  ): Promise<{ ownerName: string | null; ownerEmail: string | null }> {
+    if (!ownerUserId) {
+      return { ownerName: null, ownerEmail: null }
+    }
+    const owner = await this.prisma.tenantUser.findUnique({
+      where: { id: ownerUserId },
+      select: { name: true, email: true },
+    })
+    return {
+      ownerName: owner?.name ?? null,
+      ownerEmail: owner?.email ?? null,
+    }
+  }
+
+  private async resolveOwnersBatch(
+    ownerUserIds: (string | null)[]
+  ): Promise<Map<string, { name: string; email: string }>> {
+    const ids = [...new Set(ownerUserIds.filter((id): id is string => id !== null))]
+    if (ids.length === 0) {
+      return new Map()
+    }
+    const owners = await this.prisma.tenantUser.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, email: true },
+    })
+    const map = new Map<string, { name: string; email: string }>()
+    for (const o of owners) {
+      map.set(o.id, { name: o.name, email: o.email })
+    }
+    return map
+  }
+
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
   /* ---------------------------------------------------------------- */
 
-  async listCases(tenantId: string, page = 1, limit = 20): Promise<PaginatedCases> {
-    const where = { tenantId }
+  async listCases(
+    tenantId: string,
+    page = 1,
+    limit = 20,
+    sortBy?: string,
+    sortOrder?: string,
+    status?: string,
+    severity?: string,
+    query?: string
+  ): Promise<PaginatedCases> {
+    const where: Prisma.CaseWhereInput = { tenantId }
 
-    const [data, total] = await Promise.all([
+    if (status) {
+      where.status = status as CaseStatus
+    }
+
+    if (severity) {
+      where.severity = severity as CaseSeverity
+    }
+
+    if (query && query.trim().length > 0) {
+      where.OR = [
+        { title: { contains: query, mode: 'insensitive' } },
+        { caseNumber: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
+      ]
+    }
+
+    const [cases, total] = await Promise.all([
       this.prisma.case.findMany({
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: this.buildCaseOrderBy(sortBy, sortOrder),
       }),
       this.prisma.case.count({ where }),
     ])
 
+    const ownersMap = await this.resolveOwnersBatch(cases.map(c => c.ownerUserId))
+
+    const data = cases.map(c => {
+      const owner = c.ownerUserId ? ownersMap.get(c.ownerUserId) : undefined
+      return {
+        ...c,
+        ownerName: owner?.name ?? null,
+        ownerEmail: owner?.email ?? null,
+      }
+    })
+
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
+    }
+  }
+
+  private buildCaseOrderBy(
+    sortBy?: string,
+    sortOrder?: string
+  ): Prisma.CaseOrderByWithRelationInput {
+    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    switch (sortBy) {
+      case 'createdAt':
+        return { createdAt: order }
+      case 'updatedAt':
+        return { updatedAt: order }
+      case 'severity':
+        return { severity: order }
+      case 'status':
+        return { status: order }
+      case 'caseNumber':
+        return { caseNumber: order }
+      case 'title':
+        return { title: order }
+      default:
+        return { createdAt: 'desc' }
     }
   }
 
@@ -45,6 +138,7 @@ export class CasesService {
 
   async createCase(dto: CreateCaseDto, user: JwtPayload): Promise<CaseRecord> {
     const caseNumber = await this.generateCaseNumber()
+    const linkedAlerts = dto.linkedAlertIds ?? []
 
     const result = await this.prisma.$transaction(async tx => {
       const newCase = await tx.case.create({
@@ -57,6 +151,7 @@ export class CasesService {
           status: 'open',
           ownerUserId: dto.ownerUserId ?? null,
           createdBy: user.email,
+          ...(linkedAlerts.length > 0 ? { linkedAlerts } : {}),
         },
       })
 
@@ -69,6 +164,17 @@ export class CasesService {
         },
       })
 
+      if (linkedAlerts.length > 0) {
+        await tx.caseTimeline.create({
+          data: {
+            caseId: newCase.id,
+            type: 'alert_linked',
+            actor: user.email,
+            description: `${linkedAlerts.length} alert(s) linked at creation`,
+          },
+        })
+      }
+
       return tx.case.findUniqueOrThrow({
         where: { id: newCase.id },
         include: { notes: true, timeline: { orderBy: { timestamp: 'asc' } } },
@@ -76,7 +182,8 @@ export class CasesService {
     })
 
     this.logger.log(`Case ${caseNumber} created by ${user.email} for tenant ${user.tenantId}`)
-    return result
+    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
+    return { ...result, ownerName, ownerEmail }
   }
 
   /* ---------------------------------------------------------------- */
@@ -96,7 +203,8 @@ export class CasesService {
       throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
 
-    return caseRecord
+    const { ownerName, ownerEmail } = await this.resolveOwner(caseRecord.ownerUserId)
+    return { ...caseRecord, ownerName, ownerEmail }
   }
 
   /* ---------------------------------------------------------------- */
@@ -126,12 +234,10 @@ export class CasesService {
           severity: dto.severity ?? undefined,
           status: dto.status ?? undefined,
           ownerUserId: dto.ownerUserId ?? undefined,
-          closedAt:
-            dto.status === 'closed'
-              ? dto.closedAt
-                ? new Date(dto.closedAt)
-                : new Date()
-              : undefined,
+          closedAt: (() => {
+            if (dto.status !== 'closed') return
+            return dto.closedAt ? new Date(dto.closedAt) : new Date()
+          })(),
         },
       })
 
@@ -151,7 +257,8 @@ export class CasesService {
     })
 
     this.logger.log(`Case ${existing.caseNumber} updated by ${user.email}`)
-    return result
+    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
+    return { ...result, ownerName, ownerEmail }
   }
 
   /* ---------------------------------------------------------------- */
@@ -206,7 +313,8 @@ export class CasesService {
     })
 
     this.logger.log(`Alert ${dto.alertId} linked to case ${existing.caseNumber}`)
-    return result
+    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
+    return { ...result, ownerName, ownerEmail }
   }
 
   /* ---------------------------------------------------------------- */

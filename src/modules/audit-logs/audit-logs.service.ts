@@ -51,7 +51,7 @@ export class AuditLogsService {
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: this.buildOrderBy(query.sortBy, query.sortOrder),
         skip: (query.page - 1) * query.limit,
         take: query.limit,
       }),
@@ -61,6 +61,25 @@ export class AuditLogsService {
     return {
       data,
       pagination: buildPaginationMeta(query.page, query.limit, total),
+    }
+  }
+
+  private buildOrderBy(
+    sortBy?: string,
+    sortOrder?: string
+  ): Prisma.AuditLogOrderByWithRelationInput {
+    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    switch (sortBy) {
+      case 'createdAt':
+        return { createdAt: order }
+      case 'actor':
+        return { actor: order }
+      case 'action':
+        return { action: order }
+      case 'resource':
+        return { resource: order }
+      default:
+        return { createdAt: 'desc' }
     }
   }
 

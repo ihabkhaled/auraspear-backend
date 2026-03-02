@@ -33,3 +33,4 @@ logs/
 
 # Prisma
 prisma/migrations/**/migration_lock.toml
+.claude/

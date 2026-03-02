@@ -15,21 +15,29 @@ export class IntelController {
   constructor(private readonly intelService: IntelService) {}
 
   /**
-   * GET /ti/events/recent?page=1&limit=20
-   * Returns recent MISP threat intelligence events, paginated.
+   * GET /ti/events/recent?page=1&limit=20&sortBy=date&sortOrder=desc
+   * Returns recent MISP threat intelligence events, paginated and sorted.
    */
   @Get('events/recent')
   async getRecentEvents(
     @TenantId() tenantId: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string
   ): Promise<PaginatedMispEvents> {
-    return this.intelService.getRecentEvents(tenantId, Number(page) || 1, Number(limit) || 20)
+    return this.intelService.getRecentEvents(
+      tenantId,
+      Number(page) || 1,
+      Number(limit) || 20,
+      sortBy,
+      sortOrder
+    )
   }
 
   /**
-   * GET /ti/iocs/search?q=<query>&type=<iocType>&page=1&limit=20
-   * Search IOCs by value, with optional type filter.
+   * GET /ti/iocs/search?q=<query>&type=<iocType>&source=<source>&page=1&limit=20&sortBy=lastSeen&sortOrder=desc
+   * Search IOCs by value, with optional type and source filters, and sorting.
    */
   @Get('iocs/search')
   async searchIOCs(
@@ -37,14 +45,20 @@ export class IntelController {
     @Query('q') query?: string,
     @Query('type') type?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
+    @Query('source') source?: string
   ): Promise<PaginatedIOCs> {
     return this.intelService.searchIOCs(
       tenantId,
       query ?? '',
       type,
       Number(page) || 1,
-      Number(limit) || 20
+      Number(limit) || 20,
+      sortBy,
+      sortOrder,
+      source
     )
   }
 

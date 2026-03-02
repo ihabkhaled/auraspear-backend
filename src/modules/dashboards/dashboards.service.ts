@@ -113,10 +113,23 @@ export class DashboardsService {
       }
       const entry = trendMap.get(r.date)
       if (entry) {
-        const sev = r.severity
-        if (sev in entry && sev !== 'date') {
-          const mutable = entry as Record<string, string | number>
-          mutable[sev] = Number(r.count)
+        const count = Number(r.count)
+        switch (r.severity) {
+          case 'critical':
+            entry.critical = count
+            break
+          case 'high':
+            entry.high = count
+            break
+          case 'medium':
+            entry.medium = count
+            break
+          case 'low':
+            entry.low = count
+            break
+          case 'info':
+            entry.info = count
+            break
         }
       }
     }

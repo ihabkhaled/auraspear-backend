@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { PrismaService } from '../../prisma/prisma.service'
@@ -6,11 +6,28 @@ import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { PaginatedAlerts, AlertRecord } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
-import type { Prisma } from '@prisma/client'
+import type { AlertSeverity, AlertStatus, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name)
+
+  private static readonly VALID_SEVERITIES = new Set<string>([
+    'critical',
+    'high',
+    'medium',
+    'low',
+    'info',
+  ])
+
+  private static readonly VALID_STATUSES = new Set<string>([
+    'new_alert',
+    'acknowledged',
+    'in_progress',
+    'resolved',
+    'closed',
+    'false_positive',
+  ])
 
   constructor(
     private readonly prisma: PrismaService,
@@ -22,10 +39,18 @@ export class AlertsService {
     const where: Prisma.AlertWhereInput = { tenantId }
 
     if (query.severity) {
-      where.severity = query.severity as Prisma.EnumAlertSeverityFilter
+      const severities = query.severity
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => AlertsService.VALID_SEVERITIES.has(s))
+      if (severities.length === 1) {
+        where.severity = severities[0] as AlertSeverity
+      } else if (severities.length > 1) {
+        where.severity = { in: severities as AlertSeverity[] }
+      }
     }
 
-    if (query.status) {
+    if (query.status && AlertsService.VALID_STATUSES.has(query.status)) {
       where.status = query.status as Prisma.EnumAlertStatusFilter
     }
 
@@ -33,7 +58,31 @@ export class AlertsService {
       where.source = query.source
     }
 
-    if (query.from || query.to) {
+    if (query.agentName) {
+      where.agentName = { contains: query.agentName, mode: 'insensitive' }
+    }
+
+    if (query.ruleGroup) {
+      where.ruleName = { contains: query.ruleGroup, mode: 'insensitive' }
+    }
+
+    // timeRange takes precedence over explicit from/to
+    if (query.timeRange) {
+      const now = new Date()
+      const from = new Date(now)
+      switch (query.timeRange) {
+        case '24h':
+          from.setHours(from.getHours() - 24)
+          break
+        case '7d':
+          from.setDate(from.getDate() - 7)
+          break
+        case '30d':
+          from.setDate(from.getDate() - 30)
+          break
+      }
+      where.timestamp = { gte: from }
+    } else if (query.from ?? query.to) {
       where.timestamp = {}
       if (query.from) {
         where.timestamp.gte = new Date(query.from)
@@ -44,24 +93,13 @@ export class AlertsService {
     }
 
     if (query.query && query.query !== '*') {
-      where.OR = [
-        { title: { contains: query.query, mode: 'insensitive' } },
-        { description: { contains: query.query, mode: 'insensitive' } },
-        { sourceIp: { contains: query.query } },
-        { destinationIp: { contains: query.query } },
-        { agentName: { contains: query.query, mode: 'insensitive' } },
-        { ruleName: { contains: query.query, mode: 'insensitive' } },
-      ]
+      this.applyKqlQuery(query.query, where)
     }
-
-    const orderBy: Prisma.AlertOrderByWithRelationInput = {}
-    const sortField = query.sortBy as keyof Prisma.AlertOrderByWithRelationInput
-    orderBy[sortField] = query.sortOrder
 
     const [data, total] = await Promise.all([
       this.prisma.alert.findMany({
         where,
-        orderBy,
+        orderBy: this.buildAlertOrderBy(query.sortBy, query.sortOrder),
         skip: (query.page - 1) * query.limit,
         take: query.limit,
       }),
@@ -74,13 +112,39 @@ export class AlertsService {
     }
   }
 
+  private buildAlertOrderBy(
+    sortBy: string,
+    sortOrder: 'asc' | 'desc'
+  ): Prisma.AlertOrderByWithRelationInput {
+    switch (sortBy) {
+      case 'timestamp':
+        return { timestamp: sortOrder }
+      case 'severity':
+        return { severity: sortOrder }
+      case 'status':
+        return { status: sortOrder }
+      case 'source':
+        return { source: sortOrder }
+      case 'agentName':
+        return { agentName: sortOrder }
+      case 'sourceIp':
+        return { sourceIp: sortOrder }
+      case 'title':
+        return { title: sortOrder }
+      case 'createdAt':
+        return { createdAt: sortOrder }
+      default:
+        return { timestamp: 'desc' }
+    }
+  }
+
   async findById(tenantId: string, id: string): Promise<AlertRecord> {
     const alert = await this.prisma.alert.findFirst({
       where: { id, tenantId },
     })
 
     if (!alert) {
-      throw new NotFoundException('Alert not found')
+      throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
     }
 
     return alert
@@ -309,6 +373,95 @@ export class AlertsService {
     `
 
     return results.map(r => ({ asset: r.asset, count: Number(r.count) }))
+  }
+
+  /**
+   * Parse a KQL-style query string and apply field filters + free-text search
+   * to the given Prisma where input.
+   *
+   * Supported syntax:
+   *   severity:critical
+   *   agent.name:"web-server-01"
+   *   status:new_alert AND source:wazuh
+   *   free text (no field prefix → OR across text columns)
+   */
+  private applyKqlQuery(rawQuery: string, where: Prisma.AlertWhereInput): void {
+    // Match field:value or field:"quoted value" tokens
+    // Matches field:value or field:"quoted value" tokens
+    // Split into two non-backtracking alternatives to avoid catastrophic backtracking
+    const kqlPattern = /(\w[\w.]*):(?:"([^"]+)"|(\S+))/g
+    const freeTextParts: string[] = []
+    let lastIndex = 0
+    let match: RegExpExecArray | null
+
+    while ((match = kqlPattern.exec(rawQuery)) !== null) {
+      const textBefore = rawQuery
+        .slice(lastIndex, match.index)
+        .replaceAll(/\b(?:AND|OR|NOT)\b/gi, '')
+        .trim()
+      if (textBefore) freeTextParts.push(textBefore)
+      lastIndex = match.index + match[0].length
+
+      const field = (match[1] ?? match[3] ?? '').toLowerCase()
+      const value = match[2] ?? match[4] ?? ''
+      this.applyKqlField(field, value, where)
+    }
+
+    const remaining = rawQuery
+      .slice(lastIndex)
+      .replaceAll(/\b(?:AND|OR|NOT)\b/gi, '')
+      .trim()
+    if (remaining) freeTextParts.push(remaining)
+
+    const freeText = freeTextParts.join(' ').trim()
+    if (freeText) {
+      where.OR = [
+        { title: { contains: freeText, mode: 'insensitive' } },
+        { description: { contains: freeText, mode: 'insensitive' } },
+        { sourceIp: { contains: freeText } },
+        { destinationIp: { contains: freeText } },
+        { agentName: { contains: freeText, mode: 'insensitive' } },
+        { ruleName: { contains: freeText, mode: 'insensitive' } },
+      ]
+    }
+  }
+
+  private applyKqlField(field: string, value: string, where: Prisma.AlertWhereInput): void {
+    switch (field) {
+      case 'severity':
+        if (AlertsService.VALID_SEVERITIES.has(value)) {
+          where.severity = value as AlertSeverity
+        }
+        break
+      case 'status':
+        if (AlertsService.VALID_STATUSES.has(value)) {
+          where.status = value as AlertStatus
+        }
+        break
+      case 'source':
+        where.source = value
+        break
+      case 'agent':
+      case 'agent.name':
+        where.agentName = { contains: value, mode: 'insensitive' }
+        break
+      case 'sourceip':
+      case 'source.ip':
+        where.sourceIp = { contains: value }
+        break
+      case 'destip':
+      case 'dest.ip':
+      case 'destination.ip':
+        where.destinationIp = { contains: value }
+        break
+      case 'rule':
+      case 'rule.name':
+      case 'rulename':
+        where.ruleName = { contains: value, mode: 'insensitive' }
+        break
+      default:
+        break
+    }
   }
 
   private mapWazuhLevel(

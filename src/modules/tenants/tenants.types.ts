@@ -22,3 +22,10 @@ export interface UserRecord {
   isProtected: boolean
   createdAt: Date
 }
+
+/** Lightweight user info for assignee pickers — accessible to all authenticated users. */
+export interface TenantMember {
+  id: string
+  name: string
+  email: string
+}
