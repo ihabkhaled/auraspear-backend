@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { hasRoleAtLeast } from '../../common/utils/role.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseRecord, PaginatedCases } from './cases.types'
 import type { CreateCaseDto } from './dto/create-case.dto'
@@ -22,7 +24,7 @@ export class CasesService {
     if (!ownerUserId) {
       return { ownerName: null, ownerEmail: null }
     }
-    const owner = await this.prisma.tenantUser.findUnique({
+    const owner = await this.prisma.user.findUnique({
       where: { id: ownerUserId },
       select: { name: true, email: true },
     })
@@ -39,7 +41,7 @@ export class CasesService {
     if (ids.length === 0) {
       return new Map()
     }
-    const owners = await this.prisma.tenantUser.findMany({
+    const owners = await this.prisma.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, name: true, email: true },
     })
@@ -218,8 +220,20 @@ export class CasesService {
       throw new BusinessException(400, 'Cannot update a closed case', 'errors.cases.alreadyClosed')
     }
 
-    const changedFields = Object.keys(dto).join(', ')
+    // Block non-admin, non-owner users from changing case status
     const isStatusChange = dto.status !== undefined && dto.status !== existing.status
+    if (isStatusChange) {
+      const isAdmin = hasRoleAtLeast(user.role, UserRole.TENANT_ADMIN)
+      if (!isAdmin && user.sub !== existing.ownerUserId) {
+        throw new BusinessException(
+          403,
+          'Only case owner or admin can change case status',
+          'errors.cases.statusChangeNotAllowed'
+        )
+      }
+    }
+
+    const changedFields = Object.keys(dto).join(', ')
     const timelineType = isStatusChange ? 'status_changed' : 'updated'
     const timelineDescription = isStatusChange
       ? `Status changed from ${existing.status} to ${dto.status}`

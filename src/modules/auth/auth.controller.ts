@@ -16,9 +16,12 @@ export class AuthController {
   @Public()
   @Post('login')
   @UsePipes(new ZodValidationPipe(AuthLoginSchema))
-  async login(
-    @Body() dto: AuthLoginDto
-  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
+  async login(@Body() dto: AuthLoginDto): Promise<{
+    accessToken: string
+    refreshToken: string
+    user: JwtPayload
+    tenants: Array<{ id: string; name: string; slug: string; role: string }>
+  }> {
     return this.authService.login(dto.email, dto.password)
   }
 
@@ -26,6 +29,14 @@ export class AuthController {
   @Get('me')
   getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
     return user
+  }
+
+  @ApiBearerAuth()
+  @Get('tenants')
+  async getTenants(
+    @CurrentUser() user: JwtPayload
+  ): Promise<Array<{ id: string; name: string; slug: string; role: string }>> {
+    return this.authService.getUserTenants(user.sub)
   }
 
   @Public()

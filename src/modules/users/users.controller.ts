@@ -7,9 +7,9 @@ import { UsersService } from './users.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { Tenant, TenantUser, UserPreference } from '@prisma/client'
+import type { Tenant, User, UserPreference } from '@prisma/client'
 
-type UserProfile = Omit<TenantUser, 'passwordHash'> & {
+type UserProfile = Omit<User, 'passwordHash'> & {
   tenant: Tenant | null
   preference: UserPreference | null
 }

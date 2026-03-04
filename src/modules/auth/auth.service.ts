@@ -7,6 +7,13 @@ import { UserRole } from '../../common/interfaces/authenticated-request.interfac
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
+interface TenantMembershipInfo {
+  id: string
+  name: string
+  slug: string
+  role: UserRole
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name)
@@ -32,13 +39,23 @@ export class AuthService {
   async login(
     email: string,
     password: string
-  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
-    const tenantUser = await this.prisma.tenantUser.findFirst({
+  ): Promise<{
+    accessToken: string
+    refreshToken: string
+    user: JwtPayload
+    tenants: TenantMembershipInfo[]
+  }> {
+    const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { tenant: true },
+      include: {
+        memberships: {
+          where: { status: 'active' },
+          include: { tenant: true },
+        },
+      },
     })
 
-    if (!tenantUser?.passwordHash) {
+    if (!user?.passwordHash) {
       throw new BusinessException(
         401,
         'Invalid email or password',
@@ -46,7 +63,7 @@ export class AuthService {
       )
     }
 
-    const valid = await bcrypt.compare(password, tenantUser.passwordHash)
+    const valid = await bcrypt.compare(password, user.passwordHash)
     if (!valid) {
       throw new BusinessException(
         401,
@@ -55,27 +72,39 @@ export class AuthService {
       )
     }
 
-    if (tenantUser.status !== 'active') {
+    if (user.memberships.length === 0) {
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
-    await this.prisma.tenantUser.update({
-      where: { id: tenantUser.id },
+    await this.prisma.user.update({
+      where: { id: user.id },
       data: { lastLoginAt: new Date() },
     })
 
+    const firstMembership = user.memberships[0]
+    if (!firstMembership) {
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
+
     const payload: JwtPayload = {
-      sub: tenantUser.id,
-      email: tenantUser.email,
-      tenantId: tenantUser.tenantId,
-      tenantSlug: tenantUser.tenant.slug,
-      role: tenantUser.role as UserRole,
+      sub: user.id,
+      email: user.email,
+      tenantId: firstMembership.tenantId,
+      tenantSlug: firstMembership.tenant.slug,
+      role: firstMembership.role as UserRole,
     }
 
     const accessToken = this.signAccessToken(payload)
     const refreshToken = this.signRefreshToken(payload)
 
-    return { accessToken, refreshToken, user: payload }
+    const tenants: TenantMembershipInfo[] = user.memberships.map(m => ({
+      id: m.tenant.id,
+      name: m.tenant.name,
+      slug: m.tenant.slug,
+      role: m.role as UserRole,
+    }))
+
+    return { accessToken, refreshToken, user: payload, tenants }
   }
 
   signAccessToken(payload: JwtPayload): string {
@@ -117,25 +146,31 @@ export class AuthService {
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const payload = this.verifyRefreshToken(refreshToken)
 
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { tenant: true },
+      include: {
+        memberships: {
+          where: { tenantId: payload.tenantId, status: 'active' },
+          include: { tenant: true },
+        },
+      },
     })
 
     if (!user) {
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
 
-    if (user.status !== 'active') {
+    const membership = user.memberships[0]
+    if (!membership) {
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
     const newPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
-      tenantId: user.tenantId,
-      tenantSlug: user.tenant.slug,
-      role: user.role as UserRole,
+      tenantId: membership.tenantId,
+      tenantSlug: membership.tenant.slug,
+      role: membership.role as UserRole,
     }
 
     return {
@@ -145,18 +180,38 @@ export class AuthService {
   }
 
   async validateUserActive(userId: string): Promise<void> {
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { status: true },
     })
 
     if (!user) {
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
+  }
 
-    if (user.status !== 'active') {
+  /** Check if a user has an active membership for the given tenant. */
+  async validateMembershipActive(userId: string, tenantId: string): Promise<void> {
+    const membership = await this.prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+    })
+
+    if (membership?.status !== 'active') {
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
+  }
+
+  async getUserTenants(userId: string): Promise<TenantMembershipInfo[]> {
+    const memberships = await this.prisma.tenantMembership.findMany({
+      where: { userId, status: 'active' },
+      include: { tenant: true },
+    })
+
+    return memberships.map(m => ({
+      id: m.tenant.id,
+      name: m.tenant.name,
+      slug: m.tenant.slug,
+      role: m.role as UserRole,
+    }))
   }
 
   async findOrCreateUser(
@@ -166,18 +221,29 @@ export class AuthService {
     name: string
   ): Promise<{ id: string; role: UserRole }> {
     try {
-      const user = await this.prisma.tenantUser.upsert({
-        where: { tenantId_oidcSub: { tenantId, oidcSub } },
+      // Upsert global user
+      const user = await this.prisma.user.upsert({
+        where: { oidcSub },
         update: { email, name },
         create: {
-          tenantId,
           oidcSub,
           email,
           name,
+        },
+      })
+
+      // Upsert tenant membership
+      const membership = await this.prisma.tenantMembership.upsert({
+        where: { userId_tenantId: { userId: user.id, tenantId } },
+        update: {},
+        create: {
+          userId: user.id,
+          tenantId,
           role: UserRole.SOC_ANALYST_L1,
         },
       })
-      return { id: user.id, role: user.role as UserRole }
+
+      return { id: user.id, role: membership.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
       throw new BusinessException(401, 'Unable to provision user', 'errors.auth.provisionFailed')

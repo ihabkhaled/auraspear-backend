@@ -88,7 +88,7 @@ model Tenant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users            TenantUser[]
+  memberships      TenantMembership[]
   connectorConfigs ConnectorConfig[]
   cases            Case[]
   auditLogs        AuditLog[]
@@ -102,31 +102,46 @@ model Tenant {
   @@map("tenants")
 }
 
-// ─── Users & Membership ──────────────────────────────────────
+// ─── Users ───────────────────────────────────────────────────
 
-model TenantUser {
-  id           String     @id @default(uuid()) @db.Uuid
-  tenantId     String     @map("tenant_id") @db.Uuid
-  oidcSub      String?    @map("oidc_sub") @db.VarChar(255)
-  email        String     @db.VarChar(320)
-  name         String     @db.VarChar(255)
-  role         UserRole   @default(SOC_ANALYST_L1)
-  status       UserStatus @default(active)
-  passwordHash String?    @map("password_hash") @db.VarChar(255)
-  lastLoginAt  DateTime?  @map("last_login_at")
-  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
-  isProtected  Boolean    @default(false) @map("is_protected")
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique @db.VarChar(320)
+  name         String    @db.VarChar(255)
+  passwordHash String?   @map("password_hash") @db.VarChar(255)
+  oidcSub      String?   @unique @map("oidc_sub") @db.VarChar(255)
+  mfaEnabled   Boolean   @default(false) @map("mfa_enabled")
+  isProtected  Boolean   @default(false) @map("is_protected")
+  lastLoginAt  DateTime? @map("last_login_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  preference UserPreference?
+  memberships TenantMembership[]
+  preference  UserPreference?
 
-  @@unique([tenantId, oidcSub])
-  @@unique([tenantId, email])
+  @@map("users")
+}
+
+// ─── Tenant Membership ───────────────────────────────────────
+
+model TenantMembership {
+  id       String     @id @default(uuid()) @db.Uuid
+  userId   String     @map("user_id") @db.Uuid
+  tenantId String     @map("tenant_id") @db.Uuid
+  role     UserRole   @default(SOC_ANALYST_L1)
+  status   UserStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
   @@index([tenantId])
-  @@map("tenant_users")
+  @@index([userId])
+  @@map("tenant_memberships")
 }
 
 // ─── User Preferences ────────────────────────────────────────
@@ -142,7 +157,7 @@ model UserPreference {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  user TenantUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
 }

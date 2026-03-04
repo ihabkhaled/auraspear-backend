@@ -5,9 +5,9 @@ import { PrismaService } from '../../prisma/prisma.service'
 import type { ChangePasswordDto } from './dto/change-password.dto'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UpdateProfileDto } from './dto/update-profile.dto'
-import type { Tenant, TenantUser, UserPreference } from '@prisma/client'
+import type { Tenant, User, UserPreference } from '@prisma/client'
 
-type UserProfile = Omit<TenantUser, 'passwordHash'> & {
+type UserProfile = Omit<User, 'passwordHash'> & {
   tenant: Tenant | null
   preference: UserPreference | null
 }
@@ -31,12 +31,14 @@ export class UsersService {
   /* GET PROFILE                                                       */
   /* ---------------------------------------------------------------- */
 
-  async getProfile(userId: string): Promise<UserProfile> {
-    const user = await this.prisma.tenantUser.findUnique({
+  async getProfile(userId: string, tenantId?: string): Promise<UserProfile> {
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        tenant: true,
         preference: true,
+        memberships: tenantId
+          ? { where: { tenantId }, include: { tenant: true }, take: 1 }
+          : { include: { tenant: true }, take: 1 },
       },
     })
 
@@ -44,8 +46,14 @@ export class UsersService {
       throw new BusinessException(404, 'User not found', 'errors.users.notFound')
     }
 
-    const { passwordHash: _passwordHash, ...profile } = user
-    return profile
+    const { passwordHash: _passwordHash, memberships, ...rest } = user
+    const firstMembership = memberships[0]
+
+    return {
+      ...rest,
+      tenant: firstMembership?.tenant ?? null,
+      preference: user.preference,
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -53,7 +61,7 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<UserProfile> {
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     })
 
@@ -70,19 +78,24 @@ export class UsersService {
       throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
     }
 
-    const updated = await this.prisma.tenantUser.update({
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { name: dto.name },
       include: {
-        tenant: true,
         preference: true,
+        memberships: { include: { tenant: true }, take: 1 },
       },
     })
 
-    const { passwordHash: _passwordHash, ...profile } = updated
+    const { passwordHash: _passwordHash, memberships, ...rest } = updated
+    const firstMembership = memberships[0]
 
     this.logger.log(`Profile updated for user ${userId}`)
-    return profile
+    return {
+      ...rest,
+      tenant: firstMembership?.tenant ?? null,
+      preference: updated.preference,
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -90,7 +103,7 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ changed: boolean }> {
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     })
 
@@ -109,7 +122,7 @@ export class UsersService {
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS)
 
-    await this.prisma.tenantUser.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash: hashedPassword },
     })
@@ -122,9 +135,7 @@ export class UsersService {
   /* GET PREFERENCES                                                   */
   /* ---------------------------------------------------------------- */
 
-  async getPreferences(
-    userId: string
-  ): Promise<
+  async getPreferences(userId: string): Promise<
     | UserPreference
     | {
         userId: string
@@ -134,7 +145,7 @@ export class UsersService {
         notificationsInApp: boolean
       }
   > {
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     })
 
@@ -158,7 +169,7 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updatePreferences(userId: string, dto: UpdatePreferencesDto): Promise<UserPreference> {
-    const user = await this.prisma.tenantUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     })
 

@@ -63,15 +63,15 @@ export class AuthGuard implements CanActivate {
     try {
       const decoded = this.authService.verifyAccessToken(token)
 
-      // Verify user still exists and is active
+      // Verify user still exists
       await this.authService.validateUserActive(decoded.sub)
 
       request.user = decoded
 
-      // Allow GLOBAL_ADMIN to switch tenant context via X-Tenant-Id header
-      if (decoded.role === UserRole.GLOBAL_ADMIN) {
-        const headerTenantId = request.headers['x-tenant-id'] as string | undefined
-        if (headerTenantId && headerTenantId !== decoded.tenantId) {
+      const headerTenantId = request.headers['x-tenant-id'] as string | undefined
+      if (headerTenantId && headerTenantId !== decoded.tenantId) {
+        if (decoded.role === UserRole.GLOBAL_ADMIN) {
+          // GLOBAL_ADMIN can switch to ANY tenant
           const tenantExists = await this.prisma.tenant.findUnique({
             where: { id: headerTenantId },
             select: { id: true },
@@ -80,6 +80,28 @@ export class AuthGuard implements CanActivate {
             throw new BusinessException(400, 'Invalid tenant ID', 'errors.tenants.notFound')
           }
           request.user = { ...decoded, tenantId: headerTenantId }
+        } else {
+          // Non-admin: verify active membership for the requested tenant
+          const membership = await this.prisma.tenantMembership.findUnique({
+            where: {
+              userId_tenantId: { userId: decoded.sub, tenantId: headerTenantId },
+            },
+            include: { tenant: true },
+          })
+
+          if (!membership || membership.status !== 'active') {
+            throw new BusinessException(
+              403,
+              'No access to this tenant',
+              'errors.auth.noTenantAccess'
+            )
+          }
+
+          request.user = {
+            ...decoded,
+            tenantId: headerTenantId,
+            role: membership.role as UserRole,
+          }
         }
       }
 

@@ -578,8 +578,8 @@ async function main(): Promise<void> {
     const createdTenant = await prisma.tenant.findUnique({ where: { slug: tenant.slug } })
     const tenantId = createdTenant?.id ?? tenant.id
 
-    // ─── Users ───
-    const users = [
+    // ─── Users + Memberships ───
+    const userDefs = [
       {
         oidcSub: `admin-${tenant.slug}`,
         email: `admin@${tenant.slug}.io`,
@@ -612,19 +612,33 @@ async function main(): Promise<void> {
       },
     ]
 
-    for (const user of users) {
-      const isProtected = user.role === UserRole.GLOBAL_ADMIN
-      const createdUser = await prisma.tenantUser.upsert({
-        where: { tenantId_oidcSub: { tenantId, oidcSub: user.oidcSub } },
-        update: { passwordHash, role: user.role, isProtected },
+    for (const userDef of userDefs) {
+      const isProtected = userDef.role === UserRole.GLOBAL_ADMIN
+
+      // Upsert global User by email
+      const createdUser = await prisma.user.upsert({
+        where: { email: userDef.email },
+        update: {
+          passwordHash,
+          isProtected: isProtected || undefined,
+        },
         create: {
-          tenantId,
-          oidcSub: user.oidcSub,
-          email: user.email,
-          name: user.name,
-          role: user.role,
+          email: userDef.email,
+          name: userDef.name,
+          oidcSub: userDef.oidcSub,
           passwordHash,
           isProtected,
+        },
+      })
+
+      // Upsert TenantMembership
+      await prisma.tenantMembership.upsert({
+        where: { userId_tenantId: { userId: createdUser.id, tenantId } },
+        update: { role: userDef.role },
+        create: {
+          userId: createdUser.id,
+          tenantId,
+          role: userDef.role,
         },
       })
 
@@ -641,7 +655,7 @@ async function main(): Promise<void> {
         },
       })
 
-      logger.info({ tenant: tenant.slug, email: user.email, role: user.role }, 'Seeded user')
+      logger.info({ tenant: tenant.slug, email: userDef.email, role: userDef.role }, 'Seeded user')
     }
 
     // ─── Connectors ───
