@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
-    "start": "npx prisma migrate resolve --rolled-back 20260303000000_users_tenant_memberships_split && npm run prisma:migrate:prod && npm run prisma:seed &&nest start",
+    "start": "npm run prisma:migrate:prod && npm run prisma:seed &&nest start",
     "start:dev": "npm run prisma:migrate:prod && npm run prisma:seed && nest start --watch",
     "start:debug": "npm run prisma:migrate:prod && npm run prisma:seed && nest start --debug --watch",
     "start:prod": "npm run prisma:migrate:prod && npm run prisma:seed && node dist/main",
