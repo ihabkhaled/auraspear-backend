@@ -1,4 +1,4 @@
 {
-  "buildCommand": "npx prisma migrate resolve --rolled-back 20260303000000_users_tenant_memberships_split && npx prisma generate && npx prisma migrate deploy && npm run build && npx prisma db seed",
+  "buildCommand": "npx prisma generate && npx prisma migrate deploy && npm run build && npx prisma db seed",
   "installCommand": "npm install"
 }
