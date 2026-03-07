@@ -7,12 +7,15 @@ interface DashboardSummary {
   tenantId: string
   totalAlerts: number
   criticalAlerts: number
-  highAlerts: number
   openCases: number
   alertsLast24h: number
   resolvedLast24h: number
   meanTimeToRespond: string
   connectedSources: number
+  totalAlertsTrend: number
+  criticalAlertsTrend: number
+  openCasesTrend: number
+  mttrTrend: number
 }
 
 interface AlertTrendEntry {

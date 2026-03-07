@@ -90,6 +90,7 @@ export class CasesService {
         skip: (page - 1) * limit,
         take: limit,
         orderBy: this.buildCaseOrderBy(sortBy, sortOrder),
+        include: { tenant: { select: { name: true } } },
       }),
       this.prisma.case.count({ where }),
     ])
@@ -102,6 +103,7 @@ export class CasesService {
         ...c,
         ownerName: owner?.name ?? null,
         ownerEmail: owner?.email ?? null,
+        tenantName: c.tenant.name,
       }
     })
 
@@ -179,13 +181,17 @@ export class CasesService {
 
       return tx.case.findUniqueOrThrow({
         where: { id: newCase.id },
-        include: { notes: true, timeline: { orderBy: { timestamp: 'asc' } } },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tenant: { select: { name: true } },
+        },
       })
     })
 
     this.logger.log(`Case ${caseNumber} created by ${user.email} for tenant ${user.tenantId}`)
     const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail }
+    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -198,6 +204,7 @@ export class CasesService {
       include: {
         notes: { orderBy: { createdAt: 'asc' } },
         timeline: { orderBy: { timestamp: 'asc' } },
+        tenant: { select: { name: true } },
       },
     })
 
@@ -206,7 +213,7 @@ export class CasesService {
     }
 
     const { ownerName, ownerEmail } = await this.resolveOwner(caseRecord.ownerUserId)
-    return { ...caseRecord, ownerName, ownerEmail }
+    return { ...caseRecord, ownerName, ownerEmail, tenantName: caseRecord.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -266,13 +273,17 @@ export class CasesService {
 
       return tx.case.findUniqueOrThrow({
         where: { id },
-        include: { notes: true, timeline: { orderBy: { timestamp: 'asc' } } },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tenant: { select: { name: true } },
+        },
       })
     })
 
     this.logger.log(`Case ${existing.caseNumber} updated by ${user.email}`)
     const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail }
+    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -322,13 +333,17 @@ export class CasesService {
 
       return tx.case.findUniqueOrThrow({
         where: { id: caseId },
-        include: { notes: true, timeline: { orderBy: { timestamp: 'asc' } } },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tenant: { select: { name: true } },
+        },
       })
     })
 
     this.logger.log(`Alert ${dto.alertId} linked to case ${existing.caseNumber}`)
     const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail }
+    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */

@@ -11,29 +11,47 @@ export class DashboardsService {
     private readonly connectorsService: ConnectorsService
   ) {}
 
+  private calculateTrend(currentValue: number, previousValue: number): number {
+    if (previousValue === 0) {
+      return currentValue > 0 ? 100 : 0
+    }
+    return Math.round(((currentValue - previousValue) / previousValue) * 1000) / 10
+  }
+
   async getSummary(tenantId: string): Promise<{
     tenantId: string
     totalAlerts: number
     criticalAlerts: number
-    highAlerts: number
     openCases: number
     alertsLast24h: number
     resolvedLast24h: number
     meanTimeToRespond: string
     connectedSources: number
+    totalAlertsTrend: number
+    criticalAlertsTrend: number
+    openCasesTrend: number
+    mttrTrend: number
   }> {
+    const now = new Date()
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+
     const [
-      totalAlerts,
-      criticalAlerts,
-      highAlerts,
       openCases,
       alertsLast24h,
       resolvedLast24h,
       avgResolutionTime,
+      // Current week counts
+      alertsCurrentWeek,
+      criticalCurrentWeek,
+      casesCurrentWeek,
+      mttrCurrentWeek,
+      // Previous week counts
+      alertsPreviousWeek,
+      criticalPreviousWeek,
+      casesPreviousWeek,
+      mttrPreviousWeek,
     ] = await Promise.all([
-      this.prisma.alert.count({ where: { tenantId } }),
-      this.prisma.alert.count({ where: { tenantId, severity: 'critical' } }),
-      this.prisma.alert.count({ where: { tenantId, severity: 'high' } }),
       this.prisma.case.count({ where: { tenantId, status: { in: ['open', 'in_progress'] } } }),
       this.prisma.alert.count({
         where: {
@@ -51,25 +69,75 @@ export class DashboardsService {
       this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
         SELECT AVG(EXTRACT(EPOCH FROM (closed_at - timestamp)) * 1000)::float as avg_ms
         FROM alerts
-        WHERE tenant_id = ${tenantId}::uuid AND closed_at IS NOT NULL
+        WHERE tenant_id = ${tenantId}::uuid
+          AND closed_at IS NOT NULL
+          AND timestamp >= ${oneWeekAgo}
+      `,
+      // Current week alert count
+      this.prisma.alert.count({
+        where: { tenantId, timestamp: { gte: oneWeekAgo, lte: now } },
+      }),
+      // Current week critical alert count
+      this.prisma.alert.count({
+        where: { tenantId, severity: 'critical', timestamp: { gte: oneWeekAgo, lte: now } },
+      }),
+      // Current week cases opened
+      this.prisma.case.count({
+        where: { tenantId, createdAt: { gte: oneWeekAgo, lte: now } },
+      }),
+      // Current week MTTR
+      this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
+        SELECT AVG(EXTRACT(EPOCH FROM (closed_at - timestamp)) * 1000)::float as avg_ms
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid
+          AND closed_at IS NOT NULL
+          AND closed_at >= ${oneWeekAgo}
+          AND closed_at <= ${now}
+      `,
+      // Previous week alert count
+      this.prisma.alert.count({
+        where: { tenantId, timestamp: { gte: twoWeeksAgo, lt: oneWeekAgo } },
+      }),
+      // Previous week critical alert count
+      this.prisma.alert.count({
+        where: { tenantId, severity: 'critical', timestamp: { gte: twoWeeksAgo, lt: oneWeekAgo } },
+      }),
+      // Previous week cases opened
+      this.prisma.case.count({
+        where: { tenantId, createdAt: { gte: twoWeeksAgo, lt: oneWeekAgo } },
+      }),
+      // Previous week MTTR
+      this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
+        SELECT AVG(EXTRACT(EPOCH FROM (closed_at - timestamp)) * 1000)::float as avg_ms
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid
+          AND closed_at IS NOT NULL
+          AND closed_at >= ${twoWeeksAgo}
+          AND closed_at < ${oneWeekAgo}
       `,
     ])
 
     const avgMs = avgResolutionTime[0]?.avg_ms ?? 0
     const mttrMinutes = Math.round(avgMs / 60_000)
 
+    const mttrCurrentMs = mttrCurrentWeek[0]?.avg_ms ?? 0
+    const mttrPreviousMs = mttrPreviousWeek[0]?.avg_ms ?? 0
+
     const enabledConnectors = await this.connectorsService.getEnabledConnectors(tenantId)
 
     return {
       tenantId,
-      totalAlerts,
-      criticalAlerts,
-      highAlerts,
+      totalAlerts: alertsCurrentWeek,
+      criticalAlerts: criticalCurrentWeek,
       openCases,
       alertsLast24h,
       resolvedLast24h,
       meanTimeToRespond: mttrMinutes > 0 ? `${mttrMinutes}m` : 'N/A',
       connectedSources: enabledConnectors.length,
+      totalAlertsTrend: this.calculateTrend(alertsCurrentWeek, alertsPreviousWeek),
+      criticalAlertsTrend: this.calculateTrend(criticalCurrentWeek, criticalPreviousWeek),
+      openCasesTrend: this.calculateTrend(casesCurrentWeek, casesPreviousWeek),
+      mttrTrend: this.calculateTrend(mttrCurrentMs, mttrPreviousMs),
     }
   }
 
@@ -141,9 +209,11 @@ export class DashboardsService {
     tenantId: string
     distribution: Array<{ severity: string; count: number; percentage: number }>
   }> {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
     const counts = await this.prisma.alert.groupBy({
       by: ['severity'],
-      where: { tenantId },
+      where: { tenantId, timestamp: { gte: since } },
       _count: true,
     })
 
@@ -162,10 +232,12 @@ export class DashboardsService {
     tenantId: string
     techniques: Array<{ id: string; count: number }>
   }> {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
     const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
       SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
       FROM alerts
-      WHERE tenant_id = ${tenantId}::uuid
+      WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
       GROUP BY technique
       ORDER BY count DESC
       LIMIT 10
@@ -184,6 +256,8 @@ export class DashboardsService {
     tenantId: string
     assets: Array<{ hostname: string; alertCount: number; criticalCount: number; lastSeen: Date }>
   }> {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
     const results = await this.prisma.$queryRaw<
       Array<{ hostname: string; alert_count: bigint; critical_count: bigint; last_seen: Date }>
     >`
@@ -193,7 +267,9 @@ export class DashboardsService {
         COUNT(*) FILTER (WHERE severity = 'critical')::bigint as critical_count,
         MAX(timestamp) as last_seen
       FROM alerts
-      WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
+      WHERE tenant_id = ${tenantId}::uuid
+        AND agent_name IS NOT NULL
+        AND timestamp >= ${since}
       GROUP BY agent_name
       ORDER BY alert_count DESC
       LIMIT 10
@@ -231,13 +307,21 @@ export class DashboardsService {
       },
     })
 
-    const pipelines = connectors.map(c => ({
-      name: c.name,
-      type: c.type,
-      status: c.lastTestOk === true ? 'healthy' : c.lastTestOk === false ? 'down' : 'unknown',
-      lastChecked: c.lastTestAt,
-      lastError: c.lastError,
-    }))
+    const pipelines = connectors.map(c => {
+      let status = 'unknown'
+      if (c.lastTestOk === true) {
+        status = 'healthy'
+      } else if (c.lastTestOk === false) {
+        status = 'down'
+      }
+      return {
+        name: c.name,
+        type: c.type,
+        status,
+        lastChecked: c.lastTestAt,
+        lastError: c.lastError,
+      }
+    })
 
     return { tenantId, pipelines }
   }

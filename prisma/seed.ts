@@ -26,10 +26,234 @@ const BCRYPT_ROUNDS = 10
 // Global case counter to ensure unique case numbers across tenants
 let globalCaseCounter = 0
 
-const TENANTS = [
-  { id: randomUUID(), name: 'Aura Finance', slug: 'aura-finance' },
-  { id: randomUUID(), name: 'Aura Health', slug: 'aura-health' },
-  { id: randomUUID(), name: 'Aura Enterprise', slug: 'aura-enterprise' },
+// ─── Tenant profiles ────────────────────────────────────────────
+// Each tenant gets a different "personality" for its seed data
+
+interface ConnectorSeed {
+  type: ConnectorType
+  name: string
+  authType: AuthType
+  enabled: boolean
+}
+
+interface TenantProfile {
+  id: string
+  name: string
+  slug: string
+  alertCount: number
+  alertStatusWeights: AlertStatus[]
+  alertTemplateIndices: number[]
+  agentPool: string[]
+  caseTemplateIndices: number[]
+  huntQueryIndices: number[]
+  huntSessionStatuses: HuntSessionStatus[]
+  iocIndices: number[]
+  mispEventIndices: number[]
+  connectors: ConnectorSeed[]
+}
+
+const TENANT_PROFILES: TenantProfile[] = [
+  {
+    id: randomUUID(),
+    name: 'Aura Finance',
+    slug: 'aura-finance',
+    alertCount: 32,
+    alertStatusWeights: [
+      'new_alert',
+      'new_alert',
+      'acknowledged',
+      'acknowledged',
+      'in_progress',
+      'in_progress',
+      'resolved',
+      'closed',
+    ],
+    alertTemplateIndices: [0, 1, 2, 5, 6, 10, 11],
+    agentPool: [
+      'fin-web-01',
+      'fin-web-02',
+      'fin-db-01',
+      'trading-server-01',
+      'payment-gateway-01',
+      'fin-dc-01',
+      'treasury-ws-003',
+      'compliance-app-01',
+    ],
+    caseTemplateIndices: [0, 1, 4, 6, 7],
+    huntQueryIndices: [0, 1, 2, 3],
+    huntSessionStatuses: ['completed', 'completed', 'completed', 'running'],
+    iocIndices: [0, 1, 3, 4, 6, 8, 11, 14],
+    mispEventIndices: [0, 1, 3, 5, 6, 9],
+    connectors: [
+      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
+      {
+        type: ConnectorType.graylog,
+        name: 'Graylog SIEM',
+        authType: AuthType.basic,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.velociraptor,
+        name: 'Velociraptor EDR',
+        authType: AuthType.api_key,
+        enabled: false,
+      },
+      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: true },
+      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
+      {
+        type: ConnectorType.misp,
+        name: 'MISP Threat Intel',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.shuffle,
+        name: 'Shuffle SOAR',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.bedrock,
+        name: 'AWS Bedrock AI',
+        authType: AuthType.iam,
+        enabled: true,
+      },
+    ],
+  },
+  {
+    id: randomUUID(),
+    name: 'Aura Health',
+    slug: 'aura-health',
+    alertCount: 18,
+    alertStatusWeights: [
+      'new_alert',
+      'new_alert',
+      'new_alert',
+      'acknowledged',
+      'in_progress',
+      'resolved',
+      'closed',
+      'closed',
+    ],
+    alertTemplateIndices: [0, 3, 4, 7, 8, 9],
+    agentPool: [
+      'ehr-server-01',
+      'ehr-server-02',
+      'lab-system-01',
+      'imaging-ws-01',
+      'nurse-station-12',
+      'pharmacy-app-01',
+      'health-dc-01',
+      'telehealth-gw-01',
+    ],
+    caseTemplateIndices: [1, 2, 3, 5],
+    huntQueryIndices: [1, 4, 5],
+    huntSessionStatuses: ['completed', 'completed', 'error'],
+    iocIndices: [2, 5, 7, 9, 10, 12, 13],
+    mispEventIndices: [2, 4, 7, 8],
+    connectors: [
+      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
+      {
+        type: ConnectorType.graylog,
+        name: 'Graylog SIEM',
+        authType: AuthType.basic,
+        enabled: false,
+      },
+      {
+        type: ConnectorType.velociraptor,
+        name: 'Velociraptor EDR',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: false },
+      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
+      {
+        type: ConnectorType.misp,
+        name: 'MISP Threat Intel',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.bedrock,
+        name: 'AWS Bedrock AI',
+        authType: AuthType.iam,
+        enabled: true,
+      },
+    ],
+  },
+  {
+    id: randomUUID(),
+    name: 'Aura Enterprise',
+    slug: 'aura-enterprise',
+    alertCount: 45,
+    alertStatusWeights: [
+      'new_alert',
+      'new_alert',
+      'new_alert',
+      'new_alert',
+      'acknowledged',
+      'in_progress',
+      'false_positive',
+      'resolved',
+    ],
+    alertTemplateIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    agentPool: [
+      'ent-web-01',
+      'ent-web-02',
+      'ent-web-03',
+      'ent-dc-01',
+      'ent-dc-02',
+      'ent-db-01',
+      'ent-db-02',
+      'erp-server-01',
+      'crm-app-01',
+      'vpn-gw-01',
+      'workstation-101',
+      'workstation-202',
+      'mail-relay-01',
+      'ci-runner-01',
+    ],
+    caseTemplateIndices: [0, 1, 2, 3, 4, 5, 6, 7],
+    huntQueryIndices: [0, 2, 3, 4, 5, 6],
+    huntSessionStatuses: ['completed', 'completed', 'completed', 'completed', 'running', 'error'],
+    iocIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    mispEventIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    connectors: [
+      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
+      {
+        type: ConnectorType.graylog,
+        name: 'Graylog SIEM',
+        authType: AuthType.basic,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.velociraptor,
+        name: 'Velociraptor EDR',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: true },
+      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
+      {
+        type: ConnectorType.misp,
+        name: 'MISP Threat Intel',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.shuffle,
+        name: 'Shuffle SOAR',
+        authType: AuthType.api_key,
+        enabled: true,
+      },
+      {
+        type: ConnectorType.bedrock,
+        name: 'AWS Bedrock AI',
+        authType: AuthType.iam,
+        enabled: true,
+      },
+    ],
+  },
 ]
 
 // ─── Alert seed data ──────────────────────────────────────────
@@ -166,84 +390,6 @@ const ALERT_TEMPLATES: Array<{
   },
 ]
 
-const AGENTS = [
-  'web-server-01',
-  'web-server-02',
-  'dc-01',
-  'dc-02',
-  'db-server-01',
-  'db-server-02',
-  'workstation-042',
-  'workstation-089',
-  'endpoint-177',
-  'linux-app-03',
-  'mail-server-01',
-  'vpn-gateway-01',
-]
-
-const STATUSES: AlertStatus[] = [
-  'new_alert',
-  'new_alert',
-  'new_alert',
-  'acknowledged',
-  'in_progress',
-  'resolved',
-  'closed',
-]
-
-function randomIp(): string {
-  return `${10 + Math.floor(Math.random() * 190)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`
-}
-
-function randomDate(daysBack: number): Date {
-  return new Date(Date.now() - Math.floor(Math.random() * daysBack * 86_400_000))
-}
-
-function randomItem<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)] as T
-}
-
-async function seedAlerts(tenantId: string): Promise<void> {
-  const alertData = []
-  for (let i = 0; i < 25; i++) {
-    const template = randomItem(ALERT_TEMPLATES)
-    const status = randomItem(STATUSES)
-    const timestamp = randomDate(30)
-
-    alertData.push({
-      tenantId,
-      title: template.title,
-      description: template.description,
-      severity: template.severity,
-      status,
-      source: template.source,
-      ruleName: template.ruleName,
-      ruleId: template.ruleId,
-      agentName: randomItem(AGENTS),
-      sourceIp: randomIp(),
-      destinationIp: randomIp(),
-      mitreTactics: template.mitreTactics,
-      mitreTechniques: template.mitreTechniques,
-      timestamp,
-      acknowledgedBy: status !== 'new_alert' ? 'analyst@auraspear.io' : null,
-      acknowledgedAt: status !== 'new_alert' ? new Date(timestamp.getTime() + 300_000) : null,
-      closedBy: status === 'closed' || status === 'resolved' ? 'analyst@auraspear.io' : null,
-      closedAt:
-        status === 'closed' || status === 'resolved'
-          ? new Date(timestamp.getTime() + 3_600_000)
-          : null,
-      resolution:
-        status === 'closed'
-          ? 'Confirmed and mitigated'
-          : status === 'resolved'
-            ? 'False positive'
-            : null,
-    })
-  }
-
-  await prisma.alert.createMany({ data: alertData, skipDuplicates: true })
-}
-
 // ─── Case seed data ────────────────────────────────────────────
 
 const CASE_TEMPLATES: Array<{
@@ -302,105 +448,17 @@ const CASE_TEMPLATES: Array<{
   },
 ]
 
-async function seedCases(tenantId: string): Promise<void> {
-  const year = new Date().getFullYear()
-
-  for (const template of CASE_TEMPLATES) {
-    globalCaseCounter++
-    const caseNumber = `SOC-${year}-${String(globalCaseCounter).padStart(3, '0')}`
-
-    await prisma.case.upsert({
-      where: { caseNumber },
-      update: {},
-      create: {
-        tenantId,
-        caseNumber,
-        title: template.title,
-        description: template.description,
-        severity: template.severity,
-        status: template.status,
-        createdBy: 'admin@auraspear.io',
-        closedAt: template.status === 'closed' ? randomDate(5) : null,
-        timeline: {
-          create: [
-            {
-              type: 'created',
-              actor: 'admin@auraspear.io',
-              description: `Case ${caseNumber} created: ${template.title}`,
-            },
-            ...(template.status !== 'open'
-              ? [
-                  {
-                    type: 'status_changed',
-                    actor: 'analyst@auraspear.io',
-                    description: `Status changed to ${template.status}`,
-                  },
-                ]
-              : []),
-          ],
-        },
-        notes: {
-          create:
-            template.status !== 'open'
-              ? [
-                  {
-                    author: 'analyst@auraspear.io',
-                    body: 'Initial triage completed. Escalating for further investigation.',
-                  },
-                ]
-              : [],
-        },
-      },
-    })
-  }
-}
-
-// ─── Hunt session seed data ────────────────────────────────────
+// ─── Hunt query pool ────────────────────────────────────────────
 
 const HUNT_QUERIES = [
   'source.ip:203.0.113.* AND event.action:login_failed',
   'process.name:powershell.exe AND process.args:*-enc*',
   'dns.question.name:*.onion OR dns.question.name:*.bit',
+  'event.action:file_created AND file.extension:(exe OR dll OR scr)',
+  'network.bytes_out:>1000000 AND destination.geo.country_name:!internal',
+  'process.parent.name:winword.exe AND process.name:(cmd.exe OR powershell.exe)',
+  'registry.path:*\\Run\\* AND event.action:registry_modified',
 ]
-
-async function seedHuntSessions(tenantId: string): Promise<void> {
-  for (const query of HUNT_QUERIES) {
-    const status: HuntSessionStatus = 'completed'
-    const eventsCount = 5 + Math.floor(Math.random() * 15)
-
-    const session = await prisma.huntSession.create({
-      data: {
-        tenantId,
-        query,
-        status,
-        startedBy: 'hunter@auraspear.io',
-        startedAt: randomDate(14),
-        completedAt: randomDate(13),
-        eventsFound: eventsCount,
-        reasoning: [
-          'Searching for matching patterns in Wazuh alerts index',
-          `Found ${eventsCount} events matching query criteria`,
-          'Analysis complete. Results stored.',
-        ],
-      },
-    })
-
-    const events = []
-    for (let i = 0; i < eventsCount; i++) {
-      events.push({
-        huntSessionId: session.id,
-        timestamp: randomDate(14),
-        severity: randomItem(['critical', 'high', 'medium', 'low', 'info']),
-        eventId: `evt-${randomUUID().slice(0, 8)}`,
-        sourceIp: randomIp(),
-        user: randomItem(['john.doe', 'jane.smith', 'admin', 'svc-backup', null]),
-        description: `Event matching hunt query: ${query.slice(0, 50)}...`,
-      })
-    }
-
-    await prisma.huntEvent.createMany({ data: events })
-  }
-}
 
 // ─── Intel seed data ────────────────────────────────────────────
 
@@ -505,13 +563,197 @@ const MISP_EVENTS = [
   },
 ]
 
-async function seedIntel(tenantId: string): Promise<void> {
-  for (const ioc of IOC_DATA) {
+// ─── Helpers ────────────────────────────────────────────────────
+
+function randomIp(): string {
+  return `${10 + Math.floor(Math.random() * 190)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`
+}
+
+function randomDate(daysBack: number): Date {
+  return new Date(Date.now() - Math.floor(Math.random() * daysBack * 86_400_000))
+}
+
+function randomItem<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)] as T
+}
+
+function pickByIndices<T>(arr: T[], indices: number[]): T[] {
+  return indices.filter(i => i < arr.length).map(i => arr[i] as T)
+}
+
+// ─── Seed functions ─────────────────────────────────────────────
+
+async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<void> {
+  const templates = pickByIndices(ALERT_TEMPLATES, profile.alertTemplateIndices)
+
+  // Use deterministic externalId so alerts are idempotent via @@unique([tenantId, externalId])
+  // Seed a fixed set per tenant using the template index as part of the key
+  for (let i = 0; i < profile.alertCount; i++) {
+    const externalId = `seed-${profile.slug}-${i}`
+    const templateIndex = i % templates.length
+    const template = templates[templateIndex] as (typeof ALERT_TEMPLATES)[number]
+    const statusIndex = i % profile.alertStatusWeights.length
+    const status = profile.alertStatusWeights[statusIndex] as AlertStatus
+    const timestamp = randomDate(30)
+
+    await prisma.alert.upsert({
+      where: { tenantId_externalId: { tenantId, externalId } },
+      update: {},
+      create: {
+        tenantId,
+        externalId,
+        title: template.title,
+        description: template.description,
+        severity: template.severity,
+        status,
+        source: template.source,
+        ruleName: template.ruleName,
+        ruleId: template.ruleId,
+        agentName: randomItem(profile.agentPool),
+        sourceIp: randomIp(),
+        destinationIp: randomIp(),
+        mitreTactics: template.mitreTactics,
+        mitreTechniques: template.mitreTechniques,
+        timestamp,
+        acknowledgedBy: status !== 'new_alert' ? `analyst@${profile.slug}.io` : null,
+        acknowledgedAt: status !== 'new_alert' ? new Date(timestamp.getTime() + 300_000) : null,
+        closedBy:
+          status === 'closed' || status === 'resolved' ? `analyst@${profile.slug}.io` : null,
+        closedAt:
+          status === 'closed' || status === 'resolved'
+            ? new Date(timestamp.getTime() + 3_600_000)
+            : null,
+        resolution:
+          status === 'closed'
+            ? 'Confirmed and mitigated'
+            : status === 'resolved'
+              ? 'False positive'
+              : null,
+      },
+    })
+  }
+}
+
+async function seedCases(tenantId: string, profile: TenantProfile): Promise<void> {
+  const year = new Date().getFullYear()
+  const templates = pickByIndices(CASE_TEMPLATES, profile.caseTemplateIndices)
+
+  for (const template of templates) {
+    globalCaseCounter++
+    const caseNumber = `SOC-${year}-${String(globalCaseCounter).padStart(3, '0')}`
+
+    await prisma.case.upsert({
+      where: { caseNumber },
+      update: {},
+      create: {
+        tenantId,
+        caseNumber,
+        title: template.title,
+        description: template.description,
+        severity: template.severity,
+        status: template.status,
+        createdBy: `admin@${profile.slug}.io`,
+        closedAt: template.status === 'closed' ? randomDate(5) : null,
+        timeline: {
+          create: [
+            {
+              type: 'created',
+              actor: `admin@${profile.slug}.io`,
+              description: `Case ${caseNumber} created: ${template.title}`,
+            },
+            ...(template.status !== 'open'
+              ? [
+                  {
+                    type: 'status_changed',
+                    actor: `analyst.l2@${profile.slug}.io`,
+                    description: `Status changed to ${template.status}`,
+                  },
+                ]
+              : []),
+          ],
+        },
+        notes: {
+          create:
+            template.status !== 'open'
+              ? [
+                  {
+                    author: `analyst.l2@${profile.slug}.io`,
+                    body: 'Initial triage completed. Escalating for further investigation.',
+                  },
+                ]
+              : [],
+        },
+      },
+    })
+  }
+}
+
+async function seedHuntSessions(tenantId: string, profile: TenantProfile): Promise<void> {
+  const queries = pickByIndices(HUNT_QUERIES, profile.huntQueryIndices)
+
+  for (let qi = 0; qi < queries.length; qi++) {
+    const query = queries[qi] as string
+    const status = (profile.huntSessionStatuses[qi] ?? 'completed') as HuntSessionStatus
+    const eventsCount = status === 'error' ? 0 : 3 + Math.floor(Math.random() * 20)
+
+    // Skip if a session with this query already exists for this tenant
+    const existing = await prisma.huntSession.findFirst({
+      where: { tenantId, query },
+      select: { id: true },
+    })
+    if (existing) {
+      continue
+    }
+
+    const session = await prisma.huntSession.create({
+      data: {
+        tenantId,
+        query,
+        status,
+        startedBy: `hunter@${profile.slug}.io`,
+        startedAt: randomDate(14),
+        completedAt: status === 'running' ? null : randomDate(13),
+        eventsFound: eventsCount,
+        reasoning:
+          status === 'error'
+            ? ['Searching for matching patterns in Wazuh alerts index', 'Connection timeout']
+            : status === 'running'
+              ? ['Searching for matching patterns in Wazuh alerts index']
+              : [
+                  'Searching for matching patterns in Wazuh alerts index',
+                  `Found ${eventsCount} events matching query criteria`,
+                  'Analysis complete. Results stored.',
+                ],
+      },
+    })
+
+    const events = []
+    for (let i = 0; i < eventsCount; i++) {
+      events.push({
+        huntSessionId: session.id,
+        timestamp: randomDate(14),
+        severity: randomItem(['critical', 'high', 'medium', 'low', 'info']),
+        eventId: `evt-${randomUUID().slice(0, 8)}`,
+        sourceIp: randomIp(),
+        user: randomItem(['john.doe', 'jane.smith', 'admin', 'svc-backup', null]),
+        description: `Event matching hunt query: ${query.slice(0, 50)}...`,
+      })
+    }
+
+    await prisma.huntEvent.createMany({ data: events })
+  }
+}
+
+async function seedIntel(tenantId: string, profile: TenantProfile): Promise<void> {
+  const iocs = pickByIndices(IOC_DATA, profile.iocIndices)
+  const mispEvents = pickByIndices(MISP_EVENTS, profile.mispEventIndices)
+
+  for (const ioc of iocs) {
     await prisma.intelIOC.upsert({
       where: {
         tenantId_iocValue_iocType: { tenantId, iocValue: ioc.iocValue, iocType: ioc.iocType },
       },
-      update: { lastSeen: new Date() },
+      update: {},
       create: {
         tenantId,
         ...ioc,
@@ -524,7 +766,7 @@ async function seedIntel(tenantId: string): Promise<void> {
     })
   }
 
-  for (const evt of MISP_EVENTS) {
+  for (const evt of mispEvents) {
     await prisma.intelMispEvent.upsert({
       where: {
         tenantId_mispEventId: { tenantId, mispEventId: evt.mispEventId },
@@ -564,49 +806,49 @@ async function main(): Promise<void> {
     }
   }
 
-  for (const tenant of TENANTS) {
+  for (const profile of TENANT_PROFILES) {
     await prisma.tenant.upsert({
-      where: { slug: tenant.slug },
+      where: { slug: profile.slug },
       update: {},
       create: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
+        id: profile.id,
+        name: profile.name,
+        slug: profile.slug,
       },
     })
 
-    const createdTenant = await prisma.tenant.findUnique({ where: { slug: tenant.slug } })
-    const tenantId = createdTenant?.id ?? tenant.id
+    const createdTenant = await prisma.tenant.findUnique({ where: { slug: profile.slug } })
+    const tenantId = createdTenant?.id ?? profile.id
 
     // ─── Users + Memberships ───
     const userDefs = [
       {
-        oidcSub: `admin-${tenant.slug}`,
-        email: `admin@${tenant.slug}.io`,
+        oidcSub: `admin-${profile.slug}`,
+        email: `admin@${profile.slug}.io`,
         name: 'Admin User',
         role: UserRole.GLOBAL_ADMIN,
       },
       {
-        oidcSub: `analyst-l2-${tenant.slug}`,
-        email: `analyst.l2@${tenant.slug}.io`,
+        oidcSub: `analyst-l2-${profile.slug}`,
+        email: `analyst.l2@${profile.slug}.io`,
         name: 'Senior Analyst',
         role: UserRole.SOC_ANALYST_L2,
       },
       {
-        oidcSub: `analyst-l1-${tenant.slug}`,
-        email: `analyst.l1@${tenant.slug}.io`,
+        oidcSub: `analyst-l1-${profile.slug}`,
+        email: `analyst.l1@${profile.slug}.io`,
         name: 'Junior Analyst',
         role: UserRole.SOC_ANALYST_L1,
       },
       {
-        oidcSub: `hunter-${tenant.slug}`,
-        email: `hunter@${tenant.slug}.io`,
+        oidcSub: `hunter-${profile.slug}`,
+        email: `hunter@${profile.slug}.io`,
         name: 'Threat Hunter',
         role: UserRole.THREAT_HUNTER,
       },
       {
-        oidcSub: `exec-${tenant.slug}`,
-        email: `exec@${tenant.slug}.io`,
+        oidcSub: `exec-${profile.slug}`,
+        email: `exec@${profile.slug}.io`,
         name: 'Executive',
         role: UserRole.EXECUTIVE_READONLY,
       },
@@ -615,13 +857,9 @@ async function main(): Promise<void> {
     for (const userDef of userDefs) {
       const isProtected = userDef.role === UserRole.GLOBAL_ADMIN
 
-      // Upsert global User by email
       const createdUser = await prisma.user.upsert({
         where: { email: userDef.email },
-        update: {
-          passwordHash,
-          isProtected: isProtected || undefined,
-        },
+        update: {},
         create: {
           email: userDef.email,
           name: userDef.name,
@@ -631,10 +869,9 @@ async function main(): Promise<void> {
         },
       })
 
-      // Upsert TenantMembership
       await prisma.tenantMembership.upsert({
         where: { userId_tenantId: { userId: createdUser.id, tenantId } },
-        update: { role: userDef.role },
+        update: {},
         create: {
           userId: createdUser.id,
           tenantId,
@@ -642,7 +879,6 @@ async function main(): Promise<void> {
         },
       })
 
-      // Create default preferences
       await prisma.userPreference.upsert({
         where: { userId: createdUser.id },
         update: {},
@@ -655,52 +891,11 @@ async function main(): Promise<void> {
         },
       })
 
-      logger.info({ tenant: tenant.slug, email: userDef.email, role: userDef.role }, 'Seeded user')
+      logger.info({ tenant: profile.slug, email: userDef.email, role: userDef.role }, 'Seeded user')
     }
 
     // ─── Connectors ───
-    const connectors: Array<{
-      type: ConnectorType
-      name: string
-      authType: AuthType
-      enabled: boolean
-    }> = [
-      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
-      {
-        type: ConnectorType.graylog,
-        name: 'Graylog SIEM',
-        authType: AuthType.basic,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.velociraptor,
-        name: 'Velociraptor EDR',
-        authType: AuthType.api_key,
-        enabled: false,
-      },
-      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: true },
-      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
-      {
-        type: ConnectorType.misp,
-        name: 'MISP Threat Intel',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.shuffle,
-        name: 'Shuffle SOAR',
-        authType: AuthType.api_key,
-        enabled: false,
-      },
-      {
-        type: ConnectorType.bedrock,
-        name: 'AWS Bedrock AI',
-        authType: AuthType.iam,
-        enabled: true,
-      },
-    ]
-
-    for (const connector of connectors) {
+    for (const connector of profile.connectors) {
       await prisma.connectorConfig.upsert({
         where: { tenantId_type: { tenantId, type: connector.type } },
         update: {},
@@ -715,30 +910,31 @@ async function main(): Promise<void> {
       })
     }
 
-    // ─── Alerts ───
-    const existingAlerts = await prisma.alert.count({ where: { tenantId } })
-    if (existingAlerts === 0) {
-      await seedAlerts(tenantId)
-      logger.info({ tenant: tenant.slug }, 'Seeded 25 alerts')
-    }
+    // ─── Alerts (idempotent via deterministic externalId) ───
+    await seedAlerts(tenantId, profile)
+    logger.info({ tenant: profile.slug, count: profile.alertCount }, 'Seeded alerts')
 
-    // ─── Cases ───
-    const existingCases = await prisma.case.count({ where: { tenantId } })
-    if (existingCases === 0) {
-      await seedCases(tenantId)
-      logger.info({ tenant: tenant.slug }, 'Seeded 8 cases')
-    }
+    // ─── Cases (idempotent via upsert on caseNumber) ───
+    await seedCases(tenantId, profile)
+    logger.info({ tenant: profile.slug, count: profile.caseTemplateIndices.length }, 'Seeded cases')
 
-    // ─── Hunt Sessions ───
-    const existingHunts = await prisma.huntSession.count({ where: { tenantId } })
-    if (existingHunts === 0) {
-      await seedHuntSessions(tenantId)
-      logger.info({ tenant: tenant.slug }, 'Seeded 3 hunt sessions')
-    }
+    // ─── Hunt Sessions (idempotent via query check per tenant) ───
+    await seedHuntSessions(tenantId, profile)
+    logger.info(
+      { tenant: profile.slug, count: profile.huntQueryIndices.length },
+      'Seeded hunt sessions'
+    )
 
     // ─── Intel ───
-    await seedIntel(tenantId)
-    logger.info({ tenant: tenant.slug }, 'Seeded intel IOCs + MISP events')
+    await seedIntel(tenantId, profile)
+    logger.info(
+      {
+        tenant: profile.slug,
+        iocs: profile.iocIndices.length,
+        mispEvents: profile.mispEventIndices.length,
+      },
+      'Seeded intel'
+    )
   }
 
   logger.info('Seed completed.')

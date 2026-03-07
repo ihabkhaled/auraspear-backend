@@ -90,6 +90,18 @@ export class ConnectorsService {
   }
 
   async create(tenantId: string, dto: CreateConnectorDto): Promise<ConnectorResponse> {
+    const existing = await this.prisma.connectorConfig.findUnique({
+      where: { tenantId_type: { tenantId, type: dto.type as never } },
+    })
+
+    if (existing) {
+      throw new BusinessException(
+        409,
+        `Connector '${dto.type}' already exists`,
+        'errors.connectors.alreadyExists'
+      )
+    }
+
     const encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey)
 
     const config = await this.prisma.connectorConfig.create({
@@ -158,6 +170,18 @@ export class ConnectorsService {
   }
 
   async remove(tenantId: string, type: string): Promise<{ deleted: boolean }> {
+    const existing = await this.prisma.connectorConfig.findUnique({
+      where: { tenantId_type: { tenantId, type: type as never } },
+    })
+
+    if (!existing) {
+      throw new BusinessException(
+        404,
+        `Connector '${type}' not found`,
+        'errors.connectors.notFound'
+      )
+    }
+
     await this.prisma.connectorConfig.delete({
       where: { tenantId_type: { tenantId, type: type as never } },
     })

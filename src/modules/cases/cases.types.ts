@@ -6,8 +6,9 @@ export type CaseRecord = Case & {
   timeline: CaseTimeline[]
   ownerName: string | null
   ownerEmail: string | null
+  tenantName: string
 }
 
 export type PaginatedCases = PaginatedResponse<
-  Case & { ownerName: string | null; ownerEmail: string | null }
+  Case & { ownerName: string | null; ownerEmail: string | null; tenantName: string }
 >
