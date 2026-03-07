@@ -29,25 +29,10 @@ services:
       timeout: 5s
       retries: 5
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: auraspear-pgadmin
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-    ports:
-      - '${PGADMIN_PORT}:80'
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   backend:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     container_name: auraspear-backend
     restart: unless-stopped
     depends_on:
@@ -59,11 +44,7 @@ services:
       - '${PORT}:4000'
     env_file: .env
     environment:
-      NODE_ENV: development
-    volumes:
-      - .:/app
-      - /app/node_modules
+      NODE_ENV: production
 
 volumes:
   pgdata:
-  pgadmin_data:

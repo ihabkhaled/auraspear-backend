@@ -1,9 +1,0 @@
-# Local development overrides — loaded automatically by Docker Compose.
-# This file enables dev mode auth bypass (no OIDC required).
-# Do NOT commit to production.
-
-services:
-  backend:
-    environment:
-      NODE_ENV: development
-      LOG_LEVEL: debug

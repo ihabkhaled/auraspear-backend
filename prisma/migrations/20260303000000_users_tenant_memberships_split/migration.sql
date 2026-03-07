@@ -61,20 +61,20 @@ SELECT
 FROM tenant_users tu
 JOIN users u ON u.email = tu.email;
 
--- 5. Update cases.owner_user_id to point to users.id (join via old tenant_users email)
+-- 5. Drop old foreign key constraints BEFORE updating IDs (otherwise the old FK rejects new UUIDs)
+ALTER TABLE "user_preferences" DROP CONSTRAINT IF EXISTS "user_preferences_user_id_fkey";
+
+-- 6. Update cases.owner_user_id to point to users.id (join via old tenant_users email)
 UPDATE cases SET owner_user_id = u.id
 FROM tenant_users tu
 JOIN users u ON u.email = tu.email
 WHERE cases.owner_user_id = tu.id;
 
--- 6. Update user_preferences.user_id to point to users.id
+-- 7. Update user_preferences.user_id to point to users.id
 UPDATE user_preferences SET user_id = u.id
 FROM tenant_users tu
 JOIN users u ON u.email = tu.email
 WHERE user_preferences.user_id = tu.id;
-
--- 7. Drop old foreign key constraints on user_preferences referencing tenant_users
-ALTER TABLE "user_preferences" DROP CONSTRAINT IF EXISTS "user_preferences_user_id_fkey";
 
 -- 8. Drop old tenant_users table
 DROP TABLE "tenant_users";
