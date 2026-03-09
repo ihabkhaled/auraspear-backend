@@ -1,0 +1,15 @@
+import { z } from 'zod'
+
+export const ListCasesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  sortBy: z
+    .enum(['createdAt', 'updatedAt', 'severity', 'status', 'caseNumber', 'title'])
+    .default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  status: z.enum(['open', 'in_progress', 'closed']).optional(),
+  severity: z.enum(['critical', 'high', 'medium', 'low']).optional(),
+  query: z.string().max(500).optional(),
+})
+
+export type ListCasesQueryDto = z.infer<typeof ListCasesQuerySchema>

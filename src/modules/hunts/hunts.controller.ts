@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { ListHuntEventsQuerySchema, ListHuntsQuerySchema } from './dto/list-hunts-query.dto'
 import { type RunHuntDto, RunHuntSchema } from './dto/run-hunt.dto'
 import { HuntsService } from './hunts.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -29,14 +30,10 @@ export class HuntsController {
   @Get('runs')
   async listRuns(
     @TenantId() tenantId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedHuntSessions> {
-    return this.huntsService.listRuns(
-      tenantId,
-      Math.max(1, page ? Number.parseInt(page, 10) : 1),
-      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 20))
-    )
+    const { page, limit } = ListHuntsQuerySchema.parse(rawQuery)
+    return this.huntsService.listRuns(tenantId, page, limit)
   }
 
   @Get('runs/:id')
@@ -51,14 +48,9 @@ export class HuntsController {
   async getRunEvents(
     @Param('id') id: string,
     @TenantId() tenantId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedHuntEvents> {
-    return this.huntsService.getEvents(
-      tenantId,
-      id,
-      Math.max(1, page ? Number.parseInt(page, 10) : 1),
-      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 50))
-    )
+    const { page, limit } = ListHuntEventsQuerySchema.parse(rawQuery)
+    return this.huntsService.getEvents(tenantId, id, page, limit)
   }
 }

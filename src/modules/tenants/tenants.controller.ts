@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
+import { ListUsersQuerySchema } from './dto/list-users-query.dto'
 import {
   CreateTenantSchema,
   type CreateTenantDto,
@@ -88,12 +89,10 @@ export class TenantsController {
   async listUsers(
     @Param('id') tenantId: string,
     @CurrentUser() user: JwtPayload,
-    @Query('sortBy') sortBy?: string,
-    @Query('sortOrder') sortOrder?: string,
-    @Query('role') role?: string,
-    @Query('status') status?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<UserRecord[]> {
     assertTenantAccess(user, tenantId)
+    const { sortBy, sortOrder, role, status } = ListUsersQuerySchema.parse(rawQuery)
     return this.tenantsService.findUsers(tenantId, sortBy, sortOrder, role, status)
   }
 

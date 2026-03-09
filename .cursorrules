@@ -88,3 +88,44 @@
 - AI endpoints MUST have rate limiting — 10 req/min at controller level
 - Request body size MUST be limited — `express.json({ limit: '1mb' })` in main.ts
 - Database batch operations MUST be chunked (50 per batch) — never fire hundreds of concurrent Prisma operations
+
+### Token Revocation & JWT Security
+- Token revocation MUST use server-side Redis blacklist — on logout, blacklist both access and refresh JTIs via `TokenBlacklistService`
+- EVERY JWT MUST include `jti` (UUID) and `tokenType` (`access` or `refresh`) claims — verify tokenType on every validation
+- Access tokens: 15m expiry. Refresh tokens: 7d expiry. Both blacklisted on logout with remaining TTL.
+- `verifyAccessToken()` and `verifyRefreshToken()` are async — they check Redis blacklist after JWT signature verification
+
+### Connector Config Validation
+- EVERY connector config MUST be validated with per-type Zod schemas before encryption — call `validateConnectorConfig(type, config)` in `connector.dto.ts`
+- Supported types: wazuh, graylog, logstash, velociraptor, grafana, influxdb, misp, shuffle, bedrock
+- Each type has its own Zod schema (e.g., `WazuhConfigSchema`, `GraylogConfigSchema`)
+
+### State Machine & Data Integrity
+- Hunt run state transitions MUST follow valid state machine — only `running` → `completed` or `running` → `error`
+- Case number generation MUST use `pg_advisory_xact_lock` in a Prisma `$transaction` — prevents race conditions
+- Case owner MUST be validated as active tenant member before create/update
+- Linked alert IDs MUST belong to the same tenant before creating case associations
+- AI investigation MUST validate alert belongs to caller's tenant — no cross-tenant alert investigation
+
+### Error & Response Security
+- Error messages MUST NOT leak internal paths — sanitize by stripping file paths and truncating to 500 chars
+- Source maps MUST be disabled in production — `tsconfig.build.json` has `"sourceMap": false`
+- TLS verification warnings MUST be logged when `rejectUnauthorized: false` is used
+
+### Infrastructure
+- Prisma connection pool: `connection_limit=20&pool_timeout=10` appended to DATABASE_URL in `PrismaService`
+- Health check Redis: one shared instance per `HealthService` — never per-request connections
+- X-Request-ID middleware in `main.ts` — generates UUID if missing, propagates to response header
+- Helmet CSP: default-src self, script-src self, frame-ancestors none
+- HSTS: 1 year, includeSubDomains, preload
+- CORS origins validated as proper URLs via `new URL()` — production requires non-empty list
+- Request timeout: 30s via `server.setTimeout(30_000)`
+
+## Internationalization (i18n)
+
+- EVERY `messageKey` in `BusinessException` MUST have translations in ALL 6 language files
+- Language files: `en.json`, `ar.json`, `es.json`, `fr.json`, `de.json`, `it.json`
+- Location: frontend `src/i18n/` directory
+- Pattern: `errors.<module>.<specificAction>` (e.g., `errors.auth.tokenRevoked`)
+- When adding ANY new error messageKey, ALWAYS add the translation to ALL 6 language files — missing translations cause frontend display errors
+- When adding ANY new UI text, label, or message, ALWAYS add to ALL 6 language files

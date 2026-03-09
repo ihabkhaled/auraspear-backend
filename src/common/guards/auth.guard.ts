@@ -49,7 +49,7 @@ export class AuthGuard implements CanActivate {
     const token = authHeader.slice(7)
 
     try {
-      const decoded = this.authService.verifyAccessToken(token)
+      const decoded = await this.authService.verifyAccessToken(token)
 
       // Verify user still exists and has at least one active membership
       await this.authService.validateUserActive(decoded.sub)

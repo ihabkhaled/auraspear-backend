@@ -1,13 +1,18 @@
-import { Controller, Get, Post, Body, UsePipes } from '@nestjs/common'
+import { Controller, Get, Post, Body, Req, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { AuthService } from './auth.service'
 import { AuthLoginSchema, type AuthLoginDto } from './dto/auth-login.dto'
+import { AuthLogoutSchema, type AuthLogoutDto } from './dto/auth-logout.dto'
 import { AuthRefreshSchema, type AuthRefreshDto } from './dto/auth-refresh.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Public } from '../../common/decorators/public.decorator'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type {
+  AuthenticatedRequest,
+  JwtPayload,
+} from '../../common/interfaces/authenticated-request.interface'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -53,12 +58,40 @@ export class AuthController {
 
   /**
    * POST /auth/logout
-   * Stateless logout — client must discard tokens.
-   * TODO: Implement server-side token revocation via Redis blacklist for full security.
+   * Blacklists both access and refresh tokens in Redis so they cannot be reused.
+   * The client should also discard its stored tokens.
    */
   @ApiBearerAuth()
   @Post('logout')
-  logout(): { loggedOut: boolean } {
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(AuthLogoutSchema)) dto: AuthLogoutDto
+  ): Promise<{ loggedOut: boolean }> {
+    const accessUser = request.user
+    if (!accessUser?.jti || !accessUser?.exp) {
+      throw new BusinessException(
+        401,
+        'Access token missing required claims',
+        'errors.auth.invalidAccessToken'
+      )
+    }
+
+    const refreshPayload = await this.authService.verifyRefreshToken(dto.refreshToken)
+    if (!refreshPayload.jti || !refreshPayload.exp) {
+      throw new BusinessException(
+        401,
+        'Refresh token missing required claims',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    await this.authService.logout(
+      accessUser.jti,
+      refreshPayload.jti,
+      accessUser.exp,
+      refreshPayload.exp
+    )
+
     return { loggedOut: true }
   }
 }

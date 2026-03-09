@@ -1,12 +1,31 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { PrismaClient } from '@prisma/client'
 
 const MAX_RETRIES = 5
 const BASE_DELAY_MS = 2000
 
+/** Default connection pool size: num_cpus * 2 + 1 (Prisma default) capped at a sane max */
+const DEFAULT_CONNECTION_LIMIT = 20
+const DEFAULT_POOL_TIMEOUT_SECONDS = 10
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name)
+
+  constructor(configService: ConfigService) {
+    const databaseUrl = configService.get<string>('DATABASE_URL') ?? ''
+    const separator = databaseUrl.includes('?') ? '&' : '?'
+    const pooledUrl = `${databaseUrl}${separator}connection_limit=${DEFAULT_CONNECTION_LIMIT}&pool_timeout=${DEFAULT_POOL_TIMEOUT_SECONDS}`
+
+    super({
+      datasourceUrl: pooledUrl,
+    })
+
+    this.logger.log(
+      `Prisma connection pool configured: connection_limit=${DEFAULT_CONNECTION_LIMIT}, pool_timeout=${DEFAULT_POOL_TIMEOUT_SECONDS}s`
+    )
+  }
 
   async onModuleInit(): Promise<void> {
     await this.connectWithRetry(1)

@@ -351,6 +351,18 @@ export class CasesService {
       )
     }
 
+    // Validate that the alert belongs to the caller's tenant
+    const alertExists = await this.prisma.alert.count({
+      where: { id: dto.alertId, tenantId: user.tenantId },
+    })
+    if (alertExists === 0) {
+      throw new BusinessException(
+        400,
+        'The linked alert does not belong to this tenant',
+        'errors.cases.invalidLinkedAlerts'
+      )
+    }
+
     if (existing.linkedAlerts.includes(dto.alertId)) {
       throw new BusinessException(
         409,

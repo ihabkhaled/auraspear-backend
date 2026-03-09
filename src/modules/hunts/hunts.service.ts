@@ -12,6 +12,10 @@ import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } fr
 export class HuntsService {
   private readonly logger = new Logger(HuntsService.name)
 
+  private readonly VALID_TRANSITIONS = new Map<HuntSessionStatus, Set<HuntSessionStatus>>([
+    [HuntSessionStatus.running, new Set([HuntSessionStatus.completed, HuntSessionStatus.error])],
+  ])
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly connectorsService: ConnectorsService,
@@ -41,6 +45,7 @@ export class HuntsService {
 
     if (!wazuhConfig) {
       // No Wazuh connector configured — mark session as error
+      this.assertValidTransition(session.status, HuntSessionStatus.error)
       await this.prisma.huntSession.update({
         where: { id: session.id },
         data: {
@@ -101,6 +106,7 @@ export class HuntsService {
       }
 
       // Update session to completed
+      this.assertValidTransition(session.status, HuntSessionStatus.completed)
       const updated = await this.prisma.huntSession.update({
         where: { id: session.id },
         data: {
@@ -119,6 +125,7 @@ export class HuntsService {
       this.logger.error(`Hunt query failed for session ${session.id}: ${errorMessage}`)
 
       // Update session to error status
+      this.assertValidTransition(session.status, HuntSessionStatus.error)
       await this.prisma.huntSession.update({
         where: { id: session.id },
         data: {
@@ -211,6 +218,21 @@ export class HuntsService {
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
+    }
+  }
+
+  /**
+   * Validates that a hunt session status transition is allowed.
+   * Terminal states (completed, error) cannot transition to anything.
+   */
+  private assertValidTransition(from: HuntSessionStatus, to: HuntSessionStatus): void {
+    const allowed = this.VALID_TRANSITIONS.get(from)
+    if (!allowed?.has(to)) {
+      throw new BusinessException(
+        400,
+        `Invalid hunt session transition from ${from} to ${to}`,
+        'errors.hunts.invalidTransition'
+      )
     }
   }
 

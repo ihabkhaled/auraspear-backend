@@ -37,6 +37,48 @@
 33. **Request body size MUST be limited** — `express.json({ limit: '1mb' })` is configured in `main.ts`. Never remove this.
 34. **Elasticsearch queries MUST be sanitized** — Strip `script`, `_search`, `_mapping`, `_cluster`, `_cat`, `_nodes` patterns. Limit query length. Use `allow_leading_wildcard: false`.
 35. **Database batch operations MUST be chunked** — Never fire hundreds of concurrent Prisma operations. Batch in chunks of 50 using `Promise.allSettled()`.
+36. **Token revocation MUST use server-side blacklist** — On logout, blacklist both access and refresh JTIs in Redis with TTL matching token expiry. `TokenBlacklistService` handles this via `token:blacklist:{jti}` keys.
+37. **EVERY JWT MUST include `jti` and `tokenType` claims** — Access tokens get `tokenType: 'access'`, refresh tokens get `tokenType: 'refresh'`. Verify `tokenType` on every token validation to prevent token type confusion.
+38. **Connector configs MUST be validated with per-type Zod schemas** — Each connector type (wazuh, graylog, logstash, velociraptor, grafana, influxdb, misp, shuffle, bedrock) has its own Zod config schema in `connector.dto.ts`. Call `validateConnectorConfig(type, config)` before encrypting.
+39. **Hunt run state transitions MUST follow a valid state machine** — Only `running` → `completed` or `running` → `error` are valid transitions. Use `VALID_TRANSITIONS` map in `hunts.service.ts`. Reject invalid transitions with `BusinessException`.
+40. **Case owner MUST be validated as active tenant member** — Before creating/updating a case with `ownerUserId`, call `validateOwnerInTenant(ownerUserId, tenantId)` to verify active membership.
+41. **Linked alert IDs MUST belong to the same tenant** — Before linking alerts to a case, verify each alert belongs to the caller's tenant via Wazuh/OpenSearch query.
+42. **Case number generation MUST use advisory locks** — Use `pg_advisory_xact_lock` in a Prisma `$transaction` to prevent race conditions when generating sequential case numbers.
+43. **Error messages MUST NOT leak internal paths** — Sanitize error details by stripping file paths (`/path/to/file`) and truncating to 500 chars before returning to clients. See `connectors.service.ts` L329.
+44. **Source maps MUST be disabled in production** — `tsconfig.build.json` has `"sourceMap": false`. Never enable source maps in production builds.
+45. **Prisma connection pool MUST be configured** — `PrismaService` appends `connection_limit=20&pool_timeout=10` to DATABASE_URL. Never use unbounded connection pools.
+46. **Health check Redis MUST reuse connections** — `HealthService` creates one shared Redis instance in constructor. Never create per-request Redis connections.
+47. **AI investigation MUST validate alert tenant ownership** — Before investigating an alert, verify it belongs to the caller's tenant. Never allow cross-tenant alert investigation.
+48. **EVERY i18n messageKey MUST exist in ALL language files** — When adding a new `messageKey` to any `BusinessException`, add the corresponding translation to ALL 6 i18n files: `en.json`, `ar.json`, `es.json`, `fr.json`, `de.json`, `it.json`. Missing translations cause frontend display errors.
+49. **TLS verification warnings MUST be logged** — When `rejectUnauthorized: false` is used in connector HTTP calls, log a `console.warn` with the connector type. See `connector-http.util.ts`.
+
+---
+
+## Security Architecture (Post-Audit)
+
+### Token Lifecycle
+
+1. **Login** → Issues access token (`15m`) + refresh token (`7d`), both with `jti` (UUID) and `tokenType`
+2. **Refresh** → Verifies refresh token type + blacklist, issues new pair
+3. **Logout** → Blacklists both access `jti` and refresh `jti` in Redis with remaining TTL
+4. **Every request** → AuthGuard verifies access token, checks `tokenType === 'access'`, checks Redis blacklist
+
+### Files Added by Security Audit
+
+- `src/modules/auth/token-blacklist.service.ts` — Redis-backed JTI blacklist
+- `src/modules/auth/dto/auth-logout.dto.ts` — Logout request validation
+- `src/modules/cases/dto/list-cases-query.dto.ts` — Cases listing query validation
+- `src/modules/hunts/dto/list-hunts-query.dto.ts` — Hunts listing query validation
+- `src/modules/tenants/dto/list-users-query.dto.ts` — Users listing query validation
+
+### HTTP Hardening (`main.ts`)
+
+- X-Request-ID middleware (generates UUID if missing, propagates to response)
+- Helmet with explicit CSP (default-src: self, script-src: self, frame-ancestors: none)
+- HSTS (1 year, includeSubDomains, preload)
+- CORS origins validated as proper URLs via `new URL()`
+- Request timeout: 30 seconds (`server.setTimeout(30_000)`)
+- Body size limit: 1MB (`express.json({ limit: '1mb' })`)
 
 ---
 
@@ -334,7 +376,8 @@ src/
 |   |   +-- dto/            # search-alerts.dto, investigate-alert.dto, close-alert.dto
 |   |   +-- alerts.types.ts # Alert, PaginatedResult
 |   +-- auth/               # Authentication (OIDC callback, token exchange)
-|   |   +-- dto/            # auth-callback.dto, auth-refresh.dto
+|   |   +-- dto/            # auth-callback.dto, auth-refresh.dto, auth-logout.dto
+|   |   +-- token-blacklist.service.ts # Redis-backed JTI blacklist for token revocation
 |   +-- cases/              # Case management (CRUD, notes, linked alerts)
 |   |   +-- dto/            # create-case.dto, update-case.dto, create-note.dto, link-alert.dto
 |   |   +-- cases.types.ts  # CaseRecord, CaseNote, PaginatedCases, etc.

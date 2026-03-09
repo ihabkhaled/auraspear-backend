@@ -3,6 +3,7 @@ import { CasesService } from './cases.service'
 import { type CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
 import { type CreateNoteDto, CreateNoteSchema } from './dto/create-note.dto'
 import { type LinkAlertDto, LinkAlertSchema } from './dto/link-alert.dto'
+import { ListCasesQuerySchema } from './dto/list-cases-query.dto'
 import { type UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -23,18 +24,14 @@ export class CasesController {
   @Get()
   async listCases(
     @TenantId() tenantId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('sortBy') sortBy?: string,
-    @Query('sortOrder') sortOrder?: string,
-    @Query('status') status?: string,
-    @Query('severity') severity?: string,
-    @Query('query') query?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedCases> {
+    const { page, limit, sortBy, sortOrder, status, severity, query } =
+      ListCasesQuerySchema.parse(rawQuery)
     return this.casesService.listCases(
       tenantId,
-      Math.max(1, page ? Number.parseInt(page, 10) : 1),
-      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 20)),
+      page,
+      limit,
       sortBy,
       sortOrder,
       status,

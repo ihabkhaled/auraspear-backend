@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NestFactory } from '@nestjs/core'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
 import * as express from 'express'
@@ -21,13 +22,58 @@ async function bootstrap(): Promise<void> {
   app.use(express.json({ limit: '1mb' }))
   app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
-  // Security headers
-  app.use(helmet())
+  // X-Request-ID middleware
+  app.use(
+    (
+      req: { headers: Record<string, string | undefined> },
+      res: { setHeader: (name: string, value: string) => void },
+      next: () => void
+    ) => {
+      const requestId = req.headers['x-request-id'] ?? randomUUID()
+      req.headers['x-request-id'] = requestId
+      res.setHeader('x-request-id', requestId)
+      next()
+    }
+  )
 
-  // CORS
-  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map(o => o.trim()) ?? [
-    'http://localhost:3000',
-  ]
+  // Security headers
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      frameguard: { action: 'deny' },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    })
+  )
+
+  // CORS — validate origins
+  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
+    .split(',')
+    .map(o => o.trim())
+    .filter(o => {
+      try {
+        const url = new URL(o)
+        return url.protocol === 'http:' || url.protocol === 'https:'
+      } catch {
+        return false
+      }
+    })
+
+  if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
+    throw new Error('CORS_ORIGINS must be set with valid URLs in production')
+  }
+
   app.enableCors({ origin: corsOrigins, credentials: true })
 
   // Global prefix (exclude root route)
@@ -60,6 +106,11 @@ async function bootstrap(): Promise<void> {
   }
 
   const port = process.env.PORT ?? 4000
+
+  // Request timeout (30 seconds)
+  const server = app.getHttpServer()
+  server.setTimeout(30_000)
+
   await app.listen(port)
 }
 

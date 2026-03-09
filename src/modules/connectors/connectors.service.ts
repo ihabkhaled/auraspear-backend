@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { validateConnectorConfig } from './dto/connector.dto'
 import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
 import { GraylogService } from './services/graylog.service'
@@ -108,7 +109,19 @@ export class ConnectorsService {
       )
     }
 
-    const encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey)
+    let validatedConfig: Record<string, unknown>
+    try {
+      validatedConfig = validateConnectorConfig(dto.type, dto.config as Record<string, unknown>)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid connector config'
+      throw new BusinessException(
+        400,
+        `Invalid config for '${dto.type}': ${message}`,
+        'errors.connectors.invalidConfig'
+      )
+    }
+
+    const encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
 
     const config = await this.prisma.connectorConfig.create({
       data: {
@@ -126,7 +139,7 @@ export class ConnectorsService {
       name: config.name,
       enabled: config.enabled,
       authType: config.authType,
-      config: maskSecrets(dto.config as Record<string, unknown>),
+      config: maskSecrets(validatedConfig),
       lastTestAt: null,
       lastTestOk: null,
       lastError: null,
@@ -155,7 +168,18 @@ export class ConnectorsService {
     if (dto.enabled !== undefined) updateData.enabled = dto.enabled
     if (dto.authType !== undefined) updateData.authType = dto.authType
     if (dto.config !== undefined) {
-      updateData.encryptedConfig = encrypt(JSON.stringify(dto.config), this.encryptionKey)
+      let validatedConfig: Record<string, unknown>
+      try {
+        validatedConfig = validateConnectorConfig(type, dto.config as Record<string, unknown>)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid connector config'
+        throw new BusinessException(
+          400,
+          `Invalid config for '${type}': ${message}`,
+          'errors.connectors.invalidConfig'
+        )
+      }
+      updateData.encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
     }
 
     const updated = await this.prisma.connectorConfig.update({

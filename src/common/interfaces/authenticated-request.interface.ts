@@ -28,6 +28,7 @@ export interface JwtPayload {
   tenantId: string
   tenantSlug: string
   role: UserRole
+  jti?: string
   iat?: number
   exp?: number
 }

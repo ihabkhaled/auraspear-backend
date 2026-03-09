@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
+import { TokenBlacklistService } from './token-blacklist.service'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
@@ -23,7 +25,8 @@ export class AuthService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly tokenBlacklistService: TokenBlacklistService
   ) {
     const secret = this.configService.get<string>('JWT_SECRET')
     if (!secret || secret.length < 32) {
@@ -112,22 +115,22 @@ export class AuthService {
   }
 
   signAccessToken(payload: JwtPayload): string {
-    const { iat: _iat, exp: _exp, ...clean } = payload
-    return jwt.sign({ ...clean, tokenType: 'access' }, this.jwtSecret, {
+    const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
+    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: 'access' }, this.jwtSecret, {
       algorithm: 'HS256',
       expiresIn: this.accessExpiry,
     })
   }
 
   signRefreshToken(payload: JwtPayload): string {
-    const { iat: _iat, exp: _exp, ...clean } = payload
-    return jwt.sign({ ...clean, tokenType: 'refresh' }, this.jwtSecret, {
+    const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
+    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: 'refresh' }, this.jwtSecret, {
       algorithm: 'HS256',
       expiresIn: this.refreshExpiry,
     })
   }
 
-  verifyAccessToken(token: string): JwtPayload {
+  async verifyAccessToken(token: string): Promise<JwtPayload> {
     try {
       const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
         tokenType?: string
@@ -135,8 +138,19 @@ export class AuthService {
       if (decoded.tokenType !== 'access') {
         throw new Error('Not an access token')
       }
+
+      if (decoded.jti) {
+        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
+        if (revoked) {
+          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
+        }
+      }
+
       return decoded
-    } catch {
+    } catch (error) {
+      if (error instanceof BusinessException) {
+        throw error
+      }
       throw new BusinessException(
         401,
         'Invalid or expired access token',
@@ -145,7 +159,7 @@ export class AuthService {
     }
   }
 
-  verifyRefreshToken(token: string): JwtPayload {
+  async verifyRefreshToken(token: string): Promise<JwtPayload> {
     try {
       const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
         tokenType?: string
@@ -153,8 +167,19 @@ export class AuthService {
       if (decoded.tokenType !== 'refresh') {
         throw new Error('Not a refresh token')
       }
+
+      if (decoded.jti) {
+        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
+        if (revoked) {
+          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
+        }
+      }
+
       return decoded
-    } catch {
+    } catch (error) {
+      if (error instanceof BusinessException) {
+        throw error
+      }
       throw new BusinessException(
         401,
         'Invalid or expired refresh token',
@@ -166,7 +191,7 @@ export class AuthService {
   async refreshTokens(
     refreshToken: string
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const payload = this.verifyRefreshToken(refreshToken)
+    const payload = await this.verifyRefreshToken(refreshToken)
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
@@ -199,6 +224,26 @@ export class AuthService {
       accessToken: this.signAccessToken(newPayload),
       refreshToken: this.signRefreshToken(newPayload),
     }
+  }
+
+  /**
+   * Blacklist both access and refresh tokens so they cannot be reused.
+   * Each token is stored in Redis with a TTL equal to its remaining lifetime.
+   */
+  async logout(
+    accessJti: string,
+    refreshJti: string,
+    accessExp: number,
+    refreshExp: number
+  ): Promise<void> {
+    const now = Math.floor(Date.now() / 1000)
+    const accessTtl = Math.max(accessExp - now, 0)
+    const refreshTtl = Math.max(refreshExp - now, 0)
+
+    await Promise.all([
+      this.tokenBlacklistService.blacklist(accessJti, accessTtl),
+      this.tokenBlacklistService.blacklist(refreshJti, refreshTtl),
+    ])
   }
 
   async validateUserActive(userId: string): Promise<void> {
