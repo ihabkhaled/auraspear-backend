@@ -25,6 +25,7 @@ export class InfluxDBService {
       const res = await connectorFetch(`${baseUrl}/ping`, {
         headers: { Authorization: `Token ${token}` },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 204 && res.status !== 200) {
@@ -61,6 +62,7 @@ export class InfluxDBService {
       },
       body: flux,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -80,6 +82,7 @@ export class InfluxDBService {
     const res = await connectorFetch(`${baseUrl}/api/v2/buckets`, {
       headers: { Authorization: `Token ${token}` },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

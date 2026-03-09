@@ -8,7 +8,7 @@ export interface ConnectorHttpOptions {
   body?: unknown
   timeoutMs?: number
   rejectUnauthorized?: boolean
-  /** Allow private/internal network targets. Defaults to true for backward compatibility with internal tools. */
+  /** Allow private/internal network targets. Defaults to false — only set to true for known internal connector services. */
   allowPrivateNetwork?: boolean
 }
 
@@ -34,7 +34,7 @@ export function connectorFetch(
     body,
     timeoutMs = 15_000,
     rejectUnauthorized = true,
-    allowPrivateNetwork = true,
+    allowPrivateNetwork = false,
   } = options
 
   return new Promise((resolve, reject) => {

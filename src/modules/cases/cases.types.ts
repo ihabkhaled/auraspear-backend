@@ -12,3 +12,5 @@ export type CaseRecord = Case & {
 export type PaginatedCases = PaginatedResponse<
   Case & { ownerName: string | null; ownerEmail: string | null; tenantName: string }
 >
+
+export type PaginatedCaseNotes = PaginatedResponse<CaseNote>

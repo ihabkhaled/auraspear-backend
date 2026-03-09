@@ -21,6 +21,33 @@ const SENSITIVE_BODY_KEYS = new Set([
   'token',
 ])
 
+const MAX_SANITIZE_DEPTH = 5
+
+function sanitizeBody(body: Record<string, unknown>, depth = 0): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(body)) {
+    if (SENSITIVE_BODY_KEYS.has(key)) {
+      sanitized[key] = '[REDACTED]'
+    } else if (depth < MAX_SANITIZE_DEPTH && Array.isArray(value)) {
+      sanitized[key] = value.map(item =>
+        item !== null && typeof item === 'object' && !Array.isArray(item)
+          ? sanitizeBody(item as Record<string, unknown>, depth + 1)
+          : item
+      )
+    } else if (
+      depth < MAX_SANITIZE_DEPTH &&
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
+      sanitized[key] = sanitizeBody(value as Record<string, unknown>, depth + 1)
+    } else {
+      sanitized[key] = value
+    }
+  }
+  return sanitized
+}
+
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
   private readonly logger = new Logger(AuditInterceptor.name)
@@ -47,10 +74,7 @@ export class AuditInterceptor implements NestInterceptor {
     // Build sanitized details from request body (strip sensitive fields)
     let details: string | null = null
     if (request.body && typeof request.body === 'object') {
-      const sanitized: Record<string, unknown> = {}
-      for (const [key, value] of Object.entries(request.body as Record<string, unknown>)) {
-        sanitized[key] = SENSITIVE_BODY_KEYS.has(key) ? '[REDACTED]' : value
-      }
+      const sanitized = sanitizeBody(request.body as Record<string, unknown>)
       details = JSON.stringify(sanitized).slice(0, 2000)
     }
 

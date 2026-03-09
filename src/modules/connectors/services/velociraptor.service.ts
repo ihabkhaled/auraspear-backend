@@ -27,6 +27,7 @@ export class VelociraptorService {
           'Grpc-Metadata-authorization': `Bearer ${apiKey}`,
         },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -61,6 +62,7 @@ export class VelociraptorService {
       },
       body: { query: vql },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -86,6 +88,7 @@ export class VelociraptorService {
         'Grpc-Metadata-authorization': `Bearer ${apiKey}`,
       },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

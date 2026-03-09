@@ -1,6 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { DashboardsService } from './dashboards.service'
+import { AlertTrendQuerySchema } from './dto/dashboard-query.dto'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 
 interface DashboardSummary {
@@ -88,12 +89,10 @@ export class DashboardsController {
   @Get('alert-trend')
   async getAlertTrend(
     @TenantId() tenantId: string,
-    @Query('days') days?: string
+    @Query() rawQuery: Record<string, unknown>
   ): Promise<AlertTrend> {
-    return this.dashboardsService.getAlertTrend(
-      tenantId,
-      Math.min(365, Math.max(1, Number(days) || 7))
-    )
+    const query = AlertTrendQuerySchema.parse(rawQuery)
+    return this.dashboardsService.getAlertTrend(tenantId, query.days)
   }
 
   @Get('severity-distribution')

@@ -22,6 +22,7 @@ export class GrafanaService {
       const res = await connectorFetch(`${baseUrl}/api/health`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -52,6 +53,7 @@ export class GrafanaService {
     const res = await connectorFetch(`${baseUrl}/api/search?type=dash-db`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

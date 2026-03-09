@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { ListEventsQuerySchema, SearchIOCsQuerySchema } from './dto/list-intel-query.dto'
 import { MatchIocsSchema, type MatchIocsDto } from './dto/match-iocs.dto'
 import { IntelService } from './intel.service'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -22,44 +23,37 @@ export class IntelController {
   @Get('events/recent')
   async getRecentEvents(
     @TenantId() tenantId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('sortBy') sortBy?: string,
-    @Query('sortOrder') sortOrder?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedMispEvents> {
+    const query = ListEventsQuerySchema.parse(rawQuery)
     return this.intelService.getRecentEvents(
       tenantId,
-      Math.max(1, Number(page) || 1),
-      Math.min(100, Math.max(1, Number(limit) || 20)),
-      sortBy,
-      sortOrder
+      query.page,
+      query.limit,
+      query.sortBy,
+      query.sortOrder
     )
   }
 
   /**
-   * GET /ti/iocs/search?q=<query>&type=<iocType>&source=<source>&page=1&limit=20&sortBy=lastSeen&sortOrder=desc
+   * GET /ti/iocs/search?value=<query>&type=<iocType>&source=<source>&page=1&limit=20&sortBy=lastSeen&sortOrder=desc
    * Search IOCs by value, with optional type and source filters, and sorting.
    */
   @Get('iocs/search')
   async searchIOCs(
     @TenantId() tenantId: string,
-    @Query('q') query?: string,
-    @Query('type') type?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('sortBy') sortBy?: string,
-    @Query('sortOrder') sortOrder?: string,
-    @Query('source') source?: string
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedIOCs> {
+    const query = SearchIOCsQuerySchema.parse(rawQuery)
     return this.intelService.searchIOCs(
       tenantId,
-      query ?? '',
-      type,
-      Math.max(1, Number(page) || 1),
-      Math.min(100, Math.max(1, Number(limit) || 20)),
-      sortBy,
-      sortOrder,
-      source
+      query.value,
+      query.type,
+      query.page,
+      query.limit,
+      query.sortBy,
+      query.sortOrder,
+      query.source
     )
   }
 

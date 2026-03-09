@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { hasRoleAtLeast } from '../../common/utils/role.util'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { CaseRecord, PaginatedCases } from './cases.types'
+import type { CaseRecord, PaginatedCaseNotes, PaginatedCases } from './cases.types'
 import type { CreateCaseDto } from './dto/create-case.dto'
 import type { CreateNoteDto } from './dto/create-note.dto'
 import type { LinkAlertDto } from './dto/link-alert.dto'
@@ -412,13 +412,30 @@ export class CasesService {
   /* NOTES                                                             */
   /* ---------------------------------------------------------------- */
 
-  async getCaseNotes(caseId: string, tenantId: string): Promise<CaseNote[]> {
+  async getCaseNotes(
+    caseId: string,
+    tenantId: string,
+    page = 1,
+    limit = 50
+  ): Promise<PaginatedCaseNotes> {
     await this.getCaseById(caseId, tenantId)
 
-    return this.prisma.caseNote.findMany({
-      where: { caseId },
-      orderBy: { createdAt: 'asc' },
-    })
+    const where = { caseId }
+
+    const [notes, total] = await Promise.all([
+      this.prisma.caseNote.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.caseNote.count({ where }),
+    ])
+
+    return {
+      data: notes,
+      pagination: buildPaginationMeta(page, limit, total),
+    }
   }
 
   async addCaseNote(caseId: string, dto: CreateNoteDto, user: JwtPayload): Promise<CaseNote> {
@@ -472,7 +489,7 @@ export class CasesService {
       select: { status: true },
     })
 
-    if (membership?.status !== 'active') {
+    if (membership?.status !== MembershipStatus.ACTIVE) {
       throw new BusinessException(
         400,
         'Assigned owner is not an active member of this tenant',

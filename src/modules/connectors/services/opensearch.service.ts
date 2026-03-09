@@ -31,6 +31,7 @@ export class OpenSearchService {
       const res = await connectorFetch(`${baseUrl}/_cluster/health`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -72,6 +73,7 @@ export class OpenSearchService {
       headers,
       body: query,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

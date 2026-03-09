@@ -35,6 +35,7 @@ export class WazuhService {
       const infoResponse = await connectorFetch(`${managerUrl}/manager/info`, {
         headers: { Authorization: `Bearer ${token}` },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (infoResponse.status !== 200) {
@@ -76,6 +77,7 @@ export class WazuhService {
       method: 'POST',
       headers: { Authorization: basicAuth(username, password) },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -114,6 +116,7 @@ export class WazuhService {
     const res = await connectorFetch(`${managerUrl}/agents?status=active&limit=500`, {
       headers: { Authorization: `Bearer ${token}` },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -153,6 +156,7 @@ export class WazuhService {
       },
       body: query,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

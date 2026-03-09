@@ -29,6 +29,7 @@ export class LogstashService {
       const res = await connectorFetch(`${baseUrl}/`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -68,6 +69,7 @@ export class LogstashService {
     const res = await connectorFetch(`${baseUrl}/_node/pipelines`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -98,6 +100,7 @@ export class LogstashService {
     const res = await connectorFetch(`${baseUrl}/_node/stats/pipelines`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -126,6 +129,7 @@ export class LogstashService {
     const res = await connectorFetch(`${baseUrl}/_node/hot_threads?human=true`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

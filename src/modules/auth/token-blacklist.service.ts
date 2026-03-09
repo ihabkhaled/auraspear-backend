@@ -45,6 +45,15 @@ export class TokenBlacklistService implements OnModuleDestroy {
 
   /**
    * Check whether a token JTI has been blacklisted (revoked).
+   *
+   * **Security trade-off (fail-open):** When Redis is unavailable, this method
+   * returns `false` (not blacklisted) rather than `true`. This is an intentional
+   * availability-over-security decision: failing closed would lock out ALL
+   * authenticated users during a Redis outage, including admins who need access
+   * to diagnose and resolve the issue. The risk is that previously revoked tokens
+   * could be used during the Redis downtime window, which is bounded by the
+   * token's short TTL (15 min for access tokens). Monitor Redis health via
+   * `isRedisHealthy()` and alert on failures to minimize this window.
    */
   async isBlacklisted(jti: string): Promise<boolean> {
     try {
@@ -55,8 +64,21 @@ export class TokenBlacklistService implements OnModuleDestroy {
       this.logger.warn(
         `Failed to check blacklist for ${jti}: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
-      // Fail-open: if Redis is down, allow the token through
-      // to avoid locking out all users. Log the warning above.
+      // Fail-open: see JSDoc above for rationale.
+      return false
+    }
+  }
+
+  /**
+   * Check whether the Redis connection used for token blacklisting is healthy.
+   * Intended for use by health check services to monitor and alert on Redis
+   * availability, since the blacklist fails open when Redis is down.
+   */
+  async isRedisHealthy(): Promise<boolean> {
+    try {
+      const result = await this.redis.ping()
+      return result === 'PONG'
+    } catch {
       return false
     }
   }

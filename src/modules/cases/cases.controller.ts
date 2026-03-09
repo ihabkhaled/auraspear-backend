@@ -4,6 +4,7 @@ import { type CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
 import { type CreateNoteDto, CreateNoteSchema } from './dto/create-note.dto'
 import { type LinkAlertDto, LinkAlertSchema } from './dto/link-alert.dto'
 import { ListCasesQuerySchema } from './dto/list-cases-query.dto'
+import { ListNotesQuerySchema } from './dto/list-notes-query.dto'
 import { type UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -13,7 +14,7 @@ import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { CaseRecord, PaginatedCases } from './cases.types'
+import type { CaseRecord, PaginatedCaseNotes, PaginatedCases } from './cases.types'
 import type { CaseNote } from '@prisma/client'
 
 @Controller('cases')
@@ -89,8 +90,13 @@ export class CasesController {
   }
 
   @Get(':id/notes')
-  async getCaseNotes(@Param('id') id: string, @TenantId() tenantId: string): Promise<CaseNote[]> {
-    return this.casesService.getCaseNotes(id, tenantId)
+  async getCaseNotes(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<PaginatedCaseNotes> {
+    const { page, limit } = ListNotesQuerySchema.parse(rawQuery)
+    return this.casesService.getCaseNotes(id, tenantId, page, limit)
   }
 
   @Post(':id/notes')

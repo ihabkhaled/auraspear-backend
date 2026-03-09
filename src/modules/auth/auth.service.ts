@@ -5,7 +5,7 @@ import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
 import { TokenBlacklistService } from './token-blacklist.service'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -56,7 +56,7 @@ export class AuthService {
       where: { email },
       include: {
         memberships: {
-          where: { status: 'active' },
+          where: { status: MembershipStatus.ACTIVE },
           include: { tenant: true },
         },
       },
@@ -197,7 +197,7 @@ export class AuthService {
       where: { id: payload.sub },
       include: {
         memberships: {
-          where: { tenantId: payload.tenantId, status: 'active' },
+          where: { tenantId: payload.tenantId, status: MembershipStatus.ACTIVE },
           include: { tenant: true },
         },
       },
@@ -251,7 +251,7 @@ export class AuthService {
       where: { id: userId },
       include: {
         memberships: {
-          where: { status: 'active' },
+          where: { status: MembershipStatus.ACTIVE },
           select: { id: true },
           take: 1,
         },
@@ -273,14 +273,14 @@ export class AuthService {
       where: { userId_tenantId: { userId, tenantId } },
     })
 
-    if (membership?.status !== 'active') {
+    if (membership?.status !== MembershipStatus.ACTIVE) {
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
 
   async getUserTenants(userId: string): Promise<TenantMembershipInfo[]> {
     const memberships = await this.prisma.tenantMembership.findMany({
-      where: { userId, status: 'active' },
+      where: { userId, status: MembershipStatus.ACTIVE },
       include: { tenant: true },
     })
 

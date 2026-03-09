@@ -1,5 +1,11 @@
 import type { Request } from 'express'
 
+export enum MembershipStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  SUSPENDED = 'suspended',
+}
+
 export enum UserRole {
   GLOBAL_ADMIN = 'GLOBAL_ADMIN',
   TENANT_ADMIN = 'TENANT_ADMIN',

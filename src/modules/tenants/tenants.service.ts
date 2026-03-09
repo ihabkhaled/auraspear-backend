@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CreateTenantDto, UpdateTenantDto, AddUserDto, UpdateUserDto } from './dto/tenant.dto'
 import type { TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
@@ -89,7 +89,7 @@ export class TenantsService {
     await this.prisma.$transaction(async tx => {
       await tx.tenantMembership.updateMany({
         where: { tenantId: id },
-        data: { status: 'inactive' },
+        data: { status: MembershipStatus.INACTIVE },
       })
     })
     this.logger.log(`Tenant ${id} soft-deleted: all memberships deactivated`)
@@ -140,7 +140,7 @@ export class TenantsService {
   async findMembers(tenantId: string): Promise<Array<{ id: string; name: string; email: string }>> {
     try {
       const memberships = await this.prisma.tenantMembership.findMany({
-        where: { tenantId, status: 'active' },
+        where: { tenantId, status: MembershipStatus.ACTIVE },
         include: { user: { select: { id: true, name: true, email: true } } },
         orderBy: { user: { name: 'asc' } },
       })
@@ -208,6 +208,13 @@ export class TenantsService {
               403,
               'Cannot add a protected user to another tenant',
               'errors.tenants.userProtected'
+            )
+          }
+          if (dto.password) {
+            throw new BusinessException(
+              409,
+              'User already exists. Password cannot be changed via add user.',
+              'errors.tenants.userAlreadyExists'
             )
           }
           user = existing
@@ -402,7 +409,7 @@ export class TenantsService {
     // Soft delete: set membership status to inactive
     await this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
-      data: { status: 'inactive' },
+      data: { status: MembershipStatus.INACTIVE },
     })
     return { deleted: true }
   }
@@ -420,7 +427,7 @@ export class TenantsService {
       )
     }
 
-    if (membership.status !== 'inactive') {
+    if (membership.status !== MembershipStatus.INACTIVE) {
       throw new BusinessException(400, 'User is not deleted', 'errors.tenants.userNotDeleted')
     }
 
@@ -434,7 +441,7 @@ export class TenantsService {
 
     const updated = await this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
-      data: { status: 'active' },
+      data: { status: MembershipStatus.ACTIVE },
       include: { user: true },
     })
     return {
@@ -492,7 +499,7 @@ export class TenantsService {
       )
     }
 
-    if (membership.status === 'suspended') {
+    if (membership.status === MembershipStatus.SUSPENDED) {
       throw new BusinessException(
         400,
         'User is already blocked',
@@ -502,7 +509,7 @@ export class TenantsService {
 
     const updated = await this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
-      data: { status: 'suspended' },
+      data: { status: MembershipStatus.SUSPENDED },
       include: { user: true },
     })
     return {
@@ -531,7 +538,7 @@ export class TenantsService {
       )
     }
 
-    if (membership.status !== 'suspended') {
+    if (membership.status !== MembershipStatus.SUSPENDED) {
       throw new BusinessException(400, 'User is not blocked', 'errors.tenants.userNotBlocked')
     }
 
@@ -545,7 +552,7 @@ export class TenantsService {
 
     const updated = await this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
-      data: { status: 'active' },
+      data: { status: MembershipStatus.ACTIVE },
       include: { user: true },
     })
     return {

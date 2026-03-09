@@ -85,6 +85,14 @@ export class AuthController {
       )
     }
 
+    if (refreshPayload.sub !== accessUser.sub) {
+      throw new BusinessException(
+        403,
+        'Refresh token does not belong to this user',
+        'errors.auth.tokenMismatch'
+      )
+    }
+
     await this.authService.logout(
       accessUser.jti,
       refreshPayload.jti,

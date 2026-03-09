@@ -25,6 +25,7 @@ export class ShuffleService {
       const res = await connectorFetch(`${baseUrl}/api/v1/apps/authentication`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -52,6 +53,7 @@ export class ShuffleService {
     const res = await connectorFetch(`${baseUrl}/api/v1/workflows`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -82,6 +84,7 @@ export class ShuffleService {
       headers: { Authorization: `Bearer ${apiKey}` },
       body: data,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

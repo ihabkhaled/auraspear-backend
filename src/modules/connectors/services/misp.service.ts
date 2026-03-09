@@ -28,6 +28,7 @@ export class MispService {
           Accept: 'application/json',
         },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -63,6 +64,7 @@ export class MispService {
           Accept: 'application/json',
         },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       }
     )
 
@@ -91,6 +93,7 @@ export class MispService {
       },
       body: searchParameters,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -121,6 +124,7 @@ export class MispService {
         Accept: 'application/json',
       },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

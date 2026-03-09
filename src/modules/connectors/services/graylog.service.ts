@@ -29,6 +29,7 @@ export class GraylogService {
           'X-Requested-By': 'AuraSpear',
         },
         rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
@@ -68,6 +69,7 @@ export class GraylogService {
       },
       body: filter,
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
@@ -95,6 +97,7 @@ export class GraylogService {
         'X-Requested-By': 'AuraSpear',
       },
       rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {

@@ -11,7 +11,7 @@ import { AuthService } from '../../modules/auth/auth.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { BusinessException } from '../exceptions/business.exception'
-import { UserRole } from '../interfaces/authenticated-request.interface'
+import { MembershipStatus, UserRole } from '../interfaces/authenticated-request.interface'
 import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface'
 
 @Injectable()
@@ -80,7 +80,7 @@ export class AuthGuard implements CanActivate {
             include: { tenant: true },
           })
 
-          if (!membership || membership.status !== 'active') {
+          if (!membership || membership.status !== MembershipStatus.ACTIVE) {
             throw new BusinessException(
               403,
               'No access to this tenant',
