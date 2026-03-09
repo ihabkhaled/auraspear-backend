@@ -141,6 +141,11 @@ export class WazuhService {
     const username = config.indexerUsername ?? config.username
     const password = config.indexerPassword ?? config.password
 
+    // Validate index name to prevent path traversal
+    if (!/^[\w*-]+$/.test(index)) {
+      throw new Error('Invalid index name')
+    }
+
     const res = await connectorFetch(`${indexerUrl}/${index}/_search`, {
       method: 'POST',
       headers: {

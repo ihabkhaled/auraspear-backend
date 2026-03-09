@@ -8,12 +8,30 @@ import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './healt
 @Injectable()
 export class HealthService {
   private readonly logger = new Logger(HealthService.name)
+  private readonly redis: Redis
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly connectorsService: ConnectorsService
-  ) {}
+  ) {
+    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
+    const port = this.configService.get<number>('REDIS_PORT', 6379)
+    const password = this.configService.get<string>('REDIS_PASSWORD', '')
+
+    this.redis = new Redis({
+      host,
+      port,
+      password: password || undefined,
+      connectTimeout: 5000,
+      maxRetriesPerRequest: 1,
+      retryStrategy: () => null,
+    })
+
+    this.redis.on('error', () => {
+      // Suppress connection errors — checked in health check
+    })
+  }
 
   /**
    * GET /health
@@ -86,7 +104,7 @@ export class HealthService {
   private async checkDatabase(): Promise<ComponentCheck> {
     const start = Date.now()
     try {
-      await this.prisma.$queryRawUnsafe('SELECT 1')
+      await this.prisma.$queryRaw`SELECT 1`
       return { status: 'healthy', latencyMs: Date.now() - start }
     } catch (error) {
       this.logger.error(
@@ -97,37 +115,18 @@ export class HealthService {
   }
 
   /**
-   * Ping Redis to verify connectivity.
+   * Ping Redis to verify connectivity using the shared connection.
    */
   private async checkRedis(): Promise<ComponentCheck> {
     const start = Date.now()
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
-    const port = this.configService.get<number>('REDIS_PORT', 6379)
-    const password = this.configService.get<string>('REDIS_PASSWORD', '')
-
-    const redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      connectTimeout: 5000,
-      lazyConnect: true,
-    })
-
     try {
-      await redis.connect()
-      await redis.ping()
+      await this.redis.ping()
       return { status: 'healthy', latencyMs: Date.now() - start }
     } catch (error) {
       this.logger.error(
         `Redis health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
       return { status: 'down', latencyMs: Date.now() - start }
-    } finally {
-      try {
-        redis.disconnect()
-      } catch {
-        // ignore disconnect errors
-      }
     }
   }
 }

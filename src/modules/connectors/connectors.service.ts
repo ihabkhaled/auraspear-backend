@@ -32,7 +32,11 @@ export class ConnectorsService {
     private readonly shuffleService: ShuffleService,
     private readonly bedrockService: BedrockService
   ) {
-    this.encryptionKey = this.configService.get<string>('CONFIG_ENCRYPTION_KEY', 'a'.repeat(64))
+    const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
+    if (!key || key.length < 32) {
+      throw new Error('CONFIG_ENCRYPTION_KEY must be set and at least 32 characters')
+    }
+    this.encryptionKey = key
   }
 
   async findAll(tenantId: string): Promise<ConnectorResponse[]> {
@@ -281,7 +285,10 @@ export class ConnectorsService {
           details = `Unknown connector type: ${type}`
       }
     } catch (error) {
-      details = error instanceof Error ? error.message : 'Connection test failed'
+      const rawMessage = error instanceof Error ? error.message : 'Connection test failed'
+      // L11: Sanitize error details — strip internal paths and stack traces
+      details = rawMessage.replaceAll(/\/[\w./-]+/g, '[path]').slice(0, 500)
+      this.logger.error(`Connector ${type} test failed for tenant ${tenantId}: ${rawMessage}`)
     }
 
     const latencyMs = Date.now() - start
@@ -292,7 +299,7 @@ export class ConnectorsService {
       data: {
         lastTestAt: testedAt,
         lastTestOk: ok,
-        lastError: ok ? null : details,
+        lastError: ok ? null : details.slice(0, 500),
       },
     })
 

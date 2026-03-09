@@ -110,6 +110,11 @@ export class MispService {
     const baseUrl = (config.mispUrl ?? config.baseUrl) as string
     const authKey = (config.authKey ?? config.apiKey) as string
 
+    // Validate eventId to prevent path traversal
+    if (!/^\d+$/.test(eventId)) {
+      throw new Error('Invalid MISP event ID')
+    }
+
     const res = await connectorFetch(`${baseUrl}/events/view/${eventId}`, {
       headers: {
         Authorization: authKey,

@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
+import * as express from 'express'
 import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
 import { AppModule } from './app.module'
@@ -14,7 +15,11 @@ async function bootstrap(): Promise<void> {
 
   // Trust proxy (Vercel, load balancers) — ensures correct client IP for rate limiting/logging
   const expressApp = app.getHttpAdapter().getInstance() as Express
-  expressApp.set('trust proxy', true)
+  expressApp.set('trust proxy', 1)
+
+  // Request body size limits
+  app.use(express.json({ limit: '1mb' }))
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
   // Security headers
   app.use(helmet())
@@ -32,7 +37,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new GlobalExceptionFilter())
 
   // Swagger
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV === 'development') {
     const config = new DocumentBuilder()
       .setTitle('AuraSpear SOC BFF')
       .setDescription('Multi-tenant SIEM Backend-for-Frontend API')

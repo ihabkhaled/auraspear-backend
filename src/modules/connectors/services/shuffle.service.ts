@@ -72,6 +72,11 @@ export class ShuffleService {
     const baseUrl = (config.webhookUrl ?? config.baseUrl) as string
     const apiKey = config.apiKey as string
 
+    // Validate workflowId to prevent path traversal
+    if (!/^[\da-f-]+$/i.test(workflowId)) {
+      throw new Error('Invalid workflow ID')
+    }
+
     const res = await connectorFetch(`${baseUrl}/api/v1/workflows/${workflowId}/execute`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },

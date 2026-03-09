@@ -1,16 +1,17 @@
-import { Body, Controller, Get, Post, Query, UseGuards, UsePipes } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { MatchIocsSchema, type MatchIocsDto } from './dto/match-iocs.dto'
 import { IntelService } from './intel.service'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { AuthGuard } from '../../common/guards/auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { PaginatedMispEvents, PaginatedIOCs, IOCMatchResult } from './intel.types'
 
 @Controller('ti')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, RolesGuard)
 export class IntelController {
   constructor(private readonly intelService: IntelService) {}
 
@@ -28,8 +29,8 @@ export class IntelController {
   ): Promise<PaginatedMispEvents> {
     return this.intelService.getRecentEvents(
       tenantId,
-      Number(page) || 1,
-      Number(limit) || 20,
+      Math.max(1, Number(page) || 1),
+      Math.min(100, Math.max(1, Number(limit) || 20)),
       sortBy,
       sortOrder
     )
@@ -54,8 +55,8 @@ export class IntelController {
       tenantId,
       query ?? '',
       type,
-      Number(page) || 1,
-      Number(limit) || 20,
+      Math.max(1, Number(page) || 1),
+      Math.min(100, Math.max(1, Number(limit) || 20)),
       sortBy,
       sortOrder,
       source
@@ -68,9 +69,9 @@ export class IntelController {
    * Body: { alertIds: string[] }
    */
   @Post('iocs/match-alerts')
-  @UsePipes(new ZodValidationPipe(MatchIocsSchema))
+  @Roles(UserRole.SOC_ANALYST_L1)
   async matchIOCsAgainstAlerts(
-    @Body() dto: MatchIocsDto,
+    @Body(new ZodValidationPipe(MatchIocsSchema)) dto: MatchIocsDto,
     @TenantId() tenantId: string
   ): Promise<IOCMatchResult[]> {
     return this.intelService.matchIOCsAgainstAlerts(tenantId, dto.alertIds)

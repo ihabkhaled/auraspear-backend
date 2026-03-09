@@ -20,8 +20,8 @@ const logger = pino({
 
 const prisma = new PrismaClient()
 
-const DEFAULT_PASSWORD = 'Admin@123'
-const BCRYPT_ROUNDS = 10
+const DEFAULT_PASSWORD = process.env.SEED_DEFAULT_PASSWORD ?? 'Admin@123'
+const BCRYPT_ROUNDS = 12
 
 // Global case counter to ensure unique case numbers across tenants
 let globalCaseCounter = 0

@@ -1,17 +1,21 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { AiService } from './ai.service'
 import { AiExplainSchema, type AiExplainDto } from './dto/ai-explain.dto'
 import { type AiHuntDto, AiHuntSchema } from './dto/ai-hunt.dto'
 import { type AiInvestigateDto, AiInvestigateSchema } from './dto/ai-investigate.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Roles } from '../../common/decorators/roles.decorator'
 import { AuthGuard } from '../../common/guards/auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { AiResponse } from './ai.types'
 
 @Controller('ai')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, RolesGuard)
+@Throttle({ default: { limit: 10, ttl: 60000 } })
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
@@ -21,6 +25,7 @@ export class AiController {
    * a Bedrock connector with aiEnabled=true.
    */
   @Post('hunt')
+  @Roles(UserRole.SOC_ANALYST_L1)
   async aiHunt(
     @Body(new ZodValidationPipe(AiHuntSchema)) dto: AiHuntDto,
     @CurrentUser() user: JwtPayload
@@ -34,6 +39,7 @@ export class AiController {
    * to have a Bedrock connector with aiEnabled=true.
    */
   @Post('investigate')
+  @Roles(UserRole.SOC_ANALYST_L1)
   async aiInvestigate(
     @Body(new ZodValidationPipe(AiInvestigateSchema)) dto: AiInvestigateDto,
     @CurrentUser() user: JwtPayload
@@ -48,6 +54,7 @@ export class AiController {
    * connector with aiEnabled=true.
    */
   @Post('explain')
+  @Roles(UserRole.SOC_ANALYST_L1)
   async aiExplain(
     @Body(new ZodValidationPipe(AiExplainSchema)) dto: AiExplainDto,
     @CurrentUser() user: JwtPayload

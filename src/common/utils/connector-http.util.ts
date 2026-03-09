@@ -1,5 +1,6 @@
 import * as http from 'node:http'
 import * as https from 'node:https'
+import { isPrivateHost } from './ssrf.util'
 
 export interface ConnectorHttpOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -7,6 +8,8 @@ export interface ConnectorHttpOptions {
   body?: unknown
   timeoutMs?: number
   rejectUnauthorized?: boolean
+  /** Allow private/internal network targets. Defaults to true for backward compatibility with internal tools. */
+  allowPrivateNetwork?: boolean
 }
 
 export interface ConnectorHttpResponse {
@@ -19,7 +22,7 @@ export interface ConnectorHttpResponse {
 /**
  * HTTP client for connector integrations.
  * Supports self-signed certificates (common in internal security tools).
- * Does NOT apply SSRF protection — these URLs are admin-configured.
+ * Validates URL protocol and optionally blocks private network targets.
  */
 export function connectorFetch(
   url: string,
@@ -31,12 +34,36 @@ export function connectorFetch(
     body,
     timeoutMs = 15_000,
     rejectUnauthorized = true,
+    allowPrivateNetwork = true,
   } = options
 
   return new Promise((resolve, reject) => {
     const start = Date.now()
     const parsed = new URL(url)
+
+    // Only allow HTTP(S) protocols
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      reject(new Error('Only HTTP(S) URLs are allowed'))
+      return
+    }
+
+    // Enforce HTTPS in production to prevent credential leakage over plain HTTP
+    if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+      reject(new Error('Only HTTPS URLs are allowed in production'))
+      return
+    }
+
+    // Block private network targets when not explicitly allowed
+    if (!allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
+      reject(new Error('URLs pointing to private/internal networks are not allowed'))
+      return
+    }
     const isHttps = parsed.protocol === 'https:'
+
+    // L14: Warn when TLS verification is disabled
+    if (isHttps && !rejectUnauthorized) {
+      console.warn(`[connector-http] TLS verification disabled for ${parsed.hostname}`)
+    }
 
     const requestOptions: https.RequestOptions = {
       method,
@@ -52,11 +79,19 @@ export function connectorFetch(
       rejectUnauthorized: isHttps ? rejectUnauthorized : undefined,
     }
 
+    const maxResponseBytes = 10 * 1024 * 1024 // 10 MB limit
     const transport = isHttps ? https : http
     const req = transport.request(requestOptions, res => {
       const chunks: Buffer[] = []
+      let totalBytes = 0
 
       res.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length
+        if (totalBytes > maxResponseBytes) {
+          req.destroy()
+          reject(new Error('Response body exceeded 10 MB limit'))
+          return
+        }
         chunks.push(chunk)
       })
 

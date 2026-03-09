@@ -61,9 +61,30 @@
 - Raw SQL only for complex aggregations (GROUP BY, unnest, etc.)
 - Seed data must be idempotent (upsert/skipDuplicates)
 
-## Security
+## Security Rules — NEVER Violate
+
+### Authentication & Authorization
+- NEVER bypass authentication in any environment — no dev mode auth bypass, no fake users, no skipping JWT verification regardless of NODE_ENV
+- NEVER use hardcoded or fallback secrets — encryption keys, JWT secrets, API keys must come from env vars, fail at startup if missing
+- JWT signing MUST specify `{ algorithm: 'HS256' }`, verification MUST specify `{ algorithms: ['HS256'] }` — prevent algorithm confusion attacks
+- `validateUserActive()` MUST check membership status (not just user existence) — query memberships with `where: { status: 'active' }`
+- EVERY mutation endpoint MUST have `@UseGuards(RolesGuard)` and `@Roles(UserRole.MINIMUM_ROLE)` — no unguarded POST/PATCH/PUT/DELETE
+
+### Data Isolation & Access Control
+- EVERY Prisma `update()` and `delete()` MUST include `tenantId` in the where clause — never update/delete by `id` alone
 - SSRF protection via `validateUrl()` utility
-- All connector configs encrypted before storage
+- All connector configs encrypted before storage (AES-256-GCM)
 - JWT tokens verified on every request via AuthGuard
 - Role-based access via RolesGuard with hierarchy check
 - Tenant isolation via TenantGuard
+
+### Input Validation
+- EVERY Zod string field MUST have `.max()` limit — use DB column size as guide
+- EVERY Zod array field MUST have `.max()` limit — unbounded arrays enable DoS
+- Elasticsearch queries MUST be sanitized — strip `script`, `_search`, `_mapping`, `_cluster` patterns, limit length, use `allow_leading_wildcard: false`
+
+### Rate Limiting & Resource Protection
+- Auth endpoints MUST have strict rate limiting — login: 5 req/min, refresh: 10 req/min
+- AI endpoints MUST have rate limiting — 10 req/min at controller level
+- Request body size MUST be limited — `express.json({ limit: '1mb' })` in main.ts
+- Database batch operations MUST be chunked (50 per batch) — never fire hundreds of concurrent Prisma operations

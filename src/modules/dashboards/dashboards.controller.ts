@@ -90,7 +90,10 @@ export class DashboardsController {
     @TenantId() tenantId: string,
     @Query('days') days?: string
   ): Promise<AlertTrend> {
-    return this.dashboardsService.getAlertTrend(tenantId, Number(days) || 7)
+    return this.dashboardsService.getAlertTrend(
+      tenantId,
+      Math.min(365, Math.max(1, Number(days) || 7))
+    )
   }
 
   @Get('severity-distribution')

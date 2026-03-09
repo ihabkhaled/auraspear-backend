@@ -52,8 +52,19 @@ export class AiService {
       if (error instanceof BusinessException) {
         throw error
       }
-      // If Prisma table doesn't exist, allow AI in mock mode
-      this.logger.warn('connector_configs table not available; allowing AI in mock mode')
+      // In development, allow AI in mock mode when DB is unavailable
+      if (process.env.NODE_ENV === 'development') {
+        this.logger.warn(
+          'connector_configs table not available; allowing AI in mock mode (dev only)'
+        )
+        return
+      }
+      this.logger.error('AI gate check failed', error)
+      throw new BusinessException(
+        503,
+        'AI service temporarily unavailable',
+        'errors.ai.serviceUnavailable'
+      )
     }
   }
 
@@ -136,6 +147,15 @@ export class AiService {
 
   async aiInvestigate(dto: AiInvestigateDto, user: JwtPayload): Promise<AiResponse> {
     await this.ensureAiEnabled(user.tenantId)
+
+    // M6: Validate alert belongs to the caller's tenant
+    const alert = await this.prisma.alert.findFirst({
+      where: { id: dto.alertId, tenantId: user.tenantId },
+      select: { id: true },
+    })
+    if (!alert) {
+      throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
+    }
 
     const startTime = Date.now()
     const auditId = randomUUID()
@@ -270,9 +290,12 @@ export class AiService {
 **MITRE ATT&CK Coverage:** T1071 (Application Layer Protocol), T1048 (Exfiltration Over Alternative Protocol), T1568 (Dynamic Resolution)`
     }
 
+    // Sanitize query to prevent XSS when rendered as markdown
+    const safeQuery = query.replaceAll(/[<>"'&]/g, '')
+
     return `## Threat Hunt Analysis
 
-**Query Analysis:** "${query}"
+**Query Analysis:** "${safeQuery}"
 
 **Suggested Investigation Steps:**
 1. Correlate the query across Wazuh alerts, Sysmon events, and network flow data
@@ -281,9 +304,9 @@ export class AiService {
 4. Cross-reference findings with the latest MISP threat intelligence feeds
 
 **Recommended Queries:**
-1. \`${query} | stats count by agent.name, rule.id\` - Activity summary
-2. \`${query} | timechart span=1h count\` - Temporal analysis
-3. \`${query} AND rule.mitre.id:* | stats count by rule.mitre.id\` - ATT&CK mapping
+1. \`${safeQuery} | stats count by agent.name, rule.id\` - Activity summary
+2. \`${safeQuery} | timechart span=1h count\` - Temporal analysis
+3. \`${safeQuery} AND rule.mitre.id:* | stats count by rule.mitre.id\` - ATT&CK mapping
 
 **MITRE ATT&CK Coverage:** Multiple techniques may apply -- review mapped events for specific coverage.`
   }

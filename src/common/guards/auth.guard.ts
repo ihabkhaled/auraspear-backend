@@ -6,32 +6,24 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
 import { Reflector } from '@nestjs/core'
 import { AuthService } from '../../modules/auth/auth.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { BusinessException } from '../exceptions/business.exception'
 import { UserRole } from '../interfaces/authenticated-request.interface'
-import type {
-  JwtPayload,
-  AuthenticatedRequest,
-} from '../interfaces/authenticated-request.interface'
+import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface'
 
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name)
-  private readonly isDev: boolean
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly configService: ConfigService,
     @Inject(forwardRef(() => AuthService))
     private readonly authService: AuthService,
     private readonly prisma: PrismaService
-  ) {
-    this.isDev = this.configService.get('NODE_ENV') !== 'production'
-  }
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -47,10 +39,6 @@ export class AuthGuard implements CanActivate {
     const authHeader = request.headers.authorization
 
     if (!authHeader?.startsWith('Bearer ')) {
-      if (this.isDev && !authHeader) {
-        request.user = this.getDevUser(request)
-        return true
-      }
       throw new BusinessException(
         401,
         'Missing or invalid Authorization header',
@@ -63,8 +51,11 @@ export class AuthGuard implements CanActivate {
     try {
       const decoded = this.authService.verifyAccessToken(token)
 
-      // Verify user still exists
+      // Verify user still exists and has at least one active membership
       await this.authService.validateUserActive(decoded.sub)
+
+      // Verify user has active membership for the JWT's tenant
+      await this.authService.validateMembershipActive(decoded.sub, decoded.tenantId)
 
       request.user = decoded
 
@@ -112,21 +103,6 @@ export class AuthGuard implements CanActivate {
       }
       this.logger.warn(`JWT verification failed: ${(error as Error).message}`)
       throw new BusinessException(401, 'Invalid or expired token', 'errors.auth.expiredToken')
-    }
-  }
-
-  private getDevUser(request: AuthenticatedRequest): JwtPayload {
-    const tenantId = (request.headers['x-tenant-id'] as string | undefined) ?? 'dev-tenant-001'
-    const role =
-      (request.headers['x-role'] as string | undefined as UserRole | undefined) ??
-      UserRole.GLOBAL_ADMIN
-
-    return {
-      sub: 'dev-user-001',
-      email: 'dev@auraspear.local',
-      tenantId,
-      tenantSlug: 'dev-tenant',
-      role,
     }
   }
 }

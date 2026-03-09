@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { AuthService } from './auth.service'
 import { AuthLoginSchema, type AuthLoginDto } from './dto/auth-login.dto'
 import { AuthRefreshSchema, type AuthRefreshDto } from './dto/auth-refresh.dto'
@@ -15,6 +16,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UsePipes(new ZodValidationPipe(AuthLoginSchema))
   async login(@Body() dto: AuthLoginDto): Promise<{
     accessToken: string
@@ -41,10 +43,22 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UsePipes(new ZodValidationPipe(AuthRefreshSchema))
   async refresh(
     @Body() dto: AuthRefreshDto
   ): Promise<{ accessToken: string; refreshToken: string }> {
     return this.authService.refreshTokens(dto.refreshToken)
+  }
+
+  /**
+   * POST /auth/logout
+   * Stateless logout — client must discard tokens.
+   * TODO: Implement server-side token revocation via Redis blacklist for full security.
+   */
+  @ApiBearerAuth()
+  @Post('logout')
+  logout(): { loggedOut: boolean } {
+    return { loggedOut: true }
   }
 }

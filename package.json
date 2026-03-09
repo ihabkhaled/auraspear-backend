@@ -37,6 +37,11 @@
     "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
     "docker:prod": "docker compose -f docker-compose.prod.yml up -d --build",
     "docker:prod:down": "docker compose -f docker-compose.prod.yml down",
+    "docker:connectors": "docker compose -f docker-compose.connectors.yml up -d",
+    "docker:connectors:down": "docker compose -f docker-compose.connectors.yml down",
+    "docker:connectors:logs": "docker compose -f docker-compose.connectors.yml logs -f",
+    "docker:all": "docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml up -d",
+    "docker:all:down": "docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml down",
     "postinstall": "prisma generate",
     "prepare": "node .husky/install.mjs",
     "lint-staged": "lint-staged --concurrent false"

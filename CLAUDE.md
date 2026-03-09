@@ -24,6 +24,19 @@
 20. **NEVER allow deletion/blocking/role-change of protected users** — Users with `isProtected: true` (seeded GLOBAL_ADMIN) cannot be deleted, blocked, suspended, or have their role changed. Always check `isProtected` before these operations.
 21. **NEVER hard-delete users** — Use soft delete (set `status: 'inactive'`). Provide restore functionality. Blocked users get `status: 'suspended'`.
 22. **NEVER allow self-deletion or self-blocking** — Check `callerId !== userId` before delete/block operations.
+23. **NEVER bypass authentication in any environment** — No dev mode auth bypass, no fake users, no skipping JWT verification regardless of `NODE_ENV`. All requests must go through the full auth guard chain.
+24. **NEVER use hardcoded or fallback secrets** — Encryption keys, JWT secrets, and API keys must be loaded from environment variables with no default values. Fail loudly at startup if missing.
+25. **EVERY mutation endpoint MUST have `@Roles()` and `RolesGuard`** — All POST/PATCH/PUT/DELETE endpoints must include `@UseGuards(RolesGuard)` and `@Roles(UserRole.MINIMUM_ROLE)`. No unguarded mutations.
+26. **EVERY Prisma `update()` and `delete()` MUST include `tenantId` in the where clause** — Never update/delete by `id` alone. Always scope: `where: { id, tenantId }`.
+27. **EVERY Zod string field MUST have `.max()` limit** — All string fields in DTOs must have a maximum length. Use DB column size as guide (e.g., `.max(255)` for VarChar(255), `.max(4096)` for Text).
+28. **EVERY Zod array field MUST have `.max()` limit** — Unbounded arrays enable DoS. Add reasonable limits (e.g., `.max(500)` for alertIds).
+29. **JWT signing/verification MUST specify algorithm** — Always use `{ algorithm: 'HS256' }` for signing and `{ algorithms: ['HS256'] }` for verification. Never allow algorithm confusion.
+30. **validateUserActive MUST check membership status** — Not just user existence. Query `memberships` with `where: { status: 'active' }` and reject if none found.
+31. **Auth endpoints MUST have strict rate limiting** — Login: `@Throttle({ default: { limit: 5, ttl: 60000 } })`. Refresh: `@Throttle({ default: { limit: 10, ttl: 60000 } })`.
+32. **AI endpoints MUST have rate limiting** — Apply `@Throttle({ default: { limit: 10, ttl: 60000 } })` at controller level for all AI endpoints.
+33. **Request body size MUST be limited** — `express.json({ limit: '1mb' })` is configured in `main.ts`. Never remove this.
+34. **Elasticsearch queries MUST be sanitized** — Strip `script`, `_search`, `_mapping`, `_cluster`, `_cat`, `_nodes` patterns. Limit query length. Use `allow_leading_wildcard: false`.
+35. **Database batch operations MUST be chunked** — Never fire hundreds of concurrent Prisma operations. Batch in chunks of 50 using `Promise.allSettled()`.
 
 ---
 

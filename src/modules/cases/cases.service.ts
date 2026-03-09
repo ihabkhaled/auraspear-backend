@@ -141,10 +141,28 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   async createCase(dto: CreateCaseDto, user: JwtPayload): Promise<CaseRecord> {
-    const caseNumber = await this.generateCaseNumber()
     const linkedAlerts = dto.linkedAlertIds ?? []
 
+    if (dto.ownerUserId) {
+      await this.validateOwnerInTenant(dto.ownerUserId, user.tenantId)
+    }
+
+    // M5: Validate linkedAlertIds belong to the same tenant
+    if (linkedAlerts.length > 0) {
+      const validAlerts = await this.prisma.alert.count({
+        where: { id: { in: linkedAlerts }, tenantId: user.tenantId },
+      })
+      if (validAlerts !== linkedAlerts.length) {
+        throw new BusinessException(
+          400,
+          'One or more linked alerts do not belong to this tenant',
+          'errors.cases.invalidLinkedAlerts'
+        )
+      }
+    }
+
     const result = await this.prisma.$transaction(async tx => {
+      const caseNumber = await this.generateCaseNumber(tx)
       const newCase = await tx.case.create({
         data: {
           tenantId: user.tenantId,
@@ -189,7 +207,7 @@ export class CasesService {
       })
     })
 
-    this.logger.log(`Case ${caseNumber} created by ${user.email} for tenant ${user.tenantId}`)
+    this.logger.log(`Case created by ${user.email} for tenant ${user.tenantId}`)
     const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
     return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
   }
@@ -227,6 +245,10 @@ export class CasesService {
       throw new BusinessException(400, 'Cannot update a closed case', 'errors.cases.alreadyClosed')
     }
 
+    if (dto.ownerUserId) {
+      await this.validateOwnerInTenant(dto.ownerUserId, user.tenantId)
+    }
+
     // Block non-admin, non-owner users from changing case status
     const isStatusChange = dto.status !== undefined && dto.status !== existing.status
     if (isStatusChange) {
@@ -247,20 +269,21 @@ export class CasesService {
       : `Case updated: ${changedFields} modified`
 
     const result = await this.prisma.$transaction(async tx => {
-      await tx.case.update({
-        where: { id },
+      const updated = await tx.case.updateMany({
+        where: { id, tenantId: user.tenantId },
         data: {
           title: dto.title ?? undefined,
           description: dto.description ?? undefined,
           severity: dto.severity ?? undefined,
           status: dto.status ?? undefined,
           ownerUserId: dto.ownerUserId ?? undefined,
-          closedAt: (() => {
-            if (dto.status !== 'closed') return
-            return dto.closedAt ? new Date(dto.closedAt) : new Date()
-          })(),
+          closedAt: dto.status === 'closed' ? new Date() : undefined,
         },
       })
+
+      if (updated.count === 0) {
+        throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
+      }
 
       await tx.caseTimeline.create({
         data: {
@@ -290,12 +313,26 @@ export class CasesService {
   /* DELETE                                                            */
   /* ---------------------------------------------------------------- */
 
-  async deleteCase(id: string, tenantId: string): Promise<{ deleted: boolean }> {
+  async deleteCase(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
     const existing = await this.getCaseById(id, tenantId)
 
-    await this.prisma.case.delete({ where: { id } })
+    // Soft-delete: close the case instead of destroying audit trail
+    await this.prisma.$transaction(async tx => {
+      await tx.case.updateMany({
+        where: { id, tenantId },
+        data: { status: 'closed' as CaseStatus, closedAt: new Date() },
+      })
+      await tx.caseTimeline.create({
+        data: {
+          caseId: id,
+          type: 'deleted',
+          actor,
+          description: `Case ${existing.caseNumber} soft-deleted`,
+        },
+      })
+    })
 
-    this.logger.log(`Case ${existing.caseNumber} deleted`)
+    this.logger.log(`Case ${existing.caseNumber} soft-deleted by ${actor}`)
     return { deleted: true }
   }
 
@@ -306,6 +343,14 @@ export class CasesService {
   async linkAlert(caseId: string, dto: LinkAlertDto, user: JwtPayload): Promise<CaseRecord> {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
+    if (existing.status === 'closed') {
+      throw new BusinessException(
+        400,
+        'Cannot link alerts to a closed case',
+        'errors.cases.alreadyClosed'
+      )
+    }
+
     if (existing.linkedAlerts.includes(dto.alertId)) {
       throw new BusinessException(
         409,
@@ -315,12 +360,17 @@ export class CasesService {
     }
 
     const result = await this.prisma.$transaction(async tx => {
-      await tx.case.update({
-        where: { id: caseId },
+      const updated = await tx.case.updateMany({
+        where: { id: caseId, tenantId: user.tenantId },
         data: {
-          linkedAlerts: { push: dto.alertId },
+          // updateMany doesn't support { push }, so we set the full array
+          linkedAlerts: [...existing.linkedAlerts, dto.alertId],
         },
       })
+
+      if (updated.count === 0) {
+        throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
+      }
 
       await tx.caseTimeline.create({
         data: {
@@ -362,6 +412,14 @@ export class CasesService {
   async addCaseNote(caseId: string, dto: CreateNoteDto, user: JwtPayload): Promise<CaseNote> {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
+    if (existing.status === 'closed') {
+      throw new BusinessException(
+        400,
+        'Cannot add notes to a closed case',
+        'errors.cases.alreadyClosed'
+      )
+    }
+
     const truncatedBody = dto.body.length > 80 ? `${dto.body.slice(0, 80)}...` : dto.body
 
     const note = await this.prisma.$transaction(async tx => {
@@ -394,14 +452,35 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   /**
-   * Generate the next case number in format SOC-YYYY-NNN.
-   * Queries the maximum existing case number for the current year and increments.
+   * H4/H5: Validate that ownerUserId has an active membership in the given tenant.
    */
-  private async generateCaseNumber(): Promise<string> {
+  private async validateOwnerInTenant(ownerUserId: string, tenantId: string): Promise<void> {
+    const membership = await this.prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId: ownerUserId, tenantId } },
+      select: { status: true },
+    })
+
+    if (membership?.status !== 'active') {
+      throw new BusinessException(
+        400,
+        'Assigned owner is not an active member of this tenant',
+        'errors.cases.invalidOwner'
+      )
+    }
+  }
+
+  /**
+   * Generate the next case number in format SOC-YYYY-NNN.
+   * Uses advisory lock to prevent race conditions across concurrent transactions.
+   */
+  private async generateCaseNumber(tx: Prisma.TransactionClient = this.prisma): Promise<string> {
+    // M3: Advisory lock to prevent concurrent case number collisions
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))`
+
     const year = new Date().getFullYear()
     const prefix = `SOC-${year}-`
 
-    const latestCase = await this.prisma.case.findFirst({
+    const latestCase = await tx.case.findFirst({
       where: {
         caseNumber: { startsWith: prefix },
       },

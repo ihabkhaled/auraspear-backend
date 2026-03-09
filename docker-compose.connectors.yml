@@ -1,0 +1,400 @@
+# =============================================================================
+# AuraSpear SOC — Security Connectors (Local Development)
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.connectors.yml up -d
+#
+# To run alongside infra (Postgres + Redis):
+#   docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml up -d
+#
+# Default Credentials (for local dev only):
+#   Wazuh Manager:    admin / SecretPassword
+#   Wazuh Indexer:    admin / SecretPassword
+#   Wazuh Dashboard:  admin / SecretPassword
+#   Graylog:          admin / admin@Graylog1
+#   Grafana:          admin / admin
+#   InfluxDB:         admin / adminpassword (org: auraspear, bucket: security)
+#   MISP:             admin@admin.test / admin
+#   Shuffle:          admin / password (first-time setup via UI)
+#   Velociraptor:     admin / admin (first-time setup via UI)
+# =============================================================================
+
+networks:
+  connectors:
+    driver: bridge
+
+volumes:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh_indexer_data:
+  wazuh_dashboard_config:
+  wazuh_dashboard_certs:
+  graylog_data:
+  graylog_journal:
+  opensearch_data:
+  mongo_data:
+  grafana_data:
+  influxdb_data:
+  misp_db:
+  misp_data:
+  shuffle_data:
+  velociraptor_data:
+
+services:
+  # ===========================================================================
+  # WAZUH — SIEM (Manager + Indexer + Dashboard)
+  # ===========================================================================
+  # Docs: https://documentation.wazuh.com/current/deployment-options/docker/index.html
+  # Manager API: https://localhost:55000 (admin/SecretPassword)
+  # Indexer:     https://localhost:9200 (admin/SecretPassword)
+  # Dashboard:   https://localhost:5601 (admin/SecretPassword)
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.9.2
+    container_name: auraspear-wazuh-manager
+    hostname: wazuh-manager
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    ports:
+      - '1514:1514'
+      - '1515:1515'
+      - '514:514/udp'
+      - '55000:55000'
+    environment:
+      INDEXER_URL: https://wazuh-indexer:9200
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: SecretPassword
+      FILEBEAT_SSL_VERIFICATION_MODE: full
+      SSL_CERTIFICATE_AUTHORITIES: /etc/ssl/root-ca.pem
+      SSL_CERTIFICATE: /etc/ssl/filebeat.pem
+      SSL_KEY: /etc/ssl/filebeat-key.pem
+      API_USERNAME: wazuh-wui
+      API_PASSWORD: MyS3cr37P450r.*-
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+    networks:
+      - connectors
+
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.2
+    container_name: auraspear-wazuh-indexer
+    hostname: wazuh-indexer
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - '9200:9200'
+    environment:
+      OPENSEARCH_JAVA_OPTS: '-Xms1g -Xmx1g'
+      bootstrap.memory_lock: 'true'
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: SecretPassword
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+    networks:
+      - connectors
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.9.2
+    container_name: auraspear-wazuh-dashboard
+    hostname: wazuh-dashboard
+    restart: unless-stopped
+    ports:
+      - '5601:5601'
+    environment:
+      INDEXER_USERNAME: admin
+      INDEXER_PASSWORD: SecretPassword
+      WAZUH_API_URL: https://wazuh-manager
+      DASHBOARD_USERNAME: kibanaserver
+      DASHBOARD_PASSWORD: kibanaserver
+      API_USERNAME: wazuh-wui
+      API_PASSWORD: MyS3cr37P450r.*-
+    volumes:
+      - wazuh_dashboard_config:/usr/share/wazuh-dashboard/data/wazuh/config
+      - wazuh_dashboard_certs:/usr/share/wazuh-dashboard/certs
+    depends_on:
+      - wazuh-indexer
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # GRAYLOG — Log Management
+  # ===========================================================================
+  # Docs: https://go2docs.graylog.org/current/downloading_and_installing_graylog/docker_installation.htm
+  # UI: http://localhost:9000 (admin / admin@Graylog1)
+  # API: http://localhost:9000/api
+
+  graylog-mongo:
+    image: mongo:6.0
+    container_name: auraspear-graylog-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - connectors
+
+  graylog-opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: auraspear-graylog-opensearch
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
+      bootstrap.memory_lock: 'true'
+      discovery.type: single-node
+      action.auto_create_index: 'false'
+      plugins.security.disabled: 'true'
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'Adm1n@OpenSearch!'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    networks:
+      - connectors
+
+  graylog:
+    image: graylog/graylog:6.1
+    container_name: auraspear-graylog
+    hostname: graylog
+    restart: unless-stopped
+    depends_on:
+      - graylog-mongo
+      - graylog-opensearch
+    entrypoint: /usr/bin/tini -- wait-for-it graylog-opensearch:9200 -- /docker-entrypoint.sh
+    environment:
+      # CHANGE ME: echo -n "admin@Graylog1" | shasum -a 256
+      GRAYLOG_ROOT_PASSWORD_SHA2: 4b09467d42ceaa18e6a5bfde0a479e0a0a5e3bb8fb6a61f0c6a16e09fe1486e6
+      GRAYLOG_PASSWORD_SECRET: somepasswordpepper_atleast16chars!!
+      GRAYLOG_HTTP_BIND_ADDRESS: '0.0.0.0:9000'
+      GRAYLOG_HTTP_EXTERNAL_URI: 'http://localhost:9000/'
+      GRAYLOG_ELASTICSEARCH_HOSTS: 'http://graylog-opensearch:9200'
+      GRAYLOG_MONGODB_URI: 'mongodb://graylog-mongo:27017/graylog'
+    ports:
+      - '9000:9000'       # Web UI + API
+      - '12201:12201'     # GELF TCP
+      - '12201:12201/udp' # GELF UDP
+      - '1516:1514/tcp'   # Syslog TCP (remapped to avoid Wazuh 1514 conflict)
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+      - graylog_journal:/usr/share/graylog/data/journal
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # GRAFANA — Monitoring & Dashboards
+  # ===========================================================================
+  # UI: http://localhost:3300 (admin / admin)
+  # API: http://localhost:3300/api
+  # Note: Using port 3300 to avoid conflict with Next.js on 3000
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    container_name: auraspear-grafana
+    hostname: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+    ports:
+      - '3300:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # INFLUXDB — Time-Series Database
+  # ===========================================================================
+  # UI: http://localhost:8086 (admin / adminpassword)
+  # API: http://localhost:8086/api/v2
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: auraspear-influxdb
+    hostname: influxdb
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: auraspear
+      DOCKER_INFLUXDB_INIT_BUCKET: security
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: auraspear-dev-token-change-me
+    ports:
+      - '8086:8086'
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # MISP — Threat Intelligence Platform
+  # ===========================================================================
+  # Docs: https://github.com/MISP/misp-docker
+  # UI: https://localhost:8443 (admin@admin.test / admin)
+  # API: https://localhost:8443 (use API key from Settings > Auth Keys)
+
+  misp-db:
+    image: mariadb:11
+    container_name: auraspear-misp-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: misp_password
+      MYSQL_ROOT_PASSWORD: misp_root_password
+    volumes:
+      - misp_db:/var/lib/mysql
+    networks:
+      - connectors
+
+  misp:
+    image: ghcr.io/misp/misp-docker/misp-core:latest
+    container_name: auraspear-misp
+    hostname: misp
+    restart: unless-stopped
+    depends_on:
+      - misp-db
+    environment:
+      BASE_URL: https://localhost:8443
+      MYSQL_HOST: misp-db
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: misp_password
+      MISP_ADMIN_EMAIL: admin@admin.test
+      MISP_ADMIN_PASSPHRASE: admin
+      MISP_SETTINGSDIR: /var/www/MISP/app/Config
+      REDIS_HOST: misp-redis
+    ports:
+      - '8443:443'
+      - '8080:80'
+    volumes:
+      - misp_data:/var/www/MISP/app/files
+    networks:
+      - connectors
+
+  misp-redis:
+    image: redis:7-alpine
+    container_name: auraspear-misp-redis
+    restart: unless-stopped
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # SHUFFLE — SOAR (Security Orchestration, Automation, Response)
+  # ===========================================================================
+  # Docs: https://shuffler.io/docs/configuration
+  # UI: http://localhost:3443 (first-time setup — create admin account)
+  # API: http://localhost:3443/api/v1
+
+  shuffle-backend:
+    image: ghcr.io/shuffle/shuffle-backend:latest
+    container_name: auraspear-shuffle-backend
+    hostname: shuffle-backend
+    restart: unless-stopped
+    environment:
+      SHUFFLE_APP_HOTLOAD_FOLDER: /shuffle-apps
+      SHUFFLE_FILE_LOCATION: /shuffle-files
+      SHUFFLE_OPENSEARCH_URL: http://shuffle-opensearch:9200
+      SHUFFLE_DEFAULT_USERNAME: admin
+      SHUFFLE_DEFAULT_PASSWORD: password
+      SHUFFLE_DEFAULT_APIKEY: auraspear-shuffle-dev-key
+    ports:
+      - '3443:5001'
+    volumes:
+      - shuffle_data:/shuffle-files
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - connectors
+
+  shuffle-frontend:
+    image: ghcr.io/shuffle/shuffle-frontend:latest
+    container_name: auraspear-shuffle-frontend
+    hostname: shuffle-frontend
+    restart: unless-stopped
+    depends_on:
+      - shuffle-backend
+    environment:
+      BACKEND_HOSTNAME: shuffle-backend
+    ports:
+      - '3444:80'
+    networks:
+      - connectors
+
+  shuffle-opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: auraspear-shuffle-opensearch
+    hostname: shuffle-opensearch
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
+      bootstrap.memory_lock: 'true'
+      discovery.type: single-node
+      plugins.security.disabled: 'true'
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'Adm1n@OpenSearch!'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - connectors
+
+  # ===========================================================================
+  # VELOCIRAPTOR — Endpoint Visibility & Response
+  # ===========================================================================
+  # Docs: https://docs.velociraptor.app/
+  # UI: https://localhost:8889 (first-time setup via CLI or config)
+  # API: https://localhost:8001/api/v1
+
+  velociraptor:
+    image: wlambert/velociraptor:latest
+    container_name: auraspear-velociraptor
+    hostname: velociraptor
+    restart: unless-stopped
+    ports:
+      - '8889:8889'   # GUI
+      - '8001:8001'   # API (Frontend)
+      - '8003:8003'   # Client comms
+    volumes:
+      - velociraptor_data:/velociraptor
+    networks:
+      - connectors

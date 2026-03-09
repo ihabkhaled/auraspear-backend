@@ -63,9 +63,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         errors = responseObject.errors as string[] | undefined
       }
     } else if (exception instanceof Error) {
-      this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack)
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.error(`Unhandled exception: ${exception.message}`)
+      } else {
+        this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack)
+      }
     } else {
-      this.logger.error('Unknown exception', exception)
+      this.logger.error('Unknown exception occurred')
     }
 
     // Fall back to a status-based messageKey if none was provided
@@ -77,7 +81,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       messageKey,
       error,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: process.env.NODE_ENV === 'production' ? (request.url.split('?')[0] ?? '') : request.url,
     }
 
     // Include field-level validation errors when present

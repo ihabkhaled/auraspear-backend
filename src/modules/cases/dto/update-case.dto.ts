@@ -9,7 +9,6 @@ export const UpdateCaseSchema = z.object({
   severity: CaseSeverityEnum.optional(),
   status: CaseStatusEnum.optional(),
   ownerUserId: z.string().uuid().optional(),
-  closedAt: z.string().datetime().optional(),
 })
 
 export type UpdateCaseDto = z.infer<typeof UpdateCaseSchema>

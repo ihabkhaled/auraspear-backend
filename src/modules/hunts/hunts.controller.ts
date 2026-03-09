@@ -34,8 +34,8 @@ export class HuntsController {
   ): Promise<PaginatedHuntSessions> {
     return this.huntsService.listRuns(
       tenantId,
-      page ? Number.parseInt(page, 10) : 1,
-      limit ? Number.parseInt(limit, 10) : 20
+      Math.max(1, page ? Number.parseInt(page, 10) : 1),
+      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 20))
     )
   }
 
@@ -50,13 +50,15 @@ export class HuntsController {
   @Get('runs/:id/events')
   async getRunEvents(
     @Param('id') id: string,
+    @TenantId() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
   ): Promise<PaginatedHuntEvents> {
     return this.huntsService.getEvents(
+      tenantId,
       id,
-      page ? Number.parseInt(page, 10) : 1,
-      limit ? Number.parseInt(limit, 10) : 50
+      Math.max(1, page ? Number.parseInt(page, 10) : 1),
+      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 50))
     )
   }
 }

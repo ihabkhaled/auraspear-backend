@@ -33,8 +33,8 @@ export class CasesController {
   ): Promise<PaginatedCases> {
     return this.casesService.listCases(
       tenantId,
-      page ? Number.parseInt(page, 10) : 1,
-      limit ? Number.parseInt(limit, 10) : 20,
+      Math.max(1, page ? Number.parseInt(page, 10) : 1),
+      Math.min(100, Math.max(1, limit ? Number.parseInt(limit, 10) : 20)),
       sortBy,
       sortOrder,
       status,
@@ -74,12 +74,15 @@ export class CasesController {
   @Roles(UserRole.TENANT_ADMIN)
   async deleteCase(
     @Param('id') id: string,
-    @TenantId() tenantId: string
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
-    return this.casesService.deleteCase(id, tenantId)
+    return this.casesService.deleteCase(id, tenantId, user.email)
   }
 
   @Post(':id/link-alert')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
   async linkAlert(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(LinkAlertSchema)) dto: LinkAlertDto,
@@ -94,6 +97,8 @@ export class CasesController {
   }
 
   @Post(':id/notes')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
   async addCaseNote(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateNoteSchema)) dto: CreateNoteDto,

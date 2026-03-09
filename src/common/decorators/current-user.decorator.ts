@@ -1,4 +1,5 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common'
+import { BusinessException } from '../exceptions/business.exception'
 import { type JwtPayload } from '../interfaces/authenticated-request.interface'
 
 /**
@@ -12,7 +13,10 @@ import { type JwtPayload } from '../interfaces/authenticated-request.interface'
 export const CurrentUser = createParamDecorator(
   (data: keyof JwtPayload | undefined, ctx: ExecutionContext): JwtPayload | string => {
     const request = ctx.switchToHttp().getRequest()
-    const { user } = request
+    const user = request.user as JwtPayload | undefined
+    if (!user) {
+      throw new BusinessException(401, 'Authentication required', 'errors.auth.missingToken')
+    }
     return data ? (user[data] as string) : user
   }
 )

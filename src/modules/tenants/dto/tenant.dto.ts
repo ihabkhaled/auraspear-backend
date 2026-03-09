@@ -18,9 +18,16 @@ export const UpdateTenantSchema = z.object({
 export type UpdateTenantDto = z.infer<typeof UpdateTenantSchema>
 
 export const AddUserSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().max(320),
   name: z.string().min(1).max(255),
-  password: z.string().min(8).max(128),
+  password: z
+    .string()
+    .min(8)
+    .max(128)
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!#$%&*@^])/,
+      'Password must contain uppercase, lowercase, digit, and special character'
+    ),
   role: z.enum([
     'GLOBAL_ADMIN',
     'TENANT_ADMIN',
@@ -45,7 +52,15 @@ export const UpdateUserSchema = z.object({
       'EXECUTIVE_READONLY',
     ])
     .optional(),
-  password: z.string().min(8).max(128).optional(),
+  password: z
+    .string()
+    .min(8)
+    .max(128)
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!#$%&*@^])/,
+      'Password must contain uppercase, lowercase, digit, and special character'
+    )
+    .optional(),
 })
 
 export type UpdateUserDto = z.infer<typeof UpdateUserSchema>

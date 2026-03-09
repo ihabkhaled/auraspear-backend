@@ -7,7 +7,12 @@ export const envSchema = z.object({
   // Redis
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().default(6379),
-  REDIS_PASSWORD: z.string().default(''),
+  REDIS_PASSWORD: z
+    .string()
+    .default('')
+    .refine(value => process.env.NODE_ENV !== 'production' || value.length >= 16, {
+      message: 'REDIS_PASSWORD must be at least 16 characters in production',
+    }),
 
   // OIDC (optional — only needed when using OIDC auth)
   OIDC_ISSUER_URL: z.string().url().optional(),
@@ -15,8 +20,14 @@ export const envSchema = z.object({
   OIDC_JWKS_URI: z.string().url().optional(),
   OIDC_CLIENT_ID: z.string().optional(),
 
-  // JWT (for email/password auth)
-  JWT_SECRET: z.string().min(32),
+  // JWT (for email/password auth) — should be 64-char hex (32 bytes)
+  JWT_SECRET: z
+    .string()
+    .min(32)
+    .refine(value => value.length >= 64 && /^[\da-f]+$/i.test(value), {
+      message:
+        "JWT_SECRET must be at least 64 hex characters. Generate: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    }),
   JWT_ACCESS_EXPIRY: z.string().default('15m'),
   JWT_REFRESH_EXPIRY: z.string().default('7d'),
 
@@ -26,8 +37,14 @@ export const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
 
-  // Encryption
-  CONFIG_ENCRYPTION_KEY: z.string().min(32),
+  // Encryption — must be exactly 64-char hex (32 bytes for AES-256)
+  CONFIG_ENCRYPTION_KEY: z
+    .string()
+    .length(64)
+    .regex(/^[\da-f]{64}$/i, {
+      message:
+        "CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Generate: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    }),
 
   // Connector defaults (optional — per-tenant config stored in DB)
   WAZUH_MANAGER_URL: z.string().url().optional(),

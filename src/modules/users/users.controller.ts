@@ -1,10 +1,16 @@
-import { Body, Controller, Get, Patch, Post } from '@nestjs/common'
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { ChangePasswordSchema, type ChangePasswordDto } from './dto/change-password.dto'
 import { UpdatePreferencesSchema, type UpdatePreferencesDto } from './dto/update-preferences.dto'
 import { UpdateProfileSchema, type UpdateProfileDto } from './dto/update-profile.dto'
 import { UsersService } from './users.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { Roles } from '../../common/decorators/roles.decorator'
+import { AuthGuard } from '../../common/guards/auth.guard'
+import { RolesGuard } from '../../common/guards/roles.guard'
+import { TenantGuard } from '../../common/guards/tenant.guard'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Tenant, User, UserPreference } from '@prisma/client'
@@ -27,6 +33,7 @@ type UserPreferenceOrDefault =
 @ApiTags('users')
 @ApiBearerAuth()
 @Controller('users')
+@UseGuards(AuthGuard, TenantGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
@@ -36,6 +43,7 @@ export class UsersController {
   }
 
   @Patch('profile')
+  @Roles(UserRole.SOC_ANALYST_L1)
   async updateProfile(
     @Body(new ZodValidationPipe(UpdateProfileSchema)) dto: UpdateProfileDto,
     @CurrentUser() user: JwtPayload
@@ -44,6 +52,8 @@ export class UsersController {
   }
 
   @Post('change-password')
+  @Roles(UserRole.SOC_ANALYST_L1)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async changePassword(
     @Body(new ZodValidationPipe(ChangePasswordSchema)) dto: ChangePasswordDto,
     @CurrentUser() user: JwtPayload
@@ -57,6 +67,7 @@ export class UsersController {
   }
 
   @Patch('preferences')
+  @Roles(UserRole.SOC_ANALYST_L1)
   async updatePreferences(
     @Body(new ZodValidationPipe(UpdatePreferencesSchema)) dto: UpdatePreferencesDto,
     @CurrentUser() user: JwtPayload

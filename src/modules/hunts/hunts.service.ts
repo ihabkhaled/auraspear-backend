@@ -178,7 +178,26 @@ export class HuntsService {
   /**
    * Gets paginated events for a hunt session.
    */
-  async getEvents(sessionId: string, page: number, limit: number): Promise<PaginatedHuntEvents> {
+  async getEvents(
+    tenantId: string,
+    sessionId: string,
+    page: number,
+    limit: number
+  ): Promise<PaginatedHuntEvents> {
+    // Verify session belongs to tenant before returning events
+    const session = await this.prisma.huntSession.findFirst({
+      where: { id: sessionId, tenantId },
+      select: { id: true },
+    })
+
+    if (!session) {
+      throw new BusinessException(
+        404,
+        `Hunt session ${sessionId} not found`,
+        'errors.hunts.notFound'
+      )
+    }
+
     const [data, total] = await Promise.all([
       this.prisma.huntEvent.findMany({
         where: { huntSessionId: sessionId },
@@ -198,7 +217,35 @@ export class HuntsService {
   /**
    * Build an Elasticsearch DSL query from a hunt query string and time range.
    */
+  /**
+   * Sanitize user query to prevent Elasticsearch injection.
+   * Removes dangerous Lucene query syntax that could access internal indices
+   * or execute scripts.
+   */
+  private sanitizeEsQuery(query: string): string {
+    const sanitized = query
+      // Remove script injection patterns
+      .replaceAll(/\bscript\b/gi, '')
+      // Remove internal ES API endpoint patterns
+      .replaceAll(/_search|_mapping|_cluster|_cat|_nodes|_mget|_bulk|_msearch/gi, '')
+      // Block match-all patterns that could return entire indices
+      .replaceAll('*:*', '')
+      // Block aggregation patterns that can cause memory exhaustion
+      .replaceAll(/\baggregations?\b/gi, '')
+      .replaceAll(/\baggs?\b/gi, '')
+      // Limit length to prevent abuse
+      .slice(0, 1000)
+      .trim()
+
+    if (sanitized.length === 0) {
+      throw new BusinessException(400, 'Invalid or empty hunt query', 'errors.hunts.invalidQuery')
+    }
+
+    return sanitized
+  }
+
   private buildEsQuery(query: string, timeRange: string): Record<string, unknown> {
+    const sanitizedQuery = this.sanitizeEsQuery(query)
     const now = new Date()
     const rangeMap: Record<string, number> = {
       '1h': 60 * 60 * 1000,
@@ -219,8 +266,8 @@ export class HuntsService {
         bool: {
           must: [
             {
-              query_string: {
-                query,
+              simple_query_string: {
+                query: sanitizedQuery,
                 default_operator: 'AND',
               },
             },

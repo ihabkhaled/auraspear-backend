@@ -9,18 +9,6 @@ import type { Prisma, UserStatus } from '@prisma/client'
 
 const BCRYPT_SALT_ROUNDS = 12
 
-// Mock data fallback
-const MOCK_TENANTS: TenantRecord[] = [
-  { id: 'tid-001', name: 'Aura Finance', slug: 'aura-finance', createdAt: new Date('2024-01-15') },
-  { id: 'tid-002', name: 'Aura Health', slug: 'aura-health', createdAt: new Date('2024-02-01') },
-  {
-    id: 'tid-003',
-    name: 'Aura Enterprise',
-    slug: 'aura-enterprise',
-    createdAt: new Date('2024-03-10'),
-  },
-]
-
 @Injectable()
 export class TenantsService {
   private readonly logger = new Logger(TenantsService.name)
@@ -28,73 +16,49 @@ export class TenantsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(): Promise<TenantWithCounts[]> {
-    try {
-      const tenants = await this.prisma.tenant.findMany({
-        orderBy: { name: 'asc' },
-        include: {
-          _count: {
-            select: {
-              memberships: true,
-              alerts: true,
-              cases: true,
-            },
+    const tenants = await this.prisma.tenant.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        _count: {
+          select: {
+            memberships: true,
+            alerts: true,
+            cases: true,
           },
         },
-      })
-      return tenants.map(t => ({
-        id: t.id,
-        name: t.name,
-        slug: t.slug,
-        createdAt: t.createdAt,
-        userCount: t._count.memberships,
-        alertCount: t._count.alerts,
-        caseCount: t._count.cases,
-      }))
-    } catch {
-      this.logger.warn('Prisma unavailable, returning mock tenants')
-      return MOCK_TENANTS.map(t => ({
-        ...t,
-        userCount: 0,
-        alertCount: 0,
-        caseCount: 0,
-      }))
-    }
+      },
+    })
+    return tenants.map(t => ({
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      createdAt: t.createdAt,
+      userCount: t._count.memberships,
+      alertCount: t._count.alerts,
+      caseCount: t._count.cases,
+    }))
   }
 
   async findById(id: string): Promise<TenantWithCounts> {
-    try {
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id },
-        include: {
-          _count: {
-            select: { memberships: true, alerts: true, cases: true },
-          },
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { memberships: true, alerts: true, cases: true },
         },
-      })
-      if (!tenant) {
-        throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
-      }
-      return {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        createdAt: tenant.createdAt,
-        userCount: tenant._count.memberships,
-        alertCount: tenant._count.alerts,
-        caseCount: tenant._count.cases,
-      }
-    } catch (error) {
-      if (error instanceof BusinessException) throw error
-      const mock = MOCK_TENANTS.find(t => t.id === id || t.slug === id)
-      if (!mock) {
-        throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
-      }
-      return {
-        ...mock,
-        userCount: 0,
-        alertCount: 0,
-        caseCount: 0,
-      }
+      },
+    })
+    if (!tenant) {
+      throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
+    }
+    return {
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      createdAt: tenant.createdAt,
+      userCount: tenant._count.memberships,
+      alertCount: tenant._count.alerts,
+      caseCount: tenant._count.cases,
     }
   }
 
@@ -121,7 +85,14 @@ export class TenantsService {
   }
 
   async remove(id: string): Promise<{ deleted: boolean }> {
-    await this.prisma.tenant.delete({ where: { id } })
+    // Soft-delete: deactivate all memberships instead of destroying tenant data
+    await this.prisma.$transaction(async tx => {
+      await tx.tenantMembership.updateMany({
+        where: { tenantId: id },
+        data: { status: 'inactive' },
+      })
+    })
+    this.logger.log(`Tenant ${id} soft-deleted: all memberships deactivated`)
     return { deleted: true }
   }
 
@@ -159,8 +130,9 @@ export class TenantsService {
         isProtected: m.user.isProtected,
         createdAt: m.createdAt,
       }))
-    } catch {
-      return []
+    } catch (error) {
+      this.logger.error(`Failed to fetch users for tenant ${tenantId}`, error)
+      throw error
     }
   }
 
@@ -177,8 +149,9 @@ export class TenantsService {
         name: m.user.name,
         email: m.user.email,
       }))
-    } catch {
-      return []
+    } catch (error) {
+      this.logger.error(`Failed to fetch members for tenant ${tenantId}`, error)
+      throw error
     }
   }
 
@@ -212,54 +185,74 @@ export class TenantsService {
       )
     }
 
-    // Check if a membership already exists for this email in this tenant
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    })
-    if (existingUser) {
-      const existingMembership = await this.prisma.tenantMembership.findUnique({
-        where: { userId_tenantId: { userId: existingUser.id, tenantId } },
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+
+    // Atomic: find-or-create user + create membership in a single transaction
+    // SECURITY: Never overwrite an existing user's password hash
+    try {
+      const result = await this.prisma.$transaction(async tx => {
+        const existing = await tx.user.findUnique({ where: { email: dto.email } })
+
+        let user: {
+          id: string
+          email: string
+          name: string
+          lastLoginAt: Date | null
+          mfaEnabled: boolean
+          isProtected: boolean
+        }
+
+        if (existing) {
+          if (existing.isProtected) {
+            throw new BusinessException(
+              403,
+              'Cannot add a protected user to another tenant',
+              'errors.tenants.userProtected'
+            )
+          }
+          user = existing
+        } else {
+          user = await tx.user.create({
+            data: {
+              email: dto.email,
+              name: dto.name,
+              passwordHash,
+            },
+          })
+        }
+
+        const membership = await tx.tenantMembership.create({
+          data: {
+            userId: user.id,
+            tenantId,
+            role: dto.role as UserRole,
+          },
+        })
+
+        return { user, membership }
       })
-      if (existingMembership) {
+
+      return {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+        role: result.membership.role,
+        status: result.membership.status,
+        lastLoginAt: result.user.lastLoginAt,
+        mfaEnabled: result.user.mfaEnabled,
+        isProtected: result.user.isProtected,
+        createdAt: result.membership.createdAt,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      if (message.includes('Unique constraint')) {
         throw new BusinessException(
           409,
           'Email already exists in this tenant',
           'errors.tenants.emailExists'
         )
       }
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
-
-    // Upsert global user + create membership
-    const user = await this.prisma.user.upsert({
-      where: { email: dto.email },
-      update: { passwordHash },
-      create: {
-        email: dto.email,
-        name: dto.name,
-        passwordHash,
-      },
-    })
-
-    const membership = await this.prisma.tenantMembership.create({
-      data: {
-        userId: user.id,
-        tenantId,
-        role: dto.role as UserRole,
-      },
-    })
-
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: membership.role,
-      status: membership.status,
-      lastLoginAt: user.lastLoginAt,
-      mfaEnabled: user.mfaEnabled,
-      isProtected: user.isProtected,
-      createdAt: membership.createdAt,
+      throw error
     }
   }
 

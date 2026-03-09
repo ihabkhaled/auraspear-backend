@@ -25,7 +25,11 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService
   ) {
-    this.jwtSecret = this.configService.get<string>('JWT_SECRET', '')
+    const secret = this.configService.get<string>('JWT_SECRET')
+    if (!secret || secret.length < 32) {
+      throw new Error('JWT_SECRET must be set and at least 32 characters long')
+    }
+    this.jwtSecret = secret
     this.accessExpiry = this.configService.get<string>(
       'JWT_ACCESS_EXPIRY',
       '15m'
@@ -109,17 +113,29 @@ export class AuthService {
 
   signAccessToken(payload: JwtPayload): string {
     const { iat: _iat, exp: _exp, ...clean } = payload
-    return jwt.sign(clean, this.jwtSecret, { expiresIn: this.accessExpiry })
+    return jwt.sign({ ...clean, tokenType: 'access' }, this.jwtSecret, {
+      algorithm: 'HS256',
+      expiresIn: this.accessExpiry,
+    })
   }
 
   signRefreshToken(payload: JwtPayload): string {
     const { iat: _iat, exp: _exp, ...clean } = payload
-    return jwt.sign(clean, this.jwtSecret, { expiresIn: this.refreshExpiry })
+    return jwt.sign({ ...clean, tokenType: 'refresh' }, this.jwtSecret, {
+      algorithm: 'HS256',
+      expiresIn: this.refreshExpiry,
+    })
   }
 
   verifyAccessToken(token: string): JwtPayload {
     try {
-      return jwt.verify(token, this.jwtSecret) as JwtPayload
+      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
+        tokenType?: string
+      }
+      if (decoded.tokenType !== 'access') {
+        throw new Error('Not an access token')
+      }
+      return decoded
     } catch {
       throw new BusinessException(
         401,
@@ -131,7 +147,13 @@ export class AuthService {
 
   verifyRefreshToken(token: string): JwtPayload {
     try {
-      return jwt.verify(token, this.jwtSecret) as JwtPayload
+      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
+        tokenType?: string
+      }
+      if (decoded.tokenType !== 'refresh') {
+        throw new Error('Not a refresh token')
+      }
+      return decoded
     } catch {
       throw new BusinessException(
         401,
@@ -182,10 +204,21 @@ export class AuthService {
   async validateUserActive(userId: string): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: {
+        memberships: {
+          where: { status: 'active' },
+          select: { id: true },
+          take: 1,
+        },
+      },
     })
 
     if (!user) {
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
+    }
+
+    if (user.memberships.length === 0) {
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
 

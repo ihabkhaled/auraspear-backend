@@ -162,7 +162,7 @@ export class AlertsService {
     }
 
     return this.prisma.alert.update({
-      where: { id },
+      where: { id, tenantId },
       data: {
         status: 'acknowledged',
         acknowledgedBy: email,
@@ -183,7 +183,7 @@ export class AlertsService {
     }
 
     return this.prisma.alert.update({
-      where: { id },
+      where: { id, tenantId },
       data: { status: 'in_progress' },
     })
   }
@@ -194,10 +194,18 @@ export class AlertsService {
     resolution: string,
     email: string
   ): Promise<AlertRecord> {
-    await this.findById(tenantId, id)
+    const alert = await this.findById(tenantId, id)
+
+    if (alert.status === 'closed' || alert.status === 'resolved') {
+      throw new BusinessException(
+        400,
+        'Alert is already closed or resolved',
+        'errors.alerts.alreadyClosed'
+      )
+    }
 
     return this.prisma.alert.update({
-      where: { id },
+      where: { id, tenantId },
       data: {
         status: 'closed',
         resolution,
@@ -238,61 +246,89 @@ export class AlertsService {
 
     const result = await this.wazuhService.searchAlerts(config, esQuery)
 
-    const upsertResults = await Promise.allSettled(
-      result.hits.map(rawHit => {
-        const hit = rawHit as Record<string, unknown>
-        const source = (hit._source ?? hit) as Record<string, unknown>
-        const externalId = (hit._id ?? source.id) as string
+    // Build upsert data from hits
+    const upsertOps = result.hits.map(rawHit => {
+      const hit = rawHit as Record<string, unknown>
+      const source = (hit._source ?? hit) as Record<string, unknown>
+      const externalId = (hit._id ?? source.id) as string
 
-        const rule = source.rule as Record<string, unknown> | undefined
-        const agent = source.agent as Record<string, unknown> | undefined
-        const data = source.data as Record<string, unknown> | undefined
+      const rule = source.rule as Record<string, unknown> | undefined
+      const agent = source.agent as Record<string, unknown> | undefined
+      const data = source.data as Record<string, unknown> | undefined
 
-        const mitreTechniques: string[] = []
-        const mitreTactics: string[] = []
-        const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
-        if (mitreInfo) {
-          const ids = mitreInfo.id as string[] | undefined
-          const tactics = mitreInfo.tactic as string[] | undefined
-          if (ids) mitreTechniques.push(...ids)
-          if (tactics) mitreTactics.push(...tactics)
-        }
+      const mitreTechniques: string[] = []
+      const mitreTactics: string[] = []
+      const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
+      if (mitreInfo) {
+        const ids = mitreInfo.id as string[] | undefined
+        const tactics = mitreInfo.tactic as string[] | undefined
+        if (ids) mitreTechniques.push(...ids)
+        if (tactics) mitreTactics.push(...tactics)
+      }
 
-        const severity = this.mapWazuhLevel(rule?.level as number | undefined)
+      const severity = this.mapWazuhLevel(rule?.level as number | undefined)
 
-        return this.prisma.alert.upsert({
-          where: { tenantId_externalId: { tenantId, externalId } },
-          create: {
-            tenantId,
-            externalId,
-            title: (rule?.description ?? source.rule_description ?? 'Wazuh Alert') as string,
-            description: JSON.stringify(source),
-            severity,
-            status: 'new_alert',
-            source: 'wazuh',
-            ruleName: (rule?.description ?? null) as string | null,
-            ruleId: (rule?.id ?? null) as string | null,
-            agentName: (agent?.name ?? null) as string | null,
-            sourceIp: (data?.srcip ?? source.src_ip ?? null) as string | null,
-            destinationIp: (data?.dstip ?? source.dst_ip ?? null) as string | null,
-            mitreTactics,
-            mitreTechniques,
-            rawEvent: source as Prisma.InputJsonValue,
-            timestamp: new Date((source.timestamp ?? now) as string),
-          },
-          update: {
-            rawEvent: source as Prisma.InputJsonValue,
-          },
-        })
-      })
-    )
+      return {
+        externalId,
+        rule,
+        agent: agent ?? null,
+        data: data ?? null,
+        source,
+        severity,
+        mitreTactics,
+        mitreTechniques,
+        timestamp: new Date((source.timestamp ?? now) as string),
+      }
+    })
 
+    // Batch upserts in chunks of 50 to avoid overwhelming the database
+    const BATCH_SIZE = 50
     let ingested = 0
-    for (const upsertResult of upsertResults) {
-      if (upsertResult.status === 'fulfilled') {
-        ingested++
-      } else {
-        this.logger.warn(`Failed to ingest alert: ${(upsertResult.reason as Error).message}`)
+
+    for (let index = 0; index < upsertOps.length; index += BATCH_SIZE) {
+      const batch = upsertOps.slice(index, index + BATCH_SIZE)
+      const batchResults = await Promise.allSettled(
+        batch.map(op =>
+          this.prisma.alert.upsert({
+            where: { tenantId_externalId: { tenantId, externalId: op.externalId } },
+            create: {
+              tenantId,
+              externalId: op.externalId,
+              title: (op.rule?.description ??
+                op.source.rule_description ??
+                'Wazuh Alert') as string,
+              description: JSON.stringify(op.source),
+              severity: op.severity,
+              status: 'new_alert',
+              source: 'wazuh',
+              ruleName: (op.rule?.description ?? null) as string | null,
+              ruleId: (op.rule?.id ?? null) as string | null,
+              agentName:
+                ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
+              sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ??
+                op.source.src_ip ??
+                null) as string | null,
+              destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
+                op.source.dst_ip ??
+                null) as string | null,
+              mitreTactics: op.mitreTactics,
+              mitreTechniques: op.mitreTechniques,
+              rawEvent: op.source as Prisma.InputJsonValue,
+              timestamp: op.timestamp,
+            },
+            update: {
+              rawEvent: op.source as Prisma.InputJsonValue,
+            },
+          })
+        )
+      )
+
+      for (const batchResult of batchResults) {
+        if (batchResult.status === 'fulfilled') {
+          ingested++
+        } else {
+          this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
+        }
       }
     }
 
