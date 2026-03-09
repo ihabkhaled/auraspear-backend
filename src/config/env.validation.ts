@@ -50,6 +50,7 @@ export const envSchema = z.object({
   WAZUH_MANAGER_URL: z.string().url().optional(),
   WAZUH_INDEXER_URL: z.string().url().optional(),
   GRAYLOG_BASE_URL: z.string().url().optional(),
+  LOGSTASH_BASE_URL: z.string().url().optional(),
   VELOCIRAPTOR_BASE_URL: z.string().url().optional(),
   GRAFANA_BASE_URL: z.string().url().optional(),
   INFLUXDB_BASE_URL: z.string().url().optional(),

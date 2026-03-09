@@ -4,6 +4,7 @@ export const CreateConnectorSchema = z.object({
   type: z.enum([
     'wazuh',
     'graylog',
+    'logstash',
     'velociraptor',
     'grafana',
     'influxdb',
@@ -41,6 +42,7 @@ export const TestConnectorSchema = z.object({
   type: z.enum([
     'wazuh',
     'graylog',
+    'logstash',
     'velociraptor',
     'grafana',
     'influxdb',

@@ -4,6 +4,7 @@ import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
 import { GraylogService } from './services/graylog.service'
 import { InfluxDBService } from './services/influxdb.service'
+import { LogstashService } from './services/logstash.service'
 import { MispService } from './services/misp.service'
 import { ShuffleService } from './services/shuffle.service'
 import { VelociraptorService } from './services/velociraptor.service'
@@ -25,6 +26,7 @@ export class ConnectorsService {
     private readonly configService: ConfigService,
     private readonly wazuhService: WazuhService,
     private readonly graylogService: GraylogService,
+    private readonly logstashService: LogstashService,
     private readonly velociraptorService: VelociraptorService,
     private readonly grafanaService: GrafanaService,
     private readonly influxdbService: InfluxDBService,
@@ -237,6 +239,13 @@ export class ConnectorsService {
             await this.graylogService.testConnection(decryptedConfig)
           ok = graylogOk
           details = graylogDetails
+          break
+        }
+        case 'logstash': {
+          const { ok: logstashOk, details: logstashDetails } =
+            await this.logstashService.testConnection(decryptedConfig)
+          ok = logstashOk
+          details = logstashDetails
           break
         }
         case 'velociraptor': {

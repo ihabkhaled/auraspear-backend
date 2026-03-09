@@ -5,6 +5,7 @@ import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
 import { GraylogService } from './services/graylog.service'
 import { InfluxDBService } from './services/influxdb.service'
+import { LogstashService } from './services/logstash.service'
 import { MispService } from './services/misp.service'
 import { OpenSearchService } from './services/opensearch.service'
 import { ShuffleService } from './services/shuffle.service'
@@ -18,6 +19,7 @@ import { WazuhService } from './services/wazuh.service'
     WazuhService,
     OpenSearchService,
     GraylogService,
+    LogstashService,
     VelociraptorService,
     GrafanaService,
     InfluxDBService,
@@ -29,6 +31,7 @@ import { WazuhService } from './services/wazuh.service'
     ConnectorsService,
     WazuhService,
     GraylogService,
+    LogstashService,
     VelociraptorService,
     GrafanaService,
     InfluxDBService,
