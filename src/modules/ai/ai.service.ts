@@ -52,13 +52,6 @@ export class AiService {
       if (error instanceof BusinessException) {
         throw error
       }
-      // In development, allow AI in mock mode when DB is unavailable
-      if (process.env.NODE_ENV === 'development') {
-        this.logger.warn(
-          'connector_configs table not available; allowing AI in mock mode (dev only)'
-        )
-        return
-      }
       this.logger.error('AI gate check failed', error)
       throw new BusinessException(
         503,

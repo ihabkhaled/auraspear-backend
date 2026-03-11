@@ -63,6 +63,7 @@ export class AuthController {
    */
   @ApiBearerAuth()
   @Post('logout')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async logout(
     @Req() request: AuthenticatedRequest,
     @Body(new ZodValidationPipe(AuthLogoutSchema)) dto: AuthLogoutDto

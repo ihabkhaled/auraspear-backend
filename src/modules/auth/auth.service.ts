@@ -16,6 +16,10 @@ interface TenantMembershipInfo {
   role: UserRole
 }
 
+// Pre-computed bcrypt hash used for constant-time comparison when user doesn't exist.
+// Prevents timing-based email enumeration (bcrypt ~500ms vs immediate rejection ~1ms).
+const DUMMY_BCRYPT_HASH = '$2a$12$LJ3m4ys3Lp0Yf5YzF0OOjO5KbK6Fz6j4z5Y5Z5Y5Z5Y5Z5Y5Z5Y5u'
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name)
@@ -62,16 +66,13 @@ export class AuthService {
       },
     })
 
-    if (!user?.passwordHash) {
-      throw new BusinessException(
-        401,
-        'Invalid email or password',
-        'errors.auth.invalidCredentials'
-      )
-    }
+    // Always run bcrypt.compare to prevent timing-based email enumeration.
+    // If user doesn't exist or has no password, compare against a dummy hash
+    // so the response time is constant (~500ms) regardless of user existence.
+    const hashToCompare = user?.passwordHash ?? DUMMY_BCRYPT_HASH
+    const valid = await bcrypt.compare(password, hashToCompare)
 
-    const valid = await bcrypt.compare(password, user.passwordHash)
-    if (!valid) {
+    if (!user?.passwordHash || !valid) {
       throw new BusinessException(
         401,
         'Invalid email or password',
@@ -192,6 +193,13 @@ export class AuthService {
     refreshToken: string
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const payload = await this.verifyRefreshToken(refreshToken)
+
+    // Blacklist the old refresh token JTI to prevent replay attacks
+    if (payload.jti && payload.exp) {
+      const now = Math.floor(Date.now() / 1000)
+      const remainingTtl = Math.max(payload.exp - now, 0)
+      await this.tokenBlacklistService.blacklist(payload.jti, remainingTtl)
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },

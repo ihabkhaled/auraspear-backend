@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
+import { HealthStatus } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
@@ -41,17 +42,16 @@ export class HealthService {
   async getOverallHealth(): Promise<OverallHealth> {
     const [database, redis] = await Promise.all([this.checkDatabase(), this.checkRedis()])
 
-    let status: 'healthy' | 'degraded' | 'down' = 'healthy'
-    if (database.status === 'down' && redis.status === 'down') {
-      status = 'down'
-    } else if (database.status === 'down' || redis.status === 'down') {
-      status = 'degraded'
+    let status: HealthStatus = HealthStatus.HEALTHY
+    if (database.status === HealthStatus.DOWN && redis.status === HealthStatus.DOWN) {
+      status = HealthStatus.DOWN
+    } else if (database.status === HealthStatus.DOWN || redis.status === HealthStatus.DOWN) {
+      status = HealthStatus.DEGRADED
     }
 
     return {
       status,
       timestamp: new Date().toISOString(),
-      version: '1.0.0',
       checks: { database, redis },
     }
   }
@@ -68,9 +68,9 @@ export class HealthService {
         try {
           const test = await this.connectorsService.testConnection(tenantId, connector.type)
 
-          let status: 'healthy' | 'degraded' | 'down' = 'down'
+          let status: HealthStatus = HealthStatus.DOWN
           if (test.ok) {
-            status = test.latencyMs > 3000 ? 'degraded' : 'healthy'
+            status = test.latencyMs > 3000 ? HealthStatus.DEGRADED : HealthStatus.HEALTHY
           }
 
           return {
@@ -88,7 +88,7 @@ export class HealthService {
           return {
             name: connector.name,
             type: connector.type,
-            status: 'down',
+            status: HealthStatus.DOWN,
             latencyMs: -1,
           }
         }
@@ -105,12 +105,12 @@ export class HealthService {
     const start = Date.now()
     try {
       await this.prisma.$queryRaw`SELECT 1`
-      return { status: 'healthy', latencyMs: Date.now() - start }
+      return { status: HealthStatus.HEALTHY, latencyMs: Date.now() - start }
     } catch (error) {
       this.logger.error(
         `Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
-      return { status: 'down', latencyMs: Date.now() - start }
+      return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
     }
   }
 
@@ -121,12 +121,12 @@ export class HealthService {
     const start = Date.now()
     try {
       await this.redis.ping()
-      return { status: 'healthy', latencyMs: Date.now() - start }
+      return { status: HealthStatus.HEALTHY, latencyMs: Date.now() - start }
     } catch (error) {
       this.logger.error(
         `Redis health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
-      return { status: 'down', latencyMs: Date.now() - start }
+      return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
     }
   }
 }

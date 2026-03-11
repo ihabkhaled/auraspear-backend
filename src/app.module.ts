@@ -14,6 +14,7 @@ import { AlertsModule } from './modules/alerts/alerts.module'
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CasesModule } from './modules/cases/cases.module'
+import { ConnectorWorkspacesModule } from './modules/connector-workspaces/connector-workspaces.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { HealthModule } from './modules/health/health.module'
@@ -40,7 +41,14 @@ import { PrismaModule } from './prisma/prisma.module'
       pinoHttp: {
         transport: process.env.NODE_ENV === 'production' ? undefined : { target: 'pino-pretty' },
         level: process.env.LOG_LEVEL ?? 'info',
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
+        redact: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.currentPassword',
+          'req.body.newPassword',
+          'req.body.confirmPassword',
+        ],
       },
     }),
 
@@ -51,6 +59,7 @@ import { PrismaModule } from './prisma/prisma.module'
     AuthModule,
     TenantsModule,
     ConnectorsModule,
+    ConnectorWorkspacesModule,
     AlertsModule,
     AuditLogsModule,
     DashboardsModule,

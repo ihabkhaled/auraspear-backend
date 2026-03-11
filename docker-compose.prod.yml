@@ -7,8 +7,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - '${POSTGRES_PORT}:5432'
+    # No ports exposed in production — only accessible via Docker internal network
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +20,7 @@ services:
     image: redis:7-alpine
     container_name: auraspear-redis
     restart: unless-stopped
-    ports:
-      - '${REDIS_PORT}:6379'
+    # No ports exposed in production — only accessible via Docker internal network
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s

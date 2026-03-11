@@ -1,14 +1,15 @@
+import { type HealthStatus } from '../../common/enums'
+
 export interface ServiceHealthResult {
   name: string
   type: string
-  status: 'healthy' | 'degraded' | 'down'
+  status: HealthStatus
   latencyMs: number
 }
 
 export interface OverallHealth {
-  status: 'healthy' | 'degraded' | 'down'
+  status: HealthStatus
   timestamp: string
-  version: string
   checks: {
     database: ComponentCheck
     redis: ComponentCheck
@@ -16,6 +17,6 @@ export interface OverallHealth {
 }
 
 export interface ComponentCheck {
-  status: 'healthy' | 'down'
+  status: HealthStatus.HEALTHY | HealthStatus.DOWN
   latencyMs: number
 }

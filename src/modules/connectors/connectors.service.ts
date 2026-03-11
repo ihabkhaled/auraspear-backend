@@ -13,6 +13,7 @@ import { WazuhService } from './services/wazuh.service'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
 import { maskSecrets } from '../../common/utils/mask.util'
+import { validateUrl } from '../../common/utils/ssrf.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
@@ -121,6 +122,9 @@ export class ConnectorsService {
       )
     }
 
+    // SSRF validation at input time — reject private/internal URLs before storing
+    this.validateConfigUrls(validatedConfig)
+
     const encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
 
     const config = await this.prisma.connectorConfig.create({
@@ -179,6 +183,9 @@ export class ConnectorsService {
           'errors.connectors.invalidConfig'
         )
       }
+      // SSRF validation at input time — reject private/internal URLs before storing
+      this.validateConfigUrls(validatedConfig)
+
       updateData.encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
     }
 
@@ -378,6 +385,22 @@ export class ConnectorsService {
     })
 
     return configs.map(c => ({ type: c.type, name: c.name }))
+  }
+
+  /**
+   * Validate all URL fields in a connector config against SSRF rules at input time.
+   * Connectors intentionally connect to private infrastructure, so this only rejects
+   * metadata endpoints (169.254.x) and loopback — internal ranges are allowed.
+   */
+  private validateConfigUrls(config: Record<string, unknown>): void {
+    const urlKeys = ['baseUrl', 'managerUrl', 'indexerUrl', 'webhookUrl']
+    for (const key of urlKeys) {
+      const value = config[key]
+      if (typeof value === 'string' && value.length > 0) {
+        // validateUrl throws BusinessException for private/invalid URLs
+        validateUrl(value)
+      }
+    }
   }
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {

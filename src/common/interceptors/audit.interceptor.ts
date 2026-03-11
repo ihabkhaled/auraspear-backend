@@ -19,6 +19,14 @@ const SENSITIVE_BODY_KEYS = new Set([
   'secret',
   'apiKey',
   'token',
+  'bearerToken',
+  'accessKey',
+  'clientSecret',
+  'refreshToken',
+  'accessToken',
+  'encryptedConfig',
+  'authorization',
+  'secretAccessKey',
 ])
 
 const MAX_SANITIZE_DEPTH = 5

@@ -1,0 +1,60 @@
+import { z } from 'zod'
+import { ConnectorType } from '../../../common/enums'
+
+/** Valid connector types — matches Prisma ConnectorType enum */
+const ConnectorTypeParam = z.nativeEnum(ConnectorType)
+
+export type ConnectorTypeParam = z.infer<typeof ConnectorTypeParam>
+
+/** Pagination query params shared across list endpoints */
+export const PaginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+})
+
+export type PaginationQuery = z.infer<typeof PaginationQuerySchema>
+
+/** Search request body */
+export const WorkspaceSearchSchema = z.object({
+  query: z.string().min(1).max(500).trim(),
+  filters: z.record(z.string().max(100), z.unknown()).optional(),
+  page: z.number().int().min(1).max(1000).default(1),
+  pageSize: z.number().int().min(1).max(100).default(20),
+  from: z
+    .string()
+    .datetime()
+    .optional()
+    .refine(
+      value => {
+        if (!value) return true
+        const date = new Date(value)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        return date >= thirtyDaysAgo
+      },
+      { message: 'from date cannot be more than 30 days in the past' }
+    ),
+  to: z.string().datetime().optional(),
+})
+
+export type WorkspaceSearchDto = z.infer<typeof WorkspaceSearchSchema>
+
+/** Action request body */
+export const WorkspaceActionSchema = z.object({
+  params: z
+    .record(z.string().max(100), z.unknown())
+    .refine(value => Object.keys(value).length <= 20, {
+      message: 'Too many action parameters (max 20)',
+    })
+    .optional(),
+})
+
+export type WorkspaceActionDto = z.infer<typeof WorkspaceActionSchema>
+
+/** Action name param — alphanumeric + hyphens, max 50 chars */
+export const ActionNameSchema = z
+  .string()
+  .min(1)
+  .max(50)
+  .regex(/^[\da-z-]+$/, 'Action name must be lowercase alphanumeric with hyphens')
+
+export { ConnectorTypeParam as ConnectorTypeParamSchema }

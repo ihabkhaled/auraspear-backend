@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { CaseTimelineType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -180,7 +181,7 @@ export class CasesService {
       await tx.caseTimeline.create({
         data: {
           caseId: newCase.id,
-          type: 'created',
+          type: CaseTimelineType.CREATED,
           actor: user.email,
           description: `Case ${caseNumber} created: ${dto.title}`,
         },
@@ -190,7 +191,7 @@ export class CasesService {
         await tx.caseTimeline.create({
           data: {
             caseId: newCase.id,
-            type: 'alert_linked',
+            type: CaseTimelineType.ALERT_LINKED,
             actor: user.email,
             description: `${linkedAlerts.length} alert(s) linked at creation`,
           },
@@ -263,7 +264,7 @@ export class CasesService {
     }
 
     const changedFields = Object.keys(dto).join(', ')
-    const timelineType = isStatusChange ? 'status_changed' : 'updated'
+    const timelineType = isStatusChange ? CaseTimelineType.STATUS_CHANGED : CaseTimelineType.UPDATED
     const timelineDescription = isStatusChange
       ? `Status changed from ${existing.status} to ${dto.status}`
       : `Case updated: ${changedFields} modified`
@@ -325,7 +326,7 @@ export class CasesService {
       await tx.caseTimeline.create({
         data: {
           caseId: id,
-          type: 'deleted',
+          type: CaseTimelineType.DELETED,
           actor,
           description: `Case ${existing.caseNumber} soft-deleted`,
         },
@@ -463,7 +464,7 @@ export class CasesService {
       await tx.caseTimeline.create({
         data: {
           caseId,
-          type: 'note_added',
+          type: CaseTimelineType.NOTE_ADDED,
           actor: user.email,
           description: `Note added: ${truncatedBody}`,
         },

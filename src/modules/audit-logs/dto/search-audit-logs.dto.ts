@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SortOrder } from '../../../common/enums'
 
 export const SearchAuditLogsSchema = z.object({
   actor: z.string().max(320).optional(),
@@ -7,7 +8,7 @@ export const SearchAuditLogsSchema = z.object({
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   sortBy: z.string().max(50).optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
+  sortOrder: z.nativeEnum(SortOrder).optional(),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })

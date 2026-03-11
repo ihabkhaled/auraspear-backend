@@ -6,7 +6,7 @@ import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { PaginatedAlerts, AlertRecord } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
-import type { AlertSeverity, AlertStatus, Prisma } from '@prisma/client'
+import type { AlertSeverity, AlertStatus as PrismaAlertStatus, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AlertsService {
@@ -51,7 +51,7 @@ export class AlertsService {
     }
 
     if (query.status && AlertsService.VALID_STATUSES.has(query.status)) {
-      where.status = query.status as Prisma.EnumAlertStatusFilter
+      where.status = query.status as unknown as PrismaAlertStatus
     }
 
     if (query.source) {
@@ -471,7 +471,7 @@ export class AlertsService {
         break
       case 'status':
         if (AlertsService.VALID_STATUSES.has(value)) {
-          where.status = value as AlertStatus
+          where.status = value as PrismaAlertStatus
         }
         break
       case 'source':

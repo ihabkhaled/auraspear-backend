@@ -20,7 +20,17 @@ const logger = pino({
 
 const prisma = new PrismaClient()
 
-const DEFAULT_PASSWORD = process.env.SEED_DEFAULT_PASSWORD ?? 'Admin@123'
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(
+      `${name} environment variable is required. Set a strong password (12+ chars) before seeding.`
+    )
+  }
+  return value
+}
+
+const DEFAULT_PASSWORD: string = requireEnv('SEED_DEFAULT_PASSWORD')
 const BCRYPT_ROUNDS = 12
 
 // Global case counter to ensure unique case numbers across tenants

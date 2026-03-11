@@ -34,6 +34,11 @@ function statusToMessageKey(status: number): string {
   return STATUS_MESSAGE_KEYS[status] ?? 'errors.internalError'
 }
 
+/** Strip internal file paths from error messages to prevent information leakage. */
+function sanitizeMessage(value: string): string {
+  return value.replaceAll(/[A-Z]:\\[^\s]+|\/[\w./-]+/g, '[path]').slice(0, 500)
+}
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name)
@@ -75,9 +80,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // Fall back to a status-based messageKey if none was provided
     messageKey ??= statusToMessageKey(status)
 
+    const sanitizedMessage = Array.isArray(message)
+      ? message.map(m => sanitizeMessage(m))
+      : sanitizeMessage(message)
+
     const errorResponse: ErrorResponse = {
       statusCode: status,
-      message,
+      message: sanitizedMessage,
       messageKey,
       error,
       timestamp: new Date().toISOString(),

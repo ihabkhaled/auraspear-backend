@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { ConnectorsService } from './connectors.service'
 import {
   CreateConnectorSchema,
@@ -43,7 +44,7 @@ export class ConnectorsController {
   }
 
   @Patch(':type')
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @Roles(UserRole.TENANT_ADMIN)
   async update(
     @TenantId() tenantId: string,
     @Param('type') type: string,
@@ -62,7 +63,8 @@ export class ConnectorsController {
   }
 
   @Post(':type/test')
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async test(
     @TenantId() tenantId: string,
     @Param('type') type: string
@@ -71,7 +73,7 @@ export class ConnectorsController {
   }
 
   @Post(':type/toggle')
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @Roles(UserRole.TENANT_ADMIN)
   async toggle(
     @TenantId() tenantId: string,
     @Param('type') type: string,

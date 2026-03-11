@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SortOrder } from '../../../common/enums'
 
 export const ListCasesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
@@ -6,7 +7,7 @@ export const ListCasesQuerySchema = z.object({
   sortBy: z
     .enum(['createdAt', 'updatedAt', 'severity', 'status', 'caseNumber', 'title'])
     .default('createdAt'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  sortOrder: z.nativeEnum(SortOrder).default(SortOrder.DESC),
   status: z.enum(['open', 'in_progress', 'closed']).optional(),
   severity: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   query: z.string().max(500).optional(),

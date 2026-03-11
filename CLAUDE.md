@@ -51,6 +51,22 @@
 47. **AI investigation MUST validate alert tenant ownership** — Before investigating an alert, verify it belongs to the caller's tenant. Never allow cross-tenant alert investigation.
 48. **EVERY i18n messageKey MUST exist in ALL language files** — When adding a new `messageKey` to any `BusinessException`, add the corresponding translation to ALL 6 i18n files: `en.json`, `ar.json`, `es.json`, `fr.json`, `de.json`, `it.json`. Missing translations cause frontend display errors.
 49. **TLS verification warnings MUST be logged** — When `rejectUnauthorized: false` is used in connector HTTP calls, log a `console.warn` with the connector type. See `connector-http.util.ts`.
+50. **Refresh token rotation MUST blacklist the old JTI** — When issuing a new token pair via `/refresh`, the old refresh token's `jti` MUST be added to the Redis blacklist with its remaining TTL. Without this, intercepted refresh tokens can be replayed indefinitely for 7 days, creating persistent account takeover. Never issue new tokens without revoking the old ones.
+51. **Login MUST use constant-time comparison for missing users** — When a login attempt targets a non-existent email, ALWAYS run `bcrypt.compare()` against a pre-computed dummy hash before returning 401. This prevents timing-based email enumeration (bcrypt ~500ms vs immediate rejection ~1ms). Store a static `DUMMY_BCRYPT_HASH` constant.
+52. **NEVER ship zero-entropy or placeholder secrets in .env.example** — `CONFIG_ENCRYPTION_KEY`, `JWT_SECRET`, and all signing/encryption secrets MUST have empty values in `.env.example` with generation instructions in comments. All-zero keys (`0000...`) are effectively plaintext. The `env.validation.ts` schema MUST reject all-zero values with a `.refine()` check.
+53. **Seed scripts MUST NOT have fallback passwords** — `SEED_DEFAULT_PASSWORD` must be a required environment variable with no `??` fallback. Fail loudly at seed start if missing. This prevents seeded admin accounts from having publicly-known weak passwords like `Admin@123`.
+54. **Connector create/update/toggle MUST require `TENANT_ADMIN` role** — Connector configuration controls security infrastructure (Wazuh, MISP, Shuffle, Bedrock). A `SOC_ANALYST_L2` must NOT be able to redirect connector URLs, modify API keys, or disable integrations. All connector mutation endpoints require `@Roles(UserRole.TENANT_ADMIN)`.
+55. **NEVER bypass security checks based on `NODE_ENV`** — No `if (NODE_ENV === 'development') { skip validation }` patterns. AI enablement checks, connector HTTPS enforcement, and all security validations must run in every environment. Use test fixtures or dependency injection for testing, not runtime env checks that skip security.
+56. **Passwords MUST be redacted from structured request logs** — The pino logger `redact` array in `app.module.ts` MUST include `req.body.password`, `req.body.currentPassword`, `req.body.newPassword`, and `req.body.confirmPassword`. Logging plaintext passwords to log aggregation systems (ELK, CloudWatch) is a credential exposure vector.
+57. **`NODE_ENV` MUST default to `'production'`** — In `env.validation.ts`, the default value for `NODE_ENV` must be `'production'`, not `'development'`. This ensures that misconfigured deployments get production security behavior (no Swagger, no verbose errors, HTTPS-only connectors) instead of development permissiveness.
+58. **Connector URLs MUST be SSRF-validated at input time** — Call `validateUrl()` from `ssrf.util.ts` during connector create/update (before encryption), not only at fetch time. This prevents storing malicious URLs (e.g., `http://169.254.169.254/`) that would persist in the database even though they're rejected on use.
+59. **Health endpoints MUST NOT disclose application version** — The `@Public()` health endpoint must not include `version` in the response body. Version disclosure helps attackers identify specific vulnerable versions.
+60. **Connector test and logout endpoints MUST have rate limiting** — `POST /:type/test`: `@Throttle({ default: { limit: 5, ttl: 60000 } })` to prevent internal port scanning. `POST /auth/logout`: `@Throttle({ default: { limit: 10, ttl: 60000 } })` to prevent Redis blacklist flooding.
+61. **CSP MUST NOT allow `'unsafe-inline'`** — The Helmet `contentSecurityPolicy` directive for `styleSrc` must not include `'unsafe-inline'`. For a backend API, no inline styles are needed. This prevents CSS injection attacks.
+62. **Exception filter MUST sanitize file paths from error responses** — All error messages returned to clients must have internal file paths stripped using regex (e.g., `/[A-Z]:\\[^\s]+|\/[\w/.-]+/g` → `[path]`) and be truncated to 500 characters. Prisma errors, Node.js stack traces, and module resolution errors can all leak internal paths.
+63. **OIDC environment variables MUST be group-validated** — `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI`, `OIDC_JWKS_URI` must all be present or all absent. Partial configuration causes runtime failures. Use a Zod `.refine()` to enforce all-or-nothing.
+64. **Docker production compose MUST NOT expose internal service ports** — PostgreSQL (5432), Redis (6379), and pgAdmin (5050) must NOT have `ports:` bindings in production docker-compose. Only the backend API port (4000) should be exposed. Internal services communicate via Docker networks only.
+65. **Audit interceptor sensitive keys MUST cover all credential patterns** — The sanitization list must include: `password`, `apiKey`, `token`, `secret`, `bearerToken`, `accessKey`, `clientSecret`, `refreshToken`, `accessToken`, `encryptedConfig`, `authorization`. Missing any pattern leaks credentials to audit logs.
 
 ---
 
@@ -59,7 +75,7 @@
 ### Token Lifecycle
 
 1. **Login** → Issues access token (`15m`) + refresh token (`7d`), both with `jti` (UUID) and `tokenType`
-2. **Refresh** → Verifies refresh token type + blacklist, issues new pair
+2. **Refresh** → Verifies refresh token type + blacklist, issues new pair, **blacklists old refresh JTI** (prevents replay)
 3. **Logout** → Blacklists both access `jti` and refresh `jti` in Redis with remaining TTL
 4. **Every request** → AuthGuard verifies access token, checks `tokenType === 'access'`, checks Redis blacklist
 
