@@ -9,12 +9,27 @@ import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { PaginatedMispEvents, PaginatedIOCs, IOCMatchResult } from './intel.types'
+import type {
+  PaginatedMispEvents,
+  PaginatedIOCs,
+  IOCMatchResult,
+  IntelStatsResponse,
+} from './intel.types'
 
 @Controller('ti')
 @UseGuards(AuthGuard, TenantGuard, RolesGuard)
 export class IntelController {
   constructor(private readonly intelService: IntelService) {}
+
+  /**
+   * GET /ti/stats
+   * Returns aggregated IOC and threat actor counts for the tenant.
+   */
+  @Get('stats')
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async getStats(@TenantId() tenantId: string): Promise<IntelStatsResponse> {
+    return this.intelService.getStats(tenantId)
+  }
 
   /**
    * GET /ti/events/recent?page=1&limit=20&sortBy=date&sortOrder=desc

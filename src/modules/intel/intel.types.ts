@@ -16,3 +16,11 @@ export interface IOCMatchResult {
   }>
   matchCount: number
 }
+
+export interface IntelStatsResponse {
+  threatActors: number
+  ipIOCs: number
+  fileHashes: number
+  activeDomains: number
+  totalIOCs: number
+}

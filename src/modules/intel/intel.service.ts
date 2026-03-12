@@ -4,7 +4,12 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { MispService } from '../connectors/services/misp.service'
-import type { PaginatedMispEvents, PaginatedIOCs, IOCMatchResult } from './intel.types'
+import type {
+  PaginatedMispEvents,
+  PaginatedIOCs,
+  IOCMatchResult,
+  IntelStatsResponse,
+} from './intel.types'
 import type { Prisma } from '@prisma/client'
 
 @Injectable()
@@ -16,6 +21,51 @@ export class IntelService {
     private readonly connectorsService: ConnectorsService,
     private readonly mispService: MispService
   ) {}
+
+  /**
+   * Returns aggregated IOC and threat actor counts for the tenant.
+   */
+  async getStats(tenantId: string): Promise<IntelStatsResponse> {
+    const [iocCounts, threatActorCount] = await Promise.all([
+      this.prisma.intelIOC.groupBy({
+        by: ['iocType'],
+        where: { tenantId, active: true },
+        _count: { id: true },
+      }),
+      this.prisma.intelMispEvent.findMany({
+        where: { tenantId },
+        select: { organization: true },
+        distinct: ['organization'],
+      }),
+    ])
+
+    const countByType = new Map<string, number>()
+    for (const group of iocCounts) {
+      countByType.set(group.iocType, group._count.id)
+    }
+
+    const ipIOCs = (countByType.get('ip-src') ?? 0) + (countByType.get('ip-dst') ?? 0)
+
+    const fileHashes =
+      (countByType.get('md5') ?? 0) +
+      (countByType.get('sha1') ?? 0) +
+      (countByType.get('sha256') ?? 0)
+
+    const activeDomains = (countByType.get('domain') ?? 0) + (countByType.get('hostname') ?? 0)
+
+    let totalIOCs = 0
+    for (const group of iocCounts) {
+      totalIOCs += group._count.id
+    }
+
+    return {
+      threatActors: threatActorCount.length,
+      ipIOCs,
+      fileHashes,
+      activeDomains,
+      totalIOCs,
+    }
+  }
 
   /**
    * Returns recent MISP events from the database, paginated and optionally sorted.
@@ -51,7 +101,7 @@ export class IntelService {
    */
   async searchIOCs(
     tenantId: string,
-    query: string,
+    query?: string,
     type?: string,
     page: number = 1,
     limit: number = 20,
