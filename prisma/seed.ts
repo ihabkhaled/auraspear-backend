@@ -95,7 +95,7 @@ const TENANT_PROFILES: TenantProfile[] = [
     huntSessionStatuses: ['completed', 'completed', 'completed', 'running'],
     iocIndices: [
       0, 1, 3, 7, 8, 11, 12, 14, 17, 20, 21, 23, 25, 29, 30, 34, 35, 38, 39, 43, 44, 48, 50, 53, 56,
-      58, 60, 62, 64, 65, 66, 69, 70, 72, 74, 76, 78, 81, 83, 85, 87, 89, 91,
+      58, 60, 62, 64, 65, 66, 69, 70, 72, 74, 76, 78, 81, 83, 85, 87, 89, 91, 94, 96,
     ],
     mispEventIndices: [0, 1, 3, 5, 6, 9, 11, 13],
     connectors: [
@@ -165,7 +165,7 @@ const TENANT_PROFILES: TenantProfile[] = [
     huntSessionStatuses: ['completed', 'completed', 'error'],
     iocIndices: [
       2, 4, 5, 9, 10, 13, 15, 18, 22, 24, 26, 27, 31, 36, 40, 41, 45, 46, 49, 51, 54, 57, 59, 61,
-      63, 67, 68, 71, 73, 75, 77, 79, 80, 82, 84, 86, 88, 90, 92, 93,
+      63, 67, 68, 71, 73, 75, 77, 79, 80, 82, 84, 86, 88, 90, 92, 93, 95, 97, 99,
     ],
     mispEventIndices: [2, 4, 7, 8, 10, 12],
     connectors: [
@@ -237,7 +237,8 @@ const TENANT_PROFILES: TenantProfile[] = [
       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
       26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
       49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
-      72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+      72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94,
+      95, 96, 97, 98, 99,
     ],
     mispEventIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     connectors: [
@@ -916,6 +917,18 @@ const IOC_DATA: Array<{
   { iocValue: 'stealer-payload.dll', iocType: 'filename', source: 'virustotal', severity: 'high' },
   { iocValue: 'info-stealer-c2.ru', iocType: 'domain', source: 'virustotal', severity: 'critical' },
   { iocValue: 'AS62904', iocType: 'asn', source: 'virustotal', severity: 'medium' },
+  // ── Logstash IOCs ──
+  { iocValue: '146.70.87.199', iocType: 'ip-src', source: 'logstash', severity: 'high' },
+  { iocValue: '62.102.148.68', iocType: 'ip-src', source: 'logstash', severity: 'critical' },
+  { iocValue: 'ransomware-c2.top', iocType: 'domain', source: 'logstash', severity: 'critical' },
+  { iocValue: 'exfil-staging.net', iocType: 'domain', source: 'logstash', severity: 'high' },
+  {
+    iocValue: 'http://62.102.148.68:443/beacon',
+    iocType: 'url',
+    source: 'logstash',
+    severity: 'critical',
+  },
+  { iocValue: '146.70.87.0/24', iocType: 'cidr', source: 'logstash', severity: 'medium' },
 ]
 
 const MISP_EVENTS = [
