@@ -1,4 +1,5 @@
 import {
+  Prisma,
   PrismaClient,
   UserRole,
   ConnectorType,
@@ -866,6 +867,80 @@ function pickByIndices<T>(arr: T[], indices: number[]): T[] {
 
 // ─── Seed functions ─────────────────────────────────────────────
 
+function buildRawEvent(
+  template: (typeof ALERT_TEMPLATES)[number],
+  agentName: string,
+  srcIp: string,
+  dstIp: string,
+  ts: Date
+): Record<string, unknown> {
+  const base = {
+    timestamp: ts.toISOString(),
+    agent: { name: agentName, id: `agent-${Math.floor(Math.random() * 999)}` },
+    rule: {
+      id: template.ruleId,
+      description: template.ruleName,
+      level: Math.floor(Math.random() * 12) + 3,
+    },
+    source: { ip: srcIp, port: 1024 + Math.floor(Math.random() * 64000) },
+    destination: { ip: dstIp, port: randomItem([22, 80, 443, 3389, 8080, 8443, 53]) },
+  }
+
+  if (template.source === 'wazuh') {
+    return {
+      ...base,
+      manager: { name: 'wazuh-manager-01' },
+      decoder: { name: randomItem(['sshd', 'syslog', 'windows', 'json', 'auditd']) },
+      full_log: `${ts.toISOString()} ${agentName} ${template.ruleName}: src=${srcIp} dst=${dstIp}`,
+      data: {
+        srcip: srcIp,
+        dstip: dstIp,
+        srcuser: randomItem(['root', 'admin', 'svc-backup', 'www-data', 'nobody']),
+        program_name: randomItem(['sshd', 'sudo', 'systemd', 'kernel', 'auditd']),
+      },
+    }
+  }
+
+  if (template.source === 'graylog') {
+    return {
+      ...base,
+      gl2_source_input: `5f8c${Math.floor(Math.random() * 9999)}`,
+      gl2_source_node: 'graylog-node-01',
+      facility: randomItem(['auth', 'daemon', 'kern', 'local0', 'syslog']),
+      message: `${template.description} [${srcIp} → ${dstIp}]`,
+      streams: [`stream-${Math.floor(Math.random() * 99)}`],
+      level: randomItem([3, 4, 5, 6]),
+    }
+  }
+
+  if (template.source === 'velociraptor') {
+    return {
+      ...base,
+      client_id: `C.${Math.random().toString(36).slice(2, 14)}`,
+      flow_id: `F.${Math.random().toString(36).slice(2, 14)}`,
+      artifact: randomItem([
+        'Windows.System.ProcessCreation',
+        'Windows.EventLogs.RDPNTLM',
+        'Generic.Client.Info',
+        'Windows.Detection.LSASS',
+      ]),
+      hostname: agentName,
+      os_info: { system: 'windows', release: '10.0.19045', machine: 'AMD64' },
+    }
+  }
+
+  return base
+}
+
+const RESOLUTION_TEXTS = [
+  'Confirmed and mitigated — affected hosts isolated and patched',
+  'False positive — triggered by scheduled maintenance script',
+  'Contained — malicious process terminated, IOCs blocked at perimeter',
+  'Escalated to IR team — ongoing investigation',
+  'Remediated — user credentials rotated and MFA enforced',
+  'No action required — benign scanning by vulnerability assessment tool',
+]
+
 async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<void> {
   const templates = pickByIndices(ALERT_TEMPLATES, profile.alertTemplateIndices)
 
@@ -878,10 +953,30 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
     const statusIndex = i % profile.alertStatusWeights.length
     const status = profile.alertStatusWeights[statusIndex] as AlertStatus
     const timestamp = randomDate(30)
+    const agentName = randomItem(profile.agentPool)
+    const srcIp = randomIp()
+    const dstIp = randomIp()
+
+    // Randomly decide which optional fields to populate (variety per alert)
+    const roll = i % 5 // 0-4 gives us 5 variation groups
+    const hasRawEvent = roll !== 0 // ~80% have raw event
+    const hasAcknowledged = status !== 'new_alert' && roll !== 1 // most non-new alerts
+    const hasClosed = (status === 'closed' || status === 'resolved') && roll !== 2
+    const hasResolution =
+      (status === 'closed' || status === 'resolved' || status === 'false_positive') && roll !== 3
 
     await prisma.alert.upsert({
       where: { tenantId_externalId: { tenantId, externalId } },
-      update: {},
+      update: {
+        rawEvent: hasRawEvent
+          ? (buildRawEvent(template, agentName, srcIp, dstIp, timestamp) as Prisma.InputJsonValue)
+          : undefined,
+        acknowledgedBy: hasAcknowledged ? `analyst@${profile.slug}.io` : null,
+        acknowledgedAt: hasAcknowledged ? new Date(timestamp.getTime() + 300_000) : null,
+        closedBy: hasClosed ? `analyst@${profile.slug}.io` : null,
+        closedAt: hasClosed ? new Date(timestamp.getTime() + 3_600_000) : null,
+        resolution: hasResolution ? randomItem(RESOLUTION_TEXTS) : null,
+      },
       create: {
         tenantId,
         externalId,
@@ -892,26 +987,20 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
         source: template.source,
         ruleName: template.ruleName,
         ruleId: template.ruleId,
-        agentName: randomItem(profile.agentPool),
-        sourceIp: randomIp(),
-        destinationIp: randomIp(),
+        agentName,
+        sourceIp: srcIp,
+        destinationIp: dstIp,
         mitreTactics: template.mitreTactics,
         mitreTechniques: template.mitreTechniques,
         timestamp,
-        acknowledgedBy: status !== 'new_alert' ? `analyst@${profile.slug}.io` : null,
-        acknowledgedAt: status !== 'new_alert' ? new Date(timestamp.getTime() + 300_000) : null,
-        closedBy:
-          status === 'closed' || status === 'resolved' ? `analyst@${profile.slug}.io` : null,
-        closedAt:
-          status === 'closed' || status === 'resolved'
-            ? new Date(timestamp.getTime() + 3_600_000)
-            : null,
-        resolution:
-          status === 'closed'
-            ? 'Confirmed and mitigated'
-            : status === 'resolved'
-              ? 'False positive'
-              : null,
+        rawEvent: hasRawEvent
+          ? (buildRawEvent(template, agentName, srcIp, dstIp, timestamp) as Prisma.InputJsonValue)
+          : undefined,
+        acknowledgedBy: hasAcknowledged ? `analyst@${profile.slug}.io` : null,
+        acknowledgedAt: hasAcknowledged ? new Date(timestamp.getTime() + 300_000) : null,
+        closedBy: hasClosed ? `analyst@${profile.slug}.io` : null,
+        closedAt: hasClosed ? new Date(timestamp.getTime() + 3_600_000) : null,
+        resolution: hasResolution ? randomItem(RESOLUTION_TEXTS) : null,
       },
     })
   }
