@@ -1,10 +1,5 @@
 import { z } from 'zod'
-import {
-  IntelEventSortField,
-  IntelIocSortField,
-  MispIocType,
-  SortOrder,
-} from '../../../common/enums'
+import { IntelEventSortField, IntelIocSortField, SortOrder } from '../../../common/enums'
 
 export const ListEventsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(1000).default(1),
@@ -23,9 +18,9 @@ export const SearchIOCsQuerySchema = z.object({
     .transform(v => (v?.trim() ? v.trim() : undefined)),
   type: z
     .string()
+    .max(50)
     .optional()
-    .transform(v => (v?.trim() ? v.trim() : undefined))
-    .pipe(z.nativeEnum(MispIocType).optional()),
+    .transform(v => (v?.trim() ? v.trim() : undefined)),
   source: z
     .string()
     .max(255)

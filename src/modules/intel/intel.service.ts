@@ -116,7 +116,12 @@ export class IntelService {
     }
 
     if (type) {
-      where.iocType = type
+      const expanded = this.expandIocTypeFilter(type)
+      if (expanded.length === 1) {
+        where.iocType = expanded[0]
+      } else if (expanded.length > 1) {
+        where.iocType = { in: expanded }
+      }
     }
 
     if (source) {
@@ -403,6 +408,24 @@ export class IntelService {
     }
 
     return upserts
+  }
+
+  /**
+   * Expand a broad IOC type filter into specific DB iocType values.
+   * e.g. 'ip' → ['ip-src', 'ip-dst'], 'hash' → ['md5', 'sha1', 'sha256']
+   */
+  private expandIocTypeFilter(type: string): string[] {
+    const TYPE_GROUPS: Record<string, string[]> = {
+      ip: ['ip-src', 'ip-dst'],
+      hash: ['md5', 'sha1', 'sha256'],
+    }
+
+    const group = TYPE_GROUPS[type]
+    if (group) {
+      return group
+    }
+
+    return [type]
   }
 
   /**

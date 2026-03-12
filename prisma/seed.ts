@@ -92,7 +92,10 @@ const TENANT_PROFILES: TenantProfile[] = [
     caseTemplateIndices: [0, 1, 4, 6, 7],
     huntQueryIndices: [0, 1, 2, 3],
     huntSessionStatuses: ['completed', 'completed', 'completed', 'running'],
-    iocIndices: [0, 1, 3, 7, 8, 11, 12, 14, 17, 20, 21, 23, 25, 29, 30, 34, 35],
+    iocIndices: [
+      0, 1, 3, 7, 8, 11, 12, 14, 17, 20, 21, 23, 25, 29, 30, 34, 35, 38, 39, 43, 44, 48, 50, 53, 56,
+      58, 60, 62,
+    ],
     mispEventIndices: [0, 1, 3, 5, 6, 9, 11, 13],
     connectors: [
       { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
@@ -159,7 +162,10 @@ const TENANT_PROFILES: TenantProfile[] = [
     caseTemplateIndices: [1, 2, 3, 5],
     huntQueryIndices: [1, 4, 5],
     huntSessionStatuses: ['completed', 'completed', 'error'],
-    iocIndices: [2, 4, 5, 9, 10, 13, 15, 18, 22, 24, 26, 27, 31, 36],
+    iocIndices: [
+      2, 4, 5, 9, 10, 13, 15, 18, 22, 24, 26, 27, 31, 36, 40, 41, 45, 46, 49, 51, 54, 57, 59, 61,
+      63,
+    ],
     mispEventIndices: [2, 4, 7, 8, 10, 12],
     connectors: [
       { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
@@ -228,7 +234,8 @@ const TENANT_PROFILES: TenantProfile[] = [
     huntSessionStatuses: ['completed', 'completed', 'completed', 'completed', 'running', 'error'],
     iocIndices: [
       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-      26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+      26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+      49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
     ],
     mispEventIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     connectors: [
@@ -630,6 +637,109 @@ const IOC_DATA: Array<{
   {
     iocValue: 'http://crypto-mine.cc/worker.js',
     iocType: 'url',
+    source: 'MISP-10005',
+    severity: 'medium',
+  },
+  // ── Filenames ──
+  { iocValue: 'dropper.exe', iocType: 'filename', source: 'MISP-10002', severity: 'high' },
+  {
+    iocValue: 'ransomware-payload.dll',
+    iocType: 'filename',
+    source: 'MISP-10010',
+    severity: 'critical',
+  },
+  {
+    iocValue: 'suspicious-script.ps1',
+    iocType: 'filename',
+    source: 'MISP-10007',
+    severity: 'high',
+  },
+  { iocValue: 'keylogger.sys', iocType: 'filename', source: 'MISP-10004', severity: 'critical' },
+  {
+    iocValue: 'backdoor-installer.msi',
+    iocType: 'filename',
+    source: 'MISP-10001',
+    severity: 'high',
+  },
+  // ── CIDR ranges ──
+  { iocValue: '203.0.113.0/24', iocType: 'cidr', source: 'MISP-10001', severity: 'medium' },
+  { iocValue: '198.51.100.0/24', iocType: 'cidr', source: 'MISP-10002', severity: 'high' },
+  { iocValue: '185.220.101.0/24', iocType: 'cidr', source: 'MISP-10004', severity: 'medium' },
+  // ── Email addresses ──
+  {
+    iocValue: 'phishing@evil-domain.xyz',
+    iocType: 'email',
+    source: 'MISP-10003',
+    severity: 'high',
+  },
+  {
+    iocValue: 'c2-admin@malware-drop.ru',
+    iocType: 'email',
+    source: 'MISP-10010',
+    severity: 'critical',
+  },
+  {
+    iocValue: 'recruitment@fake-corp.com',
+    iocType: 'email',
+    source: 'MISP-10009',
+    severity: 'medium',
+  },
+  {
+    iocValue: 'support@phishing-site.com',
+    iocType: 'email',
+    source: 'MISP-10003',
+    severity: 'high',
+  },
+  // ── ASN ──
+  { iocValue: 'AS14061', iocType: 'asn', source: 'MISP-10001', severity: 'low' },
+  { iocValue: 'AS9009', iocType: 'asn', source: 'MISP-10004', severity: 'medium' },
+  { iocValue: 'AS16276', iocType: 'asn', source: 'MISP-10010', severity: 'medium' },
+  // ── CVE ──
+  { iocValue: 'CVE-2024-3094', iocType: 'cve', source: 'MISP-10006', severity: 'critical' },
+  { iocValue: 'CVE-2023-44228', iocType: 'cve', source: 'MISP-10007', severity: 'critical' },
+  { iocValue: 'CVE-2024-21887', iocType: 'cve', source: 'MISP-10014', severity: 'high' },
+  { iocValue: 'CVE-2023-46805', iocType: 'cve', source: 'MISP-10012', severity: 'high' },
+  // ── Registry keys ──
+  {
+    iocValue: 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\MalwareKey',
+    iocType: 'registry',
+    source: 'MISP-10002',
+    severity: 'high',
+  },
+  {
+    iocValue: 'HKCU\\Software\\Classes\\CLSID\\{random-guid}\\InprocServer32',
+    iocType: 'registry',
+    source: 'MISP-10004',
+    severity: 'critical',
+  },
+  {
+    iocValue: 'HKLM\\System\\CurrentControlSet\\Services\\MalService',
+    iocType: 'registry',
+    source: 'MISP-10010',
+    severity: 'high',
+  },
+  // ── File paths ──
+  {
+    iocValue: 'C:\\Windows\\Temp\\svchost_update.exe',
+    iocType: 'filepath',
+    source: 'MISP-10002',
+    severity: 'high',
+  },
+  {
+    iocValue: '/tmp/.hidden/backdoor',
+    iocType: 'filepath',
+    source: 'MISP-10007',
+    severity: 'critical',
+  },
+  {
+    iocValue: 'C:\\Users\\Public\\Documents\\stage2.dll',
+    iocType: 'filepath',
+    source: 'MISP-10010',
+    severity: 'critical',
+  },
+  {
+    iocValue: '/var/tmp/.cache/miner',
+    iocType: 'filepath',
     source: 'MISP-10005',
     severity: 'medium',
   },
