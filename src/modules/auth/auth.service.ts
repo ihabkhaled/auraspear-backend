@@ -4,8 +4,10 @@ import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
 import { TokenBlacklistService } from './token-blacklist.service'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -30,7 +32,8 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly tokenBlacklistService: TokenBlacklistService
+    private readonly tokenBlacklistService: TokenBlacklistService,
+    private readonly appLogger: AppLoggerService
   ) {
     const secret = this.configService.get<string>('JWT_SECRET')
     if (!secret || secret.length < 32) {
@@ -73,6 +76,15 @@ export class AuthService {
     const valid = await bcrypt.compare(password, hashToCompare)
 
     if (!user?.passwordHash || !valid) {
+      this.appLogger.warn('Login failed: invalid credentials', {
+        feature: AppLogFeature.AUTH,
+        action: 'login',
+        outcome: AppLogOutcome.FAILURE,
+        actorEmail: email,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'login',
+      })
       throw new BusinessException(
         401,
         'Invalid email or password',
@@ -81,6 +93,16 @@ export class AuthService {
     }
 
     if (user.memberships.length === 0) {
+      this.appLogger.warn('Login failed: no active memberships', {
+        feature: AppLogFeature.AUTH,
+        action: 'login',
+        outcome: AppLogOutcome.FAILURE,
+        actorEmail: email,
+        actorUserId: user.id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'login',
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
@@ -111,6 +133,18 @@ export class AuthService {
       slug: m.tenant.slug,
       role: m.role as UserRole,
     }))
+
+    this.appLogger.info('Login succeeded', {
+      feature: AppLogFeature.AUTH,
+      action: 'login',
+      outcome: AppLogOutcome.SUCCESS,
+      actorEmail: user.email,
+      actorUserId: user.id,
+      tenantId: firstMembership.tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: 'login',
+    })
 
     return { accessToken, refreshToken, user: payload, tenants }
   }
@@ -152,6 +186,16 @@ export class AuthService {
       if (error instanceof BusinessException) {
         throw error
       }
+
+      this.appLogger.debug('Access token verification failed', {
+        feature: AppLogFeature.AUTH,
+        action: 'verifyAccessToken',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'verifyAccessToken',
+      })
+
       throw new BusinessException(
         401,
         'Invalid or expired access token',
@@ -212,11 +256,30 @@ export class AuthService {
     })
 
     if (!user) {
+      this.appLogger.warn('Token refresh failed: user no longer exists', {
+        feature: AppLogFeature.AUTH,
+        action: 'refreshTokens',
+        outcome: AppLogOutcome.FAILURE,
+        actorUserId: payload.sub,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'refreshTokens',
+      })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
 
     const membership = user.memberships[0]
     if (!membership) {
+      this.appLogger.warn('Token refresh failed: no active membership', {
+        feature: AppLogFeature.AUTH,
+        action: 'refreshTokens',
+        outcome: AppLogOutcome.FAILURE,
+        actorEmail: user.email,
+        actorUserId: user.id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'refreshTokens',
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
@@ -227,6 +290,25 @@ export class AuthService {
       tenantSlug: membership.tenant.slug,
       role: membership.role as UserRole,
     }
+
+    // Preserve impersonation claims across token refresh
+    if (payload.isImpersonated === true) {
+      newPayload.isImpersonated = true
+      newPayload.impersonatorSub = payload.impersonatorSub
+      newPayload.impersonatorEmail = payload.impersonatorEmail
+    }
+
+    this.appLogger.info('Token refresh succeeded', {
+      feature: AppLogFeature.AUTH,
+      action: 'refreshTokens',
+      outcome: AppLogOutcome.SUCCESS,
+      actorEmail: user.email,
+      actorUserId: user.id,
+      tenantId: membership.tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: 'refreshTokens',
+    })
 
     return {
       accessToken: this.signAccessToken(newPayload),
@@ -252,6 +334,15 @@ export class AuthService {
       this.tokenBlacklistService.blacklist(accessJti, accessTtl),
       this.tokenBlacklistService.blacklist(refreshJti, refreshTtl),
     ])
+
+    this.appLogger.info('User logged out', {
+      feature: AppLogFeature.AUTH,
+      action: 'logout',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: 'logout',
+    })
   }
 
   async validateUserActive(userId: string): Promise<void> {
@@ -267,10 +358,28 @@ export class AuthService {
     })
 
     if (!user) {
+      this.appLogger.warn('User validation failed: user no longer exists', {
+        feature: AppLogFeature.AUTH,
+        action: 'validateUserActive',
+        outcome: AppLogOutcome.FAILURE,
+        actorUserId: userId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'validateUserActive',
+      })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
 
     if (user.memberships.length === 0) {
+      this.appLogger.warn('User validation failed: no active memberships', {
+        feature: AppLogFeature.AUTH,
+        action: 'validateUserActive',
+        outcome: AppLogOutcome.FAILURE,
+        actorUserId: userId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'validateUserActive',
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
@@ -282,6 +391,16 @@ export class AuthService {
     })
 
     if (membership?.status !== MembershipStatus.ACTIVE) {
+      this.appLogger.warn('Membership validation failed: not active', {
+        feature: AppLogFeature.AUTH,
+        action: 'validateMembershipActive',
+        outcome: AppLogOutcome.DENIED,
+        actorUserId: userId,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'validateMembershipActive',
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
@@ -292,12 +411,108 @@ export class AuthService {
       include: { tenant: true },
     })
 
+    this.appLogger.info('User tenants retrieved', {
+      feature: AppLogFeature.AUTH,
+      action: 'getUserTenants',
+      outcome: AppLogOutcome.SUCCESS,
+      actorUserId: userId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: 'getUserTenants',
+      metadata: { tenantCount: memberships.length },
+    })
+
     return memberships.map(m => ({
       id: m.tenant.id,
       name: m.tenant.name,
       slug: m.tenant.slug,
       role: m.role as UserRole,
     }))
+  }
+
+  /**
+   * End an impersonation session by restoring the original admin's tokens.
+   * Blacklists the current impersonation tokens and issues fresh admin tokens.
+   */
+  async endImpersonation(
+    caller: JwtPayload
+  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
+    if (caller.isImpersonated !== true || !caller.impersonatorSub) {
+      throw new BusinessException(
+        400,
+        'Not currently impersonating',
+        'errors.impersonation.notImpersonating'
+      )
+    }
+
+    // Blacklist the current impersonation access token
+    if (caller.jti && caller.exp) {
+      const now = Math.floor(Date.now() / 1000)
+      const remainingTtl = Math.max(caller.exp - now, 0)
+      await this.tokenBlacklistService.blacklist(caller.jti, remainingTtl)
+    }
+
+    // Look up the original admin user
+    const admin = await this.prisma.user.findUnique({
+      where: { id: caller.impersonatorSub },
+      include: {
+        memberships: {
+          where: { status: MembershipStatus.ACTIVE },
+          include: { tenant: true },
+        },
+      },
+    })
+
+    if (!admin) {
+      throw new BusinessException(
+        401,
+        'Original admin user no longer exists',
+        'errors.auth.userNotFound'
+      )
+    }
+
+    if (admin.memberships.length === 0) {
+      throw new BusinessException(
+        401,
+        'Admin account is no longer active',
+        'errors.auth.accountInactive'
+      )
+    }
+
+    const firstMembership = admin.memberships[0]
+    if (!firstMembership) {
+      throw new BusinessException(
+        401,
+        'Admin account is no longer active',
+        'errors.auth.accountInactive'
+      )
+    }
+
+    const adminPayload: JwtPayload = {
+      sub: admin.id,
+      email: admin.email,
+      tenantId: firstMembership.tenantId,
+      tenantSlug: firstMembership.tenant.slug,
+      role: firstMembership.role as UserRole,
+    }
+
+    this.appLogger.info('Impersonation ended', {
+      feature: AppLogFeature.IMPERSONATION,
+      action: 'endImpersonation',
+      outcome: AppLogOutcome.SUCCESS,
+      actorEmail: admin.email,
+      actorUserId: admin.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: 'endImpersonation',
+      metadata: { impersonatedEmail: caller.email, impersonatedUserId: caller.sub },
+    })
+
+    return {
+      accessToken: this.signAccessToken(adminPayload),
+      refreshToken: this.signRefreshToken(adminPayload),
+      user: adminPayload,
+    }
   }
 
   async findOrCreateUser(
@@ -329,9 +544,35 @@ export class AuthService {
         },
       })
 
+      this.appLogger.info('User found or created via OIDC', {
+        feature: AppLogFeature.AUTH,
+        action: 'findOrCreateUser',
+        outcome: AppLogOutcome.SUCCESS,
+        actorUserId: user.id,
+        actorEmail: email,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'findOrCreateUser',
+        metadata: { role: membership.role },
+      })
+
       return { id: user.id, role: membership.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
+
+      this.appLogger.error('Failed to find or create user via OIDC', {
+        feature: AppLogFeature.AUTH,
+        action: 'findOrCreateUser',
+        outcome: AppLogOutcome.FAILURE,
+        actorEmail: email,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AuthService',
+        functionName: 'findOrCreateUser',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       throw new BusinessException(401, 'Unable to provision user', 'errors.auth.provisionFailed')
     }
   }

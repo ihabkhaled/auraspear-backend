@@ -1,9 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class BedrockService {
   private readonly logger = new Logger(BedrockService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test AWS Bedrock connection.
@@ -46,6 +50,16 @@ export class BedrockService {
       const bodyString = new TextDecoder().decode(response.body)
       const body = JSON.parse(bodyString) as Record<string, unknown>
 
+      this.appLogger.info('Bedrock connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'BedrockService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'bedrock', region, modelId },
+      })
+
       return {
         ok: true,
         details: `AWS Bedrock accessible in ${region}. Model: ${modelId}. Stop reason: ${body.stop_reason ?? 'ok'}.`,
@@ -53,6 +67,17 @@ export class BedrockService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Bedrock connection test failed: ${message}`)
+
+      this.appLogger.error('Bedrock connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'BedrockService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'bedrock', region },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
 
       // Check if it's a missing SDK error
       if (message.includes('Cannot find module') || message.includes('MODULE_NOT_FOUND')) {
@@ -102,6 +127,23 @@ export class BedrockService {
     const body = JSON.parse(bodyString) as Record<string, unknown>
     const content = body.content as Array<{ text: string }> | undefined
     const usage = body.usage as { input_tokens: number; output_tokens: number } | undefined
+
+    this.appLogger.info('Bedrock model invoked', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'invoke',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'BedrockService',
+      functionName: 'invoke',
+      metadata: {
+        connectorType: 'bedrock',
+        region,
+        modelId,
+        maxTokens,
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+      },
+    })
 
     return {
       text: content?.[0]?.text ?? '',

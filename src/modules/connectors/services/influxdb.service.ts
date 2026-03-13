@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class InfluxDBService {
   private readonly logger = new Logger(InfluxDBService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test InfluxDB connection.
@@ -34,6 +38,16 @@ export class InfluxDBService {
 
       const version = res.headers['x-influxdb-version'] ?? 'unknown'
 
+      this.appLogger.info('InfluxDB connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'InfluxDBService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'influxdb', version },
+      })
+
       return {
         ok: true,
         details: `InfluxDB v${version} reachable at ${baseUrl}.`,
@@ -41,6 +55,18 @@ export class InfluxDBService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`InfluxDB connection test failed: ${message}`)
+
+      this.appLogger.error('InfluxDB connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'InfluxDBService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'influxdb' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -69,6 +95,16 @@ export class InfluxDBService {
       throw new Error(`InfluxDB query failed: status ${res.status}`)
     }
 
+    this.appLogger.info('InfluxDB Flux query executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'query',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'InfluxDBService',
+      functionName: 'query',
+      metadata: { connectorType: 'influxdb', org },
+    })
+
     return res.data as string
   }
 
@@ -90,6 +126,18 @@ export class InfluxDBService {
     }
 
     const body = res.data as Record<string, unknown>
-    return (body.buckets ?? []) as unknown[]
+    const buckets = (body.buckets ?? []) as unknown[]
+
+    this.appLogger.info('InfluxDB buckets retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getBuckets',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'InfluxDBService',
+      functionName: 'getBuckets',
+      metadata: { connectorType: 'influxdb', count: buckets.length },
+    })
+
+    return buckets
   }
 }

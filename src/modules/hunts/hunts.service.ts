@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { HuntSessionStatus } from '@prisma/client'
 import { RunHuntDto } from './dto/run-hunt.dto'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
@@ -19,7 +21,8 @@ export class HuntsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly connectorsService: ConnectorsService,
-    private readonly wazuhService: WazuhService
+    private readonly wazuhService: WazuhService,
+    private readonly appLogger: AppLoggerService
   ) {}
 
   /**
@@ -28,6 +31,18 @@ export class HuntsService {
    */
   async runHunt(tenantId: string, dto: RunHuntDto, email: string): Promise<HuntSessionRecord> {
     this.logger.log(`User ${email} started hunt "${dto.query}" for tenant ${tenantId}`)
+    this.appLogger.info('Hunt session started', {
+      feature: AppLogFeature.HUNTS,
+      action: 'runHunt',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: email,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HuntsService',
+      functionName: 'runHunt',
+      targetResource: 'HuntSession',
+      metadata: { query: dto.query, timeRange: dto.timeRange },
+    })
 
     // Create session with status 'running'
     const session = await this.prisma.huntSession.create({
@@ -59,6 +74,19 @@ export class HuntsService {
       })
 
       // The session remains in DB with error status even though we throw
+      this.appLogger.warn('Hunt failed — Wazuh connector not configured', {
+        feature: AppLogFeature.HUNTS,
+        action: 'runHunt',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        actorEmail: email,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'HuntsService',
+        functionName: 'runHunt',
+        targetResource: 'HuntSession',
+        targetResourceId: session.id,
+        metadata: { reason: 'wazuh_connector_not_configured' },
+      })
       throw new BusinessException(
         422,
         'Wazuh/OpenSearch connector is not configured for this tenant',
@@ -118,11 +146,39 @@ export class HuntsService {
         include: { events: true },
       })
 
+      this.appLogger.info('Hunt session completed successfully', {
+        feature: AppLogFeature.HUNTS,
+        action: 'runHunt',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        actorEmail: email,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'HuntsService',
+        functionName: 'runHunt',
+        targetResource: 'HuntSession',
+        targetResourceId: session.id,
+        metadata: { eventsFound: result.total, query: dto.query, timeRange: dto.timeRange },
+      })
+
       return updated
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error during hunt query'
       this.logger.error(`Hunt query failed for session ${session.id}: ${errorMessage}`)
+      this.appLogger.error('Hunt query failed', {
+        feature: AppLogFeature.HUNTS,
+        action: 'runHunt',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        actorEmail: email,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'HuntsService',
+        functionName: 'runHunt',
+        targetResource: 'HuntSession',
+        targetResourceId: session.id,
+        stackTrace: error instanceof Error ? error.stack : undefined,
+        metadata: { errorMessage, query: dto.query },
+      })
 
       // Update session to error status
       this.assertValidTransition(session.status, HuntSessionStatus.error)
@@ -150,6 +206,18 @@ export class HuntsService {
    * Lists all hunt sessions for a tenant with pagination.
    */
   async listRuns(tenantId: string, page: number, limit: number): Promise<PaginatedHuntSessions> {
+    this.appLogger.info('Listing hunt sessions', {
+      feature: AppLogFeature.HUNTS,
+      action: 'listRuns',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HuntsService',
+      functionName: 'listRuns',
+      targetResource: 'HuntSession',
+      metadata: { page, limit },
+    })
+
     const [data, total] = await Promise.all([
       this.prisma.huntSession.findMany({
         where: { tenantId },
@@ -176,8 +244,31 @@ export class HuntsService {
     })
 
     if (!session) {
+      this.appLogger.warn('Hunt session not found', {
+        feature: AppLogFeature.HUNTS,
+        action: 'getRun',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'HuntsService',
+        functionName: 'getRun',
+        targetResource: 'HuntSession',
+        targetResourceId: id,
+      })
       throw new BusinessException(404, `Hunt session ${id} not found`, 'errors.hunts.notFound')
     }
+
+    this.appLogger.info('Retrieved hunt session', {
+      feature: AppLogFeature.HUNTS,
+      action: 'getRun',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HuntsService',
+      functionName: 'getRun',
+      targetResource: 'HuntSession',
+      targetResourceId: id,
+    })
 
     return session
   }
@@ -198,6 +289,17 @@ export class HuntsService {
     })
 
     if (!session) {
+      this.appLogger.warn('Hunt session not found when fetching events', {
+        feature: AppLogFeature.HUNTS,
+        action: 'getEvents',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'HuntsService',
+        functionName: 'getEvents',
+        targetResource: 'HuntSession',
+        targetResourceId: sessionId,
+      })
       throw new BusinessException(
         404,
         `Hunt session ${sessionId} not found`,
@@ -214,6 +316,19 @@ export class HuntsService {
       }),
       this.prisma.huntEvent.count({ where: { huntSessionId: sessionId } }),
     ])
+
+    this.appLogger.info('Retrieved hunt session events', {
+      feature: AppLogFeature.HUNTS,
+      action: 'getEvents',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HuntsService',
+      functionName: 'getEvents',
+      targetResource: 'HuntEvent',
+      targetResourceId: sessionId,
+      metadata: { page, limit, totalEvents: total },
+    })
 
     return {
       data,

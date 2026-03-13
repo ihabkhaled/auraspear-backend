@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
@@ -32,7 +34,8 @@ export class AlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly connectorsService: ConnectorsService,
-    private readonly wazuhService: WazuhService
+    private readonly wazuhService: WazuhService,
+    private readonly appLogger: AppLoggerService
   ) {}
 
   async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedAlerts> {
@@ -96,19 +99,56 @@ export class AlertsService {
       this.applyKqlQuery(query.query, where)
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.alert.findMany({
-        where,
-        orderBy: this.buildAlertOrderBy(query.sortBy, query.sortOrder),
-        skip: (query.page - 1) * query.limit,
-        take: query.limit,
-      }),
-      this.prisma.alert.count({ where }),
-    ])
+    try {
+      const [data, total] = await Promise.all([
+        this.prisma.alert.findMany({
+          where,
+          orderBy: this.buildAlertOrderBy(query.sortBy, query.sortOrder),
+          skip: (query.page - 1) * query.limit,
+          take: query.limit,
+        }),
+        this.prisma.alert.count({ where }),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(query.page, query.limit, total),
+      this.appLogger.info(
+        `Searched alerts page=${query.page} limit=${query.limit} total=${total}`,
+        {
+          feature: AppLogFeature.ALERTS,
+          action: 'search',
+          outcome: AppLogOutcome.SUCCESS,
+          tenantId,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'AlertsService',
+          functionName: 'search',
+          metadata: {
+            page: query.page,
+            limit: query.limit,
+            total,
+            severity: query.severity ?? null,
+            status: query.status ?? null,
+            source: query.source ?? null,
+            timeRange: query.timeRange ?? null,
+            query: query.query ?? null,
+          },
+        }
+      )
+
+      return {
+        data,
+        pagination: buildPaginationMeta(query.page, query.limit, total),
+      }
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to search alerts', {
+        feature: AppLogFeature.ALERTS,
+        action: 'search',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'search',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
     }
   }
 
@@ -144,8 +184,31 @@ export class AlertsService {
     })
 
     if (!alert) {
+      this.appLogger.warn(`Alert not found id=${id}`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'findById',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        targetResource: 'Alert',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'findById',
+      })
       throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
     }
+
+    this.appLogger.info(`Retrieved alert id=${id}`, {
+      feature: AppLogFeature.ALERTS,
+      action: 'findById',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Alert',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AlertsService',
+      functionName: 'findById',
+    })
 
     return alert
   }
@@ -154,6 +217,19 @@ export class AlertsService {
     const alert = await this.findById(tenantId, id)
 
     if (alert.status === 'closed' || alert.status === 'resolved') {
+      this.appLogger.warn(`Cannot acknowledge closed/resolved alert id=${id}`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'acknowledge',
+        outcome: AppLogOutcome.DENIED,
+        tenantId,
+        actorEmail: email,
+        targetResource: 'Alert',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'acknowledge',
+        metadata: { currentStatus: alert.status },
+      })
       throw new BusinessException(
         400,
         'Cannot acknowledge a closed alert',
@@ -161,7 +237,7 @@ export class AlertsService {
       )
     }
 
-    return this.prisma.alert.update({
+    const updated = await this.prisma.alert.update({
       where: { id, tenantId },
       data: {
         status: 'acknowledged',
@@ -169,12 +245,39 @@ export class AlertsService {
         acknowledgedAt: new Date(),
       },
     })
+
+    this.appLogger.info(`Acknowledged alert id=${id}`, {
+      feature: AppLogFeature.ALERTS,
+      action: 'acknowledge',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: email,
+      targetResource: 'Alert',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AlertsService',
+      functionName: 'acknowledge',
+    })
+
+    return updated
   }
 
   async investigate(tenantId: string, id: string, _notes?: string): Promise<AlertRecord> {
     const alert = await this.findById(tenantId, id)
 
     if (alert.status === 'closed' || alert.status === 'resolved') {
+      this.appLogger.warn(`Cannot investigate closed/resolved alert id=${id}`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'investigate',
+        outcome: AppLogOutcome.DENIED,
+        tenantId,
+        targetResource: 'Alert',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'investigate',
+        metadata: { currentStatus: alert.status },
+      })
       throw new BusinessException(
         400,
         'Cannot investigate a closed alert',
@@ -182,10 +285,24 @@ export class AlertsService {
       )
     }
 
-    return this.prisma.alert.update({
+    const updated = await this.prisma.alert.update({
       where: { id, tenantId },
       data: { status: 'in_progress' },
     })
+
+    this.appLogger.info(`Started investigation on alert id=${id}`, {
+      feature: AppLogFeature.ALERTS,
+      action: 'investigate',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Alert',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AlertsService',
+      functionName: 'investigate',
+    })
+
+    return updated
   }
 
   async close(
@@ -197,6 +314,19 @@ export class AlertsService {
     const alert = await this.findById(tenantId, id)
 
     if (alert.status === 'closed' || alert.status === 'resolved') {
+      this.appLogger.warn(`Cannot close already closed/resolved alert id=${id}`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'close',
+        outcome: AppLogOutcome.DENIED,
+        tenantId,
+        actorEmail: email,
+        targetResource: 'Alert',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'close',
+        metadata: { currentStatus: alert.status },
+      })
       throw new BusinessException(
         400,
         'Alert is already closed or resolved',
@@ -204,7 +334,7 @@ export class AlertsService {
       )
     }
 
-    return this.prisma.alert.update({
+    const updated = await this.prisma.alert.update({
       where: { id, tenantId },
       data: {
         status: 'closed',
@@ -213,6 +343,22 @@ export class AlertsService {
         closedBy: email,
       },
     })
+
+    this.appLogger.info(`Closed alert id=${id} resolution="${resolution}"`, {
+      feature: AppLogFeature.ALERTS,
+      action: 'close',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: email,
+      targetResource: 'Alert',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AlertsService',
+      functionName: 'close',
+      metadata: { resolution },
+    })
+
+    return updated
   }
 
   /**
@@ -222,6 +368,15 @@ export class AlertsService {
   async ingestFromWazuh(tenantId: string): Promise<{ ingested: number }> {
     const config = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
     if (!config) {
+      this.appLogger.warn('Wazuh connector not configured for ingestion', {
+        feature: AppLogFeature.ALERTS,
+        action: 'ingestFromWazuh',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'ingestFromWazuh',
+      })
       throw new BusinessException(
         400,
         'Wazuh connector not configured or disabled',
@@ -244,113 +399,164 @@ export class AlertsService {
       sort: [{ timestamp: { order: 'desc' } }],
     }
 
-    const result = await this.wazuhService.searchAlerts(config, esQuery)
+    try {
+      const result = await this.wazuhService.searchAlerts(config, esQuery)
 
-    // Build upsert data from hits
-    const upsertOps = result.hits.map(rawHit => {
-      const hit = rawHit as Record<string, unknown>
-      const source = (hit._source ?? hit) as Record<string, unknown>
-      const externalId = (hit._id ?? source.id) as string
+      // Build upsert data from hits
+      const upsertOps = result.hits.map(rawHit => {
+        const hit = rawHit as Record<string, unknown>
+        const source = (hit._source ?? hit) as Record<string, unknown>
+        const externalId = (hit._id ?? source.id) as string
 
-      const rule = source.rule as Record<string, unknown> | undefined
-      const agent = source.agent as Record<string, unknown> | undefined
-      const data = source.data as Record<string, unknown> | undefined
+        const rule = source.rule as Record<string, unknown> | undefined
+        const agent = source.agent as Record<string, unknown> | undefined
+        const data = source.data as Record<string, unknown> | undefined
 
-      const mitreTechniques: string[] = []
-      const mitreTactics: string[] = []
-      const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
-      if (mitreInfo) {
-        const ids = mitreInfo.id as string[] | undefined
-        const tactics = mitreInfo.tactic as string[] | undefined
-        if (ids) mitreTechniques.push(...ids)
-        if (tactics) mitreTactics.push(...tactics)
-      }
+        const mitreTechniques: string[] = []
+        const mitreTactics: string[] = []
+        const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
+        if (mitreInfo) {
+          const ids = mitreInfo.id as string[] | undefined
+          const tactics = mitreInfo.tactic as string[] | undefined
+          if (ids) mitreTechniques.push(...ids)
+          if (tactics) mitreTactics.push(...tactics)
+        }
 
-      const severity = this.mapWazuhLevel(rule?.level as number | undefined)
+        const severity = this.mapWazuhLevel(rule?.level as number | undefined)
 
-      return {
-        externalId,
-        rule,
-        agent: agent ?? null,
-        data: data ?? null,
-        source,
-        severity,
-        mitreTactics,
-        mitreTechniques,
-        timestamp: new Date((source.timestamp ?? now) as string),
-      }
-    })
+        return {
+          externalId,
+          rule,
+          agent: agent ?? null,
+          data: data ?? null,
+          source,
+          severity,
+          mitreTactics,
+          mitreTechniques,
+          timestamp: new Date((source.timestamp ?? now) as string),
+        }
+      })
 
-    // Batch upserts in chunks of 50 to avoid overwhelming the database
-    const BATCH_SIZE = 50
-    let ingested = 0
+      // Batch upserts in chunks of 50 to avoid overwhelming the database
+      const BATCH_SIZE = 50
+      let ingested = 0
 
-    for (let index = 0; index < upsertOps.length; index += BATCH_SIZE) {
-      const batch = upsertOps.slice(index, index + BATCH_SIZE)
-      const batchResults = await Promise.allSettled(
-        batch.map(op =>
-          this.prisma.alert.upsert({
-            where: { tenantId_externalId: { tenantId, externalId: op.externalId } },
-            create: {
-              tenantId,
-              externalId: op.externalId,
-              title: (op.rule?.description ??
-                op.source.rule_description ??
-                'Wazuh Alert') as string,
-              description: JSON.stringify(op.source),
-              severity: op.severity,
-              status: 'new_alert',
-              source: 'wazuh',
-              ruleName: (op.rule?.description ?? null) as string | null,
-              ruleId: (op.rule?.id ?? null) as string | null,
-              agentName:
-                ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
-              sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ??
-                op.source.src_ip ??
-                null) as string | null,
-              destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
-                op.source.dst_ip ??
-                null) as string | null,
-              mitreTactics: op.mitreTactics,
-              mitreTechniques: op.mitreTechniques,
-              rawEvent: op.source as Prisma.InputJsonValue,
-              timestamp: op.timestamp,
-            },
-            update: {
-              rawEvent: op.source as Prisma.InputJsonValue,
-            },
-          })
+      for (let index = 0; index < upsertOps.length; index += BATCH_SIZE) {
+        const batch = upsertOps.slice(index, index + BATCH_SIZE)
+        const batchResults = await Promise.allSettled(
+          batch.map(op =>
+            this.prisma.alert.upsert({
+              where: { tenantId_externalId: { tenantId, externalId: op.externalId } },
+              create: {
+                tenantId,
+                externalId: op.externalId,
+                title: (op.rule?.description ??
+                  op.source.rule_description ??
+                  'Wazuh Alert') as string,
+                description: JSON.stringify(op.source),
+                severity: op.severity,
+                status: 'new_alert',
+                source: 'wazuh',
+                ruleName: (op.rule?.description ?? null) as string | null,
+                ruleId: (op.rule?.id ?? null) as string | null,
+                agentName:
+                  ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
+                sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ??
+                  op.source.src_ip ??
+                  null) as string | null,
+                destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
+                  op.source.dst_ip ??
+                  null) as string | null,
+                mitreTactics: op.mitreTactics,
+                mitreTechniques: op.mitreTechniques,
+                rawEvent: op.source as Prisma.InputJsonValue,
+                timestamp: op.timestamp,
+              },
+              update: {
+                rawEvent: op.source as Prisma.InputJsonValue,
+              },
+            })
+          )
         )
-      )
 
-      for (const batchResult of batchResults) {
-        if (batchResult.status === 'fulfilled') {
-          ingested++
-        } else {
-          this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
+        for (const batchResult of batchResults) {
+          if (batchResult.status === 'fulfilled') {
+            ingested++
+          } else {
+            this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
+          }
         }
       }
-    }
 
-    this.logger.log(`Ingested ${ingested} alerts from Wazuh for tenant ${tenantId}`)
-    return { ingested }
+      this.logger.log(`Ingested ${ingested} alerts from Wazuh for tenant ${tenantId}`)
+
+      this.appLogger.info(`Ingested ${ingested} alerts from Wazuh`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'ingestFromWazuh',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'ingestFromWazuh',
+        metadata: { ingested, totalHits: upsertOps.length },
+      })
+
+      return { ingested }
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to ingest alerts from Wazuh', {
+        feature: AppLogFeature.ALERTS,
+        action: 'ingestFromWazuh',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'ingestFromWazuh',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
+    }
   }
 
   /**
    * Get alert severity distribution counts for dashboard.
    */
   async getCountsBySeverity(tenantId: string): Promise<Record<string, number>> {
-    const counts = await this.prisma.alert.groupBy({
-      by: ['severity'],
-      where: { tenantId },
-      _count: true,
-    })
+    try {
+      const counts = await this.prisma.alert.groupBy({
+        by: ['severity'],
+        where: { tenantId },
+        _count: true,
+      })
 
-    const result: Record<string, number> = {}
-    for (const c of counts) {
-      result[c.severity] = c._count
+      const result: Record<string, number> = {}
+      for (const c of counts) {
+        result[c.severity] = c._count
+      }
+
+      this.appLogger.info('Retrieved alert counts by severity', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getCountsBySeverity',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getCountsBySeverity',
+      })
+
+      return result
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to retrieve alert counts by severity', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getCountsBySeverity',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getCountsBySeverity',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
     }
-    return result
   }
 
   /**
@@ -363,15 +569,40 @@ export class AlertsService {
     const since = new Date()
     since.setDate(since.getDate() - days)
 
-    const results = await this.prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
-      SELECT DATE(timestamp) as date, COUNT(*)::bigint as count
-      FROM alerts
-      WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
-      GROUP BY DATE(timestamp)
-      ORDER BY date ASC
-    `
+    try {
+      const results = await this.prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
+        SELECT DATE(timestamp) as date, COUNT(*)::bigint as count
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
+        GROUP BY DATE(timestamp)
+        ORDER BY date ASC
+      `
 
-    return results.map(r => ({ date: r.date, count: Number(r.count) }))
+      this.appLogger.info(`Retrieved alert trend for ${days} days`, {
+        feature: AppLogFeature.ALERTS,
+        action: 'getTrend',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getTrend',
+        metadata: { days, dataPoints: results.length },
+      })
+
+      return results.map(r => ({ date: r.date, count: Number(r.count) }))
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to retrieve alert trend', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getTrend',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getTrend',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
+    }
   }
 
   /**
@@ -380,16 +611,41 @@ export class AlertsService {
   async getMitreTechniqueCounts(
     tenantId: string
   ): Promise<Array<{ technique: string; count: number }>> {
-    const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
-      SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
-      FROM alerts
-      WHERE tenant_id = ${tenantId}::uuid
-      GROUP BY technique
-      ORDER BY count DESC
-      LIMIT 15
-    `
+    try {
+      const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
+        SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid
+        GROUP BY technique
+        ORDER BY count DESC
+        LIMIT 15
+      `
 
-    return results.map(r => ({ technique: r.technique, count: Number(r.count) }))
+      this.appLogger.info('Retrieved MITRE technique counts', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getMitreTechniqueCounts',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getMitreTechniqueCounts',
+        metadata: { techniqueCount: results.length },
+      })
+
+      return results.map(r => ({ technique: r.technique, count: Number(r.count) }))
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to retrieve MITRE technique counts', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getMitreTechniqueCounts',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getMitreTechniqueCounts',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
+    }
   }
 
   /**
@@ -399,16 +655,41 @@ export class AlertsService {
     tenantId: string,
     limit: number = 10
   ): Promise<Array<{ asset: string; count: number }>> {
-    const results = await this.prisma.$queryRaw<Array<{ asset: string; count: bigint }>>`
-      SELECT agent_name as asset, COUNT(*)::bigint as count
-      FROM alerts
-      WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
-      GROUP BY agent_name
-      ORDER BY count DESC
-      LIMIT ${limit}
-    `
+    try {
+      const results = await this.prisma.$queryRaw<Array<{ asset: string; count: bigint }>>`
+        SELECT agent_name as asset, COUNT(*)::bigint as count
+        FROM alerts
+        WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
+        GROUP BY agent_name
+        ORDER BY count DESC
+        LIMIT ${limit}
+      `
 
-    return results.map(r => ({ asset: r.asset, count: Number(r.count) }))
+      this.appLogger.info('Retrieved top targeted assets', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getTopTargetedAssets',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getTopTargetedAssets',
+        metadata: { limit, assetCount: results.length },
+      })
+
+      return results.map(r => ({ asset: r.asset, count: Number(r.count) }))
+    } catch (error: unknown) {
+      this.appLogger.error('Failed to retrieve top targeted assets', {
+        feature: AppLogFeature.ALERTS,
+        action: 'getTopTargetedAssets',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AlertsService',
+        functionName: 'getTopTargetedAssets',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+      throw error
+    }
   }
 
   /**

@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class VelociraptorService {
   private readonly logger = new Logger(VelociraptorService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Velociraptor connection via API key auth.
@@ -34,6 +38,16 @@ export class VelociraptorService {
         return { ok: false, details: `Velociraptor returned status ${res.status}` }
       }
 
+      this.appLogger.info('Velociraptor connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'VelociraptorService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'velociraptor' },
+      })
+
       return {
         ok: true,
         details: `Velociraptor server reachable at ${baseUrl}.`,
@@ -41,6 +55,18 @@ export class VelociraptorService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Velociraptor connection test failed: ${message}`)
+
+      this.appLogger.error('Velociraptor connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'VelociraptorService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'velociraptor' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -70,10 +96,24 @@ export class VelociraptorService {
     }
 
     const body = res.data as Record<string, unknown>
-    return {
-      rows: (body.rows ?? []) as unknown[],
-      columns: (body.columns ?? []) as string[],
-    }
+    const rows = (body.rows ?? []) as unknown[]
+    const columns = (body.columns ?? []) as string[]
+
+    this.appLogger.info('Velociraptor VQL query executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'runVQL',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'VelociraptorService',
+      functionName: 'runVQL',
+      metadata: {
+        connectorType: 'velociraptor',
+        rowCount: rows.length,
+        columnCount: columns.length,
+      },
+    })
+
+    return { rows, columns }
   }
 
   /**
@@ -96,6 +136,18 @@ export class VelociraptorService {
     }
 
     const body = res.data as Record<string, unknown>
-    return (body.items ?? []) as unknown[]
+    const clients = (body.items ?? []) as unknown[]
+
+    this.appLogger.info('Velociraptor clients retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getClients',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'VelociraptorService',
+      functionName: 'getClients',
+      metadata: { connectorType: 'velociraptor', count: clients.length },
+    })
+
+    return clients
   }
 }

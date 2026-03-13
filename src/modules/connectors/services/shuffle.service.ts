@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class ShuffleService {
   private readonly logger = new Logger(ShuffleService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Shuffle SOAR connection.
@@ -32,6 +36,16 @@ export class ShuffleService {
         return { ok: false, details: `Shuffle returned status ${res.status}` }
       }
 
+      this.appLogger.info('Shuffle connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'ShuffleService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'shuffle' },
+      })
+
       return {
         ok: true,
         details: `Shuffle SOAR reachable at ${baseUrl}.`,
@@ -39,6 +53,18 @@ export class ShuffleService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Shuffle connection test failed: ${message}`)
+
+      this.appLogger.error('Shuffle connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'ShuffleService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'shuffle' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -60,7 +86,19 @@ export class ShuffleService {
       throw new Error(`Failed to fetch workflows: status ${res.status}`)
     }
 
-    return (res.data ?? []) as unknown[]
+    const workflows = (res.data ?? []) as unknown[]
+
+    this.appLogger.info('Shuffle workflows retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getWorkflows',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ShuffleService',
+      functionName: 'getWorkflows',
+      metadata: { connectorType: 'shuffle', count: workflows.length },
+    })
+
+    return workflows
   }
 
   /**
@@ -92,6 +130,18 @@ export class ShuffleService {
     }
 
     const body = res.data as Record<string, unknown>
-    return { executionId: (body.execution_id ?? body.id ?? 'unknown') as string }
+    const executionId = (body.execution_id ?? body.id ?? 'unknown') as string
+
+    this.appLogger.info('Shuffle workflow executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'executeWorkflow',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ShuffleService',
+      functionName: 'executeWorkflow',
+      metadata: { connectorType: 'shuffle', workflowId, executionId },
+    })
+
+    return { executionId }
   }
 }

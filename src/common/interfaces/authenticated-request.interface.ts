@@ -37,6 +37,12 @@ export interface JwtPayload {
   jti?: string
   iat?: number
   exp?: number
+  /** Present and `true` when this token was issued via impersonation. */
+  isImpersonated?: boolean
+  /** The `sub` (user ID) of the admin who initiated the impersonation. */
+  impersonatorSub?: string
+  /** The email of the admin who initiated the impersonation. */
+  impersonatorEmail?: string
 }
 
 export interface AuthenticatedRequest extends Request {

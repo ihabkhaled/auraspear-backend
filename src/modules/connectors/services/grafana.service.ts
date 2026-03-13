@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class GrafanaService {
   private readonly logger = new Logger(GrafanaService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Grafana connection.
@@ -32,6 +36,16 @@ export class GrafanaService {
       const health = res.data as Record<string, unknown>
       const version = (health.version ?? 'unknown') as string
 
+      this.appLogger.info('Grafana connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'GrafanaService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'grafana', version },
+      })
+
       return {
         ok: true,
         details: `Grafana v${version} reachable at ${baseUrl}. Database: ${health.database ?? 'ok'}.`,
@@ -39,6 +53,18 @@ export class GrafanaService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Grafana connection test failed: ${message}`)
+
+      this.appLogger.error('Grafana connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'GrafanaService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'grafana' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -60,7 +86,19 @@ export class GrafanaService {
       throw new Error(`Failed to fetch dashboards: status ${res.status}`)
     }
 
-    return (res.data ?? []) as unknown[]
+    const dashboards = (res.data ?? []) as unknown[]
+
+    this.appLogger.info('Grafana dashboards retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getDashboards',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'GrafanaService',
+      functionName: 'getDashboards',
+      metadata: { connectorType: 'grafana', count: dashboards.length },
+    })
+
+    return dashboards
   }
 
   private buildAuthHeaders(config: Record<string, unknown>): Record<string, string> {

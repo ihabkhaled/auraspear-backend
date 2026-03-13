@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class MispService {
   private readonly logger = new Logger(MispService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test MISP connection.
@@ -38,6 +42,16 @@ export class MispService {
       const body = res.data as Record<string, unknown>
       const version = body.version as string | undefined
 
+      this.appLogger.info('MISP connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'MispService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'misp', version: version ?? 'unknown' },
+      })
+
       return {
         ok: true,
         details: `MISP reachable at ${baseUrl}. PyMISP version: ${version ?? 'unknown'}.`,
@@ -45,6 +59,18 @@ export class MispService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`MISP connection test failed: ${message}`)
+
+      this.appLogger.error('MISP connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'MispService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'misp' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -72,7 +98,19 @@ export class MispService {
       throw new Error(`MISP events fetch failed: status ${res.status}`)
     }
 
-    return (res.data ?? []) as unknown[]
+    const events = (res.data ?? []) as unknown[]
+
+    this.appLogger.info('MISP events retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getEvents',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'MispService',
+      functionName: 'getEvents',
+      metadata: { connectorType: 'misp', limit, count: events.length },
+    })
+
+    return events
   }
 
   /**
@@ -103,7 +141,19 @@ export class MispService {
     const body = res.data as Record<string, unknown>
     const response = body.response as Record<string, unknown> | undefined
     const attribute = response?.Attribute as unknown[] | undefined
-    return attribute ?? []
+    const results = attribute ?? []
+
+    this.appLogger.info('MISP attribute search executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'searchAttributes',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'MispService',
+      functionName: 'searchAttributes',
+      metadata: { connectorType: 'misp', resultCount: results.length },
+    })
+
+    return results
   }
 
   /**
@@ -132,6 +182,17 @@ export class MispService {
     }
 
     const body = res.data as Record<string, unknown>
+
+    this.appLogger.info('MISP event retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getEvent',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'MispService',
+      functionName: 'getEvent',
+      metadata: { connectorType: 'misp', eventId },
+    })
+
     return body.Event ?? body
   }
 }

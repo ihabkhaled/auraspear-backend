@@ -10,7 +10,9 @@ import { MispService } from './services/misp.service'
 import { ShuffleService } from './services/shuffle.service'
 import { VelociraptorService } from './services/velociraptor.service'
 import { WazuhService } from './services/wazuh.service'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
 import { maskSecrets } from '../../common/utils/mask.util'
 import { validateUrl } from '../../common/utils/ssrf.util'
@@ -34,7 +36,8 @@ export class ConnectorsService {
     private readonly influxdbService: InfluxDBService,
     private readonly mispService: MispService,
     private readonly shuffleService: ShuffleService,
-    private readonly bedrockService: BedrockService
+    private readonly bedrockService: BedrockService,
+    private readonly appLogger: AppLoggerService
   ) {
     const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
     if (!key || key.length < 32) {
@@ -49,7 +52,7 @@ export class ConnectorsService {
       orderBy: { type: 'asc' },
     })
 
-    return configs.map(
+    const results = configs.map(
       (c: {
         type: string
         name: string
@@ -70,6 +73,19 @@ export class ConnectorsService {
         lastError: c.lastError,
       })
     )
+
+    this.appLogger.info('Connectors listed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'findAll',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'findAll',
+      metadata: { count: results.length },
+    })
+
+    return results
   }
 
   async findByType(tenantId: string, type: string): Promise<ConnectorResponse> {
@@ -84,6 +100,17 @@ export class ConnectorsService {
         'errors.connectors.notFound'
       )
     }
+
+    this.appLogger.info('Connector retrieved by type', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'findByType',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'findByType',
+      metadata: { connectorType: type },
+    })
 
     return {
       type: config.type,
@@ -136,6 +163,19 @@ export class ConnectorsService {
         authType: dto.authType as never,
         encryptedConfig,
       },
+    })
+
+    this.appLogger.info('Connector created', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'create',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: dto.type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'create',
+      metadata: { connectorName: dto.name, authType: dto.authType },
     })
 
     return {
@@ -194,6 +234,19 @@ export class ConnectorsService {
       data: updateData,
     })
 
+    this.appLogger.info('Connector updated', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'update',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'update',
+      metadata: { updatedFields: Object.keys(dto) },
+    })
+
     return {
       type: updated.type,
       name: updated.name,
@@ -222,6 +275,19 @@ export class ConnectorsService {
     await this.prisma.connectorConfig.delete({
       where: { tenantId_type: { tenantId, type: type as never } },
     })
+
+    this.appLogger.info('Connector removed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'remove',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'remove',
+    })
+
     return { deleted: true }
   }
 
@@ -234,6 +300,20 @@ export class ConnectorsService {
       where: { tenantId_type: { tenantId, type: type as never } },
       data: { enabled },
     })
+
+    this.appLogger.info(`Connector ${enabled ? 'enabled' : 'disabled'}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'toggle',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'toggle',
+      metadata: { enabled },
+    })
+
     return { type, enabled }
   }
 
@@ -343,6 +423,19 @@ export class ConnectorsService {
       },
     })
 
+    this.appLogger.info(`Connector test ${ok ? 'succeeded' : 'failed'}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'testConnection',
+      outcome: ok ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'testConnection',
+      metadata: { latencyMs, ok },
+    })
+
     return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
   }
 
@@ -358,6 +451,18 @@ export class ConnectorsService {
     })
 
     if (!config?.enabled) return null
+
+    this.appLogger.debug('Decrypted connector config accessed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getDecryptedConfig',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: type,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'getDecryptedConfig',
+    })
 
     return this.decryptConfig(config.encryptedConfig)
   }

@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
@@ -9,6 +11,8 @@ import type { TestResult } from '../connectors.types'
 @Injectable()
 export class OpenSearchService {
   private readonly logger = new Logger(OpenSearchService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test OpenSearch cluster health.
@@ -40,6 +44,20 @@ export class OpenSearchService {
 
       const health = res.data as Record<string, unknown>
 
+      this.appLogger.info('OpenSearch connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'OpenSearchService',
+        functionName: 'testConnection',
+        metadata: {
+          connectorType: 'opensearch',
+          clusterName: health.cluster_name,
+          clusterStatus: health.status,
+        },
+      })
+
       return {
         ok: true,
         details: `OpenSearch cluster "${health.cluster_name}" status: ${health.status}. Nodes: ${health.number_of_nodes}.`,
@@ -47,6 +65,18 @@ export class OpenSearchService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`OpenSearch connection test failed: ${message}`)
+
+      this.appLogger.error('OpenSearch connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'OpenSearchService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'opensearch' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -85,9 +115,18 @@ export class OpenSearchService {
     const totalObject = hits.total as Record<string, unknown> | number
     const total = typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
 
-    return {
-      hits: (hits.hits ?? []) as unknown[],
-      total,
-    }
+    const hitItems = (hits.hits ?? []) as unknown[]
+
+    this.appLogger.info('OpenSearch search executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'search',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OpenSearchService',
+      functionName: 'search',
+      metadata: { connectorType: 'opensearch', index, resultCount: hitItems.length, total },
+    })
+
+    return { hits: hitItems, total }
   }
 }

@@ -11,8 +11,10 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor'
 import { validateEnvironment } from './config/env.validation'
 import { AiModule } from './modules/ai/ai.module'
 import { AlertsModule } from './modules/alerts/alerts.module'
+import { AppLogsModule } from './modules/app-logs/app-logs.module'
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module'
 import { AuthModule } from './modules/auth/auth.module'
+import { CaseCyclesModule } from './modules/case-cycles/case-cycles.module'
 import { CasesModule } from './modules/cases/cases.module'
 import { ConnectorWorkspacesModule } from './modules/connector-workspaces/connector-workspaces.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
@@ -61,9 +63,11 @@ import { PrismaModule } from './prisma/prisma.module'
     ConnectorsModule,
     ConnectorWorkspacesModule,
     AlertsModule,
+    AppLogsModule,
     AuditLogsModule,
     DashboardsModule,
     HuntsModule,
+    CaseCyclesModule,
     CasesModule,
     IntelModule,
     AiModule,

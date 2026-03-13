@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConnectorsController } from './connectors.controller'
 import { ConnectorsService } from './connectors.service'
+import { AppLogsModule } from '../app-logs/app-logs.module'
 import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
 import { GraylogService } from './services/graylog.service'
@@ -13,6 +14,7 @@ import { VelociraptorService } from './services/velociraptor.service'
 import { WazuhService } from './services/wazuh.service'
 
 @Module({
+  imports: [AppLogsModule],
   controllers: [ConnectorsController],
   providers: [
     ConnectorsService,

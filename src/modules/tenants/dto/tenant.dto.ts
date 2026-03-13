@@ -40,6 +40,36 @@ export const AddUserSchema = z.object({
 
 export type AddUserDto = z.infer<typeof AddUserSchema>
 
+export const AssignUserSchema = z.object({
+  email: z.string().email().max(320),
+  name: z.string().min(1).max(255).optional(),
+  password: z
+    .string()
+    .min(8)
+    .max(128)
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!#$%&*@^])/,
+      'Password must contain uppercase, lowercase, digit, and special character'
+    )
+    .optional(),
+  role: z.enum([
+    'GLOBAL_ADMIN',
+    'TENANT_ADMIN',
+    'SOC_ANALYST_L2',
+    'SOC_ANALYST_L1',
+    'THREAT_HUNTER',
+    'EXECUTIVE_READONLY',
+  ]),
+})
+
+export type AssignUserDto = z.infer<typeof AssignUserSchema>
+
+export const CheckEmailSchema = z.object({
+  email: z.string().email().max(320),
+})
+
+export type CheckEmailDto = z.infer<typeof CheckEmailSchema>
+
 export const UpdateUserSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   role: z

@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
@@ -11,6 +13,8 @@ interface WazuhTokenCache {
 export class WazuhService {
   private readonly logger = new Logger(WazuhService.name)
   private readonly tokenCache = new Map<string, WazuhTokenCache>()
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Wazuh Manager connection.
@@ -46,6 +50,16 @@ export class WazuhService {
       const data = (info.data as Record<string, unknown>) ?? info
       const version = (data.api_version ?? data.version ?? 'unknown') as string
 
+      this.appLogger.info('Wazuh connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'WazuhService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'wazuh', version },
+      })
+
       return {
         ok: true,
         details: `Wazuh Manager v${version} reachable at ${managerUrl}.`,
@@ -53,6 +67,18 @@ export class WazuhService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Wazuh connection test failed: ${message}`)
+
+      this.appLogger.error('Wazuh connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'WazuhService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'wazuh' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -98,6 +124,16 @@ export class WazuhService {
       expiresAt: Date.now() + 10 * 60 * 1000,
     })
 
+    this.appLogger.info('Wazuh authentication succeeded', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'authenticate',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: 'authenticate',
+      metadata: { connectorType: 'wazuh' },
+    })
+
     return token
   }
 
@@ -125,7 +161,19 @@ export class WazuhService {
 
     const body = res.data as Record<string, unknown>
     const data = body.data as Record<string, unknown> | undefined
-    return (data?.affected_items ?? []) as unknown[]
+    const agents = (data?.affected_items ?? []) as unknown[]
+
+    this.appLogger.info('Wazuh agents retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getAgents',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: 'getAgents',
+      metadata: { connectorType: 'wazuh', count: agents.length },
+    })
+
+    return agents
   }
 
   /**
@@ -168,9 +216,18 @@ export class WazuhService {
     const totalObject = hits.total as Record<string, unknown> | number
     const total = typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
 
-    return {
-      hits: (hits.hits ?? []) as unknown[],
-      total,
-    }
+    const hitItems = (hits.hits ?? []) as unknown[]
+
+    this.appLogger.info('Wazuh alert search executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'searchAlerts',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: 'searchAlerts',
+      metadata: { connectorType: 'wazuh', index, resultCount: hitItems.length, total },
+    })
+
+    return { hits: hitItems, total }
   }
 }

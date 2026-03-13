@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class LogstashService {
   private readonly logger = new Logger(LogstashService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Logstash connection via the Monitoring API.
@@ -40,6 +44,16 @@ export class LogstashService {
       const version = (body.version ?? 'unknown') as string
       const status = (body.status ?? 'unknown') as string
 
+      this.appLogger.info('Logstash connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'LogstashService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'logstash', version, status },
+      })
+
       return {
         ok: true,
         details: `Logstash reachable at ${baseUrl}. Version: ${version}. Status: ${status}.`,
@@ -47,6 +61,18 @@ export class LogstashService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Logstash connection test failed: ${message}`)
+
+      this.appLogger.error('Logstash connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'LogstashService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'logstash' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -77,9 +103,19 @@ export class LogstashService {
     }
 
     const body = res.data as Record<string, unknown>
-    return {
-      pipelines: (body.pipelines ?? {}) as Record<string, unknown>,
-    }
+    const pipelines = (body.pipelines ?? {}) as Record<string, unknown>
+
+    this.appLogger.info('Logstash pipelines retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getPipelines',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'LogstashService',
+      functionName: 'getPipelines',
+      metadata: { connectorType: 'logstash', count: Object.keys(pipelines).length },
+    })
+
+    return { pipelines }
   }
 
   /**
@@ -108,9 +144,19 @@ export class LogstashService {
     }
 
     const body = res.data as Record<string, unknown>
-    return {
-      pipelines: (body.pipelines ?? {}) as Record<string, unknown>,
-    }
+    const pipelines = (body.pipelines ?? {}) as Record<string, unknown>
+
+    this.appLogger.info('Logstash pipeline stats retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getPipelineStats',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'LogstashService',
+      functionName: 'getPipelineStats',
+      metadata: { connectorType: 'logstash', count: Object.keys(pipelines).length },
+    })
+
+    return { pipelines }
   }
 
   /**
@@ -135,6 +181,16 @@ export class LogstashService {
     if (res.status !== 200) {
       throw new Error(`Logstash hot threads request failed: status ${res.status}`)
     }
+
+    this.appLogger.info('Logstash hot threads retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getHotThreads',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'LogstashService',
+      functionName: 'getHotThreads',
+      metadata: { connectorType: 'logstash' },
+    })
 
     return res.data
   }

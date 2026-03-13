@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConnectorWorkspaceFactoryService } from './connector-workspace-factory.service'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type {
   ConnectorWorkspaceOverview,
@@ -17,10 +19,22 @@ export class ConnectorWorkspacesService {
 
   constructor(
     private readonly connectorsService: ConnectorsService,
-    private readonly factory: ConnectorWorkspaceFactoryService
+    private readonly factory: ConnectorWorkspaceFactoryService,
+    private readonly appLogger: AppLoggerService
   ) {}
 
   async getOverview(tenantId: string, type: string): Promise<ConnectorWorkspaceOverview> {
+    this.appLogger.debug('Fetching connector workspace overview', {
+      feature: AppLogFeature.CONNECTOR_WORKSPACES,
+      action: 'getOverview',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorWorkspacesService',
+      functionName: 'getOverview',
+      metadata: { connectorType: type },
+    })
+
     const { config, connectorInfo } = await this.resolveConnector(tenantId, type)
     const strategy = this.getStrategyOrThrow(type)
 
@@ -38,6 +52,17 @@ export class ConnectorWorkspacesService {
     page: number,
     pageSize: number
   ): Promise<WorkspaceRecentActivityResponse> {
+    this.appLogger.debug('Fetching connector workspace recent activity', {
+      feature: AppLogFeature.CONNECTOR_WORKSPACES,
+      action: 'getRecentActivity',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorWorkspacesService',
+      functionName: 'getRecentActivity',
+      metadata: { connectorType: type, page, pageSize },
+    })
+
     const { config } = await this.resolveConnector(tenantId, type)
     const strategy = this.getStrategyOrThrow(type)
 
@@ -50,6 +75,17 @@ export class ConnectorWorkspacesService {
     page: number,
     pageSize: number
   ): Promise<WorkspaceEntitiesResponse> {
+    this.appLogger.debug('Fetching connector workspace entities', {
+      feature: AppLogFeature.CONNECTOR_WORKSPACES,
+      action: 'getEntities',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorWorkspacesService',
+      functionName: 'getEntities',
+      metadata: { connectorType: type, page, pageSize },
+    })
+
     const { config } = await this.resolveConnector(tenantId, type)
     const strategy = this.getStrategyOrThrow(type)
 
@@ -61,6 +97,17 @@ export class ConnectorWorkspacesService {
     type: string,
     request: WorkspaceSearchRequest
   ): Promise<WorkspaceSearchResponse> {
+    this.appLogger.info('Executing connector workspace search', {
+      feature: AppLogFeature.CONNECTOR_WORKSPACES,
+      action: 'search',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorWorkspacesService',
+      functionName: 'search',
+      metadata: { connectorType: type, query: request.query },
+    })
+
     const { config } = await this.resolveConnector(tenantId, type)
     const strategy = this.getStrategyOrThrow(type)
 
@@ -79,6 +126,17 @@ export class ConnectorWorkspacesService {
     // Validate action is in the allowlist
     const allowed = strategy.getAllowedActions()
     if (!allowed.includes(action)) {
+      this.appLogger.warn('Workspace action denied — not in allowlist', {
+        feature: AppLogFeature.CONNECTOR_WORKSPACES,
+        action: 'executeAction',
+        outcome: AppLogOutcome.DENIED,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'ConnectorWorkspacesService',
+        functionName: 'executeAction',
+        metadata: { connectorType: type, requestedAction: action },
+      })
+
       throw new BusinessException(
         403,
         `Action '${action}' is not allowed for connector '${type}'`,
@@ -89,6 +147,17 @@ export class ConnectorWorkspacesService {
     this.logger.log(
       `Executing workspace action '${action}' for connector '${type}' in tenant '${tenantId}'`
     )
+
+    this.appLogger.info('Executing workspace action', {
+      feature: AppLogFeature.CONNECTOR_WORKSPACES,
+      action: 'executeAction',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorWorkspacesService',
+      functionName: 'executeAction',
+      metadata: { connectorType: type, executedAction: action },
+    })
 
     return strategy.executeAction(config, action, params)
   }

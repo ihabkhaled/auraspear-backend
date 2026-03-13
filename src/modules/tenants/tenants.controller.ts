@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UsePipes } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
+import { ImpersonateUserSchema, type ImpersonateUserDto } from './dto/impersonate-user.dto'
+import { ListTenantsQuerySchema } from './dto/list-tenants-query.dto'
 import { ListUsersQuerySchema } from './dto/list-users-query.dto'
 import {
   CreateTenantSchema,
@@ -9,6 +11,9 @@ import {
   type UpdateTenantDto,
   AddUserSchema,
   type AddUserDto,
+  AssignUserSchema,
+  type AssignUserDto,
+  CheckEmailSchema,
   UpdateUserSchema,
   type UpdateUserDto,
 } from './dto/tenant.dto'
@@ -19,7 +24,15 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { TenantMember, TenantRecord, TenantWithCounts, UserRecord } from './tenants.types'
+import type {
+  TenantMember,
+  TenantRecord,
+  TenantWithCounts,
+  UserRecord,
+  PaginatedResult,
+  CheckEmailResult,
+  ImpersonateUserResponse,
+} from './tenants.types'
 
 /**
  * Validates that a TENANT_ADMIN is only operating on their own tenant.
@@ -43,8 +56,11 @@ export class TenantsController {
 
   @Get()
   @Roles(UserRole.GLOBAL_ADMIN)
-  async listTenants(): Promise<TenantWithCounts[]> {
-    return this.tenantsService.findAll()
+  async listTenants(
+    @Query() rawQuery: Record<string, string>
+  ): Promise<PaginatedResult<TenantWithCounts>> {
+    const { page, limit, search, sortBy, sortOrder } = ListTenantsQuerySchema.parse(rawQuery)
+    return this.tenantsService.findAll(page, limit, search, sortBy, sortOrder)
   }
 
   @Post()
@@ -90,10 +106,32 @@ export class TenantsController {
     @Param('id') tenantId: string,
     @CurrentUser() user: JwtPayload,
     @Query() rawQuery: Record<string, string>
-  ): Promise<UserRecord[]> {
+  ): Promise<PaginatedResult<UserRecord>> {
     assertTenantAccess(user, tenantId)
-    const { sortBy, sortOrder, role, status } = ListUsersQuerySchema.parse(rawQuery)
-    return this.tenantsService.findUsers(tenantId, sortBy, sortOrder, role, status)
+    const { page, limit, search, sortBy, sortOrder, role, status } =
+      ListUsersQuerySchema.parse(rawQuery)
+    return this.tenantsService.findUsers(
+      tenantId,
+      page,
+      limit,
+      search,
+      sortBy,
+      sortOrder,
+      role,
+      status
+    )
+  }
+
+  @Get(':id/users/check-email')
+  @Roles(UserRole.TENANT_ADMIN)
+  async checkEmail(
+    @Param('id') tenantId: string,
+    @CurrentUser() user: JwtPayload,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<CheckEmailResult> {
+    assertTenantAccess(user, tenantId)
+    const { email } = CheckEmailSchema.parse(rawQuery)
+    return this.tenantsService.checkEmail(tenantId, email)
   }
 
   @Post(':id/users')
@@ -106,6 +144,18 @@ export class TenantsController {
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
     return this.tenantsService.addUser(tenantId, dto, user.role)
+  }
+
+  @Post(':id/users/assign')
+  @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async assignUser(
+    @Param('id') tenantId: string,
+    @Body(new ZodValidationPipe(AssignUserSchema)) dto: AssignUserDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<UserRecord> {
+    assertTenantAccess(user, tenantId)
+    return this.tenantsService.assignUser(tenantId, dto, user.role)
   }
 
   @Patch(':tenantId/users/:userId')
@@ -167,5 +217,20 @@ export class TenantsController {
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
     return this.tenantsService.unblockUser(tenantId, userId, user.role)
+  }
+
+  // ─── Impersonation ────────────────────────────────
+
+  @Post(':tenantId/users/:userId/impersonate')
+  @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async impersonateUser(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @Body(new ZodValidationPipe(ImpersonateUserSchema)) _dto: ImpersonateUserDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<ImpersonateUserResponse> {
+    assertTenantAccess(user, tenantId)
+    return this.tenantsService.impersonateUser(tenantId, userId, user)
   }
 }

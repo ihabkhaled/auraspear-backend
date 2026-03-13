@@ -1,6 +1,8 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 
 const TOKEN_BLACKLIST_PREFIX = 'token:blacklist:'
 
@@ -9,7 +11,10 @@ export class TokenBlacklistService implements OnModuleDestroy {
   private readonly logger = new Logger(TokenBlacklistService.name)
   private readonly redis: Redis
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly appLogger: AppLoggerService
+  ) {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost')
     const port = this.configService.get<number>('REDIS_PORT', 6379)
     const password = this.configService.get<string>('REDIS_PASSWORD', '')
@@ -36,10 +41,30 @@ export class TokenBlacklistService implements OnModuleDestroy {
       const key = `${TOKEN_BLACKLIST_PREFIX}${jti}`
       const ttl = Math.max(expSeconds, 1)
       await this.redis.set(key, '1', 'EX', ttl)
+
+      this.appLogger.info('Token blacklisted successfully', {
+        feature: AppLogFeature.AUTH,
+        action: 'blacklist',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'blacklist',
+        metadata: { ttlSeconds: ttl },
+      })
     } catch (error) {
       this.logger.warn(
         `Failed to blacklist token ${jti}: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
+
+      this.appLogger.error('Failed to blacklist token', {
+        feature: AppLogFeature.AUTH,
+        action: 'blacklist',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'blacklist',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
     }
   }
 
@@ -59,7 +84,20 @@ export class TokenBlacklistService implements OnModuleDestroy {
     try {
       const key = `${TOKEN_BLACKLIST_PREFIX}${jti}`
       const result = await this.redis.exists(key)
-      return result === 1
+      const blacklisted = result === 1
+
+      if (blacklisted) {
+        this.appLogger.warn('Blacklisted token usage attempt detected', {
+          feature: AppLogFeature.AUTH,
+          action: 'isBlacklisted',
+          outcome: AppLogOutcome.DENIED,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'TokenBlacklistService',
+          functionName: 'isBlacklisted',
+        })
+      }
+
+      return blacklisted
     } catch (error) {
       this.logger.warn(
         `Failed to check blacklist for ${jti}: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -79,6 +117,14 @@ export class TokenBlacklistService implements OnModuleDestroy {
       const result = await this.redis.ping()
       return result === 'PONG'
     } catch {
+      this.appLogger.warn('Token blacklist Redis connection is unhealthy', {
+        feature: AppLogFeature.AUTH,
+        action: 'isRedisHealthy',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'isRedisHealthy',
+      })
       return false
     }
   }

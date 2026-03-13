@@ -1,8 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { CaseTimelineType } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  CaseTimelineType,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { hasRoleAtLeast } from '../../common/utils/role.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseRecord, PaginatedCaseNotes, PaginatedCases } from './cases.types'
@@ -17,7 +23,10 @@ import type { CaseNote, CaseStatus, CaseSeverity, Prisma } from '@prisma/client'
 export class CasesService {
   private readonly logger = new Logger(CasesService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly appLogger: AppLoggerService
+  ) {}
 
   private async resolveOwner(
     ownerUserId: string | null
@@ -33,6 +42,29 @@ export class CasesService {
       ownerName: owner?.name ?? null,
       ownerEmail: owner?.email ?? null,
     }
+  }
+
+  private async resolveCreatorName(email: string | null): Promise<string | null> {
+    if (!email) return null
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { name: true },
+    })
+    return user?.name ?? null
+  }
+
+  private async resolveCreatorNamesBatch(emails: (string | null)[]): Promise<Map<string, string>> {
+    const uniqueEmails = [...new Set(emails.filter((e): e is string => e !== null))]
+    if (uniqueEmails.length === 0) return new Map()
+    const users = await this.prisma.user.findMany({
+      where: { email: { in: uniqueEmails } },
+      select: { email: true, name: true },
+    })
+    const map = new Map<string, string>()
+    for (const u of users) {
+      map.set(u.email, u.name)
+    }
+    return map
   }
 
   private async resolveOwnersBatch(
@@ -65,7 +97,9 @@ export class CasesService {
     sortOrder?: string,
     status?: string,
     severity?: string,
-    query?: string
+    query?: string,
+    cycleId?: string,
+    ownerUserId?: string
   ): Promise<PaginatedCases> {
     const where: Prisma.CaseWhereInput = { tenantId }
 
@@ -75,6 +109,16 @@ export class CasesService {
 
     if (severity) {
       where.severity = severity as CaseSeverity
+    }
+
+    if (cycleId === 'none') {
+      where.cycleId = null
+    } else if (cycleId) {
+      where.cycleId = cycleId
+    }
+
+    if (ownerUserId) {
+      where.ownerUserId = ownerUserId
     }
 
     if (query && query.trim().length > 0) {
@@ -96,7 +140,10 @@ export class CasesService {
       this.prisma.case.count({ where }),
     ])
 
-    const ownersMap = await this.resolveOwnersBatch(cases.map(c => c.ownerUserId))
+    const [ownersMap, creatorsMap] = await Promise.all([
+      this.resolveOwnersBatch(cases.map(c => c.ownerUserId)),
+      this.resolveCreatorNamesBatch(cases.map(c => c.createdBy)),
+    ])
 
     const data = cases.map(c => {
       const owner = c.ownerUserId ? ownersMap.get(c.ownerUserId) : undefined
@@ -104,6 +151,7 @@ export class CasesService {
         ...c,
         ownerName: owner?.name ?? null,
         ownerEmail: owner?.email ?? null,
+        createdByName: c.createdBy ? (creatorsMap.get(c.createdBy) ?? null) : null,
         tenantName: c.tenant.name,
       }
     })
@@ -163,6 +211,12 @@ export class CasesService {
     }
 
     const result = await this.prisma.$transaction(async tx => {
+      // Auto-assign to active cycle if one exists
+      const activeCycle = await tx.caseCycle.findFirst({
+        where: { tenantId: user.tenantId, status: 'active' },
+        select: { id: true },
+      })
+
       const caseNumber = await this.generateCaseNumber(tx)
       const newCase = await tx.case.create({
         data: {
@@ -174,6 +228,7 @@ export class CasesService {
           status: 'open',
           ownerUserId: dto.ownerUserId ?? null,
           createdBy: user.email,
+          cycleId: activeCycle?.id ?? null,
           ...(linkedAlerts.length > 0 ? { linkedAlerts } : {}),
         },
       })
@@ -208,9 +263,26 @@ export class CasesService {
       })
     })
 
-    this.logger.log(`Case created by ${user.email} for tenant ${user.tenantId}`)
-    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
+    this.appLogger.info('Case created', {
+      feature: AppLogFeature.CASES,
+      action: 'createCase',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'Case',
+      targetResourceId: result.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'createCase',
+      metadata: { caseNumber: result.caseNumber, severity: result.severity },
+    })
+
+    const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
+      this.resolveOwner(result.ownerUserId),
+      this.resolveCreatorName(result.createdBy),
+    ])
+    return { ...result, ownerName, ownerEmail, createdByName, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -231,8 +303,17 @@ export class CasesService {
       throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
 
-    const { ownerName, ownerEmail } = await this.resolveOwner(caseRecord.ownerUserId)
-    return { ...caseRecord, ownerName, ownerEmail, tenantName: caseRecord.tenant.name }
+    const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
+      this.resolveOwner(caseRecord.ownerUserId),
+      this.resolveCreatorName(caseRecord.createdBy),
+    ])
+    return {
+      ...caseRecord,
+      ownerName,
+      ownerEmail,
+      createdByName,
+      tenantName: caseRecord.tenant.name,
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -242,7 +323,23 @@ export class CasesService {
   async updateCase(id: string, dto: UpdateCaseDto, user: JwtPayload): Promise<CaseRecord> {
     const existing = await this.getCaseById(id, user.tenantId)
 
-    if (existing.status === 'closed') {
+    // Allow re-opening and assignee changes on closed cases, block other updates
+    const isReopening =
+      existing.status === 'closed' && dto.status !== undefined && dto.status !== 'closed'
+    const isAssigneeChange = dto.ownerUserId !== undefined
+    if (existing.status === 'closed' && !isReopening && !isAssigneeChange) {
+      this.appLogger.warn('Update case denied: case is closed', {
+        feature: AppLogFeature.CASES,
+        action: 'updateCase',
+        outcome: AppLogOutcome.DENIED,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        targetResource: 'Case',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'CasesService',
+        functionName: 'updateCase',
+      })
       throw new BusinessException(400, 'Cannot update a closed case', 'errors.cases.alreadyClosed')
     }
 
@@ -263,23 +360,72 @@ export class CasesService {
       }
     }
 
-    const changedFields = Object.keys(dto).join(', ')
+    // Resolve user name for actor
+    const actorUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { name: true },
+    })
+    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+    // Build timeline description with meaningful details
     const timelineType = isStatusChange ? CaseTimelineType.STATUS_CHANGED : CaseTimelineType.UPDATED
-    const timelineDescription = isStatusChange
-      ? `Status changed from ${existing.status} to ${dto.status}`
-      : `Case updated: ${changedFields} modified`
+    let timelineDescription: string
+    if (isReopening) {
+      timelineDescription = `Case re-opened by ${actorLabel}`
+    } else if (isStatusChange) {
+      timelineDescription = `Status changed to ${dto.status} by ${actorLabel}`
+    } else if (dto.ownerUserId !== undefined) {
+      // Resolve previous owner for "from X" in description
+      const previousOwner = existing.ownerUserId
+        ? await this.prisma.user.findUnique({
+            where: { id: existing.ownerUserId },
+            select: { name: true, email: true },
+          })
+        : null
+      const previousLabel = previousOwner ? `${previousOwner.name} (${previousOwner.email})` : null
+
+      if (dto.ownerUserId === null) {
+        timelineDescription = previousLabel
+          ? `Assignee removed (was ${previousLabel}) by ${actorLabel}`
+          : `Assignee removed by ${actorLabel}`
+      } else {
+        const newOwner = await this.prisma.user.findUnique({
+          where: { id: dto.ownerUserId },
+          select: { name: true, email: true },
+        })
+        const ownerLabel = newOwner ? `${newOwner.name} (${newOwner.email})` : dto.ownerUserId
+        timelineDescription = previousLabel
+          ? `Assigned to ${ownerLabel} from ${previousLabel} by ${actorLabel}`
+          : `Assigned to ${ownerLabel} by ${actorLabel}`
+      }
+    } else if (dto.cycleId === undefined) {
+      const changedFields = Object.keys(dto).join(', ')
+      timelineDescription = `Case updated by ${actorLabel}: ${changedFields} modified`
+    } else if (dto.cycleId === null) {
+      timelineDescription = `Removed from cycle by ${actorLabel}`
+    } else {
+      const cycle = await this.prisma.caseCycle.findUnique({
+        where: { id: dto.cycleId },
+        select: { name: true },
+      })
+      timelineDescription = `Added to cycle "${cycle?.name ?? dto.cycleId}" by ${actorLabel}`
+    }
 
     const result = await this.prisma.$transaction(async tx => {
+      // Build update data — handle nullable fields explicitly
+      const updateData: Record<string, unknown> = {}
+      if (dto.title !== undefined) updateData['title'] = dto.title
+      if (dto.description !== undefined) updateData['description'] = dto.description
+      if (dto.severity !== undefined) updateData['severity'] = dto.severity
+      if (dto.status !== undefined) updateData['status'] = dto.status
+      if (dto.ownerUserId !== undefined) updateData['ownerUserId'] = dto.ownerUserId
+      if (dto.cycleId !== undefined) updateData['cycleId'] = dto.cycleId
+      if (dto.status === 'closed') updateData['closedAt'] = new Date()
+      if (isReopening) updateData['closedAt'] = null
+
       const updated = await tx.case.updateMany({
         where: { id, tenantId: user.tenantId },
-        data: {
-          title: dto.title ?? undefined,
-          description: dto.description ?? undefined,
-          severity: dto.severity ?? undefined,
-          status: dto.status ?? undefined,
-          ownerUserId: dto.ownerUserId ?? undefined,
-          closedAt: dto.status === 'closed' ? new Date() : undefined,
-        },
+        data: updateData,
       })
 
       if (updated.count === 0) {
@@ -305,9 +451,26 @@ export class CasesService {
       })
     })
 
-    this.logger.log(`Case ${existing.caseNumber} updated by ${user.email}`)
-    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
+    this.appLogger.info('Case updated', {
+      feature: AppLogFeature.CASES,
+      action: 'updateCase',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'Case',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'updateCase',
+      metadata: { caseNumber: existing.caseNumber, changedFields: Object.keys(dto).join(', ') },
+    })
+
+    const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
+      this.resolveOwner(result.ownerUserId),
+      this.resolveCreatorName(result.createdBy),
+    ])
+    return { ...result, ownerName, ownerEmail, createdByName, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -388,7 +551,7 @@ export class CasesService {
       await tx.caseTimeline.create({
         data: {
           caseId,
-          type: 'alert_linked',
+          type: CaseTimelineType.ALERT_LINKED,
           actor: user.email,
           description: `Alert ${dto.alertId} linked from index ${dto.indexName}`,
         },
@@ -405,8 +568,11 @@ export class CasesService {
     })
 
     this.logger.log(`Alert ${dto.alertId} linked to case ${existing.caseNumber}`)
-    const { ownerName, ownerEmail } = await this.resolveOwner(result.ownerUserId)
-    return { ...result, ownerName, ownerEmail, tenantName: result.tenant.name }
+    const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
+      this.resolveOwner(result.ownerUserId),
+      this.resolveCreatorName(result.createdBy),
+    ])
+    return { ...result, ownerName, ownerEmail, createdByName, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -505,7 +671,8 @@ export class CasesService {
    */
   private async generateCaseNumber(tx: Prisma.TransactionClient = this.prisma): Promise<string> {
     // M3: Advisory lock to prevent concurrent case number collisions
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))`
+    // Cast to text to avoid Prisma void deserialization error
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))::text`
 
     const year = new Date().getFullYear()
     const prefix = `SOC-${year}-`

@@ -6,6 +6,7 @@ import {
   AuthType,
   type AlertSeverity,
   type AlertStatus,
+  type CaseCycleStatus,
   type CaseSeverity,
   type CaseStatus,
   type HuntSessionStatus,
@@ -549,6 +550,39 @@ const CASE_TEMPLATES: Array<{
     description: 'Log4Shell exploitation attempt detected on Java applications',
     severity: 'critical',
     status: 'in_progress',
+  },
+]
+
+// ─── Case Cycle seed data ──────────────────────────────────────
+
+const CYCLE_TEMPLATES: Array<{
+  name: string
+  description: string
+  status: CaseCycleStatus
+  daysAgo: number
+  durationDays: number
+}> = [
+  {
+    name: 'Cycle 1 — January Ops',
+    description: 'First operational cycle covering initial incident response and triage',
+    status: 'closed',
+    daysAgo: 60,
+    durationDays: 14,
+  },
+  {
+    name: 'Cycle 2 — February Ops',
+    description:
+      'Second operational cycle with focus on phishing campaigns and malware containment',
+    status: 'closed',
+    daysAgo: 30,
+    durationDays: 14,
+  },
+  {
+    name: 'Cycle 3 — March Ops',
+    description: 'Current active cycle for ongoing threat monitoring and response',
+    status: 'active',
+    daysAgo: 7,
+    durationDays: 14,
   },
 ]
 
@@ -1191,17 +1225,35 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
   }
 }
 
-async function seedCases(tenantId: string, profile: TenantProfile): Promise<void> {
+async function seedCases(
+  tenantId: string,
+  profile: TenantProfile,
+  cycleIds: string[],
+  assignableUserIds: string[]
+): Promise<void> {
   const year = new Date().getFullYear()
   const templates = pickByIndices(CASE_TEMPLATES, profile.caseTemplateIndices)
 
-  for (const template of templates) {
+  for (const [idx, template] of templates.entries()) {
     globalCaseCounter++
     const caseNumber = `SOC-${year}-${String(globalCaseCounter).padStart(3, '0')}`
 
+    // Distribute cases across cycles: round-robin assignment
+    const cycleId = cycleIds.length > 0 ? cycleIds[idx % cycleIds.length] : null
+
+    // Distribute cases across assignable users: round-robin, leave every 3rd case unassigned
+    const ownerUserId =
+      assignableUserIds.length > 0 && idx % 3 !== 2
+        ? assignableUserIds[idx % assignableUserIds.length]
+        : null
+
     await prisma.case.upsert({
       where: { caseNumber },
-      update: {},
+      update: {
+        // Update existing seeded cases with owner + cycle assignment
+        ...(ownerUserId ? { ownerUserId } : {}),
+        ...(cycleId ? { cycleId } : {}),
+      },
       create: {
         tenantId,
         caseNumber,
@@ -1211,6 +1263,8 @@ async function seedCases(tenantId: string, profile: TenantProfile): Promise<void
         status: template.status,
         createdBy: `admin@${profile.slug}.io`,
         closedAt: template.status === 'closed' ? randomDate(5) : null,
+        ...(cycleId ? { cycleId } : {}),
+        ...(ownerUserId ? { ownerUserId } : {}),
         timeline: {
           create: [
             {
@@ -1346,6 +1400,45 @@ async function seedIntel(tenantId: string, profile: TenantProfile): Promise<void
 
 // ─── Main seed function ────────────────────────────────────────
 
+async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise<string[]> {
+  const now = new Date()
+  const cycleIds: string[] = []
+
+  for (const template of CYCLE_TEMPLATES) {
+    const startDate = new Date(now.getTime() - template.daysAgo * 24 * 60 * 60 * 1000)
+    const endDate = new Date(startDate.getTime() + template.durationDays * 24 * 60 * 60 * 1000)
+    const cycleName = `[${profile.slug}] ${template.name}`
+
+    // Idempotent: check if cycle with this name already exists for this tenant
+    const existing = await prisma.caseCycle.findFirst({
+      where: { tenantId, name: cycleName },
+      select: { id: true },
+    })
+    if (existing) {
+      cycleIds.push(existing.id)
+      continue
+    }
+
+    const cycle = await prisma.caseCycle.create({
+      data: {
+        tenantId,
+        name: cycleName,
+        description: template.description,
+        status: template.status,
+        startDate,
+        endDate: template.status === 'closed' ? endDate : null,
+        createdBy: `admin@${profile.slug}.io`,
+        closedBy: template.status === 'closed' ? `admin@${profile.slug}.io` : null,
+        closedAt: template.status === 'closed' ? endDate : null,
+      },
+    })
+
+    cycleIds.push(cycle.id)
+  }
+
+  return cycleIds
+}
+
 async function main(): Promise<void> {
   logger.info('Seeding database...')
 
@@ -1451,6 +1544,25 @@ async function main(): Promise<void> {
       logger.info({ tenant: profile.slug, email: userDef.email, role: userDef.role }, 'Seeded user')
     }
 
+    // Collect user IDs that can be assigned cases (analysts, hunters, admins — not execs)
+    const assignableUsers = await prisma.tenantMembership.findMany({
+      where: {
+        tenantId,
+        status: 'active',
+        role: {
+          in: [
+            UserRole.GLOBAL_ADMIN,
+            UserRole.TENANT_ADMIN,
+            UserRole.SOC_ANALYST_L2,
+            UserRole.SOC_ANALYST_L1,
+            UserRole.THREAT_HUNTER,
+          ],
+        },
+      },
+      select: { userId: true },
+    })
+    const assignableUserIds = assignableUsers.map(u => u.userId)
+
     // ─── Connectors ───
     for (const connector of profile.connectors) {
       await prisma.connectorConfig.upsert({
@@ -1471,8 +1583,12 @@ async function main(): Promise<void> {
     await seedAlerts(tenantId, profile)
     logger.info({ tenant: profile.slug, count: profile.alertCount }, 'Seeded alerts')
 
+    // ─── Case Cycles (idempotent via name check per tenant) ───
+    const cycleIds = await seedCaseCycles(tenantId, profile)
+    logger.info({ tenant: profile.slug, count: CYCLE_TEMPLATES.length }, 'Seeded case cycles')
+
     // ─── Cases (idempotent via upsert on caseNumber) ───
-    await seedCases(tenantId, profile)
+    await seedCases(tenantId, profile, cycleIds, assignableUserIds)
     logger.info({ tenant: profile.slug, count: profile.caseTemplateIndices.length }, 'Seeded cases')
 
     // ─── Hunt Sessions (idempotent via query check per tenant) ───

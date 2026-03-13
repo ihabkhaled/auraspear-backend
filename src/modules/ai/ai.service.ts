@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { AiResponse } from './ai.types'
 
@@ -25,7 +27,10 @@ export class AiService {
   private readonly logger = new Logger(AiService.name)
   private readonly MODEL = 'anthropic.claude-3-sonnet'
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly appLogger: AppLoggerService
+  ) {}
 
   /* ---------------------------------------------------------------- */
   /* AI Gate: checks per-tenant AI enable/disable                      */
@@ -92,6 +97,20 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   async aiHunt(dto: AiHuntDto, user: JwtPayload): Promise<AiResponse> {
+    this.appLogger.info('AI hunt started', {
+      feature: AppLogFeature.AI,
+      action: 'aiHunt',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiHunt',
+      targetResource: 'AiHunt',
+      metadata: { queryLength: dto.query.length },
+    })
+
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
@@ -131,6 +150,26 @@ export class AiService {
       createdAt: new Date().toISOString(),
     })
 
+    this.appLogger.info('AI hunt completed successfully', {
+      feature: AppLogFeature.AI,
+      action: 'aiHunt',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiHunt',
+      targetResource: 'AiHunt',
+      metadata: {
+        model: this.MODEL,
+        confidence: response.confidence,
+        inputTokens: response.tokensUsed.input,
+        outputTokens: response.tokensUsed.output,
+        latencyMs,
+      },
+    })
+
     return response
   }
 
@@ -139,6 +178,20 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   async aiInvestigate(dto: AiInvestigateDto, user: JwtPayload): Promise<AiResponse> {
+    this.appLogger.info('AI investigation started', {
+      feature: AppLogFeature.AI,
+      action: 'aiInvestigate',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiInvestigate',
+      targetResource: 'Alert',
+      targetResourceId: dto.alertId,
+    })
+
     await this.ensureAiEnabled(user.tenantId)
 
     // M6: Validate alert belongs to the caller's tenant
@@ -147,6 +200,19 @@ export class AiService {
       select: { id: true },
     })
     if (!alert) {
+      this.appLogger.warn('AI investigation failed — alert not found', {
+        feature: AppLogFeature.AI,
+        action: 'aiInvestigate',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        actorUserId: user.sub,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'aiInvestigate',
+        targetResource: 'Alert',
+        targetResourceId: dto.alertId,
+      })
       throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
     }
 
@@ -187,6 +253,27 @@ export class AiService {
       createdAt: new Date().toISOString(),
     })
 
+    this.appLogger.info('AI investigation completed successfully', {
+      feature: AppLogFeature.AI,
+      action: 'aiInvestigate',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiInvestigate',
+      targetResource: 'Alert',
+      targetResourceId: dto.alertId,
+      metadata: {
+        model: this.MODEL,
+        confidence: response.confidence,
+        inputTokens: response.tokensUsed.input,
+        outputTokens: response.tokensUsed.output,
+        latencyMs,
+      },
+    })
+
     return response
   }
 
@@ -195,6 +282,20 @@ export class AiService {
   /* ---------------------------------------------------------------- */
 
   async aiExplain(body: { prompt: string }, user: JwtPayload): Promise<AiResponse> {
+    this.appLogger.info('AI explain started', {
+      feature: AppLogFeature.AI,
+      action: 'aiExplain',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiExplain',
+      targetResource: 'AiExplain',
+      metadata: { promptLength: body.prompt.length },
+    })
+
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
@@ -230,6 +331,26 @@ export class AiService {
       latencyMs,
       status: 'success',
       createdAt: new Date().toISOString(),
+    })
+
+    this.appLogger.info('AI explain completed successfully', {
+      feature: AppLogFeature.AI,
+      action: 'aiExplain',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'aiExplain',
+      targetResource: 'AiExplain',
+      metadata: {
+        model: this.MODEL,
+        confidence: response.confidence,
+        inputTokens: response.tokensUsed.input,
+        outputTokens: response.tokensUsed.output,
+        latencyMs,
+      },
     })
 
     return response

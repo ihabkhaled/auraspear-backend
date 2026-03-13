@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConnectorWorkspaceFactoryService } from './connector-workspace-factory.service'
 import { ConnectorWorkspacesController } from './connector-workspaces.controller'
 import { ConnectorWorkspacesService } from './connector-workspaces.service'
+import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
 import { BedrockWorkspaceStrategy } from './strategies/bedrock-workspace.strategy'
 import { GrafanaWorkspaceStrategy } from './strategies/grafana-workspace.strategy'
@@ -14,7 +15,7 @@ import { VelociraptorWorkspaceStrategy } from './strategies/velociraptor-workspa
 import { WazuhWorkspaceStrategy } from './strategies/wazuh-workspace.strategy'
 
 @Module({
-  imports: [ConnectorsModule],
+  imports: [ConnectorsModule, AppLogsModule],
   controllers: [ConnectorWorkspacesController],
   providers: [
     ConnectorWorkspacesService,

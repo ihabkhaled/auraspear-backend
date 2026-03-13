@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class GraylogService {
   private readonly logger = new Logger(GraylogService.name)
+
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
    * Test Graylog connection.
@@ -39,6 +43,16 @@ export class GraylogService {
       const body = res.data as Record<string, unknown>
       const nodes = (body.nodes ?? body.total) as number | undefined
 
+      this.appLogger.info('Graylog connection test succeeded', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'GraylogService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'graylog', nodes },
+      })
+
       return {
         ok: true,
         details: `Graylog reachable at ${baseUrl}. Nodes: ${nodes ?? 'unknown'}.`,
@@ -46,6 +60,18 @@ export class GraylogService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed'
       this.logger.warn(`Graylog connection test failed: ${message}`)
+
+      this.appLogger.error('Graylog connection test failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'GraylogService',
+        functionName: 'testConnection',
+        metadata: { connectorType: 'graylog' },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+
       return { ok: false, details: message }
     }
   }
@@ -77,10 +103,20 @@ export class GraylogService {
     }
 
     const body = res.data as Record<string, unknown>
-    return {
-      events: (body.events ?? []) as unknown[],
-      total: (body.total_results ?? 0) as number,
-    }
+    const events = (body.events ?? []) as unknown[]
+    const total = (body.total_results ?? 0) as number
+
+    this.appLogger.info('Graylog event search executed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'searchEvents',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'GraylogService',
+      functionName: 'searchEvents',
+      metadata: { connectorType: 'graylog', resultCount: events.length, total },
+    })
+
+    return { events, total }
   }
 
   /**
@@ -105,6 +141,18 @@ export class GraylogService {
     }
 
     const body = res.data as Record<string, unknown>
-    return (body.event_definitions ?? []) as unknown[]
+    const definitions = (body.event_definitions ?? []) as unknown[]
+
+    this.appLogger.info('Graylog event definitions retrieved', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'getEventDefinitions',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'GraylogService',
+      functionName: 'getEventDefinitions',
+      metadata: { connectorType: 'graylog', count: definitions.length },
+    })
+
+    return definitions
   }
 }

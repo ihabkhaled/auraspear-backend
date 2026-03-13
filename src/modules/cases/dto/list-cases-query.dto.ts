@@ -11,6 +11,8 @@ export const ListCasesQuerySchema = z.object({
   status: z.enum(['open', 'in_progress', 'closed']).optional(),
   severity: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   query: z.string().max(500).optional(),
+  cycleId: z.union([z.string().uuid(), z.literal('none')]).optional(),
+  ownerUserId: z.string().uuid().optional(),
 })
 
 export type ListCasesQueryDto = z.infer<typeof ListCasesQuerySchema>

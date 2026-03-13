@@ -57,6 +57,20 @@ export class AuthController {
   }
 
   /**
+   * POST /auth/end-impersonation
+   * Ends the current impersonation session by blacklisting the impersonation
+   * tokens and issuing fresh tokens for the original admin user.
+   */
+  @ApiBearerAuth()
+  @Post('end-impersonation')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async endImpersonation(
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
+    return this.authService.endImpersonation(user)
+  }
+
+  /**
    * POST /auth/logout
    * Blacklists both access and refresh tokens in Redis so they cannot be reused.
    * The client should also discard its stored tokens.

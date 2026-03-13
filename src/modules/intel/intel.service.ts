@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { MispService } from '../connectors/services/misp.service'
@@ -19,7 +21,8 @@ export class IntelService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly connectorsService: ConnectorsService,
-    private readonly mispService: MispService
+    private readonly mispService: MispService,
+    private readonly appLogger: AppLoggerService
   ) {}
 
   /**
@@ -58,6 +61,24 @@ export class IntelService {
       totalIOCs += group._count.id
     }
 
+    this.appLogger.info('Retrieved intel stats', {
+      feature: AppLogFeature.INTEL,
+      action: 'getStats',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'getStats',
+      targetResource: 'IntelStats',
+      metadata: {
+        totalIOCs,
+        threatActors: threatActorCount.length,
+        ipIOCs,
+        fileHashes,
+        activeDomains,
+      },
+    })
+
     return {
       threatActors: threatActorCount.length,
       ipIOCs,
@@ -88,6 +109,18 @@ export class IntelService {
       }),
       this.prisma.intelMispEvent.count({ where }),
     ])
+
+    this.appLogger.info('Retrieved recent MISP events', {
+      feature: AppLogFeature.INTEL,
+      action: 'getRecentEvents',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'getRecentEvents',
+      targetResource: 'IntelMispEvent',
+      metadata: { page, limit, totalEvents: total, sortBy, sortOrder },
+    })
 
     return {
       data,
@@ -138,6 +171,18 @@ export class IntelService {
       this.prisma.intelIOC.count({ where }),
     ])
 
+    this.appLogger.info('Searched IOCs', {
+      feature: AppLogFeature.INTEL,
+      action: 'searchIOCs',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'searchIOCs',
+      targetResource: 'IntelIOC',
+      metadata: { query, type, source, page, limit, totalResults: total, sortBy, sortOrder },
+    })
+
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
@@ -150,6 +195,18 @@ export class IntelService {
    * source or destination IP of the given alerts.
    */
   async matchIOCsAgainstAlerts(tenantId: string, alertIds: string[]): Promise<IOCMatchResult[]> {
+    this.appLogger.info('Matching IOCs against alerts', {
+      feature: AppLogFeature.INTEL,
+      action: 'matchIOCsAgainstAlerts',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'matchIOCsAgainstAlerts',
+      targetResource: 'Alert',
+      metadata: { alertCount: alertIds.length },
+    })
+
     const alerts = await this.prisma.alert.findMany({
       where: { tenantId, id: { in: alertIds } },
       select: { id: true, sourceIp: true, destinationIp: true },
@@ -196,6 +253,18 @@ export class IntelService {
       iocByValue.set(ioc.iocValue, existing)
     }
 
+    this.appLogger.info('IOC matching completed', {
+      feature: AppLogFeature.INTEL,
+      action: 'matchIOCsAgainstAlerts',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'matchIOCsAgainstAlerts',
+      targetResource: 'IntelIOC',
+      metadata: { matchingIOCsFound: matchingIOCs.length, uniqueIPs: ips.length },
+    })
+
     // Map each alert to its matched IOCs
     return alertIds.map(alertId => {
       const alert = alerts.find(a => a.id === alertId)
@@ -238,8 +307,30 @@ export class IntelService {
    * then fetches attributes and upserts IntelIOC rows.
    */
   async syncFromMisp(tenantId: string): Promise<{ eventsUpserted: number; iocsUpserted: number }> {
+    this.appLogger.info('MISP sync started', {
+      feature: AppLogFeature.INTEL,
+      action: 'syncFromMisp',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'syncFromMisp',
+      targetResource: 'IntelMispEvent',
+    })
+
     const config = await this.connectorsService.getDecryptedConfig(tenantId, 'misp')
     if (!config) {
+      this.appLogger.warn('MISP sync failed — connector not configured', {
+        feature: AppLogFeature.INTEL,
+        action: 'syncFromMisp',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'IntelService',
+        functionName: 'syncFromMisp',
+        targetResource: 'IntelMispEvent',
+        metadata: { reason: 'misp_connector_not_configured' },
+      })
       throw new BusinessException(
         400,
         'MISP connector not configured or disabled',
@@ -284,6 +375,18 @@ export class IntelService {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       this.logger.error(`MISP sync failed for tenant ${tenantId}: ${message}`)
+      this.appLogger.error('MISP sync failed', {
+        feature: AppLogFeature.INTEL,
+        action: 'syncFromMisp',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'IntelService',
+        functionName: 'syncFromMisp',
+        targetResource: 'IntelMispEvent',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+        metadata: { errorMessage: message },
+      })
 
       if (error instanceof BusinessException) {
         throw error
@@ -295,6 +398,17 @@ export class IntelService {
     this.logger.log(
       `MISP sync complete for tenant ${tenantId}: ${eventsUpserted} events, ${iocsUpserted} IOCs`
     )
+    this.appLogger.info('MISP sync completed successfully', {
+      feature: AppLogFeature.INTEL,
+      action: 'syncFromMisp',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IntelService',
+      functionName: 'syncFromMisp',
+      targetResource: 'IntelMispEvent',
+      metadata: { eventsUpserted, iocsUpserted },
+    })
     return { eventsUpserted, iocsUpserted }
   }
 

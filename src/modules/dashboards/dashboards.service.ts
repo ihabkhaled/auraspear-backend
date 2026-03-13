@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 
@@ -8,7 +10,8 @@ export class DashboardsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly connectorsService: ConnectorsService
+    private readonly connectorsService: ConnectorsService,
+    private readonly appLogger: AppLoggerService
   ) {}
 
   private calculateTrend(currentValue: number, previousValue: number): number {
@@ -32,6 +35,16 @@ export class DashboardsService {
     openCasesTrend: number
     mttrTrend: number
   }> {
+    this.appLogger.debug('Fetching dashboard summary', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getSummary',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getSummary',
+    })
+
     const now = new Date()
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
@@ -156,6 +169,17 @@ export class DashboardsService {
       info: number
     }>
   }> {
+    this.appLogger.debug('Fetching alert trend data', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getAlertTrend',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getAlertTrend',
+      metadata: { days },
+    })
+
     const since = new Date()
     since.setDate(since.getDate() - days)
 
@@ -209,6 +233,16 @@ export class DashboardsService {
     tenantId: string
     distribution: Array<{ severity: string; count: number; percentage: number }>
   }> {
+    this.appLogger.debug('Fetching severity distribution', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getSeverityDistribution',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getSeverityDistribution',
+    })
+
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
     const counts = await this.prisma.alert.groupBy({
@@ -232,6 +266,16 @@ export class DashboardsService {
     tenantId: string
     techniques: Array<{ id: string; count: number }>
   }> {
+    this.appLogger.debug('Fetching MITRE top techniques', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getMitreTopTechniques',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getMitreTopTechniques',
+    })
+
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
     const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
@@ -256,6 +300,16 @@ export class DashboardsService {
     tenantId: string
     assets: Array<{ hostname: string; alertCount: number; criticalCount: number; lastSeen: Date }>
   }> {
+    this.appLogger.debug('Fetching top targeted assets', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getTopTargetedAssets',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getTopTargetedAssets',
+    })
+
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
     const results = await this.prisma.$queryRaw<
@@ -296,6 +350,16 @@ export class DashboardsService {
       lastError: string | null
     }>
   }> {
+    this.appLogger.debug('Fetching pipeline health status', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getPipelineHealth',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getPipelineHealth',
+    })
+
     const connectors = await this.prisma.connectorConfig.findMany({
       where: { tenantId, enabled: true },
       select: {

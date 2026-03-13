@@ -6,11 +6,17 @@ export type CaseRecord = Case & {
   timeline: CaseTimeline[]
   ownerName: string | null
   ownerEmail: string | null
+  createdByName: string | null
   tenantName: string
 }
 
 export type PaginatedCases = PaginatedResponse<
-  Case & { ownerName: string | null; ownerEmail: string | null; tenantName: string }
+  Case & {
+    ownerName: string | null
+    ownerEmail: string | null
+    createdByName: string | null
+    tenantName: string
+  }
 >
 
 export type PaginatedCaseNotes = PaginatedResponse<CaseNote>

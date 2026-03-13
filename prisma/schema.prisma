@@ -74,6 +74,11 @@ enum HuntSessionStatus {
   error
 }
 
+enum CaseCycleStatus {
+  active
+  closed
+}
+
 enum UserStatus {
   active
   inactive
@@ -91,6 +96,7 @@ model Tenant {
 
   memberships      TenantMembership[]
   connectorConfigs ConnectorConfig[]
+  caseCycles       CaseCycle[]
   cases            Case[]
   auditLogs        AuditLog[]
   aiAuditLogs      AiAuditLog[]
@@ -226,6 +232,31 @@ model Alert {
   @@map("alerts")
 }
 
+// ─── Case Cycles ────────────────────────────────────────────
+
+model CaseCycle {
+  id          String          @id @default(uuid()) @db.Uuid
+  tenantId    String          @map("tenant_id") @db.Uuid
+  name        String          @db.VarChar(255)
+  description String?         @db.Text
+  status      CaseCycleStatus @default(active)
+  startDate   DateTime        @map("start_date")
+  endDate     DateTime?       @map("end_date")
+  createdBy   String          @map("created_by") @db.VarChar(320)
+  closedBy    String?         @map("closed_by") @db.VarChar(320)
+  closedAt    DateTime?       @map("closed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cases  Case[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("case_cycles")
+}
+
 // ─── Cases ───────────────────────────────────────────────────
 
 model Case {
@@ -239,17 +270,20 @@ model Case {
   ownerUserId  String?      @map("owner_user_id") @db.Uuid
   createdBy    String?      @map("created_by") @db.VarChar(320)
   linkedAlerts String[]     @default([]) @map("linked_alerts")
+  cycleId      String?      @map("cycle_id") @db.Uuid
   closedAt     DateTime?    @map("closed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cycle    CaseCycle?     @relation(fields: [cycleId], references: [id], onDelete: SetNull)
   notes    CaseNote[]
   timeline CaseTimeline[]
 
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([cycleId])
   @@map("cases")
 }
 
@@ -435,4 +469,42 @@ model SavedQuery {
 
   @@index([tenantId])
   @@map("saved_queries")
+}
+
+// ─── Application Logs ───────────────────────────────────────
+
+model ApplicationLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  level            String   @db.VarChar(10)
+  message          String   @db.VarChar(2000)
+  feature          String   @db.VarChar(100)
+  action           String   @db.VarChar(100)
+  functionName     String?  @map("function_name") @db.VarChar(255)
+  className        String?  @map("class_name") @db.VarChar(255)
+  tenantId         String?  @map("tenant_id") @db.Uuid
+  actorUserId      String?  @map("actor_user_id") @db.Uuid
+  actorEmail       String?  @map("actor_email") @db.VarChar(320)
+  requestId        String?  @map("request_id") @db.VarChar(100)
+  targetResource   String?  @map("target_resource") @db.VarChar(100)
+  targetResourceId String?  @map("target_resource_id") @db.VarChar(255)
+  outcome          String?  @db.VarChar(50)
+  metadata         Json?
+  stackTrace       String?  @map("stack_trace") @db.Text
+  httpMethod       String?  @map("http_method") @db.VarChar(10)
+  httpRoute        String?  @map("http_route") @db.VarChar(500)
+  httpStatusCode   Int?     @map("http_status_code")
+  sourceType       String?  @map("source_type") @db.VarChar(50)
+  ipAddress        String?  @map("ip_address") @db.VarChar(45)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([level])
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@index([actorUserId])
+  @@index([actorEmail])
+  @@index([feature])
+  @@index([functionName])
+  @@map("application_logs")
 }

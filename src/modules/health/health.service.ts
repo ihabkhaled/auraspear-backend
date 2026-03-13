@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
-import { HealthStatus } from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
@@ -14,7 +15,8 @@ export class HealthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly connectorsService: ConnectorsService
+    private readonly connectorsService: ConnectorsService,
+    private readonly appLogger: AppLoggerService
   ) {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost')
     const port = this.configService.get<number>('REDIS_PORT', 6379)
@@ -48,6 +50,22 @@ export class HealthService {
     } else if (database.status === HealthStatus.DOWN || redis.status === HealthStatus.DOWN) {
       status = HealthStatus.DEGRADED
     }
+
+    this.appLogger.debug('Overall health check completed', {
+      feature: AppLogFeature.SYSTEM,
+      action: 'getOverallHealth',
+      outcome: status === HealthStatus.HEALTHY ? AppLogOutcome.SUCCESS : AppLogOutcome.WARNING,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HealthService',
+      functionName: 'getOverallHealth',
+      metadata: {
+        status,
+        databaseStatus: database.status,
+        databaseLatencyMs: database.latencyMs,
+        redisStatus: redis.status,
+        redisLatencyMs: redis.latencyMs,
+      },
+    })
 
     return {
       status,
@@ -94,6 +112,22 @@ export class HealthService {
         }
       })
     )
+
+    const unhealthyCount = results.filter(r => r.status !== HealthStatus.HEALTHY).length
+
+    this.appLogger.debug('Service health check completed for all connectors', {
+      feature: AppLogFeature.SYSTEM,
+      action: 'getAllServiceHealth',
+      outcome: unhealthyCount === 0 ? AppLogOutcome.SUCCESS : AppLogOutcome.WARNING,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'HealthService',
+      functionName: 'getAllServiceHealth',
+      metadata: {
+        totalConnectors: connectors.length,
+        unhealthyCount,
+      },
+    })
 
     return results
   }

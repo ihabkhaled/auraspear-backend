@@ -8,7 +8,8 @@ export const UpdateCaseSchema = z.object({
   description: z.string().min(1).max(4096).optional(),
   severity: CaseSeverityEnum.optional(),
   status: CaseStatusEnum.optional(),
-  ownerUserId: z.string().uuid().optional(),
+  ownerUserId: z.string().uuid().nullable().optional(),
+  cycleId: z.string().uuid().nullable().optional(),
 })
 
 export type UpdateCaseDto = z.infer<typeof UpdateCaseSchema>

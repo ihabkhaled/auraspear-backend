@@ -27,7 +27,7 @@ export class CasesController {
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedCases> {
-    const { page, limit, sortBy, sortOrder, status, severity, query } =
+    const { page, limit, sortBy, sortOrder, status, severity, query, cycleId, ownerUserId } =
       ListCasesQuerySchema.parse(rawQuery)
     return this.casesService.listCases(
       tenantId,
@@ -37,7 +37,9 @@ export class CasesController {
       sortOrder,
       status,
       severity,
-      query
+      query,
+      cycleId,
+      ownerUserId
     )
   }
 
