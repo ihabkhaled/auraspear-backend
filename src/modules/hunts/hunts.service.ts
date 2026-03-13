@@ -194,6 +194,18 @@ export class HuntsService {
         },
       })
 
+      this.appLogger.warn('Throwing BusinessException for hunt query failure', {
+        feature: AppLogFeature.HUNTS,
+        action: 'runHunt',
+        className: 'HuntsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        actorEmail: email,
+        targetResource: 'HuntSession',
+        targetResourceId: session.id,
+        metadata: { errorMessage },
+      })
       throw new BusinessException(
         502,
         `Hunt query failed: ${errorMessage}`,
@@ -343,6 +355,14 @@ export class HuntsService {
   private assertValidTransition(from: HuntSessionStatus, to: HuntSessionStatus): void {
     const allowed = this.VALID_TRANSITIONS.get(from)
     if (!allowed?.has(to)) {
+      this.appLogger.warn(`Invalid hunt session transition from ${from} to ${to}`, {
+        feature: AppLogFeature.HUNTS,
+        action: 'assertValidTransition',
+        className: 'HuntsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { fromStatus: from, toStatus: to },
+      })
       throw new BusinessException(
         400,
         `Invalid hunt session transition from ${from} to ${to}`,
@@ -375,6 +395,14 @@ export class HuntsService {
       .trim()
 
     if (sanitized.length === 0) {
+      this.appLogger.warn('Hunt query is invalid or empty after sanitization', {
+        feature: AppLogFeature.HUNTS,
+        action: 'sanitizeEsQuery',
+        className: 'HuntsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { originalQueryLength: query.length },
+      })
       throw new BusinessException(400, 'Invalid or empty hunt query', 'errors.hunts.invalidQuery')
     }
 

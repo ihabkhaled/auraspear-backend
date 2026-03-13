@@ -107,6 +107,14 @@ export class OpenSearchService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('OpenSearch search failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'search',
+        className: 'OpenSearchService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status, index },
+      })
       throw new Error(`OpenSearch search failed: status ${res.status}`)
     }
 

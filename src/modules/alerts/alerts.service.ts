@@ -484,6 +484,15 @@ export class AlertsService {
             ingested++
           } else {
             this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
+            this.appLogger.warn('Failed to ingest individual alert from Wazuh batch', {
+              feature: AppLogFeature.ALERTS,
+              action: 'ingestFromWazuh',
+              className: 'AlertsService',
+              sourceType: AppLogSourceType.SERVICE,
+              outcome: AppLogOutcome.FAILURE,
+              tenantId,
+              metadata: { error: (batchResult.reason as Error).message },
+            })
           }
         }
       }

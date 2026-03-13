@@ -83,6 +83,14 @@ export class ShuffleService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Failed to fetch Shuffle workflows', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getWorkflows',
+        className: 'ShuffleService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Failed to fetch workflows: status ${res.status}`)
     }
 
@@ -114,6 +122,14 @@ export class ShuffleService {
 
     // Validate workflowId to prevent path traversal
     if (!/^[\da-f-]+$/i.test(workflowId)) {
+      this.appLogger.warn('Invalid Shuffle workflow ID provided', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'executeWorkflow',
+        className: 'ShuffleService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { workflowId },
+      })
       throw new Error('Invalid workflow ID')
     }
 
@@ -126,6 +142,14 @@ export class ShuffleService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Shuffle workflow execution failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'executeWorkflow',
+        className: 'ShuffleService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status, workflowId },
+      })
       throw new Error(`Workflow execution failed: status ${res.status}`)
     }
 

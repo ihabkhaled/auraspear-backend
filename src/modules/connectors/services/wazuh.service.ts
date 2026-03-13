@@ -107,6 +107,14 @@ export class WazuhService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Wazuh authentication failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'authenticate',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Wazuh authentication failed with status ${res.status}`)
     }
 
@@ -115,6 +123,14 @@ export class WazuhService {
     const token = (data?.token ?? body.token) as string
 
     if (!token) {
+      this.appLogger.warn('Wazuh authentication returned no token', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'authenticate',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: {},
+      })
       throw new Error('Wazuh authentication returned no token')
     }
 
@@ -156,6 +172,14 @@ export class WazuhService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Failed to fetch Wazuh agents', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getAgents',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Failed to fetch agents: status ${res.status}`)
     }
 
@@ -186,6 +210,14 @@ export class WazuhService {
   ): Promise<{ hits: unknown[]; total: number }> {
     const indexerUrl = (config.indexerUrl ?? config.opensearchUrl) as string | undefined
     if (!indexerUrl) {
+      this.appLogger.warn('Wazuh Indexer URL not configured', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'searchAlerts',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: {},
+      })
       throw new Error('Wazuh Indexer URL not configured')
     }
 
@@ -194,6 +226,14 @@ export class WazuhService {
 
     // Validate index name to prevent path traversal
     if (!/^[\w*-]+$/.test(index)) {
+      this.appLogger.warn('Invalid Wazuh index name provided', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'searchAlerts',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { index },
+      })
       throw new Error('Invalid index name')
     }
 
@@ -208,6 +248,14 @@ export class WazuhService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Wazuh Indexer search failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'searchAlerts',
+        className: 'WazuhService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status, index },
+      })
       throw new Error(`Wazuh Indexer search failed: status ${res.status}`)
     }
 

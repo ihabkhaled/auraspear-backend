@@ -94,6 +94,14 @@ export class ConnectorsService {
     })
 
     if (!config) {
+      this.appLogger.warn('Connector not found by type', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'findByType',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         404,
         `Connector '${type}' not found`,
@@ -130,6 +138,14 @@ export class ConnectorsService {
     })
 
     if (existing) {
+      this.appLogger.warn('Connector already exists', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'create',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: dto.type },
+      })
       throw new BusinessException(
         409,
         `Connector '${dto.type}' already exists`,
@@ -142,6 +158,14 @@ export class ConnectorsService {
       validatedConfig = validateConnectorConfig(dto.type, dto.config as Record<string, unknown>)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Invalid connector config'
+      this.appLogger.warn('Invalid connector config during create', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'create',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: dto.type, error: message },
+      })
       throw new BusinessException(
         400,
         `Invalid config for '${dto.type}': ${message}`,
@@ -200,6 +224,14 @@ export class ConnectorsService {
     })
 
     if (!existing) {
+      this.appLogger.warn('Connector not found for update', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'update',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         404,
         `Connector '${type}' not found`,
@@ -217,6 +249,14 @@ export class ConnectorsService {
         validatedConfig = validateConnectorConfig(type, dto.config as Record<string, unknown>)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid connector config'
+        this.appLogger.warn('Invalid connector config during update', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'update',
+          className: 'ConnectorsService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: { tenantId, connectorType: type, error: message },
+        })
         throw new BusinessException(
           400,
           `Invalid config for '${type}': ${message}`,
@@ -265,6 +305,14 @@ export class ConnectorsService {
     })
 
     if (!existing) {
+      this.appLogger.warn('Connector not found for removal', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'remove',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         404,
         `Connector '${type}' not found`,
@@ -323,6 +371,14 @@ export class ConnectorsService {
     })
 
     if (!config) {
+      this.appLogger.warn('Connector not found for test', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         404,
         `Connector '${type}' not found`,
@@ -409,6 +465,14 @@ export class ConnectorsService {
       // L11: Sanitize error details — strip internal paths and stack traces
       details = rawMessage.replaceAll(/\/[\w./-]+/g, '[path]').slice(0, 500)
       this.logger.error(`Connector ${type} test failed for tenant ${tenantId}: ${rawMessage}`)
+      this.appLogger.error('Connector test connection failed with exception', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type, error: rawMessage },
+      })
     }
 
     const latencyMs = Date.now() - start
@@ -522,6 +586,14 @@ export class ConnectorsService {
       return JSON.parse(decrypted) as Record<string, unknown>
     } catch {
       this.logger.warn('Failed to decrypt connector config, returning empty')
+      this.appLogger.warn('Failed to decrypt connector config', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'decryptConfig',
+        className: 'ConnectorsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: {},
+      })
       return {}
     }
   }

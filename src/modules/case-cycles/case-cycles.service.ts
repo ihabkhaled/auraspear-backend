@@ -94,6 +94,22 @@ export class CaseCyclesService {
     }
   }
 
+  /* ---------------------------------------------------------------- */
+  /* ORPHANED STATS (cases with no cycle)                              */
+  /* ---------------------------------------------------------------- */
+
+  async getOrphanedStats(
+    tenantId: string
+  ): Promise<{ caseCount: number; openCount: number; closedCount: number }> {
+    const [total, openCases, closedCases] = await Promise.all([
+      this.prisma.case.count({ where: { tenantId, cycleId: null } }),
+      this.prisma.case.count({ where: { tenantId, cycleId: null, status: { not: 'closed' } } }),
+      this.prisma.case.count({ where: { tenantId, cycleId: null, status: 'closed' } }),
+    ])
+
+    return { caseCount: total, openCount: openCases, closedCount: closedCases }
+  }
+
   private buildOrderBy(
     sortBy?: string,
     sortOrder?: string

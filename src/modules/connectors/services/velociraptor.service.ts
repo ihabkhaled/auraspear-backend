@@ -92,6 +92,14 @@ export class VelociraptorService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Velociraptor VQL query failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'runVQL',
+        className: 'VelociraptorService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`VQL query failed: status ${res.status}`)
     }
 
@@ -132,6 +140,14 @@ export class VelociraptorService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Failed to fetch Velociraptor clients', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getClients',
+        className: 'VelociraptorService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Failed to fetch clients: status ${res.status}`)
     }
 

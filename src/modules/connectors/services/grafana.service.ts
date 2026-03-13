@@ -83,6 +83,14 @@ export class GrafanaService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Failed to fetch Grafana dashboards', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getDashboards',
+        className: 'GrafanaService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Failed to fetch dashboards: status ${res.status}`)
     }
 

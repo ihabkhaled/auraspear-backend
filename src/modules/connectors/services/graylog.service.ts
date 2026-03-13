@@ -99,6 +99,14 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Graylog events search failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'searchEvents',
+        className: 'GraylogService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Graylog events search failed: status ${res.status}`)
     }
 
@@ -137,6 +145,14 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Graylog event definitions fetch failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getEventDefinitions',
+        className: 'GraylogService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Graylog event definitions failed: status ${res.status}`)
     }
 

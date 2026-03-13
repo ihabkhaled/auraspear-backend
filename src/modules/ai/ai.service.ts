@@ -47,6 +47,14 @@ export class AiService {
       })
 
       if (!connector) {
+        this.appLogger.warn('AI features not enabled for tenant', {
+          feature: AppLogFeature.AI,
+          action: 'ensureAiEnabled',
+          className: 'AiService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.DENIED,
+          tenantId,
+        })
         throw new BusinessException(
           403,
           'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.',
@@ -58,6 +66,23 @@ export class AiService {
         throw error
       }
       this.logger.error('AI gate check failed', error)
+      this.appLogger.error('AI gate check failed unexpectedly', {
+        feature: AppLogFeature.AI,
+        action: 'ensureAiEnabled',
+        className: 'AiService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
+      this.appLogger.warn('AI service temporarily unavailable', {
+        feature: AppLogFeature.AI,
+        action: 'ensureAiEnabled',
+        className: 'AiService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+      })
       throw new BusinessException(
         503,
         'AI service temporarily unavailable',
@@ -85,6 +110,16 @@ export class AiService {
       })
     } catch {
       this.logger.warn('ai_audit_logs table not available; audit record stored in memory only')
+      this.appLogger.warn('Failed to persist AI audit log to database', {
+        feature: AppLogFeature.AI,
+        action: 'logAudit',
+        className: 'AiService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: record.tenantId,
+        actorUserId: record.userId,
+        metadata: { auditAction: record.action, model: record.model },
+      })
     }
 
     this.logger.log(

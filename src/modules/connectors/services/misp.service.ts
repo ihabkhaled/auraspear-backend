@@ -95,6 +95,14 @@ export class MispService {
     )
 
     if (res.status !== 200) {
+      this.appLogger.warn('MISP events fetch failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getEvents',
+        className: 'MispService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status, limit },
+      })
       throw new Error(`MISP events fetch failed: status ${res.status}`)
     }
 
@@ -135,6 +143,14 @@ export class MispService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('MISP attribute search failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'searchAttributes',
+        className: 'MispService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`MISP attribute search failed: status ${res.status}`)
     }
 
@@ -165,6 +181,14 @@ export class MispService {
 
     // Validate eventId to prevent path traversal
     if (!/^\d+$/.test(eventId)) {
+      this.appLogger.warn('Invalid MISP event ID provided', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getEvent',
+        className: 'MispService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { eventId },
+      })
       throw new Error('Invalid MISP event ID')
     }
 
@@ -178,6 +202,14 @@ export class MispService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('MISP event fetch failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getEvent',
+        className: 'MispService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status, eventId },
+      })
       throw new Error(`MISP event fetch failed: status ${res.status}`)
     }
 

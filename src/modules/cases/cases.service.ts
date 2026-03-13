@@ -202,6 +202,16 @@ export class CasesService {
         where: { id: { in: linkedAlerts }, tenantId: user.tenantId },
       })
       if (validAlerts !== linkedAlerts.length) {
+        this.appLogger.warn('Invalid linked alerts: some do not belong to tenant', {
+          feature: AppLogFeature.CASES,
+          action: 'createCase',
+          className: 'CasesService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          tenantId: user.tenantId,
+          actorEmail: user.email,
+          metadata: { linkedAlertIds: linkedAlerts, validCount: validAlerts },
+        })
         throw new BusinessException(
           400,
           'One or more linked alerts do not belong to this tenant',
@@ -300,6 +310,14 @@ export class CasesService {
     })
 
     if (!caseRecord) {
+      this.appLogger.warn('Case not found', {
+        feature: AppLogFeature.CASES,
+        action: 'getCaseById',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { caseId: id, tenantId },
+      })
       throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
 
@@ -352,6 +370,16 @@ export class CasesService {
     if (isStatusChange) {
       const isAdmin = hasRoleAtLeast(user.role, UserRole.TENANT_ADMIN)
       if (!isAdmin && user.sub !== existing.ownerUserId) {
+        this.appLogger.warn('Status change denied: user is not owner or admin', {
+          feature: AppLogFeature.CASES,
+          action: 'updateCase',
+          className: 'CasesService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.DENIED,
+          tenantId: user.tenantId,
+          actorEmail: user.email,
+          metadata: { caseId: id, userId: user.sub, ownerUserId: existing.ownerUserId },
+        })
         throw new BusinessException(
           403,
           'Only case owner or admin can change case status',
@@ -429,6 +457,15 @@ export class CasesService {
       })
 
       if (updated.count === 0) {
+        this.appLogger.warn('Case not found during update transaction', {
+          feature: AppLogFeature.CASES,
+          action: 'updateCase',
+          className: 'CasesService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          tenantId: user.tenantId,
+          metadata: { caseId: id },
+        })
         throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
       }
 
@@ -508,6 +545,16 @@ export class CasesService {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
     if (existing.status === 'closed') {
+      this.appLogger.warn('Cannot link alert: case is closed', {
+        feature: AppLogFeature.CASES,
+        action: 'linkAlert',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { caseId, status: existing.status },
+      })
       throw new BusinessException(
         400,
         'Cannot link alerts to a closed case',
@@ -520,6 +567,16 @@ export class CasesService {
       where: { id: dto.alertId, tenantId: user.tenantId },
     })
     if (alertExists === 0) {
+      this.appLogger.warn('Linked alert does not belong to tenant', {
+        feature: AppLogFeature.CASES,
+        action: 'linkAlert',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { caseId, alertId: dto.alertId },
+      })
       throw new BusinessException(
         400,
         'The linked alert does not belong to this tenant',
@@ -528,6 +585,16 @@ export class CasesService {
     }
 
     if (existing.linkedAlerts.includes(dto.alertId)) {
+      this.appLogger.warn('Duplicate alert link attempt', {
+        feature: AppLogFeature.CASES,
+        action: 'linkAlert',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { caseId, alertId: dto.alertId },
+      })
       throw new BusinessException(
         409,
         `Alert ${dto.alertId} is already linked to this case`,
@@ -545,6 +612,15 @@ export class CasesService {
       })
 
       if (updated.count === 0) {
+        this.appLogger.warn('Case not found during link alert transaction', {
+          feature: AppLogFeature.CASES,
+          action: 'linkAlert',
+          className: 'CasesService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          tenantId: user.tenantId,
+          metadata: { caseId },
+        })
         throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
       }
 
@@ -609,6 +685,16 @@ export class CasesService {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
     if (existing.status === 'closed') {
+      this.appLogger.warn('Cannot add note: case is closed', {
+        feature: AppLogFeature.CASES,
+        action: 'addCaseNote',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { caseId, status: existing.status },
+      })
       throw new BusinessException(
         400,
         'Cannot add notes to a closed case',
@@ -657,6 +743,14 @@ export class CasesService {
     })
 
     if (membership?.status !== MembershipStatus.ACTIVE) {
+      this.appLogger.warn('Invalid case owner: not an active tenant member', {
+        feature: AppLogFeature.CASES,
+        action: 'validateOwnerInTenant',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { ownerUserId, tenantId, membershipStatus: membership?.status ?? null },
+      })
       throw new BusinessException(
         400,
         'Assigned owner is not an active member of this tenant',

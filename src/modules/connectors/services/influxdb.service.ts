@@ -92,6 +92,14 @@ export class InfluxDBService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('InfluxDB Flux query failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'query',
+        className: 'InfluxDBService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`InfluxDB query failed: status ${res.status}`)
     }
 
@@ -122,6 +130,14 @@ export class InfluxDBService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Failed to fetch InfluxDB buckets', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getBuckets',
+        className: 'InfluxDBService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Failed to fetch buckets: status ${res.status}`)
     }
 

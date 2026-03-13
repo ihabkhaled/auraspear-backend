@@ -113,6 +113,14 @@ export class AuthService {
 
     const firstMembership = user.memberships[0]
     if (!firstMembership) {
+      this.appLogger.warn('Login failed: no first membership found', {
+        feature: AppLogFeature.AUTH,
+        action: 'login',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { userId: user.id, email: user.email },
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
@@ -225,6 +233,14 @@ export class AuthService {
       if (error instanceof BusinessException) {
         throw error
       }
+      this.appLogger.warn('Refresh token verification failed', {
+        feature: AppLogFeature.AUTH,
+        action: 'verifyRefreshToken',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
       throw new BusinessException(
         401,
         'Invalid or expired refresh token',
@@ -438,6 +454,14 @@ export class AuthService {
     caller: JwtPayload
   ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
     if (caller.isImpersonated !== true || !caller.impersonatorSub) {
+      this.appLogger.warn('End impersonation failed: not currently impersonating', {
+        feature: AppLogFeature.IMPERSONATION,
+        action: 'endImpersonation',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.DENIED,
+        metadata: { userId: caller.sub, email: caller.email },
+      })
       throw new BusinessException(
         400,
         'Not currently impersonating',
@@ -464,6 +488,14 @@ export class AuthService {
     })
 
     if (!admin) {
+      this.appLogger.warn('End impersonation failed: original admin user no longer exists', {
+        feature: AppLogFeature.IMPERSONATION,
+        action: 'endImpersonation',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { impersonatorSub: caller.impersonatorSub },
+      })
       throw new BusinessException(
         401,
         'Original admin user no longer exists',
@@ -472,6 +504,14 @@ export class AuthService {
     }
 
     if (admin.memberships.length === 0) {
+      this.appLogger.warn('End impersonation failed: admin has no active memberships', {
+        feature: AppLogFeature.IMPERSONATION,
+        action: 'endImpersonation',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { adminId: admin.id, adminEmail: admin.email },
+      })
       throw new BusinessException(
         401,
         'Admin account is no longer active',
@@ -481,6 +521,14 @@ export class AuthService {
 
     const firstMembership = admin.memberships[0]
     if (!firstMembership) {
+      this.appLogger.warn('End impersonation failed: admin first membership not found', {
+        feature: AppLogFeature.IMPERSONATION,
+        action: 'endImpersonation',
+        className: 'AuthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { adminId: admin.id, adminEmail: admin.email },
+      })
       throw new BusinessException(
         401,
         'Admin account is no longer active',

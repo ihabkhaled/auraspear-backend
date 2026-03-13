@@ -392,6 +392,15 @@ export class IntelService {
         throw error
       }
 
+      this.appLogger.warn('Throwing BusinessException for MISP sync failure', {
+        feature: AppLogFeature.INTEL,
+        action: 'syncFromMisp',
+        className: 'IntelService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        metadata: { errorMessage: message },
+      })
       throw new BusinessException(502, `MISP sync failed: ${message}`, 'errors.intel.syncFailed')
     }
 

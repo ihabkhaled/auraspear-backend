@@ -33,6 +33,14 @@ export class CaseCyclesController {
     return { data: cycle }
   }
 
+  @Get('orphaned-stats')
+  async getOrphanedStats(
+    @TenantId() tenantId: string
+  ): Promise<{ data: { caseCount: number; openCount: number; closedCount: number } }> {
+    const stats = await this.caseCyclesService.getOrphanedStats(tenantId)
+    return { data: stats }
+  }
+
   @Get(':id')
   async getCycleById(
     @Param('id') id: string,

@@ -103,6 +103,19 @@ export class HealthService {
               error instanceof Error ? error.message : 'Unknown error'
             }`
           )
+          this.appLogger.error(`Health check failed for connector ${connector.type}`, {
+            feature: AppLogFeature.SYSTEM,
+            action: 'getAllServiceHealth',
+            className: 'HealthService',
+            sourceType: AppLogSourceType.SERVICE,
+            outcome: AppLogOutcome.FAILURE,
+            tenantId,
+            metadata: {
+              connectorType: connector.type,
+              connectorName: connector.name,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            },
+          })
           return {
             name: connector.name,
             type: connector.type,
@@ -144,6 +157,14 @@ export class HealthService {
       this.logger.error(
         `Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
+      this.appLogger.error('Database health check failed', {
+        feature: AppLogFeature.SYSTEM,
+        action: 'checkDatabase',
+        className: 'HealthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
       return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
     }
   }
@@ -160,6 +181,14 @@ export class HealthService {
       this.logger.error(
         `Redis health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
+      this.appLogger.error('Redis health check failed', {
+        feature: AppLogFeature.SYSTEM,
+        action: 'checkRedis',
+        className: 'HealthService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
       return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
     }
   }

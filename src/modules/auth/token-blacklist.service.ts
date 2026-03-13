@@ -102,6 +102,16 @@ export class TokenBlacklistService implements OnModuleDestroy {
       this.logger.warn(
         `Failed to check blacklist for ${jti}: ${error instanceof Error ? error.message : 'Unknown error'}`
       )
+
+      this.appLogger.error('Failed to check token blacklist (fail-open)', {
+        feature: AppLogFeature.AUTH,
+        action: 'isBlacklisted',
+        className: 'TokenBlacklistService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
+
       // Fail-open: see JSDoc above for rationale.
       return false
     }

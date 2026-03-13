@@ -99,6 +99,14 @@ export class LogstashService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Logstash pipelines request failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getPipelines',
+        className: 'LogstashService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Logstash pipelines request failed: status ${res.status}`)
     }
 
@@ -140,6 +148,14 @@ export class LogstashService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Logstash pipeline stats request failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getPipelineStats',
+        className: 'LogstashService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Logstash pipeline stats request failed: status ${res.status}`)
     }
 
@@ -179,6 +195,14 @@ export class LogstashService {
     })
 
     if (res.status !== 200) {
+      this.appLogger.warn('Logstash hot threads request failed', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'getHotThreads',
+        className: 'LogstashService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { status: res.status },
+      })
       throw new Error(`Logstash hot threads request failed: status ${res.status}`)
     }
 

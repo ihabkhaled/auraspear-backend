@@ -170,6 +170,14 @@ export class ConnectorWorkspacesService {
     connectorInfo: ConnectorWorkspaceOverview['connector']
   }> {
     if (!this.factory.hasStrategy(type)) {
+      this.appLogger.warn('Unsupported connector type requested', {
+        feature: AppLogFeature.CONNECTOR_WORKSPACES,
+        action: 'resolveConnector',
+        className: 'ConnectorWorkspacesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         400,
         `Unsupported connector type: ${type}`,
@@ -180,6 +188,14 @@ export class ConnectorWorkspacesService {
     const decryptedConfig = await this.connectorsService.getDecryptedConfig(tenantId, type)
 
     if (!decryptedConfig) {
+      this.appLogger.warn('Connector not configured or not enabled', {
+        feature: AppLogFeature.CONNECTOR_WORKSPACES,
+        action: 'resolveConnector',
+        className: 'ConnectorWorkspacesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { tenantId, connectorType: type },
+      })
       throw new BusinessException(
         404,
         `Connector '${type}' is not configured or not enabled for this tenant`,
@@ -207,6 +223,14 @@ export class ConnectorWorkspacesService {
   private getStrategyOrThrow(type: string) {
     const strategy = this.factory.getStrategy(type)
     if (!strategy) {
+      this.appLogger.warn('No workspace strategy found for connector type', {
+        feature: AppLogFeature.CONNECTOR_WORKSPACES,
+        action: 'getStrategyOrThrow',
+        className: 'ConnectorWorkspacesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: { connectorType: type },
+      })
       throw new BusinessException(
         400,
         `No workspace strategy for connector type: ${type}`,

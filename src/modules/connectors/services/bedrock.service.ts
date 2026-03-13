@@ -173,6 +173,14 @@ export class BedrockService {
         InvokeModelCommand: new (input: unknown) => unknown
       }
     } catch {
+      this.appLogger.warn('AWS SDK not installed for Bedrock', {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'loadAwsSdk',
+        className: 'BedrockService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        metadata: {},
+      })
       throw new Error(
         '@aws-sdk/client-bedrock-runtime is not installed. Run: npm install @aws-sdk/client-bedrock-runtime'
       )
