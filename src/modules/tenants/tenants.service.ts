@@ -10,6 +10,7 @@ import {
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { AuthService } from '../auth/auth.service'
+import { NotificationsService } from '../notifications/notifications.service'
 import type {
   CreateTenantDto,
   UpdateTenantDto,
@@ -38,7 +39,9 @@ export class TenantsService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => AuthService))
     private readonly authService: AuthService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService
   ) {}
 
   async findAll(
@@ -440,7 +443,9 @@ export class TenantsService {
   async assignUser(
     tenantId: string,
     dto: AssignUserDto,
-    callerRole: UserRole
+    callerRole: UserRole,
+    callerId: string,
+    callerEmail: string
   ): Promise<UserRecord> {
     if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
       this.appLogger.warn('Assign user denied: non-admin tried to assign GLOBAL_ADMIN role', {
@@ -581,6 +586,20 @@ export class TenantsService {
         functionName: 'assignUser',
         metadata: { role: result.membership.role },
       })
+
+      // Notify the user about tenant assignment
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true },
+      })
+      await this.notificationsService.notifyTenantAssigned(
+        tenantId,
+        result.user.id,
+        tenant?.name ?? tenantId,
+        result.membership.role,
+        callerId,
+        callerEmail
+      )
 
       return {
         id: result.user.id,
@@ -782,7 +801,8 @@ export class TenantsService {
     userId: string,
     dto: UpdateUserDto,
     callerRole: UserRole,
-    callerId: string
+    callerId: string,
+    callerEmail: string
   ): Promise<UserRecord> {
     if (callerId === userId && dto.role !== undefined) {
       this.appLogger.warn('Update user denied: cannot change own role', {
@@ -872,6 +892,7 @@ export class TenantsService {
     }
 
     // Update membership role
+    const previousRole = membership.role
     if (dto.role !== undefined) {
       await this.prisma.tenantMembership.update({
         where: { userId_tenantId: { userId, tenantId } },
@@ -930,6 +951,18 @@ export class TenantsService {
       metadata: { updatedFields: Object.keys(dto) },
     })
 
+    // Notify user about role change
+    if (dto.role !== undefined && dto.role !== previousRole) {
+      await this.notificationsService.notifyRoleChanged(
+        tenantId,
+        userId,
+        previousRole,
+        dto.role,
+        callerId,
+        callerEmail
+      )
+    }
+
     return {
       id: updated.user.id,
       email: updated.user.email,
@@ -947,7 +980,8 @@ export class TenantsService {
     tenantId: string,
     userId: string,
     callerRole: UserRole,
-    callerId: string
+    callerId: string,
+    callerEmail: string
   ): Promise<{ deleted: boolean }> {
     if (callerId === userId) {
       this.appLogger.warn('Remove user denied: cannot delete own account', {
@@ -1036,10 +1070,19 @@ export class TenantsService {
       functionName: 'removeUser',
     })
 
+    // Notify the removed user
+    await this.notificationsService.notifyUserRemoved(tenantId, userId, callerId, callerEmail)
+
     return { deleted: true }
   }
 
-  async restoreUser(tenantId: string, userId: string, callerRole: UserRole): Promise<UserRecord> {
+  async restoreUser(
+    tenantId: string,
+    userId: string,
+    callerRole: UserRole,
+    callerId: string,
+    callerEmail: string
+  ): Promise<UserRecord> {
     const membership = await this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
       include: { user: true },
@@ -1106,6 +1149,9 @@ export class TenantsService {
       functionName: 'restoreUser',
     })
 
+    // Notify the restored user
+    await this.notificationsService.notifyUserRestored(tenantId, userId, callerId, callerEmail)
+
     return {
       id: updated.user.id,
       email: updated.user.email,
@@ -1123,7 +1169,8 @@ export class TenantsService {
     tenantId: string,
     userId: string,
     callerRole: UserRole,
-    callerId: string
+    callerId: string,
+    callerEmail: string
   ): Promise<UserRecord> {
     if (callerId === userId) {
       this.appLogger.warn('Block user denied: cannot block own account', {
@@ -1228,6 +1275,9 @@ export class TenantsService {
       functionName: 'blockUser',
     })
 
+    // Notify the blocked user
+    await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
+
     return {
       id: updated.user.id,
       email: updated.user.email,
@@ -1241,7 +1291,13 @@ export class TenantsService {
     }
   }
 
-  async unblockUser(tenantId: string, userId: string, callerRole: UserRole): Promise<UserRecord> {
+  async unblockUser(
+    tenantId: string,
+    userId: string,
+    callerRole: UserRole,
+    callerId: string,
+    callerEmail: string
+  ): Promise<UserRecord> {
     const membership = await this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
       include: { user: true },
@@ -1307,6 +1363,9 @@ export class TenantsService {
       className: 'TenantsService',
       functionName: 'unblockUser',
     })
+
+    // Notify the unblocked user
+    await this.notificationsService.notifyUserUnblocked(tenantId, userId, callerId, callerEmail)
 
     return {
       id: updated.user.id,

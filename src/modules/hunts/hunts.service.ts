@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { HuntSessionStatus } from '@prisma/client'
 import { RunHuntDto } from './dto/run-hunt.dto'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import {
+  AlertSeverity,
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -9,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } from './hunts.types'
+import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class HuntsService {
@@ -51,12 +58,16 @@ export class HuntsService {
         query: dto.query,
         status: HuntSessionStatus.running,
         startedBy: email,
+        timeRange: dto.timeRange,
         reasoning: ['Querying Wazuh Indexer for matching events'],
       },
     })
 
     // Attempt to get Wazuh connector config
-    const wazuhConfig = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
+    const wazuhConfig = await this.connectorsService.getDecryptedConfig(
+      tenantId,
+      ConnectorType.WAZUH
+    )
 
     if (!wazuhConfig) {
       // No Wazuh connector configured — mark session as error
@@ -100,14 +111,6 @@ export class HuntsService {
     try {
       const result = await this.wazuhService.searchAlerts(wazuhConfig, esQuery)
 
-      const reasoning = [
-        'Querying Wazuh Indexer for matching events',
-        `Filtering events within ${dto.timeRange} time range`,
-        'Correlating source IPs with threat intelligence feeds',
-        `Found ${result.total} matching events across log sources`,
-        'Cross-referencing with MITRE ATT&CK framework',
-      ]
-
       // Store each hit as a HuntEvent
       const eventData = result.hits.map((hit: unknown) => {
         const source = (hit as Record<string, unknown>)['_source'] as
@@ -133,6 +136,61 @@ export class HuntsService {
         await this.prisma.huntEvent.createMany({ data: eventData })
       }
 
+      // Compute unique IPs
+      const ipSet = new Set<string>()
+      for (const event of eventData) {
+        if (event.sourceIp) {
+          ipSet.add(event.sourceIp)
+        }
+      }
+      const uniqueIpCount = ipSet.size
+
+      // Extract MITRE from raw hits
+      const tacticSet = new Set<string>()
+      const techniqueSet = new Set<string>()
+      for (const hit of result.hits) {
+        const source = (hit as Record<string, unknown>)['_source'] as
+          | Record<string, unknown>
+          | undefined
+        if (!source) continue
+        const rule = source['rule'] as Record<string, unknown> | undefined
+        if (!rule) continue
+        const mitre = rule['mitre'] as Record<string, unknown> | undefined
+        if (!mitre) continue
+        const tactics = mitre['tactic'] as string[] | undefined
+        const techniques = mitre['id'] as string[] | undefined
+        if (tactics) {
+          for (const t of tactics) {
+            tacticSet.add(t)
+          }
+        }
+        if (techniques) {
+          for (const t of techniques) {
+            techniqueSet.add(t)
+          }
+        }
+      }
+
+      const mitreTactics = [...tacticSet]
+      const mitreTechniques = [...techniqueSet]
+      const threatScoreValue = this.computeThreatScore(
+        eventData,
+        uniqueIpCount,
+        mitreTechniques.length
+      )
+
+      const reasoning = [
+        'Querying Wazuh Indexer for matching events',
+        `Filtering events within ${dto.timeRange} time range`,
+        'Executed query against wazuh-alerts-* index',
+        `Found ${result.total} matching events`,
+        `Identified ${uniqueIpCount} unique source IPs`,
+        mitreTechniques.length > 0
+          ? `Mapped to ${mitreTechniques.length} MITRE ATT&CK techniques: ${mitreTechniques.join(', ')}`
+          : 'No MITRE ATT&CK techniques identified in results',
+        `Computed threat score: ${threatScoreValue}/100`,
+      ]
+
       // Update session to completed
       this.assertValidTransition(session.status, HuntSessionStatus.completed)
       const updated = await this.prisma.huntSession.update({
@@ -141,6 +199,12 @@ export class HuntsService {
           status: HuntSessionStatus.completed,
           completedAt: new Date(),
           eventsFound: result.total,
+          uniqueIps: uniqueIpCount,
+          threatScore: threatScoreValue,
+          mitreTactics,
+          mitreTechniques,
+          timeRange: dto.timeRange,
+          executedQuery: esQuery as Prisma.InputJsonValue,
           reasoning,
         },
         include: { events: true },
@@ -457,18 +521,18 @@ export class HuntsService {
    * Extract severity from an OpenSearch hit source.
    */
   private extractSeverity(source: Record<string, unknown> | undefined): string {
-    if (!source) return 'info'
+    if (!source) return AlertSeverity.INFO
 
     const ruleLevel = source['rule.level'] as number | undefined
     if (ruleLevel !== undefined) {
-      if (ruleLevel >= 12) return 'critical'
-      if (ruleLevel >= 8) return 'high'
-      if (ruleLevel >= 5) return 'medium'
-      if (ruleLevel >= 3) return 'low'
-      return 'info'
+      if (ruleLevel >= 12) return AlertSeverity.CRITICAL
+      if (ruleLevel >= 8) return AlertSeverity.HIGH
+      if (ruleLevel >= 5) return AlertSeverity.MEDIUM
+      if (ruleLevel >= 3) return AlertSeverity.LOW
+      return AlertSeverity.INFO
     }
 
-    return (source.severity as string) ?? 'info'
+    return (source.severity as string) ?? AlertSeverity.INFO
   }
 
   /**
@@ -487,5 +551,45 @@ export class HuntsService {
     if (message) return message.slice(0, 500)
 
     return 'No description available'
+  }
+
+  /**
+   * Compute a deterministic threat score based on event severities, unique IPs, and MITRE coverage.
+   */
+  private computeThreatScore(
+    events: Array<{ severity: string }>,
+    uniqueIpCount: number,
+    mitreTechCount: number
+  ): number {
+    if (events.length === 0) return 0
+
+    const severityWeights: Record<string, number> = {
+      [AlertSeverity.CRITICAL]: 10,
+      [AlertSeverity.HIGH]: 7,
+      [AlertSeverity.MEDIUM]: 4,
+      [AlertSeverity.LOW]: 2,
+      [AlertSeverity.INFO]: 1,
+    }
+
+    let totalWeight = 0
+    let hasCritical = false
+    for (const event of events) {
+      const weight = severityWeights[event.severity] ?? 1
+      totalWeight += weight
+      if (event.severity === AlertSeverity.CRITICAL) {
+        hasCritical = true
+      }
+    }
+
+    const avgWeight = totalWeight / events.length
+    const score = Math.floor(
+      avgWeight * 12 +
+        Math.min(uniqueIpCount, 10) * 2 +
+        Math.min(mitreTechCount, 5) * 4 +
+        (events.length >= 100 ? 10 : events.length >= 10 ? 5 : 0) +
+        (hasCritical ? 15 : 0)
+    )
+
+    return Math.min(100, score)
   }
 }

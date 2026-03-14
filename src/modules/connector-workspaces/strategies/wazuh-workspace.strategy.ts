@@ -20,6 +20,16 @@ export class WazuhWorkspaceStrategy implements ConnectorWorkspaceStrategy {
 
   constructor(private readonly wazuhService: WazuhService) {}
 
+  private alertVariant(total: number): CardVariant {
+    if (total > 100) {
+      return CardVariant.ERROR
+    }
+    if (total > 0) {
+      return CardVariant.WARNING
+    }
+    return CardVariant.SUCCESS
+  }
+
   async getOverview(config: Record<string, unknown>) {
     const summaryCards: WorkspaceSummaryCard[] = []
     const recentItems: WorkspaceRecentItem[] = []
@@ -85,12 +95,7 @@ export class WazuhWorkspaceStrategy implements ConnectorWorkspaceStrategy {
         label: 'Alerts (24h)',
         value: alertResult.total,
         icon: 'alert-triangle',
-        variant:
-          alertResult.total > 100
-            ? CardVariant.ERROR
-            : alertResult.total > 0
-              ? CardVariant.WARNING
-              : CardVariant.SUCCESS,
+        variant: this.alertVariant(alertResult.total),
       })
 
       for (const hit of alertResult.hits.slice(0, 5)) {

@@ -15,4 +15,6 @@ export enum AppLogFeature {
   SYSTEM = 'System',
   IMPERSONATION = 'Impersonation',
   VALIDATION = 'Validation',
+  DATA_EXPLORER = 'DataExplorer',
+  NOTIFICATIONS = 'Notifications',
 }

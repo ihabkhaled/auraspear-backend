@@ -17,9 +17,19 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
+const mockNotificationsService = {
+  notifyTenantAssigned: jest.fn().mockResolvedValue(undefined),
+  notifyRoleChanged: jest.fn().mockResolvedValue(undefined),
+  notifyUserBlocked: jest.fn().mockResolvedValue(undefined),
+  notifyUserUnblocked: jest.fn().mockResolvedValue(undefined),
+  notifyUserRemoved: jest.fn().mockResolvedValue(undefined),
+  notifyUserRestored: jest.fn().mockResolvedValue(undefined),
+}
+
 const TENANT_ID = 'tenant-001'
 const USER_ID = 'user-001'
 const CALLER_ID = 'caller-001'
+const CALLER_EMAIL = 'admin@acme.com'
 
 const now = new Date('2025-06-01T00:00:00Z')
 
@@ -110,7 +120,12 @@ describe('TenantsService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     prisma = createMockPrisma()
-    service = new TenantsService(prisma as never, authService as never, mockAppLogger as never)
+    service = new TenantsService(
+      prisma as never,
+      authService as never,
+      mockAppLogger as never,
+      mockNotificationsService as never
+    )
   })
 
   /* ------------------------------------------------------------------ */
@@ -390,10 +405,14 @@ describe('TenantsService', () => {
         return fn(tx)
       })
 
+      prisma.tenant.findUnique.mockResolvedValue({ name: 'Acme Corp' })
+
       const result = await service.assignUser(
         TENANT_ID,
         { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
-        UserRole.TENANT_ADMIN
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
       )
 
       expect(result).toMatchObject({
@@ -401,6 +420,15 @@ describe('TenantsService', () => {
         email: 'analyst@acme.com',
         role: UserRole.SOC_ANALYST_L1,
       })
+
+      expect(mockNotificationsService.notifyTenantAssigned).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'Acme Corp',
+        UserRole.SOC_ANALYST_L1,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should create new user with hashed password when user does not exist', async () => {
@@ -439,7 +467,9 @@ describe('TenantsService', () => {
           password: 'StrongP@ss1',
           role: UserRole.SOC_ANALYST_L1,
         },
-        UserRole.TENANT_ADMIN
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
       )
 
       expect(result).toMatchObject({
@@ -454,7 +484,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'test@acme.com', role: UserRole.GLOBAL_ADMIN },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -462,7 +494,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'test@acme.com', role: UserRole.GLOBAL_ADMIN },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotAssignGlobalAdmin',
@@ -484,7 +518,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -500,7 +536,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userProtected',
@@ -525,7 +563,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -544,7 +584,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userAlreadyInTenant',
@@ -564,7 +606,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'new@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -580,7 +624,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'new@acme.com', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.validation.name.required',
@@ -600,7 +646,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'new@acme.com', name: 'New User', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -616,7 +664,9 @@ describe('TenantsService', () => {
         service.assignUser(
           TENANT_ID,
           { email: 'new@acme.com', name: 'New User', role: UserRole.SOC_ANALYST_L1 },
-          UserRole.TENANT_ADMIN
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.validation.password.required',
@@ -645,7 +695,8 @@ describe('TenantsService', () => {
         USER_ID,
         { name: 'Jane Updated', role: UserRole.SOC_ANALYST_L2 },
         UserRole.TENANT_ADMIN,
-        CALLER_ID
+        CALLER_ID,
+        CALLER_EMAIL
       )
 
       expect(result).toMatchObject({
@@ -653,6 +704,15 @@ describe('TenantsService', () => {
         name: 'Jane Updated',
         role: UserRole.SOC_ANALYST_L2,
       })
+
+      expect(mockNotificationsService.notifyRoleChanged).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        UserRole.SOC_ANALYST_L1,
+        UserRole.SOC_ANALYST_L2,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should throw 403 when trying to change own role', async () => {
@@ -662,7 +722,8 @@ describe('TenantsService', () => {
           CALLER_ID,
           { role: UserRole.GLOBAL_ADMIN },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -672,7 +733,8 @@ describe('TenantsService', () => {
           CALLER_ID,
           { role: UserRole.GLOBAL_ADMIN },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotModifySelf',
@@ -691,7 +753,8 @@ describe('TenantsService', () => {
           USER_ID,
           { role: UserRole.SOC_ANALYST_L2 },
           UserRole.GLOBAL_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -703,7 +766,8 @@ describe('TenantsService', () => {
           USER_ID,
           { role: UserRole.SOC_ANALYST_L2 },
           UserRole.GLOBAL_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userProtected',
@@ -720,7 +784,8 @@ describe('TenantsService', () => {
           USER_ID,
           { name: 'Changed' },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -732,7 +797,8 @@ describe('TenantsService', () => {
           USER_ID,
           { name: 'Changed' },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
@@ -748,7 +814,8 @@ describe('TenantsService', () => {
           'nonexistent',
           { name: 'Test' },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toThrow(BusinessException)
 
@@ -760,7 +827,8 @@ describe('TenantsService', () => {
           'nonexistent',
           { name: 'Test' },
           UserRole.TENANT_ADMIN,
-          CALLER_ID
+          CALLER_ID,
+          CALLER_EMAIL
         )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotFound',
@@ -777,22 +845,34 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(membership)
       prisma.tenantMembership.update.mockResolvedValue({})
 
-      const result = await service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      const result = await service.removeUser(
+        TENANT_ID,
+        USER_ID,
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
 
       expect(result).toEqual({ deleted: true })
       expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
         where: { userId_tenantId: { userId: USER_ID, tenantId: TENANT_ID } },
         data: { status: MembershipStatus.INACTIVE },
       })
+      expect(mockNotificationsService.notifyUserRemoved).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should throw 403 when trying to delete self', async () => {
       await expect(
-        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       await expect(
-        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotDeleteSelf',
       })
@@ -805,13 +885,13 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
 
       await expect(
-        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
 
       await expect(
-        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userProtected',
       })
@@ -821,13 +901,13 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotFound',
       })
@@ -845,7 +925,13 @@ describe('TenantsService', () => {
       const restoredMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
       prisma.tenantMembership.update.mockResolvedValue(restoredMembership)
 
-      const result = await service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      const result = await service.restoreUser(
+        TENANT_ID,
+        USER_ID,
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
 
       expect(result).toMatchObject({
         id: USER_ID,
@@ -856,19 +942,37 @@ describe('TenantsService', () => {
         data: { status: MembershipStatus.ACTIVE },
         include: { user: true },
       })
+      expect(mockNotificationsService.notifyUserRestored).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should throw 404 when not found', async () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.restoreUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+        service.restoreUser(
+          TENANT_ID,
+          'nonexistent',
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
+        )
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.restoreUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+        service.restoreUser(
+          TENANT_ID,
+          'nonexistent',
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
+        )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotFound',
       })
@@ -878,14 +982,14 @@ describe('TenantsService', () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
       prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
 
-      await expect(service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
-        BusinessException
-      )
+      await expect(
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
+      ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
 
       await expect(
-        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotDeleted',
       })
@@ -898,14 +1002,14 @@ describe('TenantsService', () => {
       })
       prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
 
-      await expect(service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
-        BusinessException
-      )
+      await expect(
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
+      ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
 
       await expect(
-        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
       })
@@ -923,21 +1027,33 @@ describe('TenantsService', () => {
       const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
       prisma.tenantMembership.update.mockResolvedValue(suspendedMembership)
 
-      const result = await service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      const result = await service.blockUser(
+        TENANT_ID,
+        USER_ID,
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
 
       expect(result).toMatchObject({
         id: USER_ID,
         status: MembershipStatus.SUSPENDED,
       })
+      expect(mockNotificationsService.notifyUserBlocked).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should throw 403 when blocking self', async () => {
       await expect(
-        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       await expect(
-        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotBlockSelf',
       })
@@ -950,13 +1066,13 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
 
       await expect(
-        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
 
       await expect(
-        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userProtected',
       })
@@ -967,13 +1083,13 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
 
       await expect(
-        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
 
       await expect(
-        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userAlreadyBlocked',
       })
@@ -983,13 +1099,13 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotFound',
       })
@@ -1007,26 +1123,38 @@ describe('TenantsService', () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
       prisma.tenantMembership.update.mockResolvedValue(activeMembership)
 
-      const result = await service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      const result = await service.unblockUser(
+        TENANT_ID,
+        USER_ID,
+        UserRole.TENANT_ADMIN,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
 
       expect(result).toMatchObject({
         id: USER_ID,
         status: MembershipStatus.ACTIVE,
       })
+      expect(mockNotificationsService.notifyUserUnblocked).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        CALLER_ID,
+        CALLER_EMAIL
+      )
     })
 
     it('should throw 400 when not blocked', async () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
       prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
 
-      await expect(service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
-        BusinessException
-      )
+      await expect(
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
+      ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
 
       await expect(
-        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotBlocked',
       })
@@ -1039,14 +1167,14 @@ describe('TenantsService', () => {
       })
       prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
 
-      await expect(service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
-        BusinessException
-      )
+      await expect(
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
+      ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
 
       await expect(
-        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
       })
@@ -1056,13 +1184,25 @@ describe('TenantsService', () => {
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.unblockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+        service.unblockUser(
+          TENANT_ID,
+          'nonexistent',
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
+        )
       ).rejects.toThrow(BusinessException)
 
       prisma.tenantMembership.findUnique.mockResolvedValue(null)
 
       await expect(
-        service.unblockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+        service.unblockUser(
+          TENANT_ID,
+          'nonexistent',
+          UserRole.TENANT_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
+        )
       ).rejects.toMatchObject({
         messageKey: 'errors.tenants.userNotFound',
       })

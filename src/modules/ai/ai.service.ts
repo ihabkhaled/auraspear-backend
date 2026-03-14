@@ -2,12 +2,23 @@ import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import {
+  AiAuditAction,
+  AiAuditStatus,
+  AlertSeverity,
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
+import { ConnectorsService } from '../connectors/connectors.service'
+import { BedrockService } from '../connectors/services/bedrock.service'
 import type { AiResponse } from './ai.types'
+import type { Alert, Prisma } from '@prisma/client'
 
 interface AiAuditRecord {
   id: string
@@ -18,8 +29,10 @@ interface AiAuditRecord {
   inputTokens: number
   outputTokens: number
   latencyMs: number
-  status: 'success' | 'error'
+  status: AiAuditStatus
   createdAt: string
+  prompt?: string
+  response?: string
 }
 
 @Injectable()
@@ -29,7 +42,9 @@ export class AiService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly connectorsService: ConnectorsService,
+    private readonly bedrockService: BedrockService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -41,7 +56,7 @@ export class AiService {
       const connector = await this.prisma.connectorConfig.findFirst({
         where: {
           tenantId,
-          type: 'bedrock',
+          type: ConnectorType.BEDROCK,
           enabled: true,
         },
       })
@@ -106,6 +121,8 @@ export class AiService {
           inputTokens: record.inputTokens,
           outputTokens: record.outputTokens,
           durationMs: record.latencyMs,
+          prompt: record.prompt,
+          response: record.response,
         },
       })
     } catch {
@@ -151,38 +168,103 @@ export class AiService {
     const startTime = Date.now()
     const auditId = randomUUID()
 
-    // Mock AI response for threat hunting
-    const response: AiResponse = {
-      result: this.generateHuntResponse(dto.query),
-      reasoning: [
-        `Analyzing hunt query: "${dto.query}"`,
-        'Decomposing query into sub-hypotheses for structured threat hunting',
-        'Cross-referencing with MITRE ATT&CK framework for technique coverage',
-        'Generating OpenSearch/Wazuh query syntax for each hypothesis',
-        'Prioritizing by likelihood of true positive based on environment context',
-        'Correlating with recent threat intelligence from MISP feeds',
-      ],
-      confidence: 0.87,
-      model: this.MODEL,
-      tokensUsed: {
-        input: 1247,
-        output: 2156,
-      },
+    // Try real AI analysis via Bedrock
+    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
+      user.tenantId,
+      ConnectorType.BEDROCK
+    )
+
+    let response: AiResponse | undefined
+
+    if (bedrockConfig) {
+      try {
+        const prompt = this.buildHuntPrompt(dto.query, dto.context)
+        const aiResult = await this.bedrockService.invoke(bedrockConfig, prompt, 2048)
+        const latencyMs = Date.now() - startTime
+
+        response = {
+          result: aiResult.text,
+          reasoning: [
+            `Analyzing hunt query: "${dto.query}"`,
+            'Decomposing query into threat hypotheses',
+            'Generating detection queries and MITRE ATT&CK mapping via AI',
+          ],
+          confidence: 0.85,
+          model: (bedrockConfig.modelId as string) ?? this.MODEL,
+          tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
+        }
+
+        this.appLogger.info('AI hunt completed via Bedrock', {
+          feature: AppLogFeature.AI,
+          action: 'aiHunt',
+          outcome: AppLogOutcome.SUCCESS,
+          tenantId: user.tenantId,
+          actorUserId: user.sub,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'AiService',
+          functionName: 'aiHunt',
+          metadata: {
+            model: response.model,
+            inputTokens: aiResult.inputTokens,
+            outputTokens: aiResult.outputTokens,
+            latencyMs,
+          },
+        })
+      } catch (error) {
+        this.logger.warn(
+          `Bedrock invocation failed for hunt, falling back to template: ${error instanceof Error ? error.message : 'Unknown error'}`
+        )
+        this.appLogger.warn('Bedrock hunt invocation failed, using rule-based fallback', {
+          feature: AppLogFeature.AI,
+          action: 'aiHunt',
+          outcome: AppLogOutcome.FAILURE,
+          tenantId: user.tenantId,
+          actorUserId: user.sub,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'AiService',
+          functionName: 'aiHunt',
+          metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+        })
+        // Fall through to template-based response
+      }
     }
 
-    const latencyMs = Date.now() - startTime + 1200 // simulate model latency
+    // Fallback: rule-based template response
+    if (!response) {
+      response = {
+        result: this.generateHuntResponse(dto.query),
+        reasoning: [
+          `Analyzing hunt query: "${dto.query}"`,
+          'Decomposing query into sub-hypotheses for structured threat hunting',
+          'Cross-referencing with MITRE ATT&CK framework for technique coverage',
+          'Generating OpenSearch/Wazuh query syntax for each hypothesis',
+          'Prioritizing by likelihood of true positive based on environment context',
+          'Generating rule-based hunt analysis (AI model not available)',
+        ],
+        confidence: 0.87,
+        model: 'rule-based',
+        tokensUsed: {
+          input: 0,
+          output: 0,
+        },
+      }
+    }
+
+    const latencyMs = Date.now() - startTime
 
     await this.logAudit({
       id: auditId,
       tenantId: user.tenantId,
       userId: user.sub,
-      action: 'ai_hunt',
-      model: this.MODEL,
+      action: AiAuditAction.HUNT,
+      model: response.model,
       inputTokens: response.tokensUsed.input,
       outputTokens: response.tokensUsed.output,
       latencyMs,
-      status: 'success',
+      status: AiAuditStatus.SUCCESS,
       createdAt: new Date().toISOString(),
+      prompt: dto.query,
+      response: response.result,
     })
 
     this.appLogger.info('AI hunt completed successfully', {
@@ -197,7 +279,7 @@ export class AiService {
       functionName: 'aiHunt',
       targetResource: 'AiHunt',
       metadata: {
-        model: this.MODEL,
+        model: response.model,
         confidence: response.confidence,
         inputTokens: response.tokensUsed.input,
         outputTokens: response.tokensUsed.output,
@@ -229,12 +311,12 @@ export class AiService {
 
     await this.ensureAiEnabled(user.tenantId)
 
-    // M6: Validate alert belongs to the caller's tenant
-    const alert = await this.prisma.alert.findFirst({
+    // Load full alert data
+    const fullAlert = await this.prisma.alert.findFirst({
       where: { id: dto.alertId, tenantId: user.tenantId },
-      select: { id: true },
     })
-    if (!alert) {
+
+    if (!fullAlert) {
       this.appLogger.warn('AI investigation failed — alert not found', {
         feature: AppLogFeature.AI,
         action: 'aiInvestigate',
@@ -251,41 +333,111 @@ export class AiService {
       throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
     }
 
+    // Load related alerts (same source IP or same rule, last 48 hours)
+    const relatedAlerts = await this.loadRelatedAlerts(fullAlert, user.tenantId)
+
     const startTime = Date.now()
     const auditId = randomUUID()
 
-    const response: AiResponse = {
-      result: this.generateInvestigationResponse(dto.alertId),
-      reasoning: [
-        `Retrieving alert ${dto.alertId} details from Wazuh Indexer`,
-        'Analyzing alert rule, severity, and MITRE ATT&CK mapping',
-        'Examining source/destination IPs against threat intelligence databases',
-        'Reviewing agent behavior patterns in the 24-hour window around the alert',
-        'Checking for related alerts from same agent or same rule ID',
-        'Evaluating false positive probability based on historical data',
-        'Generating investigation recommendations and suggested containment actions',
-      ],
-      confidence: 0.92,
-      model: this.MODEL,
-      tokensUsed: {
-        input: 1834,
-        output: 2891,
-      },
+    // Try real AI analysis via Bedrock
+    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
+      user.tenantId,
+      ConnectorType.BEDROCK
+    )
+
+    let response: AiResponse | undefined
+
+    if (bedrockConfig) {
+      try {
+        const prompt = this.buildInvestigationPrompt(fullAlert, relatedAlerts)
+        const aiResult = await this.bedrockService.invoke(bedrockConfig, prompt, 2048)
+        const latencyMs = Date.now() - startTime
+
+        response = {
+          result: aiResult.text,
+          reasoning: [
+            `Loading alert ${dto.alertId} details and raw event data`,
+            `Found ${relatedAlerts.length} related alerts in 48-hour window`,
+            'Analyzing severity, MITRE ATT&CK mapping, and IOC indicators',
+            'Generating AI-powered investigation report via Bedrock',
+          ],
+          confidence: this.computeInvestigationConfidence(fullAlert, relatedAlerts),
+          model: (bedrockConfig.modelId as string) ?? this.MODEL,
+          tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
+        }
+
+        this.appLogger.info('AI investigation completed via Bedrock', {
+          feature: AppLogFeature.AI,
+          action: 'aiInvestigate',
+          outcome: AppLogOutcome.SUCCESS,
+          tenantId: user.tenantId,
+          actorUserId: user.sub,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'AiService',
+          functionName: 'aiInvestigate',
+          targetResource: 'Alert',
+          targetResourceId: dto.alertId,
+          metadata: {
+            model: response.model,
+            inputTokens: aiResult.inputTokens,
+            outputTokens: aiResult.outputTokens,
+            latencyMs,
+            relatedAlertCount: relatedAlerts.length,
+          },
+        })
+      } catch (error) {
+        this.logger.warn(
+          `Bedrock invocation failed for investigation, falling back to rule-based: ${error instanceof Error ? error.message : 'Unknown error'}`
+        )
+        this.appLogger.warn('Bedrock investigation invocation failed, using rule-based fallback', {
+          feature: AppLogFeature.AI,
+          action: 'aiInvestigate',
+          outcome: AppLogOutcome.FAILURE,
+          tenantId: user.tenantId,
+          actorUserId: user.sub,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'AiService',
+          functionName: 'aiInvestigate',
+          targetResource: 'Alert',
+          targetResourceId: dto.alertId,
+          metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+        })
+        // Fall through to template-based analysis
+      }
     }
 
-    const latencyMs = Date.now() - startTime + 1500
+    // Fallback: data-driven template (not static — uses real alert data)
+    if (!response) {
+      response = {
+        result: this.generateDataDrivenInvestigation(fullAlert, relatedAlerts),
+        reasoning: [
+          `Loading alert ${dto.alertId} details and raw event data`,
+          `Found ${relatedAlerts.length} related alerts in 48-hour window`,
+          'Analyzing severity, MITRE ATT&CK mapping, and source/destination IPs',
+          'Evaluating false positive probability based on alert context',
+          'Generating rule-based investigation report (AI model not available)',
+        ],
+        confidence: this.computeInvestigationConfidence(fullAlert, relatedAlerts),
+        model: 'rule-based',
+        tokensUsed: { input: 0, output: 0 },
+      }
+    }
+
+    const latencyMs = Date.now() - startTime
 
     await this.logAudit({
       id: auditId,
       tenantId: user.tenantId,
       userId: user.sub,
-      action: 'ai_investigate',
-      model: this.MODEL,
+      action: AiAuditAction.INVESTIGATE,
+      model: response.model,
       inputTokens: response.tokensUsed.input,
       outputTokens: response.tokensUsed.output,
       latencyMs,
-      status: 'success',
+      status: AiAuditStatus.SUCCESS,
       createdAt: new Date().toISOString(),
+      prompt: dto.alertId,
+      response: response.result,
     })
 
     this.appLogger.info('AI investigation completed successfully', {
@@ -301,11 +453,12 @@ export class AiService {
       targetResource: 'Alert',
       targetResourceId: dto.alertId,
       metadata: {
-        model: this.MODEL,
+        model: response.model,
         confidence: response.confidence,
         inputTokens: response.tokensUsed.input,
         outputTokens: response.tokensUsed.output,
         latencyMs,
+        relatedAlertCount: relatedAlerts.length,
       },
     })
 
@@ -359,13 +512,15 @@ export class AiService {
       id: auditId,
       tenantId: user.tenantId,
       userId: user.sub,
-      action: 'ai_explain',
+      action: AiAuditAction.EXPLAIN,
       model: this.MODEL,
       inputTokens: response.tokensUsed.input,
       outputTokens: response.tokensUsed.output,
       latencyMs,
-      status: 'success',
+      status: AiAuditStatus.SUCCESS,
       createdAt: new Date().toISOString(),
+      prompt: body.prompt,
+      response: response.result,
     })
 
     this.appLogger.info('AI explain completed successfully', {
@@ -392,7 +547,264 @@ export class AiService {
   }
 
   /* ---------------------------------------------------------------- */
-  /* Mock response generators                                          */
+  /* Related alerts loader                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async loadRelatedAlerts(
+    alert: Alert,
+    tenantId: string
+  ): Promise<Array<Pick<Alert, 'id' | 'title' | 'severity' | 'timestamp'>>> {
+    const orConditions: Prisma.AlertWhereInput[] = []
+
+    if (alert.sourceIp) {
+      orConditions.push({ sourceIp: alert.sourceIp })
+    }
+    if (alert.ruleId) {
+      orConditions.push({ ruleId: alert.ruleId })
+    }
+
+    // If neither sourceIp nor ruleId exist, no meaningful correlation possible
+    if (orConditions.length === 0) {
+      return []
+    }
+
+    return this.prisma.alert.findMany({
+      where: {
+        tenantId,
+        id: { not: alert.id },
+        timestamp: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+        OR: orConditions,
+      },
+      select: {
+        id: true,
+        title: true,
+        severity: true,
+        timestamp: true,
+      },
+      take: 20,
+      orderBy: { timestamp: 'desc' },
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Prompt builders                                                   */
+  /* ---------------------------------------------------------------- */
+
+  private buildHuntPrompt(query: string, context?: string): string {
+    const safeQuery = this.sanitizeForMarkdown(query)
+    return `You are a senior SOC threat hunter. Analyze this threat hunting query and provide actionable guidance.
+
+Hunt Query: "${safeQuery}"
+${context ? `Additional Context: ${context.slice(0, 500)}` : ''}
+
+Provide your response in markdown with these sections:
+1. **Hypothesis** — What threat scenario does this query target?
+2. **Suggested Queries** — 3-5 Elasticsearch/Wazuh queries to execute
+3. **Indicators to Watch** — Key IOCs, behavioral patterns, or anomalies
+4. **MITRE ATT&CK Coverage** — Relevant tactics and techniques
+5. **Recommended Actions** — Next steps for the analyst
+
+Be concise, specific, and actionable. Do not hallucinate findings — this is query planning, not result analysis.`
+  }
+
+  private buildInvestigationPrompt(
+    alert: Alert,
+    relatedAlerts: Array<Pick<Alert, 'title' | 'severity' | 'timestamp'>>
+  ): string {
+    const rawEventSnippet = alert.rawEvent ? JSON.stringify(alert.rawEvent).slice(0, 2000) : 'N/A'
+
+    return `You are a senior SOC analyst performing an AI-powered investigation of a security alert.
+
+**Alert Details:**
+- Title: ${this.sanitizeForMarkdown(alert.title)}
+- Severity: ${alert.severity}
+- Rule: ${this.sanitizeForMarkdown(alert.ruleName ?? 'Unknown')} (${alert.ruleId ?? 'N/A'})
+- Source IP: ${alert.sourceIp ?? 'N/A'}
+- Destination IP: ${alert.destinationIp ?? 'N/A'}
+- Agent: ${alert.agentName ?? 'N/A'}
+- MITRE Tactics: ${alert.mitreTactics.join(', ') || 'None'}
+- MITRE Techniques: ${alert.mitreTechniques.join(', ') || 'None'}
+- Description: ${this.sanitizeForMarkdown(alert.description ?? 'N/A')}
+
+**Raw Event (truncated):**
+${rawEventSnippet}
+
+**Related Alerts (${relatedAlerts.length}):**
+${
+  relatedAlerts
+    .slice(0, 10)
+    .map(
+      ra =>
+        `- [${ra.severity}] ${this.sanitizeForMarkdown(ra.title)} at ${ra.timestamp.toISOString()}`
+    )
+    .join('\n') || 'None found'
+}
+
+Provide your investigation report in markdown with these sections:
+1. **Verdict** — True Positive / False Positive / Suspicious / Benign (with confidence %)
+2. **Summary** — Brief explanation of what happened
+3. **Key Findings** — Numbered list of important observations
+4. **Risk Assessment** — Immediate risk, lateral movement risk, data exposure risk
+5. **MITRE ATT&CK Mapping** — Tactics and techniques observed
+6. **Recommended Actions** — Numbered actionable steps
+7. **Related Alert Analysis** — How related alerts correlate (if any)
+
+Be specific and grounded in the actual alert data. Do not fabricate indicators not present in the data.`
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Confidence computation                                            */
+  /* ---------------------------------------------------------------- */
+
+  private computeInvestigationConfidence(
+    alert: Pick<Alert, 'severity' | 'mitreTechniques' | 'sourceIp'>,
+    relatedAlerts: unknown[]
+  ): number {
+    let confidence = 0.5
+
+    // Higher severity = higher confidence it's a real threat
+    switch (alert.severity) {
+      case AlertSeverity.CRITICAL: {
+        confidence += 0.2
+
+        break
+      }
+      case AlertSeverity.HIGH: {
+        confidence += 0.15
+
+        break
+      }
+      case AlertSeverity.MEDIUM: {
+        confidence += 0.1
+
+        break
+      }
+      // No default
+    }
+
+    // MITRE mapping increases confidence
+    if (alert.mitreTechniques.length > 0) {
+      confidence += 0.1
+    }
+
+    // Related alerts increase confidence
+    if (relatedAlerts.length >= 3) {
+      confidence += 0.1
+    } else if (relatedAlerts.length >= 1) {
+      confidence += 0.05
+    }
+
+    // Source IP present
+    if (alert.sourceIp) {
+      confidence += 0.05
+    }
+
+    return Math.min(0.99, confidence)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Data-driven investigation report (fallback)                       */
+  /* ---------------------------------------------------------------- */
+
+  private generateDataDrivenInvestigation(
+    alert: Alert,
+    relatedAlerts: Array<Pick<Alert, 'id' | 'title' | 'severity' | 'timestamp'>>
+  ): string {
+    let verdict: string
+    if (alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH) {
+      verdict = 'Likely True Positive'
+    } else if (alert.severity === AlertSeverity.MEDIUM) {
+      verdict = 'Requires Investigation'
+    } else {
+      verdict = 'Likely Benign'
+    }
+
+    const relatedSection =
+      relatedAlerts.length > 0
+        ? `**Related Alerts (${relatedAlerts.length}):**\n${relatedAlerts
+            .slice(0, 5)
+            .map(
+              ra =>
+                `- [${ra.severity.toUpperCase()}] ${this.sanitizeForMarkdown(ra.title)} (${ra.timestamp.toISOString()})`
+            )
+            .join('\n')}`
+        : ''
+
+    let immediateRisk: string
+    switch (alert.severity) {
+      case AlertSeverity.CRITICAL: {
+        immediateRisk = 'CRITICAL'
+
+        break
+      }
+      case AlertSeverity.HIGH: {
+        immediateRisk = 'HIGH'
+
+        break
+      }
+      case AlertSeverity.MEDIUM: {
+        immediateRisk = 'MEDIUM'
+
+        break
+      }
+      default: {
+        immediateRisk = 'LOW'
+      }
+    }
+
+    let relatedRisk: string
+    if (relatedAlerts.length >= 5) {
+      relatedRisk = 'HIGH — multiple correlated alerts detected'
+    } else if (relatedAlerts.length >= 1) {
+      relatedRisk = 'MEDIUM — some related activity found'
+    } else {
+      relatedRisk = 'LOW — isolated event'
+    }
+
+    return `## AI Investigation Report
+
+**Alert:** ${this.sanitizeForMarkdown(alert.title)}
+**Severity:** ${alert.severity.toUpperCase()}
+**Verdict:** ${verdict}
+
+**Summary:**
+This ${alert.severity}-severity alert was triggered by rule ${this.sanitizeForMarkdown(alert.ruleName ?? 'Unknown')} (${this.sanitizeForMarkdown(alert.ruleId ?? 'N/A')}).${alert.sourceIp ? ` Source IP: \`${alert.sourceIp}\`.` : ''}${alert.destinationIp ? ` Destination IP: \`${alert.destinationIp}\`.` : ''}${alert.agentName ? ` Agent: ${this.sanitizeForMarkdown(alert.agentName)}.` : ''}
+
+**Key Findings:**
+${alert.sourceIp ? `1. Source IP \`${alert.sourceIp}\` detected in this event` : '1. No source IP recorded'}
+${relatedAlerts.length > 0 ? `2. ${relatedAlerts.length} related alert(s) found in the last 48 hours` : '2. No related alerts found in the last 48 hours'}
+${alert.mitreTechniques.length > 0 ? `3. MITRE ATT&CK techniques identified: ${alert.mitreTechniques.join(', ')}` : '3. No MITRE ATT&CK techniques mapped'}
+${alert.agentName ? `4. Alert originated from agent: ${this.sanitizeForMarkdown(alert.agentName)}` : '4. No agent information available'}
+
+**Risk Assessment:**
+- Immediate Risk: ${immediateRisk}
+- Related Activity: ${relatedRisk}
+- MITRE Coverage: ${alert.mitreTechniques.length > 0 ? `${alert.mitreTechniques.length} technique(s) mapped` : 'None mapped'}
+
+**MITRE ATT&CK Mapping:**
+${alert.mitreTactics.length > 0 ? `- Tactics: ${alert.mitreTactics.join(', ')}` : '- No tactics identified'}
+${alert.mitreTechniques.length > 0 ? `- Techniques: ${alert.mitreTechniques.join(', ')}` : '- No techniques identified'}
+
+**Recommended Actions:**
+1. ${alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH ? 'Escalate immediately to incident response team' : 'Review alert context and determine if escalation is needed'}
+2. ${alert.sourceIp ? `Investigate source IP \`${alert.sourceIp}\` for additional activity` : 'Identify the source of this activity'}
+3. ${relatedAlerts.length > 0 ? 'Review related alerts for attack pattern correlation' : 'Monitor for follow-up alerts from the same source'}
+4. ${alert.agentName ? `Check endpoint health for agent ${this.sanitizeForMarkdown(alert.agentName)}` : 'Verify the affected system status'}
+5. Document findings and update case if applicable
+
+${relatedSection}`
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sanitization                                                      */
+  /* ---------------------------------------------------------------- */
+
+  private sanitizeForMarkdown(text: string): string {
+    return text.replaceAll(/[<>"'&]/g, '')
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Mock response generators (fallback templates)                     */
   /* ---------------------------------------------------------------- */
 
   private generateHuntResponse(query: string): string {
@@ -458,38 +870,6 @@ export class AiService {
 3. \`${safeQuery} AND rule.mitre.id:* | stats count by rule.mitre.id\` - ATT&CK mapping
 
 **MITRE ATT&CK Coverage:** Multiple techniques may apply -- review mapped events for specific coverage.`
-  }
-
-  private generateInvestigationResponse(alertId: string): string {
-    return `## AI Investigation Report: ${alertId}
-
-**Verdict:** Likely True Positive (Confidence: 92%)
-
-**Summary:**
-This alert indicates a genuine security event that warrants immediate investigation. The combination of behavioral indicators, threat intelligence matches, and temporal correlation with other alerts suggests active adversary activity.
-
-**Key Findings:**
-1. **Source IP** matches known malicious infrastructure in MISP feed MISP-8830
-2. **Target service** (authentication endpoint) is a common attack vector
-3. **Volume and velocity** of events exceeds baseline by 47x standard deviation
-4. **Related alerts** found: 3 additional alerts from the same source within 2 hours
-
-**Risk Assessment:**
-- Immediate Risk: HIGH - Active exploitation attempt detected
-- Lateral Movement Risk: MEDIUM - No evidence of successful compromise yet
-- Data Exposure Risk: LOW - No indicators of data access or exfiltration
-
-**Recommended Actions:**
-1. Block the source IP at the perimeter firewall immediately
-2. Review target accounts for any successful authentication attempts
-3. Enable enhanced logging on the targeted service
-4. Correlate with EDR telemetry from affected endpoints
-5. Create an incident case if not already linked
-
-**MITRE ATT&CK Mapping:**
-- Tactic: Initial Access, Credential Access
-- Techniques: T1110 (Brute Force), T1078 (Valid Accounts)
-- Detection: DS0015 (Application Log), DS0028 (Logon Session)`
   }
 
   private generateExplainResponse(prompt: string): string {

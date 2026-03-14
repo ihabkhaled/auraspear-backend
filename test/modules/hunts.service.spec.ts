@@ -1,3 +1,4 @@
+import { ConnectorType } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { HuntsService } from '../../src/modules/hunts/hunts.service'
 
@@ -135,12 +136,16 @@ describe('HuntsService', () => {
           query: dto.query,
           status: 'running',
           startedBy: USER_EMAIL,
+          timeRange: dto.timeRange,
           reasoning: ['Querying Wazuh Indexer for matching events'],
         },
       })
 
       // Verify Wazuh connector config was fetched
-      expect(connectorsService.getDecryptedConfig).toHaveBeenCalledWith(TENANT_ID, 'wazuh')
+      expect(connectorsService.getDecryptedConfig).toHaveBeenCalledWith(
+        TENANT_ID,
+        ConnectorType.WAZUH
+      )
 
       // Verify Wazuh was queried
       expect(wazuhService.searchAlerts).toHaveBeenCalled()

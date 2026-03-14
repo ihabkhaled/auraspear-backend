@@ -155,7 +155,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.assignUser(tenantId, dto, user.role)
+    return this.tenantsService.assignUser(tenantId, dto, user.role, user.sub, user.email)
   }
 
   @Patch(':tenantId/users/:userId')
@@ -168,7 +168,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.updateUser(tenantId, userId, dto, user.role, user.sub)
+    return this.tenantsService.updateUser(tenantId, userId, dto, user.role, user.sub, user.email)
   }
 
   @Delete(':tenantId/users/:userId')
@@ -180,7 +180,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.removeUser(tenantId, userId, user.role, user.sub)
+    return this.tenantsService.removeUser(tenantId, userId, user.role, user.sub, user.email)
   }
 
   @Post(':tenantId/users/:userId/restore')
@@ -192,7 +192,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.restoreUser(tenantId, userId, user.role)
+    return this.tenantsService.restoreUser(tenantId, userId, user.role, user.sub, user.email)
   }
 
   @Post(':tenantId/users/:userId/block')
@@ -204,7 +204,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.blockUser(tenantId, userId, user.role, user.sub)
+    return this.tenantsService.blockUser(tenantId, userId, user.role, user.sub, user.email)
   }
 
   @Post(':tenantId/users/:userId/unblock')
@@ -216,7 +216,7 @@ export class TenantsController {
     @CurrentUser() user: JwtPayload
   ): Promise<UserRecord> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.unblockUser(tenantId, userId, user.role)
+    return this.tenantsService.unblockUser(tenantId, userId, user.role, user.sub, user.email)
   }
 
   // ─── Impersonation ────────────────────────────────

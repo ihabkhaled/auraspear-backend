@@ -104,7 +104,8 @@ model Tenant {
   alerts           Alert[]
   intelIocs        IntelIOC[]
   intelMispEvents  IntelMispEvent[]
-  huntSessions     HuntSession[]
+  huntSessions         HuntSession[]
+  logstashPipelineLogs LogstashPipelineLog[]
 
   @@map("tenants")
 }
@@ -281,6 +282,7 @@ model Case {
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cycle    CaseCycle?     @relation(fields: [cycleId], references: [id], onDelete: SetNull)
   notes     CaseNote[]
+  comments  CaseComment[]
   timeline  CaseTimeline[]
   tasks     CaseTask[]
   artifacts CaseArtifact[]
@@ -303,6 +305,39 @@ model CaseNote {
 
   @@index([caseId])
   @@map("case_notes")
+}
+
+model CaseComment {
+  id        String  @id @default(uuid()) @db.Uuid
+  caseId    String  @map("case_id") @db.Uuid
+  authorId  String  @map("author_id") @db.Uuid
+  body      String  @db.Text
+  isEdited  Boolean @default(false) @map("is_edited")
+  isDeleted Boolean @default(false) @map("is_deleted")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  case     Case                 @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  mentions CaseCommentMention[]
+
+  @@index([caseId, createdAt])
+  @@index([authorId])
+  @@map("case_comments")
+}
+
+model CaseCommentMention {
+  id        String @id @default(uuid()) @db.Uuid
+  commentId String @map("comment_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  comment CaseComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([userId])
+  @@map("case_comment_mentions")
 }
 
 model CaseTimeline {
@@ -412,6 +447,14 @@ model HuntSession {
   startedBy   String            @map("started_by") @db.VarChar(320)
   eventsFound Int               @default(0) @map("events_found")
   reasoning   String[]          @default([])
+  uniqueIps       Int               @default(0) @map("unique_ips")
+  threatScore     Int               @default(0) @map("threat_score")
+  mitreTactics    String[]          @default([]) @map("mitre_tactics")
+  mitreTechniques String[]          @default([]) @map("mitre_techniques")
+  aiAnalysis      String?           @map("ai_analysis") @db.Text
+  sourceType      String            @default("wazuh") @map("source_type") @db.VarChar(50)
+  timeRange       String            @default("24h") @map("time_range") @db.VarChar(10)
+  executedQuery   Json?             @map("executed_query")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -542,4 +585,205 @@ model ApplicationLog {
   @@index([feature])
   @@index([functionName])
   @@map("application_logs")
+}
+
+// ─── Data Explorer — Sync Jobs ──────────────────────────────
+
+enum SyncJobStatus {
+  running
+  completed
+  failed
+}
+
+/// Tracks each sync run for a connector, providing history, audit, and retry capability.
+/// Source-of-truth for sync operations. Retention: 90 days (cron cleanup).
+model ConnectorSyncJob {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @map("tenant_id") @db.Uuid
+  connectorType   ConnectorType @map("connector_type")
+  status          SyncJobStatus @default(running)
+  recordsSynced   Int           @default(0) @map("records_synced")
+  recordsFailed   Int           @default(0) @map("records_failed")
+  errorMessage    String?       @map("error_message") @db.Text
+  errorCode       String?       @map("error_code") @db.VarChar(100)
+  durationMs      Int?          @map("duration_ms")
+  initiatedBy     String        @default("system") @map("initiated_by") @db.VarChar(320)
+  cursor          String?       @db.VarChar(1000)
+  startedAt       DateTime      @default(now()) @map("started_at")
+  completedAt     DateTime?     @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, connectorType])
+  @@index([tenantId, startedAt])
+  @@index([status])
+  @@map("connector_sync_jobs")
+}
+
+// ─── Data Explorer — Grafana Dashboards ─────────────────────
+
+/// Synced Grafana dashboard metadata. Fetch detail live.
+/// Indexed for search and browse. Retention: synced on demand, replaced on re-sync.
+model GrafanaDashboard {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  uid         String   @db.VarChar(255)
+  title       String   @db.VarChar(500)
+  folderTitle String?  @map("folder_title") @db.VarChar(500)
+  url         String   @db.VarChar(1000)
+  tags        String[] @default([])
+  type        String   @default("dash-db") @db.VarChar(50)
+  isStarred   Boolean  @default(false) @map("is_starred")
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, uid])
+  @@index([tenantId])
+  @@map("grafana_dashboards")
+}
+
+// ─── Data Explorer — Velociraptor ───────────────────────────
+
+/// Synced Velociraptor endpoint metadata. Heavy details fetched live.
+/// Retention: re-synced periodically, stale entries auto-removed after 7 days.
+model VelociraptorEndpoint {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  clientId   String    @map("client_id") @db.VarChar(255)
+  hostname   String    @db.VarChar(500)
+  os         String?   @db.VarChar(100)
+  osVersion  String?   @map("os_version") @db.VarChar(255)
+  lastSeenAt DateTime? @map("last_seen_at")
+  labels     String[]  @default([])
+  ipAddress  String?   @map("ip_address") @db.VarChar(45)
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, clientId])
+  @@index([tenantId])
+  @@index([tenantId, hostname])
+  @@map("velociraptor_endpoints")
+}
+
+/// Synced Velociraptor hunt metadata.
+model VelociraptorHunt {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  huntId      String   @map("hunt_id") @db.VarChar(255)
+  description String?  @db.Text
+  creator     String?  @db.VarChar(255)
+  state       String?  @db.VarChar(50)
+  artifacts   String[] @default([])
+  totalClients    Int  @default(0) @map("total_clients")
+  finishedClients Int  @default(0) @map("finished_clients")
+  startedAt   DateTime? @map("started_at")
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, huntId])
+  @@index([tenantId])
+  @@map("velociraptor_hunts")
+}
+
+/// Synced Velociraptor notebook metadata.
+model VelociraptorNotebook {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  notebookId  String    @map("notebook_id") @db.VarChar(255)
+  name        String    @db.VarChar(500)
+  description String?   @db.Text
+  creator     String?   @db.VarChar(255)
+  modifiedAt  DateTime? @map("modified_at")
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, notebookId])
+  @@index([tenantId])
+  @@map("velociraptor_notebooks")
+}
+
+// ─── Data Explorer — Logstash Pipeline Logs ─────────────────
+
+/// Synced Logstash pipeline log entries. Seeded or synced from Logstash stats.
+/// Indexed for search and browse. Retention: synced on demand, replaced on re-sync.
+model LogstashPipelineLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  pipelineId     String   @map("pipeline_id") @db.VarChar(255)
+  timestamp      DateTime @default(now())
+  level          String   @db.VarChar(20)
+  message        String   @db.Text
+  source         String   @db.VarChar(255)
+  eventsIn       Int      @default(0) @map("events_in")
+  eventsOut      Int      @default(0) @map("events_out")
+  eventsFiltered Int      @default(0) @map("events_filtered")
+  durationMs     Float    @default(0) @map("duration_ms")
+  metadata       Json?
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, timestamp])
+  @@index([tenantId, pipelineId])
+  @@index([tenantId, level])
+  @@map("logstash_pipeline_logs")
+}
+
+// ─── Data Explorer — Shuffle Workflows ──────────────────────
+
+/// Synced Shuffle workflow metadata. Execution details fetched live.
+model ShuffleWorkflow {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  workflowId   String   @map("workflow_id") @db.VarChar(255)
+  name         String   @db.VarChar(500)
+  description  String?  @db.Text
+  isValid      Boolean  @default(false) @map("is_valid")
+  triggerCount Int      @default(0) @map("trigger_count")
+  tags         String[] @default([])
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, workflowId])
+  @@index([tenantId])
+  @@map("shuffle_workflows")
+}
+
+// ─── Notifications ──────────────────────────────────────────
+
+model Notification {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  type             String    @db.VarChar(50)
+  actorUserId      String    @map("actor_user_id") @db.Uuid
+  recipientUserId  String    @map("recipient_user_id") @db.Uuid
+  title            String    @db.VarChar(500)
+  message          String    @db.Text
+  entityType       String    @map("entity_type") @db.VarChar(50)
+  entityId         String    @map("entity_id") @db.Uuid
+  caseId           String?   @map("case_id") @db.Uuid
+  caseCommentId    String?   @map("case_comment_id") @db.Uuid
+  readAt           DateTime? @map("read_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([recipientUserId, caseCommentId])
+  @@index([tenantId, recipientUserId, readAt, createdAt])
+  @@index([tenantId, recipientUserId, createdAt])
+  @@index([caseCommentId])
+  @@map("notifications")
 }

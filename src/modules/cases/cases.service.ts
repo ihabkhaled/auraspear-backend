@@ -3,7 +3,10 @@ import {
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
+  CaseCycleStatus,
+  CaseStatus,
   CaseTimelineType,
+  NotificationType,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
@@ -11,16 +14,26 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { hasRoleAtLeast } from '../../common/utils/role.util'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { CaseRecord, PaginatedCaseNotes, PaginatedCases } from './cases.types'
+import { NotificationsService } from '../notifications/notifications.service'
+import type {
+  CaseCommentResponse,
+  CaseRecord,
+  MentionableUser,
+  PaginatedCaseComments,
+  PaginatedCaseNotes,
+  PaginatedCases,
+} from './cases.types'
 import type { CreateArtifactDto } from './dto/create-artifact.dto'
 import type { CreateCaseDto } from './dto/create-case.dto'
+import type { CreateCommentDto } from './dto/create-comment.dto'
 import type { CreateNoteDto } from './dto/create-note.dto'
 import type { CreateTaskDto } from './dto/create-task.dto'
 import type { LinkAlertDto } from './dto/link-alert.dto'
 import type { UpdateCaseDto } from './dto/update-case.dto'
+import type { UpdateCommentDto } from './dto/update-comment.dto'
 import type { UpdateTaskDto } from './dto/update-task.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { CaseNote, CaseStatus, CaseSeverity, Prisma } from '@prisma/client'
+import type { CaseNote, CaseSeverity, Prisma } from '@prisma/client'
 
 @Injectable()
 export class CasesService {
@@ -28,7 +41,8 @@ export class CasesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly notificationsService: NotificationsService
   ) {}
 
   private async resolveOwner(
@@ -242,7 +256,7 @@ export class CasesService {
         resolvedCycleId = dto.cycleId
       } else {
         const activeCycle = await tx.caseCycle.findFirst({
-          where: { tenantId: user.tenantId, status: 'active' },
+          where: { tenantId: user.tenantId, status: CaseCycleStatus.ACTIVE },
           select: { id: true },
         })
         resolvedCycleId = activeCycle?.id ?? null
@@ -256,7 +270,7 @@ export class CasesService {
           title: dto.title,
           description: dto.description,
           severity: dto.severity,
-          status: 'open',
+          status: CaseStatus.OPEN,
           ownerUserId: dto.ownerUserId ?? null,
           createdBy: user.email,
           cycleId: resolvedCycleId,
@@ -368,9 +382,11 @@ export class CasesService {
 
     // Allow re-opening and assignee changes on closed cases, block other updates
     const isReopening =
-      existing.status === 'closed' && dto.status !== undefined && dto.status !== 'closed'
+      existing.status === CaseStatus.CLOSED &&
+      dto.status !== undefined &&
+      dto.status !== CaseStatus.CLOSED
     const isAssigneeChange = dto.ownerUserId !== undefined
-    if (existing.status === 'closed' && !isReopening && !isAssigneeChange) {
+    if (existing.status === CaseStatus.CLOSED && !isReopening && !isAssigneeChange) {
       this.appLogger.warn('Update case denied: case is closed', {
         feature: AppLogFeature.CASES,
         action: 'updateCase',
@@ -485,7 +501,7 @@ export class CasesService {
       if (dto.status !== undefined) updateData['status'] = dto.status
       if (dto.ownerUserId !== undefined) updateData['ownerUserId'] = dto.ownerUserId
       if (dto.cycleId !== undefined) updateData['cycleId'] = dto.cycleId
-      if (dto.status === 'closed') updateData['closedAt'] = new Date()
+      if (dto.status === CaseStatus.CLOSED) updateData['closedAt'] = new Date()
       if (isReopening) updateData['closedAt'] = null
 
       const updated = await tx.case.updateMany({
@@ -542,6 +558,83 @@ export class CasesService {
       metadata: { caseNumber: existing.caseNumber, changedFields: Object.keys(dto).join(', ') },
     })
 
+    // Notify case assignment changes (after transaction success)
+    if (dto.ownerUserId !== undefined && dto.ownerUserId !== existing.ownerUserId) {
+      // Notify new assignee
+      if (dto.ownerUserId !== null) {
+        await this.notificationsService.notifyCaseAssigned(
+          user.tenantId,
+          id,
+          existing.caseNumber,
+          dto.ownerUserId,
+          user.sub,
+          user.email
+        )
+      }
+      // Notify previous assignee about unassignment
+      if (existing.ownerUserId) {
+        await this.notificationsService.notifyCaseUnassigned(
+          user.tenantId,
+          id,
+          existing.caseNumber,
+          existing.ownerUserId,
+          user.sub,
+          user.email
+        )
+      }
+    }
+
+    // Notify case owner about status change
+    if (isStatusChange) {
+      await this.notificationsService.notifyCaseActivity(
+        user.tenantId,
+        id,
+        existing.caseNumber,
+        existing.ownerUserId,
+        NotificationType.CASE_STATUS_CHANGED,
+        `Case ${existing.caseNumber} status changed to ${dto.status}`,
+        user.sub,
+        user.email
+      )
+    }
+
+    // Notify case owner about cycle change
+    if (dto.cycleId !== undefined && dto.cycleId !== existing.cycleId) {
+      const cycleMessage =
+        dto.cycleId === null
+          ? `Case ${existing.caseNumber} removed from cycle`
+          : `Case ${existing.caseNumber} added to a cycle`
+      await this.notificationsService.notifyCaseActivity(
+        user.tenantId,
+        id,
+        existing.caseNumber,
+        existing.ownerUserId,
+        NotificationType.CASE_UPDATED,
+        cycleMessage,
+        user.sub,
+        user.email
+      )
+    }
+
+    // Notify case owner about field edits (title, description, severity)
+    const hasFieldChanges =
+      !isStatusChange &&
+      dto.ownerUserId === undefined &&
+      dto.cycleId === undefined &&
+      (dto.title !== undefined || dto.description !== undefined || dto.severity !== undefined)
+    if (hasFieldChanges) {
+      await this.notificationsService.notifyCaseActivity(
+        user.tenantId,
+        id,
+        existing.caseNumber,
+        existing.ownerUserId,
+        NotificationType.CASE_UPDATED,
+        `Case ${existing.caseNumber} has been updated`,
+        user.sub,
+        user.email
+      )
+    }
+
     const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
       this.resolveOwner(result.ownerUserId),
       this.resolveCreatorName(result.createdBy),
@@ -560,7 +653,7 @@ export class CasesService {
     await this.prisma.$transaction(async tx => {
       await tx.case.updateMany({
         where: { id, tenantId },
-        data: { status: 'closed' as CaseStatus, closedAt: new Date() },
+        data: { status: CaseStatus.CLOSED, closedAt: new Date() },
       })
       await tx.caseTimeline.create({
         data: {
@@ -583,7 +676,7 @@ export class CasesService {
   async linkAlert(caseId: string, dto: LinkAlertDto, user: JwtPayload): Promise<CaseRecord> {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
-    if (existing.status === 'closed') {
+    if (existing.status === CaseStatus.CLOSED) {
       this.appLogger.warn('Cannot link alert: case is closed', {
         feature: AppLogFeature.CASES,
         action: 'linkAlert',
@@ -725,7 +818,7 @@ export class CasesService {
   async addCaseNote(caseId: string, dto: CreateNoteDto, user: JwtPayload): Promise<CaseNote> {
     const existing = await this.getCaseById(caseId, user.tenantId)
 
-    if (existing.status === 'closed') {
+    if (existing.status === CaseStatus.CLOSED) {
       this.appLogger.warn('Cannot add note: case is closed', {
         feature: AppLogFeature.CASES,
         action: 'addCaseNote',
@@ -768,6 +861,434 @@ export class CasesService {
 
     this.logger.log(`Note added to case ${existing.caseNumber} by ${user.email}`)
     return note
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* COMMENTS                                                          */
+  /* ---------------------------------------------------------------- */
+
+  async listCaseComments(
+    caseId: string,
+    tenantId: string,
+    page = 1,
+    limit = 20
+  ): Promise<PaginatedCaseComments> {
+    await this.getCaseById(caseId, tenantId)
+
+    const where = { caseId, isDeleted: false }
+
+    const [comments, total] = await Promise.all([
+      this.prisma.caseComment.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          mentions: true,
+        },
+      }),
+      this.prisma.caseComment.count({ where }),
+    ])
+
+    const authorIds = [...new Set(comments.map(c => c.authorId))]
+    const mentionUserIds = [...new Set(comments.flatMap(c => c.mentions.map(m => m.userId)))]
+    const allUserIds = [...new Set([...authorIds, ...mentionUserIds])]
+
+    const users =
+      allUserIds.length > 0
+        ? await this.prisma.user.findMany({
+            where: { id: { in: allUserIds } },
+            select: { id: true, name: true, email: true },
+          })
+        : []
+
+    const userMap = new Map(users.map(u => [u.id, u]))
+
+    const data: CaseCommentResponse[] = comments.map(comment => {
+      const author = userMap.get(comment.authorId)
+      return {
+        id: comment.id,
+        caseId: comment.caseId,
+        body: comment.body,
+        isEdited: comment.isEdited,
+        isDeleted: comment.isDeleted,
+        createdAt: comment.createdAt,
+        updatedAt: comment.updatedAt,
+        author: {
+          id: comment.authorId,
+          name: author?.name ?? 'Unknown',
+          email: author?.email ?? '',
+        },
+        mentions: comment.mentions.map(m => {
+          const mentionUser = userMap.get(m.userId)
+          return {
+            id: m.userId,
+            name: mentionUser?.name ?? 'Unknown',
+            email: mentionUser?.email ?? '',
+          }
+        }),
+      }
+    })
+
+    return {
+      data,
+      pagination: buildPaginationMeta(page, limit, total),
+    }
+  }
+
+  async addCaseComment(
+    caseId: string,
+    dto: CreateCommentDto,
+    user: JwtPayload
+  ): Promise<CaseCommentResponse> {
+    const existing = await this.getCaseById(caseId, user.tenantId)
+
+    if (existing.status === CaseStatus.CLOSED) {
+      this.appLogger.warn('Cannot add comment: case is closed', {
+        feature: AppLogFeature.CASES,
+        action: 'addCaseComment',
+        className: 'CasesService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { caseId, status: existing.status },
+      })
+      throw new BusinessException(
+        400,
+        'Cannot add comments to a closed case',
+        'errors.cases.alreadyClosed'
+      )
+    }
+
+    // Validate: cannot mention yourself
+    const uniqueMentionIds = [...new Set(dto.mentionedUserIds)]
+    if (uniqueMentionIds.includes(user.sub)) {
+      throw new BusinessException(
+        400,
+        'You cannot mention yourself in a comment',
+        'errors.cases.cannotMentionSelf'
+      )
+    }
+
+    // Validate mentioned users belong to the same tenant
+    if (uniqueMentionIds.length > 0) {
+      const validMentions = await this.prisma.tenantMembership.count({
+        where: {
+          userId: { in: uniqueMentionIds },
+          tenantId: user.tenantId,
+          status: MembershipStatus.ACTIVE,
+        },
+      })
+      if (validMentions !== uniqueMentionIds.length) {
+        throw new BusinessException(
+          400,
+          'One or more mentioned users are not active members of this tenant',
+          'errors.cases.invalidMentionedUsers'
+        )
+      }
+    }
+
+    const truncatedBody = dto.body.length > 80 ? `${dto.body.slice(0, 80)}...` : dto.body
+
+    const comment = await this.prisma.$transaction(async tx => {
+      const createdComment = await tx.caseComment.create({
+        data: {
+          caseId,
+          authorId: user.sub,
+          body: dto.body,
+        },
+      })
+
+      if (uniqueMentionIds.length > 0) {
+        await tx.caseCommentMention.createMany({
+          data: uniqueMentionIds.map(userId => ({
+            commentId: createdComment.id,
+            userId,
+          })),
+        })
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: CaseTimelineType.COMMENT_ADDED,
+          actor: user.email,
+          description: `Comment added: ${truncatedBody}`,
+        },
+      })
+
+      return tx.caseComment.findUniqueOrThrow({
+        where: { id: createdComment.id },
+        include: { mentions: true },
+      })
+    })
+
+    this.appLogger.info('Comment added', {
+      feature: AppLogFeature.CASES,
+      action: 'addCaseComment',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'CaseComment',
+      targetResourceId: comment.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'addCaseComment',
+      metadata: { caseId, caseNumber: existing.caseNumber, mentionCount: uniqueMentionIds.length },
+    })
+
+    // Create mention notifications after the transaction succeeds
+    if (uniqueMentionIds.length > 0) {
+      await this.notificationsService.createMentionNotifications(
+        user.tenantId,
+        caseId,
+        comment.id,
+        uniqueMentionIds,
+        user
+      )
+    }
+
+    // Notify case owner about the new comment
+    await this.notificationsService.notifyCaseActivity(
+      user.tenantId,
+      caseId,
+      existing.caseNumber,
+      existing.ownerUserId,
+      NotificationType.CASE_COMMENT_ADDED,
+      `New comment on case ${existing.caseNumber}: ${truncatedBody}`,
+      user.sub,
+      user.email
+    )
+
+    return this.mapCommentToResponse(comment, user.sub)
+  }
+
+  async updateCaseComment(
+    caseId: string,
+    commentId: string,
+    dto: UpdateCommentDto,
+    user: JwtPayload
+  ): Promise<CaseCommentResponse> {
+    await this.getCaseById(caseId, user.tenantId)
+
+    const existing = await this.prisma.caseComment.findFirst({
+      where: { id: commentId, caseId, isDeleted: false },
+    })
+    if (!existing) {
+      throw new BusinessException(404, 'Comment not found', 'errors.cases.commentNotFound')
+    }
+
+    // Only author or TENANT_ADMIN+ can edit
+    if (existing.authorId !== user.sub && !hasRoleAtLeast(user.role, UserRole.TENANT_ADMIN)) {
+      throw new BusinessException(
+        403,
+        'You can only edit your own comments',
+        'errors.cases.commentEditNotAllowed'
+      )
+    }
+
+    const uniqueMentionIds = [...new Set(dto.mentionedUserIds)]
+    if (uniqueMentionIds.length > 0) {
+      const validMentions = await this.prisma.tenantMembership.count({
+        where: {
+          userId: { in: uniqueMentionIds },
+          tenantId: user.tenantId,
+          status: MembershipStatus.ACTIVE,
+        },
+      })
+      if (validMentions !== uniqueMentionIds.length) {
+        throw new BusinessException(
+          400,
+          'One or more mentioned users are not active members of this tenant',
+          'errors.cases.invalidMentionedUsers'
+        )
+      }
+    }
+
+    const comment = await this.prisma.$transaction(async tx => {
+      await tx.caseComment.update({
+        where: { id: commentId },
+        data: {
+          body: dto.body,
+          isEdited: true,
+        },
+      })
+
+      // Replace mentions
+      await tx.caseCommentMention.deleteMany({ where: { commentId } })
+      if (uniqueMentionIds.length > 0) {
+        await tx.caseCommentMention.createMany({
+          data: uniqueMentionIds.map(userId => ({
+            commentId,
+            userId,
+          })),
+        })
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: CaseTimelineType.COMMENT_EDITED,
+          actor: user.email,
+          description: 'Comment edited',
+        },
+      })
+
+      return tx.caseComment.findUniqueOrThrow({
+        where: { id: commentId },
+        include: { mentions: true },
+      })
+    })
+
+    this.appLogger.info('Comment updated', {
+      feature: AppLogFeature.CASES,
+      action: 'updateCaseComment',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseComment',
+      targetResourceId: commentId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'updateCaseComment',
+      metadata: { caseId },
+    })
+
+    return this.mapCommentToResponse(comment, user.sub)
+  }
+
+  async deleteCaseComment(
+    caseId: string,
+    commentId: string,
+    user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
+    const caseRecord = await this.getCaseById(caseId, user.tenantId)
+
+    const existing = await this.prisma.caseComment.findFirst({
+      where: { id: commentId, caseId, isDeleted: false },
+    })
+    if (!existing) {
+      throw new BusinessException(404, 'Comment not found', 'errors.cases.commentNotFound')
+    }
+
+    // Only author or TENANT_ADMIN+ can delete
+    if (existing.authorId !== user.sub && !hasRoleAtLeast(user.role, UserRole.TENANT_ADMIN)) {
+      throw new BusinessException(
+        403,
+        'You can only delete your own comments',
+        'errors.cases.commentDeleteNotAllowed'
+      )
+    }
+
+    await this.prisma.$transaction(async tx => {
+      // Soft delete
+      await tx.caseComment.update({
+        where: { id: commentId },
+        data: { isDeleted: true },
+      })
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: CaseTimelineType.COMMENT_DELETED,
+          actor: user.email,
+          description: 'Comment deleted',
+        },
+      })
+    })
+
+    this.appLogger.info('Comment deleted', {
+      feature: AppLogFeature.CASES,
+      action: 'deleteCaseComment',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseComment',
+      targetResourceId: commentId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'deleteCaseComment',
+      metadata: { caseId, caseNumber: caseRecord.caseNumber },
+    })
+
+    return { deleted: true }
+  }
+
+  async searchMentionableUsers(
+    tenantId: string,
+    query: string,
+    limit = 10
+  ): Promise<MentionableUser[]> {
+    const memberships = await this.prisma.tenantMembership.findMany({
+      where: {
+        tenantId,
+        status: MembershipStatus.ACTIVE,
+        user: {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } },
+          ],
+        },
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+      },
+      take: limit,
+    })
+
+    return memberships.map(m => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+    }))
+  }
+
+  private async mapCommentToResponse(
+    comment: {
+      id: string
+      caseId: string
+      authorId: string
+      body: string
+      isEdited: boolean
+      isDeleted: boolean
+      createdAt: Date
+      updatedAt: Date
+      mentions: Array<{ userId: string }>
+    },
+    _requestUserId: string
+  ): Promise<CaseCommentResponse> {
+    const allUserIds = [comment.authorId, ...comment.mentions.map(m => m.userId)]
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(allUserIds)] } },
+      select: { id: true, name: true, email: true },
+    })
+    const userMap = new Map(users.map(u => [u.id, u]))
+    const author = userMap.get(comment.authorId)
+
+    return {
+      id: comment.id,
+      caseId: comment.caseId,
+      body: comment.body,
+      isEdited: comment.isEdited,
+      isDeleted: comment.isDeleted,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      author: {
+        id: comment.authorId,
+        name: author?.name ?? 'Unknown',
+        email: author?.email ?? '',
+      },
+      mentions: comment.mentions.map(m => {
+        const mentionUser = userMap.get(m.userId)
+        return {
+          id: m.userId,
+          name: mentionUser?.name ?? 'Unknown',
+          email: mentionUser?.email ?? '',
+        }
+      }),
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -840,7 +1361,7 @@ export class CasesService {
   async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload) {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
-    if (caseRecord.status === 'closed') {
+    if (caseRecord.status === CaseStatus.CLOSED) {
       throw new BusinessException(
         400,
         'Cannot add tasks to a closed case',
@@ -886,6 +1407,18 @@ export class CasesService {
       functionName: 'createTask',
       metadata: { caseId, caseNumber: caseRecord.caseNumber },
     })
+
+    // Notify case owner about new task
+    await this.notificationsService.notifyCaseActivity(
+      user.tenantId,
+      caseId,
+      caseRecord.caseNumber,
+      caseRecord.ownerUserId,
+      NotificationType.CASE_TASK_ADDED,
+      `New task added to case ${caseRecord.caseNumber}: "${dto.title}"`,
+      user.sub,
+      user.email
+    )
 
     return task
   }
@@ -982,7 +1515,7 @@ export class CasesService {
   async createArtifact(caseId: string, dto: CreateArtifactDto, user: JwtPayload) {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
-    if (caseRecord.status === 'closed') {
+    if (caseRecord.status === CaseStatus.CLOSED) {
       throw new BusinessException(
         400,
         'Cannot add artifacts to a closed case',
@@ -1035,6 +1568,18 @@ export class CasesService {
       functionName: 'createArtifact',
       metadata: { caseId, caseNumber: caseRecord.caseNumber },
     })
+
+    // Notify case owner about new artifact
+    await this.notificationsService.notifyCaseActivity(
+      user.tenantId,
+      caseId,
+      caseRecord.caseNumber,
+      caseRecord.ownerUserId,
+      NotificationType.CASE_ARTIFACT_ADDED,
+      `New artifact added to case ${caseRecord.caseNumber}: ${dto.type}:${dto.value}`,
+      user.sub,
+      user.email
+    )
 
     return artifact
   }

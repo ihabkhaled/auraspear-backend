@@ -14,6 +14,14 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
+const mockConnectorsService = {
+  getDecryptedConfig: jest.fn().mockResolvedValue(null),
+}
+
+const mockBedrockService = {
+  invoke: jest.fn(),
+}
+
 const mockUser: JwtPayload = {
   sub: 'user-1',
   tenantId: 'tenant-1',
@@ -29,6 +37,7 @@ function createMockPrisma() {
     },
     alert: {
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     aiAuditLog: {
       create: jest.fn(),
@@ -37,7 +46,12 @@ function createMockPrisma() {
 }
 
 function createService(prisma: ReturnType<typeof createMockPrisma>) {
-  return new AiService(prisma as never, mockAppLogger as never)
+  return new AiService(
+    prisma as never,
+    mockAppLogger as never,
+    mockConnectorsService as never,
+    mockBedrockService as never
+  )
 }
 
 describe('AiService', () => {
@@ -46,6 +60,7 @@ describe('AiService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockConnectorsService.getDecryptedConfig.mockResolvedValue(null)
     prisma = createMockPrisma()
     service = createService(prisma)
   })
@@ -70,9 +85,9 @@ describe('AiService', () => {
       expect(Array.isArray(result.reasoning)).toBe(true)
       expect(result.reasoning.length).toBeGreaterThan(0)
       expect(result.confidence).toBe(0.87)
-      expect(result.model).toBe('anthropic.claude-3-sonnet')
-      expect(result.tokensUsed.input).toBe(1247)
-      expect(result.tokensUsed.output).toBe(2156)
+      expect(result.model).toBe('rule-based')
+      expect(result.tokensUsed.input).toBe(0)
+      expect(result.tokensUsed.output).toBe(0)
     })
 
     it('should throw 403 when Bedrock connector not enabled', async () => {
@@ -148,9 +163,9 @@ describe('AiService', () => {
             tenantId: 'tenant-1',
             actor: 'user-1',
             action: 'ai_hunt',
-            model: 'anthropic.claude-3-sonnet',
-            inputTokens: 1247,
-            outputTokens: 2156,
+            model: 'rule-based',
+            inputTokens: 0,
+            outputTokens: 0,
           }),
         })
       )
@@ -179,25 +194,43 @@ describe('AiService', () => {
   describe('aiInvestigate', () => {
     const dto = { alertId: 'alert-1' }
 
+    const mockAlert = {
+      id: 'alert-1',
+      tenantId: 'tenant-1',
+      title: 'Suspicious Login Attempt',
+      severity: 'medium',
+      ruleId: 'rule-1',
+      ruleName: 'Failed Login',
+      sourceIp: '192.168.1.100',
+      destinationIp: '10.0.0.1',
+      agentName: 'agent-01',
+      mitreTactics: ['Initial Access'],
+      mitreTechniques: ['T1078'],
+      description: 'Multiple failed login attempts detected',
+      rawEvent: null,
+      timestamp: new Date(),
+    }
+
     it('should return investigation response', async () => {
       prisma.connectorConfig.findFirst.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue({ id: 'alert-1' })
+      prisma.alert.findFirst.mockResolvedValue(mockAlert)
       prisma.aiAuditLog.create.mockResolvedValue({})
 
       const result = await service.aiInvestigate(dto, mockUser)
 
       expect(result.result).toContain('AI Investigation Report')
-      expect(result.result).toContain('alert-1')
-      expect(result.confidence).toBe(0.92)
-      expect(result.model).toBe('anthropic.claude-3-sonnet')
+      expect(result.result).toContain('Suspicious Login Attempt')
+      expect(result.confidence).toBeGreaterThan(0.5)
+      expect(result.confidence).toBeLessThanOrEqual(0.99)
+      expect(result.model).toBe('rule-based')
       expect(Array.isArray(result.reasoning)).toBe(true)
       expect(result.reasoning.length).toBeGreaterThan(0)
-      expect(result.tokensUsed.input).toBe(1834)
-      expect(result.tokensUsed.output).toBe(2891)
+      expect(result.tokensUsed.input).toBe(0)
+      expect(result.tokensUsed.output).toBe(0)
     })
 
     it('should throw 403 when AI not enabled', async () => {
@@ -237,7 +270,7 @@ describe('AiService', () => {
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue({ id: 'alert-1' })
+      prisma.alert.findFirst.mockResolvedValue(mockAlert)
       prisma.aiAuditLog.create.mockResolvedValue({})
 
       await service.aiInvestigate(dto, mockUser)
@@ -255,7 +288,7 @@ describe('AiService', () => {
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue({ id: 'alert-1' })
+      prisma.alert.findFirst.mockResolvedValue(mockAlert)
       prisma.aiAuditLog.create.mockResolvedValue({})
 
       await service.aiInvestigate(dto, mockUser)
@@ -266,7 +299,7 @@ describe('AiService', () => {
             tenantId: 'tenant-1',
             actor: 'user-1',
             action: 'ai_investigate',
-            model: 'anthropic.claude-3-sonnet',
+            model: 'rule-based',
           }),
         })
       )

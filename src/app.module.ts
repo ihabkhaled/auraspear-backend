@@ -20,9 +20,11 @@ import { ConnectorSyncModule } from './modules/connector-sync/connector-sync.mod
 import { ConnectorWorkspacesModule } from './modules/connector-workspaces/connector-workspaces.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
+import { DataExplorerModule } from './modules/data-explorer/data-explorer.module'
 import { HealthModule } from './modules/health/health.module'
 import { HuntsModule } from './modules/hunts/hunts.module'
 import { IntelModule } from './modules/intel/intel.module'
+import { NotificationsModule } from './modules/notifications/notifications.module'
 import { TenantsModule } from './modules/tenants/tenants.module'
 import { UsersModule } from './modules/users/users.module'
 import { PrismaModule } from './prisma/prisma.module'
@@ -64,6 +66,7 @@ import { PrismaModule } from './prisma/prisma.module'
     ConnectorsModule,
     ConnectorWorkspacesModule,
     ConnectorSyncModule,
+    DataExplorerModule,
     AlertsModule,
     AppLogsModule,
     AuditLogsModule,
@@ -72,6 +75,7 @@ import { PrismaModule } from './prisma/prisma.module'
     CaseCyclesModule,
     CasesModule,
     IntelModule,
+    NotificationsModule,
     AiModule,
     HealthModule,
     UsersModule,
