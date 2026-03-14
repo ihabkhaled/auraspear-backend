@@ -1,4 +1,4 @@
 {
-  "buildCommand": "npx prisma migrate resolve --rolled-back 20260314033727_add_case_tasks_and_artifacts && npx prisma migrate resolve --rolled-back 20260314060000_add_connector_last_sync_at && npx prisma generate && npx prisma migrate deploy && npm run build && npx prisma db seed",
+  "buildCommand": "npx prisma migrate resolve --rolled-back 20260314060000_add_connector_last_sync_at && npx prisma generate && npx prisma migrate deploy && npm run build && npx prisma db seed",
   "installCommand": "npm install"
 }
