@@ -29,9 +29,12 @@ export class BedrockService {
       // For now, verify credentials format is valid
       const { BedrockRuntimeClient, InvokeModelCommand } = await this.loadAwsSdk()
 
+      const endpoint = config.endpoint as string | undefined
+
       const client = new BedrockRuntimeClient({
         region,
         credentials: { accessKeyId, secretAccessKey },
+        ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
       })
 
       // Send a minimal test prompt
@@ -104,11 +107,13 @@ export class BedrockService {
     const secretAccessKey = config.secretAccessKey as string
     const modelId = (config.modelId ?? 'anthropic.claude-3-sonnet-20240229-v1:0') as string
 
+    const endpoint = config.endpoint as string | undefined
     const { BedrockRuntimeClient, InvokeModelCommand } = await this.loadAwsSdk()
 
     const client = new BedrockRuntimeClient({
       region,
       credentials: { accessKeyId, secretAccessKey },
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     })
 
     const command = new InvokeModelCommand({

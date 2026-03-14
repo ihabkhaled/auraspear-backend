@@ -1,9 +1,10 @@
-import { connectorFetch } from '../../src/common/utils/connector-http.util'
+import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.util'
 import { VelociraptorService } from '../../src/modules/connectors/services/velociraptor.service'
 
 jest.mock('../../src/common/utils/connector-http.util')
 
 const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
+const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -16,9 +17,19 @@ function createService(): VelociraptorService {
   return new VelociraptorService(mockAppLogger as never)
 }
 
-const VALID_CONFIG: Record<string, unknown> = {
-  baseUrl: 'https://velociraptor.local',
-  apiKey: 'vr-api-key-xyz',
+/** Config using basic auth (username + password) */
+const BASIC_AUTH_CONFIG: Record<string, unknown> = {
+  apiUrl: 'https://velociraptor.local:8889',
+  username: 'admin',
+  password: 'admin',
+  verifyTls: true,
+}
+
+/** Config using mTLS (clientCert + clientKey) */
+const MTLS_CONFIG: Record<string, unknown> = {
+  apiUrl: 'https://velociraptor.local:8001',
+  clientCert: '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----',
+  clientKey: '-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----',
   verifyTls: true,
 }
 
@@ -27,6 +38,7 @@ describe('VelociraptorService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockedBasicAuth.mockReturnValue('Basic YWRtaW46YWRtaW4=')
     service = createService()
   })
 
@@ -35,7 +47,7 @@ describe('VelociraptorService', () => {
   /* ------------------------------------------------------------------ */
 
   describe('testConnection', () => {
-    it('should return ok: true when Velociraptor is reachable', async () => {
+    it('should return ok: true with basic auth when reachable', async () => {
       mockedConnectorFetch.mockResolvedValue({
         status: 200,
         data: { metadata: {} },
@@ -43,22 +55,45 @@ describe('VelociraptorService', () => {
         latencyMs: 25,
       })
 
-      const result = await service.testConnection(VALID_CONFIG)
+      const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(result.ok).toBe(true)
       expect(result.details).toContain('Velociraptor server reachable')
       expect(result.details).toContain('velociraptor.local')
       expect(mockedConnectorFetch).toHaveBeenCalledWith(
-        'https://velociraptor.local/api/v1/GetServerMetadata',
+        'https://velociraptor.local:8889/api/v1/GetUserUITraits',
         expect.objectContaining({
           headers: expect.objectContaining({
-            'Grpc-Metadata-authorization': 'Bearer vr-api-key-xyz',
+            Authorization: 'Basic YWRtaW46YWRtaW4=',
           }),
+          rejectUnauthorized: true,
+          allowPrivateNetwork: true,
         })
       )
     })
 
-    it('should use gRPC auth header format', async () => {
+    it('should return ok: true with mTLS auth when reachable', async () => {
+      mockedConnectorFetch.mockResolvedValue({
+        status: 200,
+        data: {},
+        headers: {},
+        latencyMs: 15,
+      })
+
+      const result = await service.testConnection(MTLS_CONFIG)
+
+      expect(result.ok).toBe(true)
+      expect(result.details).toContain('Velociraptor server reachable')
+      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+        'https://velociraptor.local:8001/api/v1/GetUserUITraits',
+        expect.objectContaining({
+          clientCert: MTLS_CONFIG.clientCert,
+          clientKey: MTLS_CONFIG.clientKey,
+        })
+      )
+    })
+
+    it('should use basicAuth helper for username/password', async () => {
       mockedConnectorFetch.mockResolvedValue({
         status: 200,
         data: {},
@@ -66,28 +101,40 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.testConnection(VALID_CONFIG)
+      await service.testConnection(BASIC_AUTH_CONFIG)
 
-      const callArguments = mockedConnectorFetch.mock.calls[0]
-      const options = callArguments?.[1] as Record<string, unknown> | undefined
-      const headers = options?.headers as Record<string, string> | undefined
+      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'admin')
+    })
 
-      expect(headers?.['Grpc-Metadata-authorization']).toBe('Bearer vr-api-key-xyz')
+    it('should fall back to baseUrl when apiUrl is missing', async () => {
+      mockedConnectorFetch.mockResolvedValue({
+        status: 200,
+        data: {},
+        headers: {},
+        latencyMs: 10,
+      })
+
+      await service.testConnection({ baseUrl: 'https://vr.local', username: 'u', password: 'p' })
+
+      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+        'https://vr.local/api/v1/GetUserUITraits',
+        expect.anything()
+      )
     })
 
     it('should return error when base URL is not configured', async () => {
-      const result = await service.testConnection({ apiKey: 'key' })
+      const result = await service.testConnection({ username: 'admin', password: 'admin' })
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Velociraptor base URL not configured')
+      expect(result.details).toBe('Velociraptor URL not configured')
       expect(mockedConnectorFetch).not.toHaveBeenCalled()
     })
 
-    it('should return error when API key is not configured', async () => {
-      const result = await service.testConnection({ baseUrl: 'https://vr.local' })
+    it('should return error when no auth is configured', async () => {
+      const result = await service.testConnection({ apiUrl: 'https://vr.local' })
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Velociraptor API key not configured')
+      expect(result.details).toContain('authentication not configured')
       expect(mockedConnectorFetch).not.toHaveBeenCalled()
     })
 
@@ -99,7 +146,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      const result = await service.testConnection(VALID_CONFIG)
+      const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Velociraptor returned status 403')
@@ -108,7 +155,7 @@ describe('VelociraptorService', () => {
     it('should handle network errors gracefully', async () => {
       mockedConnectorFetch.mockRejectedValue(new Error('self-signed certificate'))
 
-      const result = await service.testConnection(VALID_CONFIG)
+      const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('self-signed certificate')
@@ -118,7 +165,7 @@ describe('VelociraptorService', () => {
     it('should handle non-Error thrown values', async () => {
       mockedConnectorFetch.mockRejectedValue({ code: 'UNKNOWN' })
 
-      const result = await service.testConnection(VALID_CONFIG)
+      const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Connection failed')
@@ -132,7 +179,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.testConnection(VALID_CONFIG)
+      await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
         'Velociraptor connection test succeeded',
@@ -145,7 +192,7 @@ describe('VelociraptorService', () => {
     it('should log error on failed connection', async () => {
       mockedConnectorFetch.mockRejectedValue(new Error('ETIMEDOUT'))
 
-      await service.testConnection(VALID_CONFIG)
+      await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(mockAppLogger.error).toHaveBeenCalledWith(
         'Velociraptor connection test failed',
@@ -164,11 +211,33 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.testConnection({ ...VALID_CONFIG, verifyTls: false })
+      await service.testConnection({ ...BASIC_AUTH_CONFIG, verifyTls: false })
 
       expect(mockedConnectorFetch).toHaveBeenCalledWith(
         expect.stringContaining('velociraptor.local'),
         expect.objectContaining({ rejectUnauthorized: false })
+      )
+    })
+
+    it('should include caCert in mTLS options when provided', async () => {
+      mockedConnectorFetch.mockResolvedValue({
+        status: 200,
+        data: {},
+        headers: {},
+        latencyMs: 10,
+      })
+
+      const config = {
+        ...MTLS_CONFIG,
+        caCert: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
+      }
+      await service.testConnection(config)
+
+      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          caCert: config.caCert,
+        })
       )
     })
   })
@@ -189,18 +258,15 @@ describe('VelociraptorService', () => {
       })
 
       const vql = 'SELECT * FROM clients()'
-      const result = await service.runVQL(VALID_CONFIG, vql)
+      const result = await service.runVQL(BASIC_AUTH_CONFIG, vql)
 
       expect(result.rows).toEqual(mockRows)
       expect(result.columns).toEqual(mockColumns)
       expect(mockedConnectorFetch).toHaveBeenCalledWith(
-        'https://velociraptor.local/api/v1/CreateNotebook',
+        'https://velociraptor.local:8889/api/v1/CreateNotebook',
         expect.objectContaining({
           method: 'POST',
           body: { query: vql },
-          headers: expect.objectContaining({
-            'Grpc-Metadata-authorization': 'Bearer vr-api-key-xyz',
-          }),
         })
       )
     })
@@ -213,7 +279,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      const result = await service.runVQL(VALID_CONFIG, 'SELECT 1')
+      const result = await service.runVQL(BASIC_AUTH_CONFIG, 'SELECT 1')
 
       expect(result.rows).toEqual([])
       expect(result.columns).toEqual([])
@@ -227,7 +293,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await expect(service.runVQL(VALID_CONFIG, 'INVALID VQL')).rejects.toThrow(
+      await expect(service.runVQL(BASIC_AUTH_CONFIG, 'INVALID VQL')).rejects.toThrow(
         'VQL query failed: status 400'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
@@ -241,7 +307,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.runVQL(VALID_CONFIG, 'SELECT a FROM test()')
+      await service.runVQL(BASIC_AUTH_CONFIG, 'SELECT a FROM test()')
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
         'Velociraptor VQL query executed',
@@ -251,7 +317,7 @@ describe('VelociraptorService', () => {
       )
     })
 
-    it('should use gRPC auth header for VQL queries', async () => {
+    it('should use basic auth header for VQL queries', async () => {
       mockedConnectorFetch.mockResolvedValue({
         status: 200,
         data: { rows: [], columns: [] },
@@ -259,13 +325,13 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.runVQL(VALID_CONFIG, 'SELECT 1')
+      await service.runVQL(BASIC_AUTH_CONFIG, 'SELECT 1')
 
       const callArguments = mockedConnectorFetch.mock.calls[0]
       const options = callArguments?.[1] as Record<string, unknown> | undefined
       const headers = options?.headers as Record<string, string> | undefined
 
-      expect(headers?.['Grpc-Metadata-authorization']).toBe('Bearer vr-api-key-xyz')
+      expect(headers?.Authorization).toBe('Basic YWRtaW46YWRtaW4=')
     })
   })
 
@@ -286,14 +352,14 @@ describe('VelociraptorService', () => {
         latencyMs: 80,
       })
 
-      const clients = await service.getClients(VALID_CONFIG)
+      const clients = await service.getClients(BASIC_AUTH_CONFIG)
 
       expect(clients).toEqual(mockClients)
       expect(mockedConnectorFetch).toHaveBeenCalledWith(
-        'https://velociraptor.local/api/v1/SearchClients?query=all&limit=500',
+        'https://velociraptor.local:8889/api/v1/SearchClients?query=all&limit=500',
         expect.objectContaining({
           headers: expect.objectContaining({
-            'Grpc-Metadata-authorization': 'Bearer vr-api-key-xyz',
+            Authorization: 'Basic YWRtaW46YWRtaW4=',
           }),
         })
       )
@@ -307,7 +373,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      const clients = await service.getClients(VALID_CONFIG)
+      const clients = await service.getClients(BASIC_AUTH_CONFIG)
 
       expect(clients).toEqual([])
     })
@@ -320,7 +386,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await expect(service.getClients(VALID_CONFIG)).rejects.toThrow(
+      await expect(service.getClients(BASIC_AUTH_CONFIG)).rejects.toThrow(
         'Failed to fetch clients: status 503'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
@@ -334,7 +400,7 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.getClients(VALID_CONFIG)
+      await service.getClients(BASIC_AUTH_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
         'Velociraptor clients retrieved',
@@ -344,7 +410,7 @@ describe('VelociraptorService', () => {
       )
     })
 
-    it('should use gRPC auth header for client queries', async () => {
+    it('should use mTLS options for client queries', async () => {
       mockedConnectorFetch.mockResolvedValue({
         status: 200,
         data: { items: [] },
@@ -352,13 +418,15 @@ describe('VelociraptorService', () => {
         latencyMs: 10,
       })
 
-      await service.getClients(VALID_CONFIG)
+      await service.getClients(MTLS_CONFIG)
 
-      const callArguments = mockedConnectorFetch.mock.calls[0]
-      const options = callArguments?.[1] as Record<string, unknown> | undefined
-      const headers = options?.headers as Record<string, string> | undefined
-
-      expect(headers?.['Grpc-Metadata-authorization']).toBe('Bearer vr-api-key-xyz')
+      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          clientCert: MTLS_CONFIG.clientCert,
+          clientKey: MTLS_CONFIG.clientKey,
+        })
+      )
     })
   })
 })
