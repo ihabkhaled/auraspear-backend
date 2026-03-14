@@ -8,9 +8,9 @@
 #   docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml up -d
 #
 # Default Credentials (for local dev only):
-#   Wazuh Manager:    admin / SecretPassword
-#   Wazuh Indexer:    admin / SecretPassword
-#   Wazuh Dashboard:  admin / SecretPassword
+#   Wazuh Manager API: wazuh-wui / MyS3cr37P450r.*-
+#   Wazuh Indexer:    admin / admin
+#   Wazuh Dashboard:  admin / admin
 #   Graylog:          admin / admin@Graylog1
 #   Logstash:         no auth (Monitoring API on port 9600)
 #   Grafana:          admin / admin
@@ -18,6 +18,7 @@
 #   MISP:             admin@admin.test / admin
 #   Shuffle:          admin / password (first-time setup via UI)
 #   Velociraptor:     admin / admin (first-time setup via UI)
+#   OpenSearch (Graylog/Shuffle): admin / AuraSpear#Dev2024!
 # =============================================================================
 
 networks:
@@ -25,6 +26,7 @@ networks:
     driver: bridge
 
 volumes:
+  wazuh_certs:
   wazuh_api_configuration:
   wazuh_etc:
   wazuh_logs:
@@ -61,11 +63,37 @@ services:
   # Indexer:     https://localhost:9200 (admin/SecretPassword)
   # Dashboard:   https://localhost:5601 (admin/SecretPassword)
 
+  wazuh-certs-generator:
+    image: wazuh/wazuh-certs-generator:0.0.2
+    container_name: auraspear-wazuh-certs-generator
+    hostname: wazuh-certs-generator
+    entrypoint: /bin/sh
+    command: >
+      -c '
+        if [ -f /certificates/root-ca.pem ]; then
+          echo "Certificates already exist, skipping generation.";
+        else
+          /entrypoint.sh;
+        fi;
+        chown -R 1000:1000 /certificates 2>/dev/null;
+        chmod 755 /certificates 2>/dev/null;
+        chmod 644 /certificates/* 2>/dev/null;
+        echo "Certificate permissions set.";
+      '
+    volumes:
+      - wazuh_certs:/certificates
+      - ./config/wazuh/wazuh-certs.yml:/config/certs.yml:ro
+    networks:
+      - connectors
+
   wazuh-manager:
     image: wazuh/wazuh-manager:4.9.2
     container_name: auraspear-wazuh-manager
     hostname: wazuh-manager
     restart: unless-stopped
+    depends_on:
+      wazuh-certs-generator:
+        condition: service_completed_successfully
     ulimits:
       memlock:
         soft: -1
@@ -82,10 +110,10 @@ services:
       INDEXER_URL: https://wazuh-indexer:9200
       INDEXER_USERNAME: admin
       INDEXER_PASSWORD: SecretPassword
-      FILEBEAT_SSL_VERIFICATION_MODE: full
+      FILEBEAT_SSL_VERIFICATION_MODE: none
       SSL_CERTIFICATE_AUTHORITIES: /etc/ssl/root-ca.pem
-      SSL_CERTIFICATE: /etc/ssl/filebeat.pem
-      SSL_KEY: /etc/ssl/filebeat-key.pem
+      SSL_CERTIFICATE: /etc/ssl/wazuh.manager.pem
+      SSL_KEY: /etc/ssl/wazuh.manager-key.pem
       API_USERNAME: wazuh-wui
       API_PASSWORD: MyS3cr37P450r.*-
     volumes:
@@ -100,6 +128,7 @@ services:
       - wazuh_wodles:/var/ossec/wodles
       - filebeat_etc:/etc/filebeat
       - filebeat_var:/var/lib/filebeat
+      - wazuh_certs:/etc/ssl:ro
     networks:
       - connectors
 
@@ -108,6 +137,11 @@ services:
     container_name: auraspear-wazuh-indexer
     hostname: wazuh-indexer
     restart: unless-stopped
+    user: '0:0'
+    depends_on:
+      wazuh-certs-generator:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "/setup-certs.sh"]
     ulimits:
       memlock:
         soft: -1
@@ -120,10 +154,13 @@ services:
     environment:
       OPENSEARCH_JAVA_OPTS: '-Xms1g -Xmx1g'
       bootstrap.memory_lock: 'true'
+      discovery.type: single-node
       INDEXER_USERNAME: admin
-      INDEXER_PASSWORD: SecretPassword
+      INDEXER_PASSWORD: admin
     volumes:
       - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - wazuh_certs:/certs-shared:ro
+      - ./config/wazuh/setup-indexer-certs.sh:/setup-certs.sh:ro
     networks:
       - connectors
 
@@ -132,11 +169,13 @@ services:
     container_name: auraspear-wazuh-dashboard
     hostname: wazuh-dashboard
     restart: unless-stopped
+    user: '0:0'
+    entrypoint: ["/bin/sh", "/setup-certs.sh"]
     ports:
-      - '5601:5601'
+      - '5601:443'
     environment:
       INDEXER_USERNAME: admin
-      INDEXER_PASSWORD: SecretPassword
+      INDEXER_PASSWORD: admin
       WAZUH_API_URL: https://wazuh-manager
       DASHBOARD_USERNAME: kibanaserver
       DASHBOARD_PASSWORD: kibanaserver
@@ -144,7 +183,8 @@ services:
       API_PASSWORD: MyS3cr37P450r.*-
     volumes:
       - wazuh_dashboard_config:/usr/share/wazuh-dashboard/data/wazuh/config
-      - wazuh_dashboard_certs:/usr/share/wazuh-dashboard/certs
+      - wazuh_certs:/certs-shared:ro
+      - ./config/wazuh/setup-dashboard-certs.sh:/setup-certs.sh:ro
     depends_on:
       - wazuh-indexer
     networks:
@@ -176,7 +216,7 @@ services:
       discovery.type: single-node
       action.auto_create_index: 'false'
       plugins.security.disabled: 'true'
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'Adm1n@OpenSearch!'
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'AuraSpear#Dev2024!'
     ulimits:
       memlock:
         soft: -1
@@ -200,7 +240,7 @@ services:
     entrypoint: /usr/bin/tini -- wait-for-it graylog-opensearch:9200 -- /docker-entrypoint.sh
     environment:
       # CHANGE ME: echo -n "admin@Graylog1" | shasum -a 256
-      GRAYLOG_ROOT_PASSWORD_SHA2: 4b09467d42ceaa18e6a5bfde0a479e0a0a5e3bb8fb6a61f0c6a16e09fe1486e6
+      GRAYLOG_ROOT_PASSWORD_SHA2: d77a6617635d49f48dbc5f6b75d444030548d87d90054a7058192f4b8b71383c
       GRAYLOG_PASSWORD_SECRET: somepasswordpepper_atleast16chars!!
       GRAYLOG_HTTP_BIND_ADDRESS: '0.0.0.0:9000'
       GRAYLOG_HTTP_EXTERNAL_URI: 'http://localhost:9000/'
@@ -243,7 +283,7 @@ services:
       - '8088:8088'   # HTTP input
     volumes:
       - logstash_data:/usr/share/logstash/data
-      - logstash_pipeline:/usr/share/logstash/pipeline
+      - ./config/logstash/pipeline:/usr/share/logstash/pipeline:ro
     networks:
       - connectors
 
@@ -283,7 +323,7 @@ services:
     hostname: influxdb
     restart: unless-stopped
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_MODE: setup # Only runs on first start; skips if already initialized
       DOCKER_INFLUXDB_INIT_USERNAME: admin
       DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
       DOCKER_INFLUXDB_INIT_ORG: auraspear
@@ -400,7 +440,7 @@ services:
       bootstrap.memory_lock: 'true'
       discovery.type: single-node
       plugins.security.disabled: 'true'
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'Adm1n@OpenSearch!'
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: 'AuraSpear#Dev2024!'
     ulimits:
       memlock:
         soft: -1
@@ -415,7 +455,7 @@ services:
   # VELOCIRAPTOR — Endpoint Visibility & Response
   # ===========================================================================
   # Docs: https://docs.velociraptor.app/
-  # UI: https://localhost:8889 (first-time setup via CLI or config)
+  # UI: https://localhost:8889 (admin / admin)
   # API: https://localhost:8001/api/v1
 
   velociraptor:
@@ -423,6 +463,12 @@ services:
     container_name: auraspear-velociraptor
     hostname: velociraptor
     restart: unless-stopped
+    environment:
+      VELOX_FRONTEND_HOSTNAME: velociraptor
+      VELOX_SERVER_URL: https://velociraptor:8889/
+      VELOX_USER: admin
+      VELOX_PASSWORD: admin
+      VELOX_ROLE: administrator
     ports:
       - '8889:8889'   # GUI
       - '8001:8001'   # API (Frontend)

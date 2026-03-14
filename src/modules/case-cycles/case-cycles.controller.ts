@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { CaseCyclesService } from './case-cycles.service'
 import { type CloseCaseCycleDto, CloseCaseCycleSchema } from './dto/close-case-cycle.dto'
 import { type CreateCaseCycleDto, CreateCaseCycleSchema } from './dto/create-case-cycle.dto'
 import { ListCaseCyclesQuerySchema } from './dto/list-case-cycles-query.dto'
+import { type UpdateCaseCycleDto, UpdateCaseCycleSchema } from './dto/update-case-cycle.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
@@ -61,6 +62,18 @@ export class CaseCyclesController {
     return { data: cycle }
   }
 
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.TENANT_ADMIN)
+  async updateCycle(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateCaseCycleSchema)) dto: UpdateCaseCycleDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ data: CaseCycleRecord }> {
+    const cycle = await this.caseCyclesService.updateCycle(id, dto, user)
+    return { data: cycle }
+  }
+
   @Patch(':id/close')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
@@ -71,5 +84,26 @@ export class CaseCyclesController {
   ): Promise<{ data: CaseCycleRecord }> {
     const cycle = await this.caseCyclesService.closeCycle(id, dto, user)
     return { data: cycle }
+  }
+
+  @Patch(':id/activate')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.TENANT_ADMIN)
+  async activateCycle(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ data: CaseCycleRecord }> {
+    const cycle = await this.caseCyclesService.activateCycle(id, user)
+    return { data: cycle }
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.TENANT_ADMIN)
+  async deleteCycle(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
+    return this.caseCyclesService.deleteCycle(id, user)
   }
 }

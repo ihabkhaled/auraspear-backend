@@ -1,3 +1,5 @@
+export const REDACTED_PLACEHOLDER = '***REDACTED***'
+
 const SENSITIVE_KEYS = new Set([
   'password',
   'secret',
@@ -14,6 +16,12 @@ const SENSITIVE_KEYS = new Set([
   'encryptedConfig',
   'encrypted_config',
   'authorization',
+  'indexerPassword',
+  'indexer_password',
+  'clientKey',
+  'client_key',
+  'mispAuthKey',
+  'shuffleApiKey',
 ])
 
 export function maskSecrets(data: Record<string, unknown>): Record<string, unknown> {
@@ -21,7 +29,7 @@ export function maskSecrets(data: Record<string, unknown>): Record<string, unkno
 
   for (const [key, value] of Object.entries(data)) {
     if (SENSITIVE_KEYS.has(key) || SENSITIVE_KEYS.has(key.toLowerCase())) {
-      masked[key] = typeof value === 'string' && value.length > 0 ? '***REDACTED***' : value
+      masked[key] = typeof value === 'string' && value.length > 0 ? REDACTED_PLACEHOLDER : value
     } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       masked[key] = maskSecrets(value as Record<string, unknown>)
     } else {

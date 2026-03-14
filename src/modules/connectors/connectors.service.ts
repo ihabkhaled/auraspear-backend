@@ -14,7 +14,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enu
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
-import { maskSecrets } from '../../common/utils/mask.util'
+import { maskSecrets, REDACTED_PLACEHOLDER } from '../../common/utils/mask.util'
 import { validateUrl } from '../../common/utils/ssrf.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
@@ -244,9 +244,27 @@ export class ConnectorsService {
     if (dto.enabled !== undefined) updateData.enabled = dto.enabled
     if (dto.authType !== undefined) updateData.authType = dto.authType
     if (dto.config !== undefined) {
+      // Merge with existing config — preserve redacted (masked) secret values
+      const existingDecrypted = this.decryptConfig(existing.encryptedConfig)
+      const mergedConfig: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(dto.config as Record<string, unknown>)) {
+        if (value === REDACTED_PLACEHOLDER) {
+          // Keep existing value for masked secrets
+          mergedConfig[key] = existingDecrypted[key]
+        } else {
+          mergedConfig[key] = value
+        }
+      }
+      // Also preserve any existing keys not sent in the update
+      for (const [key, value] of Object.entries(existingDecrypted)) {
+        if (!(key in mergedConfig)) {
+          mergedConfig[key] = value
+        }
+      }
+
       let validatedConfig: Record<string, unknown>
       try {
-        validatedConfig = validateConnectorConfig(type, dto.config as Record<string, unknown>)
+        validatedConfig = validateConnectorConfig(type, mergedConfig)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid connector config'
         this.appLogger.warn('Invalid connector config during update', {
@@ -562,7 +580,15 @@ export class ConnectorsService {
    * metadata endpoints (169.254.x) and loopback — internal ranges are allowed.
    */
   private validateConfigUrls(config: Record<string, unknown>): void {
-    const urlKeys = ['baseUrl', 'managerUrl', 'indexerUrl', 'webhookUrl']
+    const urlKeys = [
+      'baseUrl',
+      'managerUrl',
+      'indexerUrl',
+      'webhookUrl',
+      'apiUrl',
+      'grafanaUrl',
+      'mispUrl',
+    ]
     for (const key of urlKeys) {
       const value = config[key]
       if (typeof value === 'string' && value.length > 0) {

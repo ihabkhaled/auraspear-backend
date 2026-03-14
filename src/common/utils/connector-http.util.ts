@@ -28,14 +28,18 @@ export function connectorFetch(
   url: string,
   options: ConnectorHttpOptions = {}
 ): Promise<ConnectorHttpResponse> {
+  const isProduction = process.env.NODE_ENV === 'production'
   const {
     method = 'GET',
     headers = {},
     body,
     timeoutMs = 15_000,
-    rejectUnauthorized = true,
+    rejectUnauthorized: callerRejectUnauthorized = isProduction,
     allowPrivateNetwork = false,
   } = options
+
+  // In non-production, always accept self-signed certificates for local testing
+  const rejectUnauthorized = isProduction ? callerRejectUnauthorized : false
 
   return new Promise((resolve, reject) => {
     const start = Date.now()
@@ -48,13 +52,13 @@ export function connectorFetch(
     }
 
     // Enforce HTTPS in production to prevent credential leakage over plain HTTP
-    if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+    if (isProduction && parsed.protocol !== 'https:') {
       reject(new Error('Only HTTPS URLs are allowed in production'))
       return
     }
 
-    // Block private network targets when not explicitly allowed
-    if (!allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
+    // Block private network targets when not explicitly allowed (skip in non-production)
+    if (isProduction && !allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
       reject(new Error('URLs pointing to private/internal networks are not allowed'))
       return
     }

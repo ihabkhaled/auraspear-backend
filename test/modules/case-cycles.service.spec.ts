@@ -9,10 +9,16 @@ function createMockPrisma() {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+      delete: jest.fn(),
+    },
+    case: {
+      updateMany: jest.fn(),
     },
     user: {
       findMany: jest.fn(),
     },
+    $transaction: jest.fn(),
   }
 }
 
@@ -217,15 +223,16 @@ describe('CaseCyclesService', () => {
   /* ------------------------------------------------------------------ */
 
   describe('createCycle', () => {
-    it('should create a new cycle when no active exists', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+    it('should create a new cycle as closed status', async () => {
+      // No overlapping cycles
+      prisma.caseCycle.findMany.mockResolvedValue([])
 
       const createdCycle = {
         id: 'cycle-new',
         tenantId: TENANT_ID,
         name: 'Q2 2026',
         description: 'Second quarter',
-        status: 'active',
+        status: 'closed',
         startDate: new Date('2026-04-01'),
         endDate: null,
         createdBy: mockUser.email,
@@ -254,21 +261,27 @@ describe('CaseCyclesService', () => {
           data: expect.objectContaining({
             tenantId: TENANT_ID,
             name: 'Q2 2026',
-            status: 'active',
+            status: 'closed',
           }),
         })
       )
     })
 
-    it('should throw 409 when active cycle already exists', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue({
-        id: 'cycle-existing',
-        name: 'Q1 2026',
-      })
+    it('should reject overlapping date ranges', async () => {
+      // Existing cycle that would overlap
+      prisma.caseCycle.findMany.mockResolvedValue([
+        {
+          id: 'cycle-existing',
+          name: 'Q1 2026',
+          startDate: new Date('2026-01-01'),
+          endDate: new Date('2026-03-31'),
+        },
+      ])
 
       const dto = {
-        name: 'Q2 2026',
-        startDate: new Date('2026-04-01'),
+        name: 'Overlapping cycle',
+        startDate: new Date('2026-03-01'), // Overlaps with Q1
+        endDate: new Date('2026-06-30'),
       }
 
       await expect(service.createCycle(dto, mockUser as never)).rejects.toThrow(BusinessException)
@@ -278,6 +291,481 @@ describe('CaseCyclesService', () => {
       } catch (error) {
         expect((error as BusinessException).getStatus()).toBe(409)
       }
+    })
+
+    it('should reject when start date is after end date', async () => {
+      const dto = {
+        name: 'Bad dates',
+        startDate: new Date('2026-06-01'),
+        endDate: new Date('2026-01-01'),
+      }
+
+      await expect(service.createCycle(dto, mockUser as never)).rejects.toThrow(BusinessException)
+
+      try {
+        await service.createCycle(dto, mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* updateCycle                                                          */
+  /* ------------------------------------------------------------------ */
+
+  describe('updateCycle', () => {
+    it('should update name and description successfully', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Q1 2026',
+        description: null,
+        status: 'closed',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-03-31'),
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 2 },
+        cases: [{ status: 'open' }, { status: 'closed' }],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      const updatedCycle = {
+        ...existingCycle,
+        name: 'Q1 2026 Updated',
+        description: 'Updated description',
+      }
+      prisma.caseCycle.update.mockResolvedValue(updatedCycle)
+
+      const dto = { name: 'Q1 2026 Updated', description: 'Updated description' }
+      const result = await service.updateCycle('cycle-1', dto, mockUser as never)
+
+      expect(result.name).toBe('Q1 2026 Updated')
+      expect(prisma.caseCycle.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cycle-1' },
+          data: expect.objectContaining({
+            name: 'Q1 2026 Updated',
+            description: 'Updated description',
+          }),
+        })
+      )
+    })
+
+    it('should validate start < end date', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Q1 2026',
+        description: null,
+        status: 'closed',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-03-31'),
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 0 },
+        cases: [],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      const dto = {
+        startDate: new Date('2026-06-01'),
+        endDate: new Date('2026-01-01'),
+      }
+
+      await expect(service.updateCycle('cycle-1', dto, mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.updateCycle('cycle-1', dto, mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+
+    it('should check date overlap excluding self', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Q1 2026',
+        description: null,
+        status: 'closed',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-03-31'),
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 0 },
+        cases: [],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      // Overlapping cycle returned from findMany (excludeId should exclude self)
+      prisma.caseCycle.findMany.mockResolvedValue([
+        {
+          id: 'cycle-other',
+          name: 'Q2 2026',
+          startDate: new Date('2026-04-01'),
+          endDate: new Date('2026-06-30'),
+        },
+      ])
+
+      const dto = {
+        startDate: new Date('2026-05-01'), // overlaps with cycle-other
+        endDate: new Date('2026-07-31'),
+      }
+
+      await expect(service.updateCycle('cycle-1', dto, mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.updateCycle('cycle-1', dto, mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(409)
+      }
+
+      // Verify findMany was called with exclusion of self
+      expect(prisma.caseCycle.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: TENANT_ID,
+            id: { not: 'cycle-1' },
+          }),
+        })
+      )
+    })
+
+    it('should auto-deactivate when dates moved outside today', async () => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Active Cycle',
+        description: null,
+        status: 'active',
+        startDate: new Date('2025-01-01'),
+        endDate: null,
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 1 },
+        cases: [{ status: 'open' }],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      // No overlapping cycles
+      prisma.caseCycle.findMany.mockResolvedValue([])
+
+      const updatedCycle = {
+        ...existingCycle,
+        status: 'closed',
+        startDate: new Date('2028-01-01'),
+        endDate: new Date('2028-06-30'),
+      }
+      prisma.caseCycle.update.mockResolvedValue(updatedCycle)
+
+      // Move dates far into the future (today is outside the range)
+      const dto = {
+        startDate: new Date('2028-01-01'),
+        endDate: new Date('2028-06-30'),
+      }
+
+      await service.updateCycle('cycle-1', dto, mockUser as never)
+
+      expect(prisma.caseCycle.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cycle-1' },
+          data: expect.objectContaining({
+            status: 'closed',
+            startDate: dto.startDate,
+            endDate: dto.endDate,
+          }),
+        })
+      )
+    })
+
+    it('should throw when cycle not found', async () => {
+      prisma.caseCycle.findFirst.mockResolvedValue(null)
+
+      await expect(
+        service.updateCycle('nonexistent', { name: 'Updated' }, mockUser as never)
+      ).rejects.toThrow(BusinessException)
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* activateCycle                                                        */
+  /* ------------------------------------------------------------------ */
+
+  describe('activateCycle', () => {
+    it('should successfully activate and deactivate previous active cycle', async () => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      // Create a start date in the past and no end date (open-ended)
+      const pastStart = new Date(today)
+      pastStart.setMonth(pastStart.getMonth() - 1)
+
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Q1 2026',
+        description: null,
+        status: 'closed',
+        startDate: pastStart,
+        endDate: null,
+        createdBy: 'admin@test.com',
+        closedBy: mockUser.email,
+        closedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 2 },
+        cases: [{ status: 'open' }, { status: 'closed' }],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      const activatedCycle = {
+        ...existingCycle,
+        status: 'active',
+        closedBy: null,
+        closedAt: null,
+      }
+
+      prisma.$transaction.mockImplementation(
+        async (callback: (tx: unknown) => Promise<unknown>) => {
+          const tx = {
+            caseCycle: {
+              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+              update: jest.fn().mockResolvedValue(activatedCycle),
+            },
+          }
+          return callback(tx)
+        }
+      )
+
+      const result = await service.activateCycle('cycle-1', mockUser as never)
+
+      expect(result.caseCount).toBe(2)
+      expect(result.openCount).toBe(1)
+      expect(result.closedCount).toBe(1)
+      expect(prisma.$transaction).toHaveBeenCalled()
+    })
+
+    it('should reject if today is outside date range (future start)', async () => {
+      const futureStart = new Date()
+      futureStart.setFullYear(futureStart.getFullYear() + 2)
+
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Future Cycle',
+        description: null,
+        status: 'closed',
+        startDate: futureStart,
+        endDate: null,
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 0 },
+        cases: [],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.activateCycle('cycle-1', mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+
+    it('should reject if today is outside date range (past end)', async () => {
+      const pastEnd = new Date()
+      pastEnd.setFullYear(pastEnd.getFullYear() - 1)
+      const pastStart = new Date(pastEnd)
+      pastStart.setMonth(pastStart.getMonth() - 3)
+
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Past Cycle',
+        description: null,
+        status: 'closed',
+        startDate: pastStart,
+        endDate: pastEnd,
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 0 },
+        cases: [],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.activateCycle('cycle-1', mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+
+    it('should reject if already active', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Active Cycle',
+        description: null,
+        status: 'active',
+        startDate: new Date('2025-01-01'),
+        endDate: null,
+        createdBy: 'admin@test.com',
+        closedBy: null,
+        closedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        _count: { cases: 0 },
+        cases: [],
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.activateCycle('cycle-1', mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+
+    it('should throw when cycle not found', async () => {
+      prisma.caseCycle.findFirst.mockResolvedValue(null)
+
+      await expect(service.activateCycle('nonexistent', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* deleteCycle                                                          */
+  /* ------------------------------------------------------------------ */
+
+  describe('deleteCycle', () => {
+    it('should delete a closed cycle with no cases', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Empty Cycle',
+        status: 'closed',
+        _count: { cases: 0 },
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      prisma.caseCycle.delete.mockResolvedValue(existingCycle)
+
+      const result = await service.deleteCycle('cycle-1', mockUser as never)
+
+      expect(result.deleted).toBe(true)
+      expect(prisma.caseCycle.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'cycle-1' } })
+      )
+      // Should not use transaction when no cases to unlink
+      expect(prisma.$transaction).not.toHaveBeenCalled()
+    })
+
+    it('should unlink cases before deleting', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Cycle With Cases',
+        status: 'closed',
+        _count: { cases: 3 },
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      prisma.$transaction.mockImplementation(
+        async (callback: (tx: unknown) => Promise<unknown>) => {
+          const tx = {
+            case: {
+              updateMany: jest.fn().mockResolvedValue({ count: 3 }),
+            },
+            caseCycle: {
+              delete: jest.fn().mockResolvedValue(existingCycle),
+            },
+          }
+          return callback(tx)
+        }
+      )
+
+      const result = await service.deleteCycle('cycle-1', mockUser as never)
+
+      expect(result.deleted).toBe(true)
+      expect(prisma.$transaction).toHaveBeenCalled()
+    })
+
+    it('should reject deletion of active cycle', async () => {
+      const existingCycle = {
+        id: 'cycle-1',
+        tenantId: TENANT_ID,
+        name: 'Active Cycle',
+        status: 'active',
+        _count: { cases: 2 },
+      }
+
+      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+
+      await expect(service.deleteCycle('cycle-1', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
+
+      try {
+        await service.deleteCycle('cycle-1', mockUser as never)
+      } catch (error) {
+        expect((error as BusinessException).getStatus()).toBe(400)
+      }
+    })
+
+    it('should throw when cycle not found', async () => {
+      prisma.caseCycle.findFirst.mockResolvedValue(null)
+
+      await expect(service.deleteCycle('nonexistent', mockUser as never)).rejects.toThrow(
+        BusinessException
+      )
     })
   })
 

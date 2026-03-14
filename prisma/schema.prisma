@@ -278,8 +278,10 @@ model Case {
 
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cycle    CaseCycle?     @relation(fields: [cycleId], references: [id], onDelete: SetNull)
-  notes    CaseNote[]
-  timeline CaseTimeline[]
+  notes     CaseNote[]
+  timeline  CaseTimeline[]
+  tasks     CaseTask[]
+  artifacts CaseArtifact[]
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -315,6 +317,37 @@ model CaseTimeline {
   @@index([caseId])
   @@index([caseId, timestamp])
   @@map("case_timeline")
+}
+
+model CaseTask {
+  id          String @id @default(uuid()) @db.Uuid
+  caseId      String @map("case_id") @db.Uuid
+  title       String @db.VarChar(500)
+  status      String @default("pending") @db.VarChar(20)
+  assignee    String? @db.VarChar(320)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_tasks")
+}
+
+model CaseArtifact {
+  id     String @id @default(uuid()) @db.Uuid
+  caseId String @map("case_id") @db.Uuid
+  type   String @db.VarChar(20)
+  value  String @db.VarChar(2048)
+  source String @default("manual") @db.VarChar(100)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_artifacts")
 }
 
 // ─── Threat Intel ────────────────────────────────────────────

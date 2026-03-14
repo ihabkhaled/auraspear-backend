@@ -1,11 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { CasesService } from './cases.service'
+import { type CreateArtifactDto, CreateArtifactSchema } from './dto/create-artifact.dto'
 import { type CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
 import { type CreateNoteDto, CreateNoteSchema } from './dto/create-note.dto'
+import { type CreateTaskDto, CreateTaskSchema } from './dto/create-task.dto'
 import { type LinkAlertDto, LinkAlertSchema } from './dto/link-alert.dto'
 import { ListCasesQuerySchema } from './dto/list-cases-query.dto'
 import { ListNotesQuerySchema } from './dto/list-notes-query.dto'
 import { type UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto'
+import { type UpdateTaskDto, UpdateTaskSchema } from './dto/update-task.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
@@ -110,5 +113,72 @@ export class CasesController {
     @CurrentUser() user: JwtPayload
   ): Promise<CaseNote> {
     return this.casesService.addCaseNote(id, dto, user)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* TASKS                                                              */
+  /* ---------------------------------------------------------------- */
+
+  @Post(':id/tasks')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async createTask(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(CreateTaskSchema)) dto: CreateTaskDto,
+    @CurrentUser() user: JwtPayload
+  ) {
+    const task = await this.casesService.createTask(id, dto, user)
+    return { data: task }
+  }
+
+  @Patch(':id/tasks/:taskId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async updateTask(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body(new ZodValidationPipe(UpdateTaskSchema)) dto: UpdateTaskDto,
+    @CurrentUser() user: JwtPayload
+  ) {
+    const task = await this.casesService.updateTask(id, taskId, dto, user)
+    return { data: task }
+  }
+
+  @Delete(':id/tasks/:taskId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async deleteTask(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.casesService.deleteTask(id, taskId, user)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ARTIFACTS                                                          */
+  /* ---------------------------------------------------------------- */
+
+  @Post(':id/artifacts')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async createArtifact(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(CreateArtifactSchema)) dto: CreateArtifactDto,
+    @CurrentUser() user: JwtPayload
+  ) {
+    const artifact = await this.casesService.createArtifact(id, dto, user)
+    return { data: artifact }
+  }
+
+  @Delete(':id/artifacts/:artifactId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L1)
+  async deleteArtifact(
+    @Param('id') id: string,
+    @Param('artifactId') artifactId: string,
+    @CurrentUser() user: JwtPayload
+  ) {
+    return this.casesService.deleteArtifact(id, artifactId, user)
   }
 }

@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './case-cycles.types'
 import type { CloseCaseCycleDto } from './dto/close-case-cycle.dto'
 import type { CreateCaseCycleDto } from './dto/create-case-cycle.dto'
+import type { UpdateCaseCycleDto } from './dto/update-case-cycle.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { CaseCycleStatus as PrismaCycleStatus, Prisma } from '@prisma/client'
 
@@ -269,41 +270,25 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async createCycle(dto: CreateCaseCycleDto, user: JwtPayload): Promise<CaseCycleRecord> {
-    // Check if there's already an active cycle for this tenant
-    const existingActive = await this.prisma.caseCycle.findFirst({
-      where: { tenantId: user.tenantId, status: 'active' },
-      select: { id: true, name: true },
-    })
-
-    if (existingActive) {
-      this.appLogger.warn(
-        `Cannot create cycle: active cycle "${existingActive.name}" already exists`,
-        {
-          feature: AppLogFeature.CASE_CYCLES,
-          action: 'createCycle',
-          outcome: AppLogOutcome.DENIED,
-          tenantId: user.tenantId,
-          actorEmail: user.email,
-          actorUserId: user.sub,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'CaseCyclesService',
-          functionName: 'createCycle',
-          metadata: { existingCycleId: existingActive.id, existingCycleName: existingActive.name },
-        }
-      )
+    // Validate start < end if endDate provided
+    if (dto.endDate && dto.startDate >= dto.endDate) {
       throw new BusinessException(
-        409,
-        `An active cycle "${existingActive.name}" already exists. Close it before creating a new one.`,
-        'errors.caseCycles.activeAlreadyExists'
+        400,
+        'Start date must be before end date',
+        'errors.caseCycles.startAfterEnd'
       )
     }
 
+    // Check for overlapping cycles (exclude closed cycles)
+    await this.checkDateOverlap(user.tenantId, dto.startDate, dto.endDate ?? null)
+
+    // Create as closed — user must explicitly activate
     const cycle = await this.prisma.caseCycle.create({
       data: {
         tenantId: user.tenantId,
         name: dto.name,
         description: dto.description ?? null,
-        status: 'active',
+        status: 'closed',
         startDate: dto.startDate,
         endDate: dto.endDate ?? null,
         createdBy: user.email,
@@ -335,6 +320,241 @@ export class CaseCyclesService {
       openCount: 0,
       closedCount: 0,
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* UPDATE                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async updateCycle(
+    id: string,
+    dto: UpdateCaseCycleDto,
+    user: JwtPayload
+  ): Promise<CaseCycleRecord> {
+    const existing = await this.prisma.caseCycle.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: {
+        _count: { select: { cases: true } },
+        cases: { select: { status: true } },
+      },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
+    }
+
+    const startDate = dto.startDate ?? existing.startDate
+    const endDate = dto.endDate === undefined ? existing.endDate : dto.endDate
+
+    // Validate start < end
+    if (endDate && startDate >= endDate) {
+      throw new BusinessException(
+        400,
+        'Start date must be before end date',
+        'errors.caseCycles.startAfterEnd'
+      )
+    }
+
+    // Check overlap if dates changed (exclude self)
+    if (dto.startDate !== undefined || dto.endDate !== undefined) {
+      await this.checkDateOverlap(user.tenantId, startDate, endDate ?? null, id)
+    }
+
+    // If active and dates changed such that today is outside range, auto-deactivate
+    const updateData: Record<string, unknown> = {}
+    if (dto.name !== undefined) updateData.name = dto.name
+    if (dto.description !== undefined) updateData.description = dto.description
+    if (dto.startDate !== undefined) updateData.startDate = dto.startDate
+    if (dto.endDate !== undefined) updateData.endDate = dto.endDate
+
+    if (
+      existing.status === 'active' &&
+      (dto.startDate !== undefined || dto.endDate !== undefined)
+    ) {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const isInRange = startDate <= today && (endDate === null || endDate >= today)
+      if (!isInRange) {
+        updateData.status = 'closed'
+        updateData.closedAt = new Date()
+        updateData.closedBy = user.email
+      }
+    }
+
+    const updated = await this.prisma.caseCycle.update({
+      where: { id },
+      data: updateData,
+    })
+
+    const openCount = existing.cases.filter(c => c.status !== 'closed').length
+    const closedCount = existing.cases.filter(c => c.status === 'closed').length
+
+    this.appLogger.info(`Updated case cycle "${existing.name}"`, {
+      feature: AppLogFeature.CASE_CYCLES,
+      action: 'updateCycle',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'CaseCycle',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CaseCyclesService',
+      functionName: 'updateCycle',
+      metadata: {
+        updatedFields: Object.keys(dto),
+        autoDeactivated: updateData.status === 'closed',
+      },
+    })
+
+    return {
+      ...updated,
+      caseCount: existing._count.cases,
+      openCount,
+      closedCount,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ACTIVATE                                                          */
+  /* ---------------------------------------------------------------- */
+
+  async activateCycle(id: string, user: JwtPayload): Promise<CaseCycleRecord> {
+    const existing = await this.prisma.caseCycle.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: {
+        _count: { select: { cases: true } },
+        cases: { select: { status: true } },
+      },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
+    }
+
+    if (existing.status === 'active') {
+      throw new BusinessException(
+        400,
+        'This cycle is already active',
+        'errors.caseCycles.alreadyActive'
+      )
+    }
+
+    // Check today is within the cycle's date range
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (existing.startDate > today) {
+      throw new BusinessException(
+        400,
+        'Cannot activate: cycle start date is in the future',
+        'errors.caseCycles.activationOutsideRange'
+      )
+    }
+    if (existing.endDate && existing.endDate < today) {
+      throw new BusinessException(
+        400,
+        'Cannot activate: cycle end date has passed',
+        'errors.caseCycles.activationOutsideRange'
+      )
+    }
+
+    // Atomically deactivate any currently active cycle and activate this one
+    const result = await this.prisma.$transaction(async tx => {
+      await tx.caseCycle.updateMany({
+        where: { tenantId: user.tenantId, status: 'active', id: { not: id } },
+        data: {
+          status: 'closed',
+          closedBy: user.email,
+          closedAt: new Date(),
+        },
+      })
+
+      return tx.caseCycle.update({
+        where: { id },
+        data: {
+          status: 'active',
+          closedBy: null,
+          closedAt: null,
+        },
+      })
+    })
+
+    const openCount = existing.cases.filter(c => c.status !== 'closed').length
+    const closedCount = existing.cases.filter(c => c.status === 'closed').length
+
+    this.appLogger.info(`Activated case cycle "${existing.name}"`, {
+      feature: AppLogFeature.CASE_CYCLES,
+      action: 'activateCycle',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'CaseCycle',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CaseCyclesService',
+      functionName: 'activateCycle',
+    })
+
+    return {
+      ...result,
+      caseCount: existing._count.cases,
+      openCount,
+      closedCount,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* DELETE                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async deleteCycle(id: string, user: JwtPayload): Promise<{ deleted: boolean }> {
+    const existing = await this.prisma.caseCycle.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: { _count: { select: { cases: true } } },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
+    }
+
+    if (existing.status === 'active') {
+      throw new BusinessException(
+        400,
+        'Cannot delete an active cycle. Close it first.',
+        'errors.caseCycles.deleteActiveNotAllowed'
+      )
+    }
+
+    if (existing._count.cases > 0) {
+      // Unlink cases from this cycle (set cycleId to null) then delete
+      await this.prisma.$transaction(async tx => {
+        await tx.case.updateMany({
+          where: { cycleId: id, tenantId: user.tenantId },
+          data: { cycleId: null },
+        })
+        await tx.caseCycle.delete({ where: { id } })
+      })
+    } else {
+      await this.prisma.caseCycle.delete({ where: { id } })
+    }
+
+    this.appLogger.info(`Deleted case cycle "${existing.name}"`, {
+      feature: AppLogFeature.CASE_CYCLES,
+      action: 'deleteCycle',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'CaseCycle',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CaseCyclesService',
+      functionName: 'deleteCycle',
+      metadata: { cycleName: existing.name, casesUnlinked: existing._count.cases },
+    })
+
+    return { deleted: true }
   }
 
   /* ---------------------------------------------------------------- */
@@ -430,5 +650,70 @@ export class CaseCyclesService {
       openCount,
       closedCount,
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* OVERLAP CHECK (private)                                           */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Checks if a new/updated cycle's date range overlaps with any existing
+   * non-closed cycle for the tenant. Adjacent ranges (end === start of another)
+   * are allowed. Only true overlaps are rejected.
+   *
+   * @param excludeId - Exclude a specific cycle (for update scenarios)
+   */
+  private async checkDateOverlap(
+    tenantId: string,
+    startDate: Date,
+    endDate: Date | null,
+    excludeId?: string
+  ): Promise<void> {
+    // Fetch all cycles for tenant (excluding the one being edited)
+    const where: Prisma.CaseCycleWhereInput = { tenantId }
+    if (excludeId) {
+      where.id = { not: excludeId }
+    }
+
+    const cycles = await this.prisma.caseCycle.findMany({
+      where,
+      select: { id: true, name: true, startDate: true, endDate: true },
+    })
+
+    for (const cycle of cycles) {
+      if (this.datesOverlap(startDate, endDate, cycle.startDate, cycle.endDate)) {
+        this.appLogger.warn(`Cycle date range overlaps with "${cycle.name}"`, {
+          feature: AppLogFeature.CASE_CYCLES,
+          action: 'checkDateOverlap',
+          outcome: AppLogOutcome.DENIED,
+          tenantId,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'CaseCyclesService',
+          functionName: 'checkDateOverlap',
+          metadata: { overlappingCycleId: cycle.id, overlappingCycleName: cycle.name },
+        })
+        throw new BusinessException(
+          409,
+          `Date range overlaps with existing cycle "${cycle.name}"`,
+          'errors.caseCycles.dateOverlap'
+        )
+      }
+    }
+  }
+
+  /**
+   * Two date ranges overlap if:
+   * range1.start < range2.end AND range2.start < range1.end
+   *
+   * If either range has no endDate, it's treated as open-ended (infinite).
+   * Adjacent (same-day boundaries) are allowed: start1 === end2 is NOT overlap.
+   */
+  private datesOverlap(start1: Date, end1: Date | null, start2: Date, end2: Date | null): boolean {
+    // If range1 starts at or after range2 ends → no overlap
+    if (end2 && start1 >= end2) return false
+    // If range2 starts at or after range1 ends → no overlap
+    if (end1 && start2 >= end1) return false
+    // Otherwise they overlap
+    return true
   }
 }

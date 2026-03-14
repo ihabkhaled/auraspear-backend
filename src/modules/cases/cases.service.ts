@@ -12,10 +12,13 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { hasRoleAtLeast } from '../../common/utils/role.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseRecord, PaginatedCaseNotes, PaginatedCases } from './cases.types'
+import type { CreateArtifactDto } from './dto/create-artifact.dto'
 import type { CreateCaseDto } from './dto/create-case.dto'
 import type { CreateNoteDto } from './dto/create-note.dto'
+import type { CreateTaskDto } from './dto/create-task.dto'
 import type { LinkAlertDto } from './dto/link-alert.dto'
 import type { UpdateCaseDto } from './dto/update-case.dto'
+import type { UpdateTaskDto } from './dto/update-task.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { CaseNote, CaseStatus, CaseSeverity, Prisma } from '@prisma/client'
 
@@ -221,11 +224,29 @@ export class CasesService {
     }
 
     const result = await this.prisma.$transaction(async tx => {
-      // Auto-assign to active cycle if one exists
-      const activeCycle = await tx.caseCycle.findFirst({
-        where: { tenantId: user.tenantId, status: 'active' },
-        select: { id: true },
-      })
+      // Use provided cycleId, or auto-assign to active cycle if one exists
+      let resolvedCycleId: string | null = null
+      if (dto.cycleId) {
+        // Validate the provided cycle belongs to the tenant
+        const cycle = await tx.caseCycle.findFirst({
+          where: { id: dto.cycleId, tenantId: user.tenantId },
+          select: { id: true },
+        })
+        if (!cycle) {
+          throw new BusinessException(
+            400,
+            'The specified cycle does not belong to this tenant',
+            'errors.cases.invalidCycle'
+          )
+        }
+        resolvedCycleId = dto.cycleId
+      } else {
+        const activeCycle = await tx.caseCycle.findFirst({
+          where: { tenantId: user.tenantId, status: 'active' },
+          select: { id: true },
+        })
+        resolvedCycleId = activeCycle?.id ?? null
+      }
 
       const caseNumber = await this.generateCaseNumber(tx)
       const newCase = await tx.case.create({
@@ -238,7 +259,7 @@ export class CasesService {
           status: 'open',
           ownerUserId: dto.ownerUserId ?? null,
           createdBy: user.email,
-          cycleId: activeCycle?.id ?? null,
+          cycleId: resolvedCycleId,
           ...(linkedAlerts.length > 0 ? { linkedAlerts } : {}),
         },
       })
@@ -268,6 +289,8 @@ export class CasesService {
         include: {
           notes: true,
           timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
           tenant: { select: { name: true } },
         },
       })
@@ -305,6 +328,8 @@ export class CasesService {
       include: {
         notes: { orderBy: { createdAt: 'asc' } },
         timeline: { orderBy: { timestamp: 'asc' } },
+        tasks: true,
+        artifacts: true,
         tenant: { select: { name: true } },
       },
     })
@@ -427,8 +452,20 @@ export class CasesService {
           : `Assigned to ${ownerLabel} by ${actorLabel}`
       }
     } else if (dto.cycleId === undefined) {
-      const changedFields = Object.keys(dto).join(', ')
-      timelineDescription = `Case updated by ${actorLabel}: ${changedFields} modified`
+      const changes: string[] = []
+      if (dto.title !== undefined && dto.title !== existing.title) {
+        changes.push(`title changed to "${dto.title}"`)
+      }
+      if (dto.description !== undefined && dto.description !== existing.description) {
+        changes.push('description updated')
+      }
+      if (dto.severity !== undefined && dto.severity !== existing.severity) {
+        changes.push(`severity changed from ${existing.severity} to ${dto.severity}`)
+      }
+      timelineDescription =
+        changes.length > 0
+          ? `Case updated by ${actorLabel}: ${changes.join(', ')}`
+          : `Case updated by ${actorLabel}`
     } else if (dto.cycleId === null) {
       timelineDescription = `Removed from cycle by ${actorLabel}`
     } else {
@@ -483,6 +520,8 @@ export class CasesService {
         include: {
           notes: true,
           timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
           tenant: { select: { name: true } },
         },
       })
@@ -638,6 +677,8 @@ export class CasesService {
         include: {
           notes: true,
           timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
           tenant: { select: { name: true } },
         },
       })
@@ -790,5 +831,255 @@ export class CasesService {
     }
 
     return `${prefix}${String(nextSequence).padStart(3, '0')}`
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* TASKS                                                              */
+  /* ---------------------------------------------------------------- */
+
+  async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload) {
+    const caseRecord = await this.getCaseById(caseId, user.tenantId)
+
+    if (caseRecord.status === 'closed') {
+      throw new BusinessException(
+        400,
+        'Cannot add tasks to a closed case',
+        'errors.cases.alreadyClosed'
+      )
+    }
+
+    const task = await this.prisma.caseTask.create({
+      data: {
+        caseId,
+        title: dto.title,
+        status: dto.status ?? 'pending',
+        assignee: dto.assignee ?? null,
+      },
+    })
+
+    // Add timeline entry
+    const actorUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { name: true },
+    })
+    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+    await this.prisma.caseTimeline.create({
+      data: {
+        caseId,
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: `Task "${dto.title}" added by ${actorLabel}`,
+      },
+    })
+
+    this.appLogger.info('Task created', {
+      feature: AppLogFeature.CASES,
+      action: 'createTask',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseTask',
+      targetResourceId: task.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'createTask',
+      metadata: { caseId, caseNumber: caseRecord.caseNumber },
+    })
+
+    return task
+  }
+
+  async updateTask(caseId: string, taskId: string, dto: UpdateTaskDto, user: JwtPayload) {
+    await this.getCaseById(caseId, user.tenantId)
+
+    const existing = await this.prisma.caseTask.findFirst({
+      where: { id: taskId, caseId },
+    })
+    if (!existing) {
+      throw new BusinessException(404, 'Task not found', 'errors.cases.taskNotFound')
+    }
+
+    const updateData: Record<string, unknown> = {}
+    if (dto.title !== undefined) updateData['title'] = dto.title
+    if (dto.status !== undefined) updateData['status'] = dto.status
+    if (dto.assignee !== undefined) updateData['assignee'] = dto.assignee
+
+    const task = await this.prisma.caseTask.update({
+      where: { id: taskId },
+      data: updateData,
+    })
+
+    // Add timeline entry for status changes
+    if (dto.status !== undefined && dto.status !== existing.status) {
+      const actorUser = await this.prisma.user.findUnique({
+        where: { id: user.sub },
+        select: { name: true },
+      })
+      const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+      await this.prisma.caseTimeline.create({
+        data: {
+          caseId,
+          type: CaseTimelineType.UPDATED,
+          actor: user.email,
+          description: `Task "${existing.title}" ${dto.status === 'completed' ? 'completed' : `changed to ${dto.status}`} by ${actorLabel}`,
+        },
+      })
+    }
+
+    return task
+  }
+
+  async deleteTask(caseId: string, taskId: string, user: JwtPayload) {
+    const caseRecord = await this.getCaseById(caseId, user.tenantId)
+
+    const existing = await this.prisma.caseTask.findFirst({
+      where: { id: taskId, caseId },
+    })
+    if (!existing) {
+      throw new BusinessException(404, 'Task not found', 'errors.cases.taskNotFound')
+    }
+
+    await this.prisma.caseTask.delete({ where: { id: taskId } })
+
+    const actorUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { name: true },
+    })
+    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+    await this.prisma.caseTimeline.create({
+      data: {
+        caseId,
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: `Task "${existing.title}" removed by ${actorLabel}`,
+      },
+    })
+
+    this.appLogger.info('Task deleted', {
+      feature: AppLogFeature.CASES,
+      action: 'deleteTask',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseTask',
+      targetResourceId: taskId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'deleteTask',
+      metadata: { caseId, caseNumber: caseRecord.caseNumber },
+    })
+
+    return { deleted: true }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ARTIFACTS                                                          */
+  /* ---------------------------------------------------------------- */
+
+  async createArtifact(caseId: string, dto: CreateArtifactDto, user: JwtPayload) {
+    const caseRecord = await this.getCaseById(caseId, user.tenantId)
+
+    if (caseRecord.status === 'closed') {
+      throw new BusinessException(
+        400,
+        'Cannot add artifacts to a closed case',
+        'errors.cases.alreadyClosed'
+      )
+    }
+
+    // Check for duplicate artifact (same type + value on same case)
+    const duplicate = await this.prisma.caseArtifact.findFirst({
+      where: { caseId, type: dto.type, value: dto.value },
+    })
+    if (duplicate) {
+      throw new BusinessException(409, 'Duplicate artifact', 'errors.cases.duplicateArtifact')
+    }
+
+    const artifact = await this.prisma.caseArtifact.create({
+      data: {
+        caseId,
+        type: dto.type,
+        value: dto.value,
+        source: dto.source ?? 'manual',
+      },
+    })
+
+    const actorUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { name: true },
+    })
+    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+    await this.prisma.caseTimeline.create({
+      data: {
+        caseId,
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: `Artifact ${dto.type}:${dto.value} added by ${actorLabel}`,
+      },
+    })
+
+    this.appLogger.info('Artifact created', {
+      feature: AppLogFeature.CASES,
+      action: 'createArtifact',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseArtifact',
+      targetResourceId: artifact.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'createArtifact',
+      metadata: { caseId, caseNumber: caseRecord.caseNumber },
+    })
+
+    return artifact
+  }
+
+  async deleteArtifact(caseId: string, artifactId: string, user: JwtPayload) {
+    const caseRecord = await this.getCaseById(caseId, user.tenantId)
+
+    const existing = await this.prisma.caseArtifact.findFirst({
+      where: { id: artifactId, caseId },
+    })
+    if (!existing) {
+      throw new BusinessException(404, 'Artifact not found', 'errors.cases.artifactNotFound')
+    }
+
+    await this.prisma.caseArtifact.delete({ where: { id: artifactId } })
+
+    const actorUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { name: true },
+    })
+    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+
+    await this.prisma.caseTimeline.create({
+      data: {
+        caseId,
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: `Artifact ${existing.type}:${existing.value} removed by ${actorLabel}`,
+      },
+    })
+
+    this.appLogger.info('Artifact deleted', {
+      feature: AppLogFeature.CASES,
+      action: 'deleteArtifact',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      targetResource: 'CaseArtifact',
+      targetResourceId: artifactId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CasesService',
+      functionName: 'deleteArtifact',
+      metadata: { caseId, caseNumber: caseRecord.caseNumber },
+    })
+
+    return { deleted: true }
   }
 }

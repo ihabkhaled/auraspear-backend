@@ -8,6 +8,7 @@ export const CreateCaseSchema = z.object({
   severity: CaseSeverityEnum,
   ownerUserId: z.string().uuid().optional(),
   linkedAlertIds: z.array(z.string().uuid()).max(500).optional(),
+  cycleId: z.string().uuid().optional(),
 })
 
 export type CreateCaseDto = z.infer<typeof CreateCaseSchema>

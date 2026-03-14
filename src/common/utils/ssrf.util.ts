@@ -40,15 +40,18 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
     )
   }
 
-  // Block private/internal IPs
+  // Block private/internal IPs (skip in non-production for local testing)
+  const isProduction = process.env.NODE_ENV === 'production'
   const { hostname } = parsed
-  for (const pattern of PRIVATE_RANGES) {
-    if (pattern.test(hostname)) {
-      throw new BusinessException(
-        400,
-        'URLs pointing to private/internal networks are not allowed',
-        'errors.ssrf.privateNetwork'
-      )
+  if (isProduction) {
+    for (const pattern of PRIVATE_RANGES) {
+      if (pattern.test(hostname)) {
+        throw new BusinessException(
+          400,
+          'URLs pointing to private/internal networks are not allowed',
+          'errors.ssrf.privateNetwork'
+        )
+      }
     }
   }
 
