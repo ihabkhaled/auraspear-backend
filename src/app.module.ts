@@ -16,6 +16,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CaseCyclesModule } from './modules/case-cycles/case-cycles.module'
 import { CasesModule } from './modules/cases/cases.module'
+import { ConnectorSyncModule } from './modules/connector-sync/connector-sync.module'
 import { ConnectorWorkspacesModule } from './modules/connector-workspaces/connector-workspaces.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
@@ -62,6 +63,7 @@ import { PrismaModule } from './prisma/prisma.module'
     TenantsModule,
     ConnectorsModule,
     ConnectorWorkspacesModule,
+    ConnectorSyncModule,
     AlertsModule,
     AppLogsModule,
     AuditLogsModule,

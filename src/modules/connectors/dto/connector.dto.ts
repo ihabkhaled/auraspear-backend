@@ -43,10 +43,13 @@ export const LogstashConfigSchema = z
 export const VelociraptorConfigSchema = z
   .object({
     baseUrl: z.string().max(500).optional(),
-    apiKey: z.string().max(500).optional(),
+    apiUrl: z.string().max(500).optional(),
+    username: z.string().max(255).optional(),
+    password: z.string().max(255).optional(),
     orgId: z.string().max(255).optional(),
     clientCert: z.string().max(10000).optional(),
     clientKey: z.string().max(10000).optional(),
+    caCert: z.string().max(10000).optional(),
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()

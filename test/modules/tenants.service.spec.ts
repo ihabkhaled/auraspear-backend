@@ -1,0 +1,1213 @@
+jest.mock('bcryptjs', () => ({
+  compare: jest.fn(),
+  hash: jest.fn().mockResolvedValue('hashed-pw'),
+}))
+
+import { BusinessException } from '../../src/common/exceptions/business.exception'
+import {
+  MembershipStatus,
+  UserRole,
+} from '../../src/common/interfaces/authenticated-request.interface'
+import { TenantsService } from '../../src/modules/tenants/tenants.service'
+
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
+const TENANT_ID = 'tenant-001'
+const USER_ID = 'user-001'
+const CALLER_ID = 'caller-001'
+
+const now = new Date('2025-06-01T00:00:00Z')
+
+function createMockPrisma() {
+  return {
+    tenant: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      count: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    },
+    tenantMembership: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      updateMany: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
+    },
+    user: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      create: jest.fn(),
+      count: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  }
+}
+
+const authService = {
+  signAccessToken: jest.fn().mockReturnValue('mock-access'),
+  signRefreshToken: jest.fn().mockReturnValue('mock-refresh'),
+}
+
+function makeTenantRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: TENANT_ID,
+    name: 'Acme Corp',
+    slug: 'acme-corp',
+    createdAt: now,
+    _count: { memberships: 5, alerts: 10, cases: 3 },
+    ...overrides,
+  }
+}
+
+function makeMembershipRow(overrides: Record<string, unknown> = {}) {
+  return {
+    userId: USER_ID,
+    tenantId: TENANT_ID,
+    role: UserRole.SOC_ANALYST_L1,
+    status: MembershipStatus.ACTIVE,
+    createdAt: now,
+    user: {
+      id: USER_ID,
+      email: 'analyst@acme.com',
+      name: 'Jane Doe',
+      lastLoginAt: null,
+      mfaEnabled: false,
+      isProtected: false,
+    },
+    ...overrides,
+  }
+}
+
+function makeUserRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: USER_ID,
+    email: 'analyst@acme.com',
+    name: 'Jane Doe',
+    lastLoginAt: null,
+    mfaEnabled: false,
+    isProtected: false,
+    passwordHash: 'old-hash',
+    ...overrides,
+  }
+}
+
+describe('TenantsService', () => {
+  let service: TenantsService
+  let prisma: ReturnType<typeof createMockPrisma>
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    prisma = createMockPrisma()
+    service = new TenantsService(prisma as never, authService as never, mockAppLogger as never)
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* findAll                                                             */
+  /* ------------------------------------------------------------------ */
+  describe('findAll', () => {
+    it('should return paginated tenants with counts', async () => {
+      const tenantRow = makeTenantRow()
+      prisma.$transaction.mockResolvedValue([[tenantRow], 1])
+
+      const result = await service.findAll(1, 20)
+
+      expect(result.data).toHaveLength(1)
+      expect(result.data[0]).toEqual({
+        id: TENANT_ID,
+        name: 'Acme Corp',
+        slug: 'acme-corp',
+        createdAt: now,
+        userCount: 5,
+        alertCount: 10,
+        caseCount: 3,
+      })
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 20,
+        total: 1,
+        totalPages: 1,
+      })
+    })
+
+    it('should handle search filter', async () => {
+      prisma.$transaction.mockResolvedValue([[], 0])
+
+      const result = await service.findAll(1, 10, 'search-term')
+
+      expect(result.data).toHaveLength(0)
+      expect(result.pagination.total).toBe(0)
+      expect(result.pagination.totalPages).toBe(1)
+    })
+
+    it('should handle empty results', async () => {
+      prisma.$transaction.mockResolvedValue([[], 0])
+
+      const result = await service.findAll(1, 20)
+
+      expect(result.data).toEqual([])
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 1,
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* findById                                                            */
+  /* ------------------------------------------------------------------ */
+  describe('findById', () => {
+    it('should return tenant with counts', async () => {
+      prisma.tenant.findUnique.mockResolvedValue(makeTenantRow())
+
+      const result = await service.findById(TENANT_ID)
+
+      expect(result).toEqual({
+        id: TENANT_ID,
+        name: 'Acme Corp',
+        slug: 'acme-corp',
+        createdAt: now,
+        userCount: 5,
+        alertCount: 10,
+        caseCount: 3,
+      })
+    })
+
+    it('should throw 404 when tenant not found', async () => {
+      prisma.tenant.findUnique.mockResolvedValue(null)
+
+      await expect(service.findById('nonexistent')).rejects.toThrow(BusinessException)
+      await expect(service.findById('nonexistent')).rejects.toMatchObject({
+        messageKey: 'errors.tenants.notFound',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* create                                                              */
+  /* ------------------------------------------------------------------ */
+  describe('create', () => {
+    it('should create tenant and return it', async () => {
+      const created = { id: 'new-tenant', name: 'New Co', slug: 'new-co', createdAt: now }
+      prisma.tenant.create.mockResolvedValue(created)
+
+      const result = await service.create({ name: 'New Co', slug: 'new-co' })
+
+      expect(result).toEqual(created)
+      expect(prisma.tenant.create).toHaveBeenCalledWith({
+        data: { name: 'New Co', slug: 'new-co' },
+      })
+    })
+
+    it('should throw 409 when slug already exists', async () => {
+      prisma.tenant.create.mockRejectedValue(new Error('Unique constraint failed on the fields'))
+
+      await expect(service.create({ name: 'Dup', slug: 'existing-slug' })).rejects.toThrow(
+        BusinessException
+      )
+      await expect(service.create({ name: 'Dup', slug: 'existing-slug' })).rejects.toMatchObject({
+        messageKey: 'errors.tenants.slugConflict',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* update                                                              */
+  /* ------------------------------------------------------------------ */
+  describe('update', () => {
+    it('should update and return tenant', async () => {
+      const updated = { id: TENANT_ID, name: 'Updated Name', slug: 'acme-corp', createdAt: now }
+      prisma.tenant.update.mockResolvedValue(updated)
+
+      const result = await service.update(TENANT_ID, { name: 'Updated Name' })
+
+      expect(result).toEqual(updated)
+      expect(prisma.tenant.update).toHaveBeenCalledWith({
+        where: { id: TENANT_ID },
+        data: { name: 'Updated Name' },
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* remove                                                              */
+  /* ------------------------------------------------------------------ */
+  describe('remove', () => {
+    it('should deactivate all memberships and return { deleted: true }', async () => {
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          tenantMembership: { updateMany: jest.fn().mockResolvedValue({ count: 3 }) },
+        }
+        return fn(tx)
+      })
+
+      const result = await service.remove(TENANT_ID)
+
+      expect(result).toEqual({ deleted: true })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* findUsers                                                           */
+  /* ------------------------------------------------------------------ */
+  describe('findUsers', () => {
+    it('should return paginated users with role/status filtering', async () => {
+      const membership = makeMembershipRow()
+      prisma.$transaction.mockResolvedValue([[membership], 1])
+
+      const result = await service.findUsers(
+        TENANT_ID,
+        1,
+        20,
+        undefined,
+        undefined,
+        undefined,
+        UserRole.SOC_ANALYST_L1,
+        MembershipStatus.ACTIVE
+      )
+
+      expect(result.data).toHaveLength(1)
+      expect(result.data[0]).toMatchObject({
+        id: USER_ID,
+        email: 'analyst@acme.com',
+        name: 'Jane Doe',
+        role: UserRole.SOC_ANALYST_L1,
+        status: MembershipStatus.ACTIVE,
+      })
+      expect(result.pagination.total).toBe(1)
+    })
+
+    it('should handle search by name/email', async () => {
+      prisma.$transaction.mockResolvedValue([[], 0])
+
+      const result = await service.findUsers(TENANT_ID, 1, 20, 'jane')
+
+      expect(result.data).toEqual([])
+      expect(result.pagination.total).toBe(0)
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* findMembers                                                         */
+  /* ------------------------------------------------------------------ */
+  describe('findMembers', () => {
+    it('should return lightweight member list (id, name, email)', async () => {
+      prisma.tenantMembership.findMany.mockResolvedValue([
+        { user: { id: 'u1', name: 'Alice', email: 'alice@acme.com' } },
+        { user: { id: 'u2', name: 'Bob', email: 'bob@acme.com' } },
+      ])
+
+      const result = await service.findMembers(TENANT_ID)
+
+      expect(result).toEqual([
+        { id: 'u1', name: 'Alice', email: 'alice@acme.com' },
+        { id: 'u2', name: 'Bob', email: 'bob@acme.com' },
+      ])
+      expect(prisma.tenantMembership.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tenantId: TENANT_ID, status: MembershipStatus.ACTIVE },
+        })
+      )
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* checkEmail                                                          */
+  /* ------------------------------------------------------------------ */
+  describe('checkEmail', () => {
+    it('should return { exists: false, alreadyInTenant: false } for new email', async () => {
+      prisma.user.findUnique.mockResolvedValue(null)
+
+      const result = await service.checkEmail(TENANT_ID, 'new@acme.com')
+
+      expect(result).toEqual({ exists: false, user: null, alreadyInTenant: false })
+    })
+
+    it('should return { exists: true, alreadyInTenant: true } for existing tenant member', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        name: 'Jane',
+        email: 'jane@acme.com',
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID })
+
+      const result = await service.checkEmail(TENANT_ID, 'jane@acme.com')
+
+      expect(result).toEqual({
+        exists: true,
+        user: { id: USER_ID, name: 'Jane', email: 'jane@acme.com' },
+        alreadyInTenant: true,
+      })
+    })
+
+    it('should normalize email (lowercase + trim)', async () => {
+      prisma.user.findUnique.mockResolvedValue(null)
+
+      await service.checkEmail(TENANT_ID, '  Test@Acme.COM  ')
+
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'test@acme.com' },
+        select: { id: true, name: true, email: true },
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* assignUser                                                          */
+  /* ------------------------------------------------------------------ */
+  describe('assignUser', () => {
+    it('should assign existing user to tenant', async () => {
+      const existingUser = makeUserRow()
+      const membership = {
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        role: UserRole.SOC_ANALYST_L1,
+        status: MembershipStatus.ACTIVE,
+        createdAt: now,
+      }
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(existingUser), create: jest.fn() },
+          tenantMembership: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue(membership),
+          },
+        }
+        return fn(tx)
+      })
+
+      const result = await service.assignUser(
+        TENANT_ID,
+        { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
+        UserRole.TENANT_ADMIN
+      )
+
+      expect(result).toMatchObject({
+        id: USER_ID,
+        email: 'analyst@acme.com',
+        role: UserRole.SOC_ANALYST_L1,
+      })
+    })
+
+    it('should create new user with hashed password when user does not exist', async () => {
+      const createdUser = makeUserRow({
+        id: 'new-user-id',
+        email: 'new@acme.com',
+        name: 'New User',
+      })
+      const membership = {
+        userId: 'new-user-id',
+        tenantId: TENANT_ID,
+        role: UserRole.SOC_ANALYST_L1,
+        status: MembershipStatus.ACTIVE,
+        createdAt: now,
+      }
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: {
+            findUnique: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue(createdUser),
+          },
+          tenantMembership: {
+            findUnique: jest.fn(),
+            create: jest.fn().mockResolvedValue(membership),
+          },
+        }
+        return fn(tx)
+      })
+
+      const result = await service.assignUser(
+        TENANT_ID,
+        {
+          email: 'new@acme.com',
+          name: 'New User',
+          password: 'StrongP@ss1',
+          role: UserRole.SOC_ANALYST_L1,
+        },
+        UserRole.TENANT_ADMIN
+      )
+
+      expect(result).toMatchObject({
+        id: 'new-user-id',
+        email: 'new@acme.com',
+        name: 'New User',
+      })
+    })
+
+    it('should throw 403 when non-GLOBAL_ADMIN tries to assign GLOBAL_ADMIN role', async () => {
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'test@acme.com', role: UserRole.GLOBAL_ADMIN },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toThrow(BusinessException)
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'test@acme.com', role: UserRole.GLOBAL_ADMIN },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotAssignGlobalAdmin',
+      })
+    })
+
+    it('should throw 403 when trying to reassign protected user', async () => {
+      const protectedUser = makeUserRow({ isProtected: true })
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(protectedUser) },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(protectedUser) },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userProtected',
+      })
+    })
+
+    it('should throw 409 when user already in tenant', async () => {
+      const existingUser = makeUserRow()
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(existingUser) },
+          tenantMembership: {
+            findUnique: jest.fn().mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID }),
+            create: jest.fn(),
+          },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(existingUser) },
+          tenantMembership: {
+            findUnique: jest.fn().mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID }),
+            create: jest.fn(),
+          },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'analyst@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userAlreadyInTenant',
+      })
+    })
+
+    it('should throw 400 when name missing for new user', async () => {
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'new@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'new@acme.com', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.validation.name.required',
+      })
+    })
+
+    it('should throw 400 when password missing for new user', async () => {
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'new@acme.com', name: 'New User', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
+          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
+        }
+        return fn(tx)
+      })
+
+      await expect(
+        service.assignUser(
+          TENANT_ID,
+          { email: 'new@acme.com', name: 'New User', role: UserRole.SOC_ANALYST_L1 },
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.validation.password.required',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* updateUser                                                          */
+  /* ------------------------------------------------------------------ */
+  describe('updateUser', () => {
+    it('should update user name and role', async () => {
+      const membership = makeMembershipRow()
+      prisma.tenantMembership.findUnique
+        .mockResolvedValueOnce(membership) // first lookup
+        .mockResolvedValueOnce({
+          ...membership,
+          role: UserRole.SOC_ANALYST_L2,
+          user: { ...membership.user, name: 'Jane Updated' },
+        }) // after update lookup
+      prisma.tenantMembership.update.mockResolvedValue({})
+      prisma.user.update.mockResolvedValue({})
+
+      const result = await service.updateUser(
+        TENANT_ID,
+        USER_ID,
+        { name: 'Jane Updated', role: UserRole.SOC_ANALYST_L2 },
+        UserRole.TENANT_ADMIN,
+        CALLER_ID
+      )
+
+      expect(result).toMatchObject({
+        id: USER_ID,
+        name: 'Jane Updated',
+        role: UserRole.SOC_ANALYST_L2,
+      })
+    })
+
+    it('should throw 403 when trying to change own role', async () => {
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          CALLER_ID,
+          { role: UserRole.GLOBAL_ADMIN },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toThrow(BusinessException)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          CALLER_ID,
+          { role: UserRole.GLOBAL_ADMIN },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotModifySelf',
+      })
+    })
+
+    it('should throw 403 when modifying protected user role', async () => {
+      const protectedMembership = makeMembershipRow({
+        user: { ...makeMembershipRow().user, isProtected: true },
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          USER_ID,
+          { role: UserRole.SOC_ANALYST_L2 },
+          UserRole.GLOBAL_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          USER_ID,
+          { role: UserRole.SOC_ANALYST_L2 },
+          UserRole.GLOBAL_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userProtected',
+      })
+    })
+
+    it('should throw 403 when non-GLOBAL_ADMIN modifies GLOBAL_ADMIN user', async () => {
+      const globalAdminMembership = makeMembershipRow({ role: UserRole.GLOBAL_ADMIN })
+      prisma.tenantMembership.findUnique.mockResolvedValue(globalAdminMembership)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          USER_ID,
+          { name: 'Changed' },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(globalAdminMembership)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          USER_ID,
+          { name: 'Changed' },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
+      })
+    })
+
+    it('should throw 404 when user not found', async () => {
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          'nonexistent',
+          { name: 'Test' },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          'nonexistent',
+          { name: 'Test' },
+          UserRole.TENANT_ADMIN,
+          CALLER_ID
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotFound',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* removeUser                                                          */
+  /* ------------------------------------------------------------------ */
+  describe('removeUser', () => {
+    it('should set membership status to INACTIVE', async () => {
+      const membership = makeMembershipRow()
+      prisma.tenantMembership.findUnique.mockResolvedValue(membership)
+      prisma.tenantMembership.update.mockResolvedValue({})
+
+      const result = await service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+
+      expect(result).toEqual({ deleted: true })
+      expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
+        where: { userId_tenantId: { userId: USER_ID, tenantId: TENANT_ID } },
+        data: { status: MembershipStatus.INACTIVE },
+      })
+    })
+
+    it('should throw 403 when trying to delete self', async () => {
+      await expect(
+        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      await expect(
+        service.removeUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotDeleteSelf',
+      })
+    })
+
+    it('should throw 403 for protected user', async () => {
+      const protectedMembership = makeMembershipRow({
+        user: { ...makeMembershipRow().user, isProtected: true },
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userProtected',
+      })
+    })
+
+    it('should throw 404 when user not found', async () => {
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotFound',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* restoreUser                                                         */
+  /* ------------------------------------------------------------------ */
+  describe('restoreUser', () => {
+    it('should restore INACTIVE membership to ACTIVE', async () => {
+      const inactiveMembership = makeMembershipRow({ status: MembershipStatus.INACTIVE })
+      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveMembership)
+
+      const restoredMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
+      prisma.tenantMembership.update.mockResolvedValue(restoredMembership)
+
+      const result = await service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+
+      expect(result).toMatchObject({
+        id: USER_ID,
+        status: MembershipStatus.ACTIVE,
+      })
+      expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
+        where: { userId_tenantId: { userId: USER_ID, tenantId: TENANT_ID } },
+        data: { status: MembershipStatus.ACTIVE },
+        include: { user: true },
+      })
+    })
+
+    it('should throw 404 when not found', async () => {
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.restoreUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.restoreUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotFound',
+      })
+    })
+
+    it('should throw 400 when user not deleted (status !== INACTIVE)', async () => {
+      const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
+      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+
+      await expect(service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+
+      await expect(
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotDeleted',
+      })
+    })
+
+    it('should throw 403 when non-GLOBAL_ADMIN restores GLOBAL_ADMIN', async () => {
+      const inactiveGlobalAdmin = makeMembershipRow({
+        status: MembershipStatus.INACTIVE,
+        role: UserRole.GLOBAL_ADMIN,
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
+
+      await expect(service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
+
+      await expect(
+        service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* blockUser                                                           */
+  /* ------------------------------------------------------------------ */
+  describe('blockUser', () => {
+    it('should set status to SUSPENDED', async () => {
+      const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
+      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+
+      const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
+      prisma.tenantMembership.update.mockResolvedValue(suspendedMembership)
+
+      const result = await service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+
+      expect(result).toMatchObject({
+        id: USER_ID,
+        status: MembershipStatus.SUSPENDED,
+      })
+    })
+
+    it('should throw 403 when blocking self', async () => {
+      await expect(
+        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      await expect(
+        service.blockUser(TENANT_ID, CALLER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotBlockSelf',
+      })
+    })
+
+    it('should throw 403 for protected user', async () => {
+      const protectedMembership = makeMembershipRow({
+        user: { ...makeMembershipRow().user, isProtected: true },
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userProtected',
+      })
+    })
+
+    it('should throw 400 when already blocked', async () => {
+      const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
+      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+
+      await expect(
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+
+      await expect(
+        service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userAlreadyBlocked',
+      })
+    })
+
+    it('should throw 404 when not found', async () => {
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotFound',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* unblockUser                                                         */
+  /* ------------------------------------------------------------------ */
+  describe('unblockUser', () => {
+    it('should set status from SUSPENDED to ACTIVE', async () => {
+      const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
+      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+
+      const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
+      prisma.tenantMembership.update.mockResolvedValue(activeMembership)
+
+      const result = await service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+
+      expect(result).toMatchObject({
+        id: USER_ID,
+        status: MembershipStatus.ACTIVE,
+      })
+    })
+
+    it('should throw 400 when not blocked', async () => {
+      const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
+      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+
+      await expect(service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+
+      await expect(
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotBlocked',
+      })
+    })
+
+    it('should throw 403 for non-admin unblocking GLOBAL_ADMIN', async () => {
+      const suspendedGlobalAdmin = makeMembershipRow({
+        status: MembershipStatus.SUSPENDED,
+        role: UserRole.GLOBAL_ADMIN,
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
+
+      await expect(service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
+
+      await expect(
+        service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.cannotModifyGlobalAdmin',
+      })
+    })
+
+    it('should throw 404 when not found', async () => {
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.unblockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+      ).rejects.toThrow(BusinessException)
+
+      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+
+      await expect(
+        service.unblockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userNotFound',
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* impersonateUser                                                     */
+  /* ------------------------------------------------------------------ */
+  describe('impersonateUser', () => {
+    const callerPayload = {
+      sub: CALLER_ID,
+      email: 'admin@acme.com',
+      tenantId: TENANT_ID,
+      tenantSlug: 'acme-corp',
+      role: UserRole.GLOBAL_ADMIN,
+    }
+
+    it('should return impersonation tokens', async () => {
+      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: 'analyst@acme.com',
+        name: 'Jane Doe',
+        isProtected: false,
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        role: UserRole.SOC_ANALYST_L1,
+        status: MembershipStatus.ACTIVE,
+      })
+
+      const result = await service.impersonateUser(TENANT_ID, USER_ID, callerPayload)
+
+      expect(result.accessToken).toBe('mock-access')
+      expect(result.refreshToken).toBe('mock-refresh')
+      expect(result.user).toMatchObject({
+        sub: USER_ID,
+        email: 'analyst@acme.com',
+        tenantId: TENANT_ID,
+        tenantSlug: 'acme-corp',
+        role: UserRole.SOC_ANALYST_L1,
+      })
+      expect(result.impersonator).toMatchObject({
+        sub: CALLER_ID,
+        email: 'admin@acme.com',
+        role: UserRole.GLOBAL_ADMIN,
+      })
+    })
+
+    it('should throw 403 for nested impersonation', async () => {
+      const impersonatedCaller = { ...callerPayload, isImpersonated: true }
+
+      await expect(service.impersonateUser(TENANT_ID, USER_ID, impersonatedCaller)).rejects.toThrow(
+        BusinessException
+      )
+
+      await expect(
+        service.impersonateUser(TENANT_ID, USER_ID, impersonatedCaller)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.impersonation.nestedNotAllowed',
+      })
+    })
+
+    it('should throw 400 for self-impersonation', async () => {
+      const selfCaller = { ...callerPayload, sub: USER_ID }
+
+      await expect(service.impersonateUser(TENANT_ID, USER_ID, selfCaller)).rejects.toThrow(
+        BusinessException
+      )
+
+      await expect(service.impersonateUser(TENANT_ID, USER_ID, selfCaller)).rejects.toMatchObject({
+        messageKey: 'errors.impersonation.cannotImpersonateSelf',
+      })
+    })
+
+    it('should throw 403 for protected user', async () => {
+      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: 'analyst@acme.com',
+        name: 'Jane Doe',
+        isProtected: true,
+      })
+
+      await expect(service.impersonateUser(TENANT_ID, USER_ID, callerPayload)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: 'analyst@acme.com',
+        name: 'Jane Doe',
+        isProtected: true,
+      })
+
+      await expect(
+        service.impersonateUser(TENANT_ID, USER_ID, callerPayload)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.impersonation.protectedUser',
+      })
+    })
+
+    it('should throw 403 when caller does not have higher role than target', async () => {
+      const tenantAdminCaller = { ...callerPayload, role: UserRole.TENANT_ADMIN }
+
+      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: 'other-admin@acme.com',
+        name: 'Other Admin',
+        isProtected: false,
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        role: UserRole.TENANT_ADMIN,
+        status: MembershipStatus.ACTIVE,
+      })
+
+      await expect(service.impersonateUser(TENANT_ID, USER_ID, tenantAdminCaller)).rejects.toThrow(
+        BusinessException
+      )
+
+      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
+      prisma.user.findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: 'other-admin@acme.com',
+        name: 'Other Admin',
+        isProtected: false,
+      })
+      prisma.tenantMembership.findUnique.mockResolvedValue({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        role: UserRole.TENANT_ADMIN,
+        status: MembershipStatus.ACTIVE,
+      })
+
+      await expect(
+        service.impersonateUser(TENANT_ID, USER_ID, tenantAdminCaller)
+      ).rejects.toMatchObject({
+        messageKey: 'errors.impersonation.insufficientPrivilege',
+      })
+    })
+  })
+})

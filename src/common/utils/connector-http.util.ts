@@ -10,6 +10,12 @@ export interface ConnectorHttpOptions {
   rejectUnauthorized?: boolean
   /** Allow private/internal network targets. Defaults to false — only set to true for known internal connector services. */
   allowPrivateNetwork?: boolean
+  /** PEM-encoded client certificate for mTLS authentication. */
+  clientCert?: string
+  /** PEM-encoded client private key for mTLS authentication. */
+  clientKey?: string
+  /** PEM-encoded CA certificate to trust for the connection. */
+  caCert?: string
 }
 
 export interface ConnectorHttpResponse {
@@ -36,6 +42,9 @@ export function connectorFetch(
     timeoutMs = 15_000,
     rejectUnauthorized: callerRejectUnauthorized = isProduction,
     allowPrivateNetwork = false,
+    clientCert,
+    clientKey,
+    caCert,
   } = options
 
   // In non-production, always accept self-signed certificates for local testing
@@ -81,6 +90,9 @@ export function connectorFetch(
       },
       timeout: timeoutMs,
       rejectUnauthorized: isHttps ? rejectUnauthorized : undefined,
+      ...(clientCert ? { cert: clientCert } : {}),
+      ...(clientKey ? { key: clientKey } : {}),
+      ...(caCert ? { ca: caCert } : {}),
     }
 
     const maxResponseBytes = 10 * 1024 * 1024 // 10 MB limit

@@ -1,8 +1,55 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch } from '../../../common/utils/connector-http.util'
+import {
+  basicAuth,
+  connectorFetch,
+  type ConnectorHttpOptions,
+} from '../../../common/utils/connector-http.util'
 import type { TestResult } from '../connectors.types'
+
+/**
+ * Resolves the Velociraptor base URL from config.
+ * Prefers `apiUrl`, falls back to `baseUrl`.
+ */
+function resolveBaseUrl(config: Record<string, unknown>): string | undefined {
+  return (config.apiUrl ?? config.baseUrl) as string | undefined
+}
+
+/**
+ * Builds authentication options for Velociraptor requests.
+ *
+ * Supports two auth modes:
+ * 1. **mTLS** (preferred for API port 8001) — uses `clientCert` + `clientKey`
+ * 2. **Basic auth** (GUI port 8889) — uses `username` + `password`
+ */
+function buildAuthOptions(config: Record<string, unknown>): {
+  headers: Record<string, string>
+  httpOptions: Partial<ConnectorHttpOptions>
+} {
+  const clientCert = config.clientCert as string | undefined
+  const clientKey = config.clientKey as string | undefined
+  const caCert = config.caCert as string | undefined
+  const username = config.username as string | undefined
+  const password = config.password as string | undefined
+
+  const headers: Record<string, string> = {}
+  const httpOptions: Partial<ConnectorHttpOptions> = {}
+
+  if (clientCert && clientKey) {
+    // mTLS authentication for the gRPC gateway API (port 8001)
+    httpOptions.clientCert = clientCert
+    httpOptions.clientKey = clientKey
+    if (caCert) {
+      httpOptions.caCert = caCert
+    }
+  } else if (username && password) {
+    // Basic auth for the GUI REST API (port 8889)
+    headers.Authorization = basicAuth(username, password)
+  }
+
+  return { headers, httpOptions }
+}
 
 @Injectable()
 export class VelociraptorService {
@@ -11,25 +58,32 @@ export class VelociraptorService {
   constructor(private readonly appLogger: AppLoggerService) {}
 
   /**
-   * Test Velociraptor connection via API key auth.
-   * GET /api/v1/GetServerMetadata
+   * Test Velociraptor connection.
+   * Supports mTLS (clientCert + clientKey) or Basic auth (username + password).
    */
   async testConnection(config: Record<string, unknown>): Promise<TestResult> {
-    const baseUrl = config.baseUrl as string | undefined
+    const baseUrl = resolveBaseUrl(config)
     if (!baseUrl) {
-      return { ok: false, details: 'Velociraptor base URL not configured' }
+      return { ok: false, details: 'Velociraptor URL not configured' }
     }
 
-    const apiKey = config.apiKey as string | undefined
-    if (!apiKey) {
-      return { ok: false, details: 'Velociraptor API key not configured' }
+    const { headers, httpOptions } = buildAuthOptions(config)
+
+    const hasClientCert = Boolean(config.clientCert && config.clientKey)
+    const hasBasicAuth = Boolean(config.username && config.password)
+
+    if (!hasClientCert && !hasBasicAuth) {
+      return {
+        ok: false,
+        details:
+          'Velociraptor authentication not configured. Provide client certificate + key (mTLS) or username + password (Basic auth).',
+      }
     }
 
     try {
-      const res = await connectorFetch(`${baseUrl}/api/v1/GetServerMetadata`, {
-        headers: {
-          'Grpc-Metadata-authorization': `Bearer ${apiKey}`,
-        },
+      const res = await connectorFetch(`${baseUrl}/api/v1/GetUserUITraits`, {
+        headers,
+        ...httpOptions,
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
@@ -78,14 +132,13 @@ export class VelociraptorService {
     config: Record<string, unknown>,
     vql: string
   ): Promise<{ rows: unknown[]; columns: string[] }> {
-    const baseUrl = config.baseUrl as string
-    const apiKey = config.apiKey as string
+    const baseUrl = resolveBaseUrl(config) as string
+    const { headers, httpOptions } = buildAuthOptions(config)
 
     const res = await connectorFetch(`${baseUrl}/api/v1/CreateNotebook`, {
       method: 'POST',
-      headers: {
-        'Grpc-Metadata-authorization': `Bearer ${apiKey}`,
-      },
+      headers,
+      ...httpOptions,
       body: { query: vql },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
@@ -128,13 +181,12 @@ export class VelociraptorService {
    * Get connected clients from Velociraptor.
    */
   async getClients(config: Record<string, unknown>): Promise<unknown[]> {
-    const baseUrl = config.baseUrl as string
-    const apiKey = config.apiKey as string
+    const baseUrl = resolveBaseUrl(config) as string
+    const { headers, httpOptions } = buildAuthOptions(config)
 
     const res = await connectorFetch(`${baseUrl}/api/v1/SearchClients?query=all&limit=500`, {
-      headers: {
-        'Grpc-Metadata-authorization': `Bearer ${apiKey}`,
-      },
+      headers,
+      ...httpOptions,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })

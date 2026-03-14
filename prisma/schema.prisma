@@ -182,6 +182,8 @@ model ConnectorConfig {
   lastTestAt      DateTime?     @map("last_test_at")
   lastTestOk      Boolean?      @map("last_test_ok")
   lastError       String?       @map("last_error") @db.Text
+  lastSyncAt      DateTime?     @map("last_sync_at")
+  syncEnabled     Boolean       @default(true) @map("sync_enabled")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
