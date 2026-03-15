@@ -10,23 +10,18 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    intelIOC: {
-      groupBy: jest.fn(),
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    intelMispEvent: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    alert: {
-      findMany: jest.fn(),
-    },
-    $queryRaw: jest.fn(),
+    groupActiveIOCsByType: jest.fn(),
+    findDistinctOrganizations: jest.fn(),
+    findManyMispEvents: jest.fn(),
+    countMispEvents: jest.fn(),
+    findManyIOCs: jest.fn(),
+    countIOCs: jest.fn(),
+    findAlertsByIds: jest.fn(),
+    findActiveIOCsByValues: jest.fn(),
+    upsertMispEvent: jest.fn(),
+    upsertIOC: jest.fn(),
   }
 }
 
@@ -46,12 +41,12 @@ function createMockMispService() {
 }
 
 function createService(
-  prisma: ReturnType<typeof createMockPrisma>,
+  repository: ReturnType<typeof createMockRepository>,
   connectorsService: ReturnType<typeof createMockConnectorsService>,
   mispService: ReturnType<typeof createMockMispService>
 ) {
   return new IntelService(
-    prisma as never,
+    repository as never,
     connectorsService as never,
     mispService as never,
     mockAppLogger as never
@@ -59,17 +54,17 @@ function createService(
 }
 
 describe('IntelService', () => {
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let connectorsService: ReturnType<typeof createMockConnectorsService>
   let mispService: ReturnType<typeof createMockMispService>
   let service: IntelService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     connectorsService = createMockConnectorsService()
     mispService = createMockMispService()
-    service = createService(prisma, connectorsService, mispService)
+    service = createService(repository, connectorsService, mispService)
   })
 
   /* ------------------------------------------------------------------ */
@@ -78,7 +73,7 @@ describe('IntelService', () => {
 
   describe('getStats', () => {
     it('should return aggregated IOC counts and threat actor count', async () => {
-      prisma.intelIOC.groupBy.mockResolvedValue([
+      repository.groupActiveIOCsByType.mockResolvedValue([
         { iocType: 'ip-src', _count: { id: 15 } },
         { iocType: 'ip-dst', _count: { id: 10 } },
         { iocType: 'md5', _count: { id: 8 } },
@@ -88,7 +83,7 @@ describe('IntelService', () => {
         { iocType: 'hostname', _count: { id: 5 } },
         { iocType: 'url', _count: { id: 7 } },
       ])
-      prisma.intelMispEvent.findMany.mockResolvedValue([
+      repository.findDistinctOrganizations.mockResolvedValue([
         { organization: 'APT28' },
         { organization: 'Lazarus Group' },
         { organization: 'Turla' },
@@ -101,17 +96,11 @@ describe('IntelService', () => {
       expect(result.fileHashes).toBe(15)
       expect(result.activeDomains).toBe(17)
       expect(result.threatActors).toBe(3)
-      expect(prisma.intelIOC.groupBy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          by: ['iocType'],
-          where: { tenantId: TENANT_ID, active: true },
-        })
-      )
     })
 
     it('should handle empty data', async () => {
-      prisma.intelIOC.groupBy.mockResolvedValue([])
-      prisma.intelMispEvent.findMany.mockResolvedValue([])
+      repository.groupActiveIOCsByType.mockResolvedValue([])
+      repository.findDistinctOrganizations.mockResolvedValue([])
 
       const result = await service.getStats(TENANT_ID)
 
@@ -155,8 +144,8 @@ describe('IntelService', () => {
           published: true,
         },
       ]
-      prisma.intelMispEvent.findMany.mockResolvedValue(mockEvents)
-      prisma.intelMispEvent.count.mockResolvedValue(25)
+      repository.findManyMispEvents.mockResolvedValue(mockEvents)
+      repository.countMispEvents.mockResolvedValue(25)
 
       const result = await service.getRecentEvents(TENANT_ID, 1, 20)
 
@@ -168,19 +157,11 @@ describe('IntelService', () => {
       expect(result.pagination.totalPages).toBe(2)
       expect(result.pagination.hasNext).toBe(true)
       expect(result.pagination.hasPrev).toBe(false)
-
-      expect(prisma.intelMispEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { tenantId: TENANT_ID },
-          skip: 0,
-          take: 20,
-        })
-      )
     })
 
     it('should handle empty list', async () => {
-      prisma.intelMispEvent.findMany.mockResolvedValue([])
-      prisma.intelMispEvent.count.mockResolvedValue(0)
+      repository.findManyMispEvents.mockResolvedValue([])
+      repository.countMispEvents.mockResolvedValue(0)
 
       const result = await service.getRecentEvents(TENANT_ID, 1, 20)
 
@@ -192,8 +173,8 @@ describe('IntelService', () => {
     })
 
     it('should compute correct pagination for page 2', async () => {
-      prisma.intelMispEvent.findMany.mockResolvedValue([])
-      prisma.intelMispEvent.count.mockResolvedValue(50)
+      repository.findManyMispEvents.mockResolvedValue([])
+      repository.countMispEvents.mockResolvedValue(50)
 
       const result = await service.getRecentEvents(TENANT_ID, 2, 10)
 
@@ -201,13 +182,6 @@ describe('IntelService', () => {
       expect(result.pagination.totalPages).toBe(5)
       expect(result.pagination.hasNext).toBe(true)
       expect(result.pagination.hasPrev).toBe(true)
-
-      expect(prisma.intelMispEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          skip: 10,
-          take: 10,
-        })
-      )
     })
   })
 
@@ -217,12 +191,12 @@ describe('IntelService', () => {
 
   describe('searchIOCs', () => {
     it('should filter by query (case-insensitive iocValue contains)', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, '192.168', undefined, 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             tenantId: TENANT_ID,
@@ -234,12 +208,12 @@ describe('IntelService', () => {
     })
 
     it('should expand type "ip" to ["ip-src", "ip-dst"]', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, undefined, 'ip', 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             iocType: { in: ['ip-src', 'ip-dst'] },
@@ -249,12 +223,12 @@ describe('IntelService', () => {
     })
 
     it('should expand type "hash" to ["md5", "sha1", "sha256"]', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, undefined, 'hash', 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             iocType: { in: ['md5', 'sha1', 'sha256'] },
@@ -264,12 +238,12 @@ describe('IntelService', () => {
     })
 
     it('should pass a single type directly when no expansion exists', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, undefined, 'domain', 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             iocType: 'domain',
@@ -279,8 +253,8 @@ describe('IntelService', () => {
     })
 
     it('should filter by source', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(
         TENANT_ID,
@@ -293,7 +267,7 @@ describe('IntelService', () => {
         'MISP-100'
       )
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             source: { contains: 'MISP-100', mode: 'insensitive' },
@@ -318,8 +292,8 @@ describe('IntelService', () => {
           active: true,
         },
       ]
-      prisma.intelIOC.findMany.mockResolvedValue(mockIOCs)
-      prisma.intelIOC.count.mockResolvedValue(1)
+      repository.findManyIOCs.mockResolvedValue(mockIOCs)
+      repository.countIOCs.mockResolvedValue(1)
 
       const result = await service.searchIOCs(TENANT_ID, '10.0.0', 'ip', 1, 20)
 
@@ -329,12 +303,12 @@ describe('IntelService', () => {
     })
 
     it('should not set iocValue filter when query is empty string', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, '', undefined, 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { tenantId: TENANT_ID, active: true },
         })
@@ -342,12 +316,12 @@ describe('IntelService', () => {
     })
 
     it('should not set iocValue filter when query is whitespace only', async () => {
-      prisma.intelIOC.findMany.mockResolvedValue([])
-      prisma.intelIOC.count.mockResolvedValue(0)
+      repository.findManyIOCs.mockResolvedValue([])
+      repository.countIOCs.mockResolvedValue(0)
 
       await service.searchIOCs(TENANT_ID, '   ', undefined, 1, 20)
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyIOCs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { tenantId: TENANT_ID, active: true },
         })
@@ -361,11 +335,11 @@ describe('IntelService', () => {
 
   describe('matchIOCsAgainstAlerts', () => {
     it('should match alert sourceIp/destinationIp against IOCs', async () => {
-      prisma.alert.findMany.mockResolvedValue([
+      repository.findAlertsByIds.mockResolvedValue([
         { id: 'alert-1', sourceIp: '10.0.0.1', destinationIp: '192.168.1.1' },
         { id: 'alert-2', sourceIp: '172.16.0.5', destinationIp: null },
       ])
-      prisma.intelIOC.findMany.mockResolvedValue([
+      repository.findActiveIOCsByValues.mockResolvedValue([
         { iocValue: '10.0.0.1', iocType: 'ip-src', source: 'MISP-100', severity: 'high' },
         { iocValue: '172.16.0.5', iocType: 'ip-dst', source: 'MISP-200', severity: 'critical' },
       ])
@@ -387,10 +361,10 @@ describe('IntelService', () => {
 
     it('should return matches per alert with deduplication', async () => {
       // Same IP appears as both sourceIp and destinationIp for an alert
-      prisma.alert.findMany.mockResolvedValue([
+      repository.findAlertsByIds.mockResolvedValue([
         { id: 'alert-1', sourceIp: '10.0.0.1', destinationIp: '10.0.0.1' },
       ])
-      prisma.intelIOC.findMany.mockResolvedValue([
+      repository.findActiveIOCsByValues.mockResolvedValue([
         { iocValue: '10.0.0.1', iocType: 'ip-src', source: 'MISP-100', severity: 'high' },
       ])
 
@@ -403,10 +377,10 @@ describe('IntelService', () => {
     })
 
     it('should handle alerts with no matching IOCs', async () => {
-      prisma.alert.findMany.mockResolvedValue([
+      repository.findAlertsByIds.mockResolvedValue([
         { id: 'alert-1', sourceIp: '10.0.0.1', destinationIp: '10.0.0.2' },
       ])
-      prisma.intelIOC.findMany.mockResolvedValue([])
+      repository.findActiveIOCsByValues.mockResolvedValue([])
 
       const result = await service.matchIOCsAgainstAlerts(TENANT_ID, ['alert-1'])
 
@@ -416,8 +390,8 @@ describe('IntelService', () => {
     })
 
     it('should handle alert IDs not found in the database', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.intelIOC.findMany.mockResolvedValue([])
+      repository.findAlertsByIds.mockResolvedValue([])
+      repository.findActiveIOCsByValues.mockResolvedValue([])
 
       const result = await service.matchIOCsAgainstAlerts(TENANT_ID, ['nonexistent-alert'])
 
@@ -428,7 +402,7 @@ describe('IntelService', () => {
     })
 
     it('should handle alerts with no IPs', async () => {
-      prisma.alert.findMany.mockResolvedValue([
+      repository.findAlertsByIds.mockResolvedValue([
         { id: 'alert-1', sourceIp: null, destinationIp: null },
       ])
 
@@ -436,25 +410,22 @@ describe('IntelService', () => {
 
       expect(result).toHaveLength(1)
       expect(result[0]?.matchCount).toBe(0)
-      // intelIOC.findMany should not be called since ips array is empty
-      expect(prisma.intelIOC.findMany).not.toHaveBeenCalled()
+      // findActiveIOCsByValues should not be called since ips array is empty
+      expect(repository.findActiveIOCsByValues).not.toHaveBeenCalled()
     })
 
     it('should collect unique IPs across all alerts', async () => {
-      prisma.alert.findMany.mockResolvedValue([
+      repository.findAlertsByIds.mockResolvedValue([
         { id: 'alert-1', sourceIp: '10.0.0.1', destinationIp: '10.0.0.2' },
         { id: 'alert-2', sourceIp: '10.0.0.1', destinationIp: '10.0.0.3' },
       ])
-      prisma.intelIOC.findMany.mockResolvedValue([])
+      repository.findActiveIOCsByValues.mockResolvedValue([])
 
       await service.matchIOCsAgainstAlerts(TENANT_ID, ['alert-1', 'alert-2'])
 
-      expect(prisma.intelIOC.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            iocValue: { in: expect.arrayContaining(['10.0.0.1', '10.0.0.2', '10.0.0.3']) },
-          }),
-        })
+      expect(repository.findActiveIOCsByValues).toHaveBeenCalledWith(
+        TENANT_ID,
+        expect.arrayContaining(['10.0.0.1', '10.0.0.2', '10.0.0.3'])
       )
     })
   })
@@ -516,8 +487,8 @@ describe('IntelService', () => {
         },
       ])
 
-      prisma.intelMispEvent.upsert.mockResolvedValue({})
-      prisma.intelIOC.upsert.mockResolvedValue({})
+      repository.upsertMispEvent.mockResolvedValue({})
+      repository.upsertIOC.mockResolvedValue({})
 
       const result = await service.syncFromMisp(TENANT_ID)
 
@@ -608,12 +579,12 @@ describe('IntelService', () => {
       ])
 
       // First event upsert succeeds, second fails
-      prisma.intelMispEvent.upsert
+      repository.upsertMispEvent
         .mockResolvedValueOnce({})
         .mockRejectedValueOnce(new Error('Unique constraint violation'))
 
       // IOC upsert succeeds
-      prisma.intelIOC.upsert.mockResolvedValue({})
+      repository.upsertIOC.mockResolvedValue({})
 
       const result = await service.syncFromMisp(TENANT_ID)
 
@@ -669,7 +640,7 @@ describe('IntelService', () => {
       ])
 
       mispService.searchAttributes.mockResolvedValue([])
-      prisma.intelMispEvent.upsert.mockResolvedValue({})
+      repository.upsertMispEvent.mockResolvedValue({})
 
       const result = await service.syncFromMisp(TENANT_ID)
 

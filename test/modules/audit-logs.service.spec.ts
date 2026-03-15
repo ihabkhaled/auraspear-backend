@@ -7,13 +7,10 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    auditLog: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-    },
+    findManyAndCount: jest.fn(),
+    create: jest.fn(),
   }
 }
 
@@ -21,11 +18,11 @@ const TENANT_ID = 'tenant-001'
 
 describe('AuditLogsService', () => {
   let service: AuditLogsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
-    service = new AuditLogsService(prisma as never, mockAppLogger as never)
+    repository = createMockRepository()
+    service = new AuditLogsService(repository as never, mockAppLogger as never)
     jest.clearAllMocks()
   })
 
@@ -53,8 +50,7 @@ describe('AuditLogsService', () => {
           resource: 'Case',
         },
       ]
-      prisma.auditLog.findMany.mockResolvedValueOnce(logs)
-      prisma.auditLog.count.mockResolvedValueOnce(2)
+      repository.findManyAndCount.mockResolvedValueOnce([logs, 2])
 
       const result = await service.search(TENANT_ID, baseQuery)
 
@@ -67,68 +63,61 @@ describe('AuditLogsService', () => {
         hasNext: false,
         hasPrev: false,
       })
-      expect(prisma.auditLog.findMany).toHaveBeenCalledTimes(1)
-      expect(prisma.auditLog.count).toHaveBeenCalledTimes(1)
+      expect(repository.findManyAndCount).toHaveBeenCalledTimes(1)
     })
 
     it('should always scope to provided tenantId', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       await service.search(TENANT_ID, baseQuery)
 
-      const whereArgument = prisma.auditLog.findMany.mock.calls[0][0].where
-      expect(whereArgument.tenantId).toBe(TENANT_ID)
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.tenantId).toBe(TENANT_ID)
     })
 
     it('should filter by actor (contains, case-insensitive)', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       await service.search(TENANT_ID, { ...baseQuery, actor: 'admin' })
 
-      const whereArgument = prisma.auditLog.findMany.mock.calls[0][0].where
-      expect(whereArgument.actor).toEqual({ contains: 'admin', mode: 'insensitive' })
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.actor).toEqual({ contains: 'admin', mode: 'insensitive' })
     })
 
     it('should filter by action', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       await service.search(TENANT_ID, { ...baseQuery, action: 'CREATE' })
 
-      const whereArgument = prisma.auditLog.findMany.mock.calls[0][0].where
-      expect(whereArgument.action).toBe('CREATE')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.action).toBe('CREATE')
     })
 
     it('should filter by resource', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       await service.search(TENANT_ID, { ...baseQuery, resource: 'User' })
 
-      const whereArgument = prisma.auditLog.findMany.mock.calls[0][0].where
-      expect(whereArgument.resource).toBe('User')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.resource).toBe('User')
     })
 
     it('should filter by date range', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       const from = '2025-01-01T00:00:00.000Z'
       const to = '2025-01-31T23:59:59.000Z'
       await service.search(TENANT_ID, { ...baseQuery, from, to })
 
-      const whereArgument = prisma.auditLog.findMany.mock.calls[0][0].where
-      expect(whereArgument.createdAt).toEqual({
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.createdAt).toEqual({
         gte: new Date(from),
         lte: new Date(to),
       })
     })
 
     it('should handle empty results', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       const result = await service.search(TENANT_ID, baseQuery)
 
@@ -138,17 +127,16 @@ describe('AuditLogsService', () => {
     })
 
     it('should log success via appLogger', async () => {
-      prisma.auditLog.findMany.mockResolvedValueOnce([])
-      prisma.auditLog.count.mockResolvedValueOnce(0)
+      repository.findManyAndCount.mockResolvedValueOnce([[], 0])
 
       await service.search(TENANT_ID, baseQuery)
 
       expect(mockAppLogger.info).toHaveBeenCalledTimes(1)
     })
 
-    it('should log failure and re-throw when prisma throws', async () => {
+    it('should log failure and re-throw when repository throws', async () => {
       const dbError = new Error('DB connection failed')
-      prisma.auditLog.findMany.mockRejectedValueOnce(dbError)
+      repository.findManyAndCount.mockRejectedValueOnce(dbError)
 
       await expect(service.search(TENANT_ID, baseQuery)).rejects.toThrow('DB connection failed')
       expect(mockAppLogger.error).toHaveBeenCalledTimes(1)
@@ -172,22 +160,20 @@ describe('AuditLogsService', () => {
         ipAddress: '192.168.1.1',
       }
       const createdEntry = { id: 'audit-1', ...data, createdAt: new Date() }
-      prisma.auditLog.create.mockResolvedValueOnce(createdEntry)
+      repository.create.mockResolvedValueOnce(createdEntry)
 
       const result = await service.create(data)
 
       expect(result).toEqual(createdEntry)
-      expect(prisma.auditLog.create).toHaveBeenCalledWith({
-        data: {
-          tenantId: TENANT_ID,
-          actor: 'admin@test.com',
-          role: 'TENANT_ADMIN',
-          action: 'CREATE',
-          resource: 'User',
-          resourceId: 'user-123',
-          details: 'Created new user',
-          ipAddress: '192.168.1.1',
-        },
+      expect(repository.create).toHaveBeenCalledWith({
+        tenantId: TENANT_ID,
+        actor: 'admin@test.com',
+        role: 'TENANT_ADMIN',
+        action: 'CREATE',
+        resource: 'User',
+        resourceId: 'user-123',
+        details: 'Created new user',
+        ipAddress: '192.168.1.1',
       })
     })
 
@@ -207,22 +193,20 @@ describe('AuditLogsService', () => {
         ipAddress: null,
         createdAt: new Date(),
       }
-      prisma.auditLog.create.mockResolvedValueOnce(createdEntry)
+      repository.create.mockResolvedValueOnce(createdEntry)
 
       const result = await service.create(data)
 
       expect(result).toEqual(createdEntry)
-      expect(prisma.auditLog.create).toHaveBeenCalledWith({
-        data: {
-          tenantId: TENANT_ID,
-          actor: 'admin@test.com',
-          role: 'TENANT_ADMIN',
-          action: 'LOGIN',
-          resource: 'Auth',
-          resourceId: null,
-          details: null,
-          ipAddress: null,
-        },
+      expect(repository.create).toHaveBeenCalledWith({
+        tenantId: TENANT_ID,
+        actor: 'admin@test.com',
+        role: 'TENANT_ADMIN',
+        action: 'LOGIN',
+        resource: 'Auth',
+        resourceId: null,
+        details: null,
+        ipAddress: null,
       })
     })
 
@@ -235,14 +219,14 @@ describe('AuditLogsService', () => {
         resource: 'Case',
         resourceId: 'case-1',
       }
-      prisma.auditLog.create.mockResolvedValueOnce({ id: 'audit-3', ...data })
+      repository.create.mockResolvedValueOnce({ id: 'audit-3', ...data })
 
       await service.create(data)
 
       expect(mockAppLogger.info).toHaveBeenCalledTimes(1)
     })
 
-    it('should log failure and re-throw when prisma throws', async () => {
+    it('should log failure and re-throw when repository throws', async () => {
       const data = {
         tenantId: TENANT_ID,
         actor: 'admin@test.com',
@@ -251,7 +235,7 @@ describe('AuditLogsService', () => {
         resource: 'Alert',
       }
       const dbError = new Error('Unique constraint violation')
-      prisma.auditLog.create.mockRejectedValueOnce(dbError)
+      repository.create.mockRejectedValueOnce(dbError)
 
       await expect(service.create(data)).rejects.toThrow('Unique constraint violation')
       expect(mockAppLogger.error).toHaveBeenCalledTimes(1)

@@ -16,16 +16,14 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    user: {
-      findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-    userPreference: {
-      findUnique: jest.fn(),
-      upsert: jest.fn(),
-    },
+    findByIdWithPreferencesAndMemberships: jest.fn(),
+    findById: jest.fn(),
+    updateName: jest.fn(),
+    updatePasswordHash: jest.fn(),
+    findPreference: jest.fn(),
+    upsertPreference: jest.fn(),
   }
 }
 
@@ -81,11 +79,11 @@ const mockUserPlain = {
 
 describe('UsersService', () => {
   let service: UsersService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
-    service = new UsersService(prisma as never, mockAppLogger as never)
+    repository = createMockRepository()
+    service = new UsersService(repository as never, mockAppLogger as never)
     jest.clearAllMocks()
   })
 
@@ -95,7 +93,7 @@ describe('UsersService', () => {
 
   describe('getProfile', () => {
     it('should return profile with tenant and preference, excluding passwordHash', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserWithMemberships)
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue(mockUserWithMemberships)
 
       const result = await service.getProfile(USER_ID, TENANT_ID)
 
@@ -109,32 +107,26 @@ describe('UsersService', () => {
         })
       )
       expect(result).not.toHaveProperty('passwordHash')
-      expect(prisma.user.findUnique).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        include: {
-          preference: true,
-          memberships: { where: { tenantId: TENANT_ID }, include: { tenant: true }, take: 1 },
-        },
-      })
+      expect(repository.findByIdWithPreferencesAndMemberships).toHaveBeenCalledWith(
+        USER_ID,
+        TENANT_ID
+      )
     })
 
     it('should return first membership tenant when tenantId is not provided', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserWithMemberships)
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue(mockUserWithMemberships)
 
       const result = await service.getProfile(USER_ID)
 
       expect(result.tenant).toEqual(mockTenant)
-      expect(prisma.user.findUnique).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        include: {
-          preference: true,
-          memberships: { include: { tenant: true }, take: 1 },
-        },
-      })
+      expect(repository.findByIdWithPreferencesAndMemberships).toHaveBeenCalledWith(
+        USER_ID,
+        undefined
+      )
     })
 
     it('should return null tenant when user has no memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue({
         ...mockUserWithMemberships,
         memberships: [],
       })
@@ -145,7 +137,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 404 when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue(null)
 
       await expect(service.getProfile(USER_ID, TENANT_ID)).rejects.toThrow(BusinessException)
       await expect(service.getProfile(USER_ID, TENANT_ID)).rejects.toMatchObject({
@@ -154,14 +146,14 @@ describe('UsersService', () => {
     })
 
     it('should log warning when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue(null)
 
       await expect(service.getProfile(USER_ID)).rejects.toThrow()
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should log info on successful profile retrieval', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserWithMemberships)
+      repository.findByIdWithPreferencesAndMemberships.mockResolvedValue(mockUserWithMemberships)
 
       await service.getProfile(USER_ID)
 
@@ -177,7 +169,7 @@ describe('UsersService', () => {
     const updateDto = { name: 'Updated Name', currentPassword: 'correct-password' }
 
     it('should update name when password is correct', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
 
       const updatedUser = {
@@ -186,25 +178,18 @@ describe('UsersService', () => {
         preference: mockPreference,
         memberships: [{ tenant: mockTenant }],
       }
-      prisma.user.update.mockResolvedValue(updatedUser)
+      repository.updateName.mockResolvedValue(updatedUser)
 
       const result = await service.updateProfile(USER_ID, updateDto)
 
       expect(result.name).toBe('Updated Name')
       expect(result.tenant).toEqual(mockTenant)
       expect(result).not.toHaveProperty('passwordHash')
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        data: { name: 'Updated Name' },
-        include: {
-          preference: true,
-          memberships: { include: { tenant: true }, take: 1 },
-        },
-      })
+      expect(repository.updateName).toHaveBeenCalledWith(USER_ID, 'Updated Name')
     })
 
     it('should throw 404 when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.updateProfile(USER_ID, updateDto)).rejects.toThrow(BusinessException)
       await expect(service.updateProfile(USER_ID, updateDto)).rejects.toMatchObject({
@@ -213,7 +198,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 400 when user has no passwordHash (external auth)', async () => {
-      prisma.user.findUnique.mockResolvedValue({ ...mockUserPlain, passwordHash: null })
+      repository.findById.mockResolvedValue({ ...mockUserPlain, passwordHash: null })
 
       await expect(service.updateProfile(USER_ID, updateDto)).rejects.toThrow(BusinessException)
       await expect(service.updateProfile(USER_ID, updateDto)).rejects.toMatchObject({
@@ -222,7 +207,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 400 when current password is incorrect', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.updateProfile(USER_ID, updateDto)).rejects.toThrow(BusinessException)
@@ -232,9 +217,9 @@ describe('UsersService', () => {
     })
 
     it('should return null tenant when updated user has no memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
-      prisma.user.update.mockResolvedValue({
+      repository.updateName.mockResolvedValue({
         ...mockUserPlain,
         name: 'Updated Name',
         preference: null,
@@ -247,9 +232,9 @@ describe('UsersService', () => {
     })
 
     it('should call bcrypt.compare with the correct arguments', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
-      prisma.user.update.mockResolvedValue({
+      repository.updateName.mockResolvedValue({
         ...mockUserPlain,
         preference: null,
         memberships: [],
@@ -273,25 +258,23 @@ describe('UsersService', () => {
     }
 
     it('should change password when current password is correct', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
       mockedBcrypt.hash.mockResolvedValue('$2a$12$newhashedpassword' as never)
-      prisma.user.update.mockResolvedValue({})
 
       const result = await service.changePassword(USER_ID, changeDto)
 
       expect(result).toEqual({ changed: true })
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        data: { passwordHash: '$2a$12$newhashedpassword' },
-      })
+      expect(repository.updatePasswordHash).toHaveBeenCalledWith(
+        USER_ID,
+        '$2a$12$newhashedpassword'
+      )
     })
 
     it('should hash new password with bcrypt using 12 salt rounds', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
       mockedBcrypt.hash.mockResolvedValue('$2a$12$newhashedpassword' as never)
-      prisma.user.update.mockResolvedValue({})
 
       await service.changePassword(USER_ID, changeDto)
 
@@ -299,7 +282,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 404 when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toThrow(BusinessException)
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toMatchObject({
@@ -308,7 +291,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 400 when user has no passwordHash', async () => {
-      prisma.user.findUnique.mockResolvedValue({ ...mockUserPlain, passwordHash: null })
+      repository.findById.mockResolvedValue({ ...mockUserPlain, passwordHash: null })
 
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toThrow(BusinessException)
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toMatchObject({
@@ -317,7 +300,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 400 when current password is incorrect', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toThrow(BusinessException)
@@ -327,7 +310,7 @@ describe('UsersService', () => {
     })
 
     it('should call bcrypt.compare with current password and stored hash', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toThrow()
@@ -336,7 +319,7 @@ describe('UsersService', () => {
     })
 
     it('should log warning when password change is denied', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.changePassword(USER_ID, changeDto)).rejects.toThrow()
@@ -345,10 +328,9 @@ describe('UsersService', () => {
     })
 
     it('should log info on successful password change', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
+      repository.findById.mockResolvedValue(mockUserPlain)
       mockedBcrypt.compare.mockResolvedValue(true as never)
       mockedBcrypt.hash.mockResolvedValue('$2a$12$newhashedpassword' as never)
-      prisma.user.update.mockResolvedValue({})
 
       await service.changePassword(USER_ID, changeDto)
 
@@ -362,18 +344,18 @@ describe('UsersService', () => {
 
   describe('getPreferences', () => {
     it('should return existing preferences', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.findUnique.mockResolvedValue(mockPreference)
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.findPreference.mockResolvedValue(mockPreference)
 
       const result = await service.getPreferences(USER_ID)
 
       expect(result).toEqual(mockPreference)
-      expect(prisma.userPreference.findUnique).toHaveBeenCalledWith({ where: { userId: USER_ID } })
+      expect(repository.findPreference).toHaveBeenCalledWith(USER_ID)
     })
 
     it('should return default preferences when none exist', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.findPreference.mockResolvedValue(null)
 
       const result = await service.getPreferences(USER_ID)
 
@@ -387,7 +369,7 @@ describe('UsersService', () => {
     })
 
     it('should throw 404 when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.getPreferences(USER_ID)).rejects.toThrow(BusinessException)
       await expect(service.getPreferences(USER_ID)).rejects.toMatchObject({
@@ -396,7 +378,7 @@ describe('UsersService', () => {
     })
 
     it('should log warning when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.getPreferences(USER_ID)).rejects.toThrow()
 
@@ -404,8 +386,8 @@ describe('UsersService', () => {
     })
 
     it('should log info on successful preference retrieval', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.findUnique.mockResolvedValue(mockPreference)
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.findPreference.mockResolvedValue(mockPreference)
 
       await service.getPreferences(USER_ID)
 
@@ -426,8 +408,8 @@ describe('UsersService', () => {
     }
 
     it('should upsert preferences with all fields', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue({
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue({
         ...mockPreference,
         ...fullDto,
       })
@@ -438,26 +420,25 @@ describe('UsersService', () => {
       expect(result.language).toBe('fr')
       expect(result.notificationsEmail).toBe(false)
       expect(result.notificationsInApp).toBe(true)
-      expect(prisma.userPreference.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        update: {
+      expect(repository.upsertPreference).toHaveBeenCalledWith(
+        USER_ID,
+        {
           theme: 'dark',
           language: 'fr',
           notificationsEmail: false,
           notificationsInApp: true,
         },
-        create: {
-          userId: USER_ID,
+        {
           theme: 'dark',
           language: 'fr',
           notificationsEmail: false,
           notificationsInApp: true,
-        },
-      })
+        }
+      )
     })
 
     it('should throw 404 when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.updatePreferences(USER_ID, fullDto)).rejects.toThrow(BusinessException)
       await expect(service.updatePreferences(USER_ID, fullDto)).rejects.toMatchObject({
@@ -467,102 +448,98 @@ describe('UsersService', () => {
 
     it('should handle partial update with only theme', async () => {
       const partialDto = { theme: 'light' as const }
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue({
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue({
         ...mockPreference,
         theme: 'light',
       })
 
       await service.updatePreferences(USER_ID, partialDto)
 
-      expect(prisma.userPreference.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        update: {
+      expect(repository.upsertPreference).toHaveBeenCalledWith(
+        USER_ID,
+        {
           theme: 'light',
         },
-        create: {
-          userId: USER_ID,
+        {
           theme: 'light',
           language: 'en',
           notificationsEmail: true,
           notificationsInApp: true,
-        },
-      })
+        }
+      )
     })
 
     it('should handle partial update with only language', async () => {
       const partialDto = { language: 'ar' as const }
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue({
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue({
         ...mockPreference,
         language: 'ar',
       })
 
       await service.updatePreferences(USER_ID, partialDto)
 
-      expect(prisma.userPreference.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        update: {
+      expect(repository.upsertPreference).toHaveBeenCalledWith(
+        USER_ID,
+        {
           language: 'ar',
         },
-        create: {
-          userId: USER_ID,
+        {
           theme: 'system',
           language: 'ar',
           notificationsEmail: true,
           notificationsInApp: true,
-        },
-      })
+        }
+      )
     })
 
     it('should handle partial update with only notification settings', async () => {
       const partialDto = { notificationsEmail: false }
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue({
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue({
         ...mockPreference,
         notificationsEmail: false,
       })
 
       await service.updatePreferences(USER_ID, partialDto)
 
-      expect(prisma.userPreference.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        update: {
+      expect(repository.upsertPreference).toHaveBeenCalledWith(
+        USER_ID,
+        {
           notificationsEmail: false,
         },
-        create: {
-          userId: USER_ID,
+        {
           theme: 'system',
           language: 'en',
           notificationsEmail: false,
           notificationsInApp: true,
-        },
-      })
+        }
+      )
     })
 
     it('should use default values in create when dto fields are not provided', async () => {
       const emptyDto = {}
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue(mockPreference)
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue(mockPreference)
 
       await service.updatePreferences(USER_ID, emptyDto)
 
-      expect(prisma.userPreference.upsert).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
-        update: {},
-        create: {
-          userId: USER_ID,
+      expect(repository.upsertPreference).toHaveBeenCalledWith(
+        USER_ID,
+        {},
+        {
           theme: 'system',
           language: 'en',
           notificationsEmail: true,
           notificationsInApp: true,
-        },
-      })
+        }
+      )
     })
 
     it('should log info on successful preference update', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserPlain)
-      prisma.userPreference.upsert.mockResolvedValue(mockPreference)
+      repository.findById.mockResolvedValue(mockUserPlain)
+      repository.upsertPreference.mockResolvedValue(mockPreference)
 
       await service.updatePreferences(USER_ID, fullDto)
 
@@ -570,7 +547,7 @@ describe('UsersService', () => {
     })
 
     it('should log warning when user is not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findById.mockResolvedValue(null)
 
       await expect(service.updatePreferences(USER_ID, fullDto)).rejects.toThrow()
 

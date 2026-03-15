@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { ConnectorsRepository } from './connectors.repository'
 import { validateConnectorConfig } from './dto/connector.dto'
 import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
@@ -16,7 +17,6 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.util'
 import { maskSecrets, REDACTED_PLACEHOLDER } from '../../common/utils/mask.util'
 import { validateUrl } from '../../common/utils/ssrf.util'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 
@@ -26,7 +26,7 @@ export class ConnectorsService {
   private readonly encryptionKey: string
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly connectorsRepository: ConnectorsRepository,
     private readonly configService: ConfigService,
     private readonly wazuhService: WazuhService,
     private readonly graylogService: GraylogService,
@@ -47,10 +47,7 @@ export class ConnectorsService {
   }
 
   async findAll(tenantId: string): Promise<ConnectorResponse[]> {
-    const configs = await this.prisma.connectorConfig.findMany({
-      where: { tenantId },
-      orderBy: { type: 'asc' },
-    })
+    const configs = await this.connectorsRepository.findAllByTenant(tenantId)
 
     const results = configs.map(
       (c: {
@@ -89,9 +86,7 @@ export class ConnectorsService {
   }
 
   async findByType(tenantId: string, type: string): Promise<ConnectorResponse> {
-    const config = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
 
     if (!config) {
       this.appLogger.warn('Connector not found by type', {
@@ -133,9 +128,7 @@ export class ConnectorsService {
   }
 
   async create(tenantId: string, dto: CreateConnectorDto): Promise<ConnectorResponse> {
-    const existing = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: dto.type as never } },
-    })
+    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, dto.type)
 
     if (existing) {
       this.appLogger.warn('Connector already exists', {
@@ -178,15 +171,13 @@ export class ConnectorsService {
 
     const encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
 
-    const config = await this.prisma.connectorConfig.create({
-      data: {
-        tenantId,
-        type: dto.type as never,
-        name: dto.name,
-        enabled: dto.enabled,
-        authType: dto.authType as never,
-        encryptedConfig,
-      },
+    const config = await this.connectorsRepository.create({
+      tenantId,
+      type: dto.type as never,
+      name: dto.name,
+      enabled: dto.enabled,
+      authType: dto.authType as never,
+      encryptedConfig,
     })
 
     this.appLogger.info('Connector created', {
@@ -219,9 +210,7 @@ export class ConnectorsService {
     type: string,
     dto: UpdateConnectorDto
   ): Promise<ConnectorResponse> {
-    const existing = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, type)
 
     if (!existing) {
       this.appLogger.warn('Connector not found for update', {
@@ -287,10 +276,11 @@ export class ConnectorsService {
       updateData.encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
     }
 
-    const updated = await this.prisma.connectorConfig.update({
-      where: { tenantId_type: { tenantId, type: type as never } },
-      data: updateData,
-    })
+    const updated = await this.connectorsRepository.updateByTenantAndType(
+      tenantId,
+      type,
+      updateData
+    )
 
     this.appLogger.info('Connector updated', {
       feature: AppLogFeature.CONNECTORS,
@@ -318,9 +308,7 @@ export class ConnectorsService {
   }
 
   async remove(tenantId: string, type: string): Promise<{ deleted: boolean }> {
-    const existing = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, type)
 
     if (!existing) {
       this.appLogger.warn('Connector not found for removal', {
@@ -338,9 +326,7 @@ export class ConnectorsService {
       )
     }
 
-    await this.prisma.connectorConfig.delete({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    await this.connectorsRepository.deleteByTenantAndType(tenantId, type)
 
     this.appLogger.info('Connector removed', {
       feature: AppLogFeature.CONNECTORS,
@@ -362,10 +348,7 @@ export class ConnectorsService {
     type: string,
     enabled: boolean
   ): Promise<{ type: string; enabled: boolean }> {
-    await this.prisma.connectorConfig.update({
-      where: { tenantId_type: { tenantId, type: type as never } },
-      data: { enabled },
-    })
+    await this.connectorsRepository.updateByTenantAndType(tenantId, type, { enabled })
 
     this.appLogger.info(`Connector ${enabled ? 'enabled' : 'disabled'}`, {
       feature: AppLogFeature.CONNECTORS,
@@ -384,9 +367,7 @@ export class ConnectorsService {
   }
 
   async testConnection(tenantId: string, type: string): Promise<TestResult> {
-    const config = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
 
     if (!config) {
       this.appLogger.warn('Connector not found for test', {
@@ -496,13 +477,10 @@ export class ConnectorsService {
     const latencyMs = Date.now() - start
     const testedAt = new Date()
 
-    await this.prisma.connectorConfig.update({
-      where: { tenantId_type: { tenantId, type: type as never } },
-      data: {
-        lastTestAt: testedAt,
-        lastTestOk: ok,
-        lastError: ok ? null : details.slice(0, 500),
-      },
+    await this.connectorsRepository.updateByTenantAndType(tenantId, type, {
+      lastTestAt: testedAt,
+      lastTestOk: ok,
+      lastError: ok ? null : details.slice(0, 500),
     })
 
     this.appLogger.info(`Connector test ${ok ? 'succeeded' : 'failed'}`, {
@@ -528,9 +506,7 @@ export class ConnectorsService {
     tenantId: string,
     type: string
   ): Promise<Record<string, unknown> | null> {
-    const config = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-    })
+    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
 
     if (!config?.enabled) return null
 
@@ -553,10 +529,7 @@ export class ConnectorsService {
    * Check if a connector is enabled for a tenant.
    */
   async isEnabled(tenantId: string, type: string): Promise<boolean> {
-    const config = await this.prisma.connectorConfig.findUnique({
-      where: { tenantId_type: { tenantId, type: type as never } },
-      select: { enabled: true },
-    })
+    const config = await this.connectorsRepository.findEnabledStatus(tenantId, type)
 
     return config?.enabled ?? false
   }
@@ -565,11 +538,7 @@ export class ConnectorsService {
    * Get all enabled connectors for a tenant.
    */
   async getEnabledConnectors(tenantId: string): Promise<Array<{ type: string; name: string }>> {
-    const configs = await this.prisma.connectorConfig.findMany({
-      where: { tenantId, enabled: true },
-      select: { type: true, name: true },
-      orderBy: { type: 'asc' },
-    })
+    const configs = await this.connectorsRepository.findEnabledByTenant(tenantId)
 
     return configs.map(c => ({ type: c.type, name: c.name }))
   }

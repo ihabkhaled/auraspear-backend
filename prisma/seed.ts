@@ -4,6 +4,44 @@ import {
   UserRole,
   ConnectorType,
   AuthType,
+  IncidentSeverity,
+  IncidentStatus,
+  IncidentCategory,
+  IncidentActorType,
+  RuleSource,
+  RuleSeverity,
+  RuleStatus,
+  VulnerabilitySeverity,
+  PatchStatus,
+  AiAgentTier,
+  AiAgentStatus,
+  AiAgentSessionStatus,
+  UebaEntityType,
+  UebaRiskLevel,
+  MlModelType,
+  MlModelStatus,
+  AttackPathSeverity,
+  AttackPathStatus,
+  SoarPlaybookStatus,
+  SoarTriggerType,
+  SoarExecutionStatus,
+  ComplianceStandard,
+  ComplianceControlStatus,
+  ReportType,
+  ReportFormat,
+  ReportStatus,
+  ServiceType,
+  ServiceStatus,
+  MetricType,
+  NormalizationSourceType,
+  NormalizationPipelineStatus,
+  DetectionRuleType,
+  DetectionRuleSeverity,
+  DetectionRuleStatus,
+  CloudProvider,
+  CloudAccountStatus,
+  CloudFindingSeverity,
+  CloudFindingStatus,
   type AlertSeverity,
   type AlertStatus,
   type CaseCycleStatus,
@@ -14,6 +52,7 @@ import {
 import * as bcrypt from 'bcryptjs'
 import { randomUUID } from 'node:crypto'
 import pino from 'pino'
+import { encrypt } from '../src/common/utils/encryption.util'
 
 const logger = pino({
   transport: { target: 'pino-pretty' },
@@ -46,6 +85,7 @@ interface ConnectorSeed {
   name: string
   authType: AuthType
   enabled: boolean
+  config: Record<string, unknown>
 }
 
 interface TenantProfile {
@@ -63,6 +103,113 @@ interface TenantProfile {
   mispEventIndices: number[]
   connectors: ConnectorSeed[]
 }
+
+// ─── Connector configs matching docker-compose.connectors.yml ──
+// All connectors share the same real configs so every tenant can
+// query the local Docker stack.  Credentials come from the compose file.
+
+const CONNECTOR_SEEDS: ConnectorSeed[] = [
+  {
+    type: ConnectorType.wazuh,
+    name: 'Wazuh Manager',
+    authType: AuthType.basic,
+    enabled: true,
+    config: {
+      baseUrl: 'https://localhost:55000',
+      indexerUrl: 'https://localhost:9200',
+      username: 'wazuh-wui',
+      password: 'MyS3cr37P450r.*-',
+      indexerUsername: 'admin',
+      indexerPassword: 'admin',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.graylog,
+    name: 'Graylog SIEM',
+    authType: AuthType.basic,
+    enabled: true,
+    config: {
+      baseUrl: 'http://localhost:9000',
+      username: 'admin',
+      password: 'admin@Graylog1',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.velociraptor,
+    name: 'Velociraptor EDR',
+    authType: AuthType.api_key,
+    enabled: false,
+    config: {
+      baseUrl: 'https://localhost:8889',
+      apiUrl: 'https://localhost:8001',
+      username: 'admin',
+      password: 'admin',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.grafana,
+    name: 'Grafana',
+    authType: AuthType.api_key,
+    enabled: true,
+    config: {
+      baseUrl: 'http://localhost:3001',
+      apiKey: 'glsa_placeholder_dev_token',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.influxdb,
+    name: 'InfluxDB',
+    authType: AuthType.token,
+    enabled: true,
+    config: {
+      baseUrl: 'http://localhost:8086',
+      token: 'auraspear-dev-token-change-me',
+      org: 'auraspear',
+      bucket: 'soc-metrics',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.misp,
+    name: 'MISP Threat Intel',
+    authType: AuthType.api_key,
+    enabled: true,
+    config: {
+      baseUrl: 'https://localhost:8443',
+      mispUrl: 'https://localhost:8443',
+      mispAuthKey: 'placeholder-run-seed-connectors-sh',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.shuffle,
+    name: 'Shuffle SOAR',
+    authType: AuthType.api_key,
+    enabled: true,
+    config: {
+      baseUrl: 'http://localhost:3443',
+      apiKey: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      verifyTls: false,
+    },
+  },
+  {
+    type: ConnectorType.bedrock,
+    name: 'AWS Bedrock AI',
+    authType: AuthType.iam,
+    enabled: true,
+    config: {
+      region: 'us-east-1',
+      modelId: 'anthropic.claude-3-sonnet',
+      nlHuntingEnabled: true,
+      explainableAiEnabled: true,
+      auditLoggingEnabled: true,
+    },
+  },
+]
 
 const TENANT_PROFILES: TenantProfile[] = [
   {
@@ -99,41 +246,7 @@ const TENANT_PROFILES: TenantProfile[] = [
       58, 60, 62, 64, 65, 66, 69, 70, 72, 74, 76, 78, 81, 83, 85, 87, 89, 91, 94, 96,
     ],
     mispEventIndices: [0, 1, 3, 5, 6, 9, 11, 13],
-    connectors: [
-      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
-      {
-        type: ConnectorType.graylog,
-        name: 'Graylog SIEM',
-        authType: AuthType.basic,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.velociraptor,
-        name: 'Velociraptor EDR',
-        authType: AuthType.api_key,
-        enabled: false,
-      },
-      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: true },
-      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
-      {
-        type: ConnectorType.misp,
-        name: 'MISP Threat Intel',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.shuffle,
-        name: 'Shuffle SOAR',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.bedrock,
-        name: 'AWS Bedrock AI',
-        authType: AuthType.iam,
-        enabled: true,
-      },
-    ],
+    connectors: CONNECTOR_SEEDS,
   },
   {
     id: randomUUID(),
@@ -169,35 +282,7 @@ const TENANT_PROFILES: TenantProfile[] = [
       63, 67, 68, 71, 73, 75, 77, 79, 80, 82, 84, 86, 88, 90, 92, 93, 95, 97, 99,
     ],
     mispEventIndices: [2, 4, 7, 8, 10, 12],
-    connectors: [
-      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
-      {
-        type: ConnectorType.graylog,
-        name: 'Graylog SIEM',
-        authType: AuthType.basic,
-        enabled: false,
-      },
-      {
-        type: ConnectorType.velociraptor,
-        name: 'Velociraptor EDR',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: false },
-      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
-      {
-        type: ConnectorType.misp,
-        name: 'MISP Threat Intel',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.bedrock,
-        name: 'AWS Bedrock AI',
-        authType: AuthType.iam,
-        enabled: true,
-      },
-    ],
+    connectors: CONNECTOR_SEEDS,
   },
   {
     id: randomUUID(),
@@ -242,41 +327,7 @@ const TENANT_PROFILES: TenantProfile[] = [
       95, 96, 97, 98, 99,
     ],
     mispEventIndices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-    connectors: [
-      { type: ConnectorType.wazuh, name: 'Wazuh Manager', authType: AuthType.basic, enabled: true },
-      {
-        type: ConnectorType.graylog,
-        name: 'Graylog SIEM',
-        authType: AuthType.basic,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.velociraptor,
-        name: 'Velociraptor EDR',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      { type: ConnectorType.grafana, name: 'Grafana', authType: AuthType.api_key, enabled: true },
-      { type: ConnectorType.influxdb, name: 'InfluxDB', authType: AuthType.token, enabled: true },
-      {
-        type: ConnectorType.misp,
-        name: 'MISP Threat Intel',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.shuffle,
-        name: 'Shuffle SOAR',
-        authType: AuthType.api_key,
-        enabled: true,
-      },
-      {
-        type: ConnectorType.bedrock,
-        name: 'AWS Bedrock AI',
-        authType: AuthType.iam,
-        enabled: true,
-      },
-    ],
+    connectors: CONNECTOR_SEEDS,
   },
 ]
 
@@ -1398,6 +1449,3512 @@ async function seedIntel(tenantId: string, profile: TenantProfile): Promise<void
   }
 }
 
+// ─── AI Audit Log seed data ─────────────────────────────────────
+
+const AI_AUDIT_ACTORS = [
+  'analyst@auraspear.io',
+  'hunter@auraspear.io',
+  'soc-lead@auraspear.io',
+  'admin@auraspear.io',
+  'responder@auraspear.io',
+  'tier2@auraspear.io',
+  'tier3@auraspear.io',
+  'incident@auraspear.io',
+]
+
+const AI_AUDIT_ACTIONS = [
+  'ai_hunt',
+  'ai_hunt',
+  'ai_hunt',
+  'ai_investigate',
+  'ai_investigate',
+  'ai_explain',
+]
+
+const AI_AUDIT_MODELS = [
+  'anthropic.claude-3-sonnet',
+  'anthropic.claude-3-sonnet',
+  'anthropic.claude-3-sonnet',
+  'anthropic.claude-3-haiku',
+  'rule-based',
+]
+
+const AI_HUNT_PROMPTS = [
+  'Look for brute force login attempts from external IPs in the last 24 hours',
+  'Find evidence of lateral movement using SMB and WMI across internal subnets',
+  'Detect DNS tunneling or suspicious TXT record queries to newly registered domains',
+  'Hunt for PowerShell encoded commands executed by non-admin users',
+  'Search for C2 beacon activity with regular interval outbound connections',
+  'Identify privilege escalation attempts via service account abuse',
+  'Look for data exfiltration over HTTPS to uncommon destinations',
+  'Find evidence of persistence via scheduled tasks or registry Run keys',
+  'Detect suspicious process injection using WriteProcessMemory',
+  'Hunt for credential harvesting tools like Mimikatz or LaZagne',
+  'Search for ransomware precursors: shadow copy deletion and mass file renaming',
+  'Look for anomalous SSH login patterns from unexpected geolocations',
+  'Detect web shell activity on public-facing web servers',
+  'Hunt for supply chain attack indicators in recently updated packages',
+  'Search for Kerberoasting or AS-REP roasting activity in Active Directory',
+  'Find evidence of NTLM relay attacks in the authentication logs',
+  'Detect living-off-the-land binary (LOLBin) execution chains',
+  'Hunt for email-based initial access vectors via macro-enabled documents',
+  'Look for unusual outbound traffic on non-standard ports from servers',
+  'Detect unauthorized VPN connections from new device fingerprints',
+  'Search for MFA bypass attempts or session token theft',
+  'Hunt for cloud infrastructure reconnaissance via API enumeration',
+  'Find evidence of container escape attempts in Kubernetes clusters',
+  'Detect insider threat indicators via abnormal data access patterns',
+  'Look for DNS over HTTPS (DoH) tunneling to bypass security controls',
+]
+
+const AI_HUNT_RESPONSES = [
+  `## Threat Hunt Analysis: Brute Force Activity\n\n**Hypothesis:** An external threat actor is conducting credential-based attacks against authentication services.\n\n**Suggested Queries:**\n1. \`event.id:4625 AND agent.name:dc-01 | stats count by data.srcip\`\n2. \`event.id:4625 AND data.srcip:198.51.100.* | timechart span=1m count\`\n3. \`(event.id:4624) AND data.srcip:198.51.100.22\`\n\n**MITRE ATT&CK Coverage:** T1110.001, T1110.003`,
+  `## Threat Hunt Analysis: Lateral Movement via SMB/WMI\n\n**Hypothesis:** Compromised credentials are being used for lateral movement.\n\n**Suggested Queries:**\n1. \`event.action:logon AND logon.type:3 AND source.ip:10.0.0.0/8\`\n2. \`process.name:wmic.exe AND process.args:*process*call*create*\`\n3. \`event.action:share_access AND share.name:(ADMIN$ OR C$)\`\n\n**MITRE ATT&CK Coverage:** T1021.002, T1047`,
+  `## Threat Hunt Analysis: DNS Tunneling Detection\n\n**Hypothesis:** A compromised host is exfiltrating data via DNS tunneling.\n\n**Indicators Found:**\n- Beaconing pattern from workstation-17 (60s intervals)\n- Domain update-service.xyz registered 3 days ago\n- 47MB estimated exfiltrated via DNS\n\n**MITRE ATT&CK Coverage:** T1071.004, T1048`,
+  `## Threat Hunt Analysis: PowerShell Abuse\n\n**Hypothesis:** Adversary is using encoded PowerShell for defense evasion.\n\n**Key Findings:**\n- 23 encoded PowerShell executions in last 12 hours\n- 5 originated from Office macro execution\n- Base64 decoded content reveals Cobalt Strike beacon stager\n\n**MITRE ATT&CK Coverage:** T1059.001, T1027, T1204.002`,
+  `## Threat Hunt Analysis: Command & Control Detection\n\n**Hypothesis:** A compromised endpoint is communicating with external C2.\n\n**Indicators Found:**\n- 2 endpoints showing beaconing behavior (60s interval, 5s jitter)\n- Destination IPs on bulletproof hosting\n- Self-signed TLS certs with suspicious CN values\n\n**MITRE ATT&CK Coverage:** T1071, T1573, T1568`,
+]
+
+const AI_INVESTIGATE_PROMPTS = [
+  'alert-brute-force-ssh-203.0.113.45',
+  'alert-malware-certutil-download',
+  'alert-privilege-escalation-sudo',
+  'alert-data-exfiltration-large-upload',
+  'alert-ransomware-shadow-delete',
+  'alert-phishing-macro-execution',
+  'alert-suspicious-process-injection',
+  'alert-network-scan-nmap-detected',
+  'alert-credential-dump-lsass',
+  'alert-web-shell-aspx-detected',
+  'alert-kerberos-golden-ticket',
+  'alert-rdp-brute-force-internal',
+  'alert-dns-exfil-high-entropy',
+  'alert-service-account-abuse',
+  'alert-unauthorized-usb-device',
+]
+
+const AI_INVESTIGATE_RESPONSES = [
+  `## AI Investigation Report\n\n**Alert:** Brute Force SSH Attack from 203.0.113.45\n**Severity:** CRITICAL\n**Verdict:** True Positive (Confidence: 87%)\n\n**Summary:** 847 failed SSH login attempts targeting root on web-prod-03. Successful auth on attempt #848. Post-exploitation includes privilege escalation and reverse shell.\n\n**MITRE ATT&CK:** T1110.001, T1078, T1548.003, T1059.004`,
+  `## AI Investigation Report\n\n**Alert:** Suspicious Download via certutil.exe\n**Severity:** HIGH\n**Verdict:** Suspicious (Confidence: 72%)\n\n**Summary:** certutil.exe used to download remote payload to temp directory. File executed 12 seconds post-download. Consistent with known download cradle techniques.\n\n**MITRE ATT&CK:** T1105, T1059.003, T1204.002`,
+  `## AI Investigation Report\n\n**Alert:** Privilege Escalation via Service Account\n**Severity:** HIGH\n**Verdict:** Likely True Positive (Confidence: 81%)\n\n**Summary:** svc_deploy performed unauthorized privilege escalation on app-server-05. New local admin user created and added to Domain Admins within 2 minutes.\n\n**MITRE ATT&CK:** T1078.002, T1136.002, T1098`,
+  `## AI Investigation Report\n\n**Alert:** Large Data Transfer to External Storage\n**Severity:** MEDIUM\n**Verdict:** Requires Investigation (Confidence: 65%)\n\n**Summary:** 2.3GB uploaded to Mega.nz from finance-workstation-12 outside business hours. User j.martinez from Finance department.\n\n**MITRE ATT&CK:** T1567, T1048`,
+]
+
+const AI_EXPLAIN_PROMPTS = [
+  'Explain MITRE ATT&CK technique T1059.001 PowerShell',
+  'What is a golden ticket attack in Active Directory?',
+  'Explain the difference between IDS and IPS',
+  'What is MITRE T1110 Brute Force and how to detect it?',
+  'Explain DNS over HTTPS (DoH) security implications',
+  'What is a SIEM and how does it correlate events?',
+  'Explain the concept of lateral movement in cybersecurity',
+  'What are indicators of compromise (IOCs) vs indicators of attack (IOAs)?',
+  'Explain Kerberoasting and how to defend against it',
+  'What is the MITRE ATT&CK framework and why is it important?',
+  'Explain zero-day vulnerabilities and responsible disclosure',
+  'What is a supply chain attack and recent examples?',
+  'Explain the concept of defense in depth',
+  'What is endpoint detection and response (EDR)?',
+  'Explain the OWASP Top 10 web application security risks',
+]
+
+const AI_EXPLAIN_RESPONSES = [
+  `## Explainable AI: PowerShell Abuse (T1059.001)\n\nPowerShell is a legitimate system administration tool frequently abused for execution and defense evasion. It provides direct access to .NET framework, WMI, and COM objects.\n\n**Detection:** Monitor encoded commands, Script Block Logging (4104), PowerShell from unusual parents.\n\n**MITRE ATT&CK:** T1059.001 — Common in APT29, FIN7, Lazarus Group campaigns.`,
+  `## Explainable AI: Golden Ticket Attack\n\nA Golden Ticket attack occurs when an adversary compromises the KRBTGT password hash, allowing them to forge TGTs for any account with unrestricted access.\n\n**Detection:** Monitor for TGTs with abnormal lifetimes, DCSync attempts (Event ID 4662), anomalous ticket options.\n\n**Remediation:** Rotate KRBTGT password twice, implement PAWs, enable Advanced Audit Policy.`,
+  `## Explainable AI: IDS vs IPS\n\nIDS monitors traffic passively and alerts on threats. IPS sits inline and can actively block malicious traffic.\n\n**Key Differences:** IDS is out-of-band with no latency impact; IPS is inline with minimal latency but risk of blocking legitimate traffic.\n\n**Best Practice:** Deploy IPS at perimeter, IDS internally, combine both with SIEM.`,
+]
+
+const AI_AUDIT_TARGET_COUNT = 550
+
+function deterministicRandom(seed: number): number {
+  // Simple seeded PRNG for deterministic record generation
+  const x = Math.sin(seed) * 10000
+  return x - Math.floor(x)
+}
+
+function deterministicPick<T>(arr: T[], seed: number): T {
+  const index = Math.floor(deterministicRandom(seed) * arr.length)
+  return arr[index] as T
+}
+
+function deterministicDate(seed: number, maxDaysBack: number): Date {
+  const daysBack = deterministicRandom(seed) * maxDaysBack
+  const hoursOffset = deterministicRandom(seed + 1000) * 24
+  return new Date(Date.now() - daysBack * 86_400_000 - hoursOffset * 3_600_000)
+}
+
+function deterministicInt(seed: number, min: number, max: number): number {
+  return min + Math.floor(deterministicRandom(seed) * (max - min + 1))
+}
+
+async function seedAiAuditLogs(tenantId: string, tenantSlug: string): Promise<void> {
+  // Idempotent: skip if already seeded
+  const existingCount = await prisma.aiAuditLog.count({ where: { tenantId } })
+  if (existingCount >= AI_AUDIT_TARGET_COUNT) {
+    logger.info(
+      { tenant: tenantSlug, existing: existingCount },
+      'AI audit logs already seeded, skipping'
+    )
+    return
+  }
+
+  const records: Prisma.AiAuditLogCreateManyInput[] = []
+
+  for (let i = 0; i < AI_AUDIT_TARGET_COUNT; i++) {
+    const baseSeed = i * 7 + tenantSlug.length * 31
+    const action = deterministicPick(AI_AUDIT_ACTIONS, baseSeed)
+    const model = deterministicPick(AI_AUDIT_MODELS, baseSeed + 1)
+    const actor = deterministicPick(AI_AUDIT_ACTORS, baseSeed + 2)
+    const createdAt = deterministicDate(baseSeed + 3, 60)
+
+    let prompt: string
+    let response: string
+    let inputTokens: number
+    let outputTokens: number
+    let durationMs: number
+
+    if (action === 'ai_hunt') {
+      prompt = deterministicPick(AI_HUNT_PROMPTS, baseSeed + 4)
+      response = deterministicPick(AI_HUNT_RESPONSES, baseSeed + 5)
+      inputTokens = deterministicInt(baseSeed + 6, 200, 1200)
+      outputTokens = deterministicInt(baseSeed + 7, 400, 2000)
+      durationMs =
+        model === 'rule-based'
+          ? deterministicInt(baseSeed + 8, 50, 300)
+          : deterministicInt(baseSeed + 8, 800, 4500)
+    } else if (action === 'ai_investigate') {
+      prompt = deterministicPick(AI_INVESTIGATE_PROMPTS, baseSeed + 4)
+      response = deterministicPick(AI_INVESTIGATE_RESPONSES, baseSeed + 5)
+      inputTokens = deterministicInt(baseSeed + 6, 500, 2000)
+      outputTokens = deterministicInt(baseSeed + 7, 600, 2500)
+      durationMs =
+        model === 'rule-based'
+          ? deterministicInt(baseSeed + 8, 100, 500)
+          : deterministicInt(baseSeed + 8, 1200, 6000)
+    } else {
+      prompt = deterministicPick(AI_EXPLAIN_PROMPTS, baseSeed + 4)
+      response = deterministicPick(AI_EXPLAIN_RESPONSES, baseSeed + 5)
+      inputTokens = deterministicInt(baseSeed + 6, 100, 900)
+      outputTokens = deterministicInt(baseSeed + 7, 300, 1800)
+      durationMs =
+        model === 'rule-based'
+          ? deterministicInt(baseSeed + 8, 50, 200)
+          : deterministicInt(baseSeed + 8, 600, 3000)
+    }
+
+    if (model === 'rule-based') {
+      inputTokens = 0
+      outputTokens = 0
+    }
+
+    records.push({
+      tenantId,
+      actor,
+      action,
+      model,
+      inputTokens,
+      outputTokens,
+      prompt,
+      response,
+      durationMs,
+      createdAt,
+    })
+  }
+
+  // Batch insert in chunks of 50 (rule 35: batch in chunks)
+  for (let i = 0; i < records.length; i += 50) {
+    const chunk = records.slice(i, i + 50)
+    await prisma.aiAuditLog.createMany({ data: chunk, skipDuplicates: true })
+  }
+}
+
+// ─── Phase 1-4 Seed Functions ──────────────────────────────────
+
+// Global counters for unique numbers across tenants
+let globalIncidentCounter = 0
+let globalCorrelationRuleCounter = 0
+let globalAttackPathCounter = 0
+let globalDetectionRuleCounter = 0
+
+// ─── 1. Incidents ─────────────────────────────────────────────
+
+async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const year = new Date().getFullYear()
+    const incidents = [
+      {
+        title: 'Ransomware Outbreak on Finance Servers',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.contained,
+        category: IncidentCategory.malware,
+        tactics: ['Impact'],
+        techniques: ['T1486'],
+      },
+      {
+        title: 'Spear Phishing Campaign Targeting Executives',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.in_progress,
+        category: IncidentCategory.phishing,
+        tactics: ['Initial Access'],
+        techniques: ['T1566.001'],
+      },
+      {
+        title: 'Brute Force Attack on VPN Gateway',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.resolved,
+        category: IncidentCategory.brute_force,
+        tactics: ['Credential Access'],
+        techniques: ['T1110.001'],
+      },
+      {
+        title: 'Insider Data Exfiltration via USB',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.in_progress,
+        category: IncidentCategory.insider,
+        tactics: ['Exfiltration'],
+        techniques: ['T1052.001'],
+      },
+      {
+        title: 'SQL Injection on Public Web Application',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.resolved,
+        category: IncidentCategory.intrusion,
+        tactics: ['Initial Access'],
+        techniques: ['T1190'],
+      },
+      {
+        title: 'Cobalt Strike Beacon Detected on Workstation',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.contained,
+        category: IncidentCategory.malware,
+        tactics: ['Command and Control'],
+        techniques: ['T1071.001'],
+      },
+      {
+        title: 'Unauthorized Cloud Storage Access',
+        severity: IncidentSeverity.medium,
+        status: IncidentStatus.open,
+        category: IncidentCategory.cloud,
+        tactics: ['Collection'],
+        techniques: ['T1530'],
+      },
+      {
+        title: 'DDoS Attack on Customer Portal',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.resolved,
+        category: IncidentCategory.dos,
+        tactics: ['Impact'],
+        techniques: ['T1498.001'],
+      },
+      {
+        title: 'Credential Stuffing on Employee Portal',
+        severity: IncidentSeverity.medium,
+        status: IncidentStatus.closed,
+        category: IncidentCategory.brute_force,
+        tactics: ['Credential Access'],
+        techniques: ['T1110.004'],
+      },
+      {
+        title: 'Lateral Movement via Pass-the-Hash',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.in_progress,
+        category: IncidentCategory.intrusion,
+        tactics: ['Lateral Movement'],
+        techniques: ['T1550.002'],
+      },
+      {
+        title: 'Supply Chain Compromise via NPM Package',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.open,
+        category: IncidentCategory.intrusion,
+        tactics: ['Initial Access'],
+        techniques: ['T1195.002'],
+      },
+      {
+        title: 'Cryptominer Deployed on Build Servers',
+        severity: IncidentSeverity.medium,
+        status: IncidentStatus.resolved,
+        category: IncidentCategory.malware,
+        tactics: ['Impact'],
+        techniques: ['T1496'],
+      },
+      {
+        title: 'Phishing Email with Macro-Enabled Document',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.closed,
+        category: IncidentCategory.phishing,
+        tactics: ['Execution'],
+        techniques: ['T1204.002'],
+      },
+      {
+        title: 'Active Directory Golden Ticket Attack',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.contained,
+        category: IncidentCategory.intrusion,
+        tactics: ['Credential Access'],
+        techniques: ['T1558.001'],
+      },
+      {
+        title: 'Data Exfiltration via DNS Tunneling',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.in_progress,
+        category: IncidentCategory.exfiltration,
+        tactics: ['Exfiltration'],
+        techniques: ['T1048.003'],
+      },
+      {
+        title: 'Rogue Wireless Access Point Detected',
+        severity: IncidentSeverity.medium,
+        status: IncidentStatus.resolved,
+        category: IncidentCategory.intrusion,
+        tactics: ['Initial Access'],
+        techniques: ['T1200'],
+      },
+      {
+        title: 'Web Shell Deployed on IIS Server',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.contained,
+        category: IncidentCategory.malware,
+        tactics: ['Persistence'],
+        techniques: ['T1505.003'],
+      },
+      {
+        title: 'Privilege Escalation via Kernel Exploit',
+        severity: IncidentSeverity.critical,
+        status: IncidentStatus.in_progress,
+        category: IncidentCategory.intrusion,
+        tactics: ['Privilege Escalation'],
+        techniques: ['T1068'],
+      },
+      {
+        title: 'Suspicious PowerShell Empire Activity',
+        severity: IncidentSeverity.high,
+        status: IncidentStatus.open,
+        category: IncidentCategory.malware,
+        tactics: ['Execution'],
+        techniques: ['T1059.001'],
+      },
+      {
+        title: 'Unauthorized VPN Connection from Foreign IP',
+        severity: IncidentSeverity.medium,
+        status: IncidentStatus.closed,
+        category: IncidentCategory.other,
+        tactics: ['Initial Access'],
+        techniques: ['T1133'],
+      },
+    ]
+
+    const timelineTemplates = [
+      {
+        event: 'Incident created and assigned to SOC team',
+        actorType: IncidentActorType.system,
+        actorName: 'AuraSpear SIEM',
+      },
+      {
+        event: 'Initial triage completed — confirmed as true positive',
+        actorType: IncidentActorType.user,
+        actorName: `analyst.l2@${tenantSlug}.io`,
+      },
+      {
+        event: 'Containment actions initiated — affected hosts isolated',
+        actorType: IncidentActorType.user,
+        actorName: `analyst.l2@${tenantSlug}.io`,
+      },
+      {
+        event: 'AI agent performed automated IOC enrichment',
+        actorType: IncidentActorType.ai_agent,
+        actorName: 'Sentinel AI Agent',
+      },
+      {
+        event: 'Forensic evidence collected from affected endpoints',
+        actorType: IncidentActorType.user,
+        actorName: `hunter@${tenantSlug}.io`,
+      },
+      {
+        event: 'Remediation steps applied — patches deployed',
+        actorType: IncidentActorType.user,
+        actorName: `admin@${tenantSlug}.io`,
+      },
+    ]
+
+    for (let i = 0; i < incidents.length; i++) {
+      globalIncidentCounter++
+      const inc = incidents[i]!
+      const incidentNumber = `INC-${year}-${String(globalIncidentCounter).padStart(4, '0')}`
+
+      const existing = await prisma.incident.findUnique({ where: { incidentNumber } })
+      if (existing) continue
+
+      const createdAt = new Date(Date.now() - (incidents.length - i) * 86_400_000 * 2)
+      const timelineCount = 3 + (i % 4) // 3-6 entries
+
+      await prisma.incident.create({
+        data: {
+          tenantId,
+          incidentNumber,
+          title: inc.title,
+          description: `Incident detected: ${inc.title}. Investigation and response procedures initiated per SOC playbook.`,
+          severity: inc.severity,
+          status: inc.status,
+          category: inc.category,
+          mitreTactics: inc.tactics,
+          mitreTechniques: inc.techniques,
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+          resolvedAt:
+            inc.status === IncidentStatus.resolved || inc.status === IncidentStatus.closed
+              ? new Date(createdAt.getTime() + 86_400_000 * 3)
+              : null,
+          createdAt,
+          timeline: {
+            create: Array.from({ length: timelineCount }, (_, j) => {
+              const tmpl = timelineTemplates[j % timelineTemplates.length]!
+              return {
+                event: tmpl.event,
+                actorType: tmpl.actorType,
+                actorName: tmpl.actorName,
+                timestamp: new Date(createdAt.getTime() + j * 3_600_000),
+              }
+            }),
+          },
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: incidents.length }, 'Seeded incidents')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed incidents')
+  }
+}
+
+// ─── 2. Correlation Rules ─────────────────────────────────────
+
+async function seedCorrelationRules(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const year = new Date().getFullYear()
+    const rules = [
+      {
+        title: 'Multiple Failed Logins Followed by Success',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1110'],
+        hitCount: 234,
+      },
+      {
+        title: 'PowerShell Download Cradle Detection',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Execution'],
+        techniques: ['T1059.001'],
+        hitCount: 89,
+      },
+      {
+        title: 'Suspicious DNS Query Volume',
+        source: RuleSource.custom,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Exfiltration'],
+        techniques: ['T1048.003'],
+        hitCount: 156,
+      },
+      {
+        title: 'LSASS Memory Access by Non-System Process',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1003.001'],
+        hitCount: 12,
+      },
+      {
+        title: 'Lateral Movement via WMI',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Lateral Movement'],
+        techniques: ['T1047'],
+        hitCount: 67,
+      },
+      {
+        title: 'Ransomware File Rename Pattern',
+        source: RuleSource.custom,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Impact'],
+        techniques: ['T1486'],
+        hitCount: 3,
+      },
+      {
+        title: 'Anomalous Outbound Data Transfer',
+        source: RuleSource.ai_generated,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Exfiltration'],
+        techniques: ['T1041'],
+        hitCount: 45,
+      },
+      {
+        title: 'Scheduled Task Persistence',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Persistence'],
+        techniques: ['T1053.005'],
+        hitCount: 178,
+      },
+      {
+        title: 'Registry Run Key Modification',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Persistence'],
+        techniques: ['T1547.001'],
+        hitCount: 312,
+      },
+      {
+        title: 'Kerberoasting SPN Request Spike',
+        source: RuleSource.custom,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1558.003'],
+        hitCount: 8,
+      },
+      {
+        title: 'DLL Side-Loading from Temp Directory',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.high,
+        status: RuleStatus.review,
+        tactics: ['Defense Evasion'],
+        techniques: ['T1574.002'],
+        hitCount: 23,
+      },
+      {
+        title: 'RDP Brute Force from External IP',
+        source: RuleSource.custom,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1110.001'],
+        hitCount: 567,
+      },
+      {
+        title: 'Process Injection via WriteProcessMemory',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Defense Evasion'],
+        techniques: ['T1055'],
+        hitCount: 19,
+      },
+      {
+        title: 'Suspicious certutil.exe Usage',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Defense Evasion'],
+        techniques: ['T1140'],
+        hitCount: 98,
+      },
+      {
+        title: 'Cloud API Enumeration Spike',
+        source: RuleSource.ai_generated,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Discovery'],
+        techniques: ['T1580'],
+        hitCount: 34,
+      },
+      {
+        title: 'Unusual Parent-Child Process Relationship',
+        source: RuleSource.ai_generated,
+        severity: RuleSeverity.high,
+        status: RuleStatus.review,
+        tactics: ['Execution'],
+        techniques: ['T1059'],
+        hitCount: 145,
+      },
+      {
+        title: 'Shadow Copy Deletion Detected',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Impact'],
+        techniques: ['T1490'],
+        hitCount: 5,
+      },
+      {
+        title: 'Beacon Communication Pattern Detected',
+        source: RuleSource.ai_generated,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Command and Control'],
+        techniques: ['T1071.001'],
+        hitCount: 27,
+      },
+      {
+        title: 'Email with Malicious Attachment Hash',
+        source: RuleSource.custom,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Initial Access'],
+        techniques: ['T1566.001'],
+        hitCount: 89,
+      },
+      {
+        title: 'SMB Share Enumeration',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.low,
+        status: RuleStatus.active,
+        tactics: ['Discovery'],
+        techniques: ['T1135'],
+        hitCount: 1023,
+      },
+      {
+        title: 'Mimikatz Command Line Arguments',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1003'],
+        hitCount: 7,
+      },
+      {
+        title: 'Abnormal Service Installation',
+        source: RuleSource.custom,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.disabled,
+        tactics: ['Persistence'],
+        techniques: ['T1543.003'],
+        hitCount: 456,
+      },
+      {
+        title: 'DNS Over HTTPS Evasion',
+        source: RuleSource.ai_generated,
+        severity: RuleSeverity.medium,
+        status: RuleStatus.active,
+        tactics: ['Command and Control'],
+        techniques: ['T1071.004'],
+        hitCount: 78,
+      },
+      {
+        title: 'Credential Dumping via ntdsutil',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.critical,
+        status: RuleStatus.active,
+        tactics: ['Credential Access'],
+        techniques: ['T1003.003'],
+        hitCount: 2,
+      },
+      {
+        title: 'Suspicious Office Macro Execution',
+        source: RuleSource.sigma,
+        severity: RuleSeverity.high,
+        status: RuleStatus.active,
+        tactics: ['Execution'],
+        techniques: ['T1204.002'],
+        hitCount: 167,
+      },
+    ]
+
+    for (let i = 0; i < rules.length; i++) {
+      globalCorrelationRuleCounter++
+      const rule = rules[i]!
+      const ruleNumber = `CR-${year}-${String(globalCorrelationRuleCounter).padStart(4, '0')}`
+
+      await prisma.correlationRule.upsert({
+        where: { ruleNumber },
+        update: {},
+        create: {
+          tenantId,
+          ruleNumber,
+          title: rule.title,
+          description: `Sigma/Custom correlation rule: ${rule.title}. Detects suspicious activity matching MITRE ATT&CK ${rule.techniques.join(', ')}.`,
+          source: rule.source,
+          severity: rule.severity,
+          status: rule.status,
+          mitreTactics: rule.tactics,
+          mitreTechniques: rule.techniques,
+          hitCount: rule.hitCount,
+          linkedIncidents: Math.floor(rule.hitCount / 50),
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+          lastFiredAt: rule.hitCount > 0 ? randomDate(7) : null,
+          yamlContent:
+            rule.source === RuleSource.sigma
+              ? `title: ${rule.title}\nstatus: ${rule.status}\nlevel: ${rule.severity}\ndetection:\n  selection:\n    EventID: 4625\n  condition: selection`
+              : null,
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: rules.length }, 'Seeded correlation rules')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed correlation rules')
+  }
+}
+
+// ─── 3. Vulnerabilities ───────────────────────────────────────
+
+async function seedVulnerabilities(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const vulns = [
+      {
+        cveId: 'CVE-2024-21762',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 12,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Fortinet FortiOS',
+        desc: 'Out-of-bound write vulnerability in FortiOS SSL VPN allowing remote code execution.',
+      },
+      {
+        cveId: 'CVE-2024-3094',
+        cvss: 10.0,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 3,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'XZ Utils 5.6.0-5.6.1',
+        desc: 'Backdoor in XZ Utils allowing unauthorized SSH access via liblzma.',
+      },
+      {
+        cveId: 'CVE-2024-21887',
+        cvss: 9.1,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 4,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Ivanti Connect Secure',
+        desc: 'Command injection in Ivanti Connect Secure web components.',
+      },
+      {
+        cveId: 'CVE-2023-46805',
+        cvss: 8.2,
+        severity: VulnerabilitySeverity.high,
+        hosts: 4,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Ivanti Connect Secure',
+        desc: 'Authentication bypass in Ivanti Connect Secure and Policy Secure.',
+      },
+      {
+        cveId: 'CVE-2024-1709',
+        cvss: 10.0,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 2,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'ConnectWise ScreenConnect',
+        desc: 'Authentication bypass allowing unauthorized access to ScreenConnect.',
+      },
+      {
+        cveId: 'CVE-2024-1708',
+        cvss: 8.4,
+        severity: VulnerabilitySeverity.high,
+        hosts: 2,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'ConnectWise ScreenConnect',
+        desc: 'Path traversal in ScreenConnect allowing remote code execution.',
+      },
+      {
+        cveId: 'CVE-2024-23897',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Jenkins',
+        desc: 'Arbitrary file read via Jenkins CLI args4j parser.',
+      },
+      {
+        cveId: 'CVE-2024-27198',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'JetBrains TeamCity',
+        desc: 'Authentication bypass in TeamCity allowing admin access.',
+      },
+      {
+        cveId: 'CVE-2023-44228',
+        cvss: 10.0,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 8,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Apache Log4j',
+        desc: 'Remote code execution via JNDI injection in Log4j (Log4Shell follow-up).',
+      },
+      {
+        cveId: 'CVE-2024-38063',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 45,
+        exploit: false,
+        patch: PatchStatus.scheduled,
+        software: 'Windows TCP/IP',
+        desc: 'Remote code execution via IPv6 packets in Windows TCP/IP stack.',
+      },
+      {
+        cveId: 'CVE-2024-30088',
+        cvss: 8.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 23,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Windows Kernel',
+        desc: 'Windows Kernel elevation of privilege vulnerability.',
+      },
+      {
+        cveId: 'CVE-2024-4577',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 3,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'PHP CGI',
+        desc: 'Argument injection in PHP CGI on Windows allowing RCE.',
+      },
+      {
+        cveId: 'CVE-2024-28986',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'SolarWinds Web Help Desk',
+        desc: 'Java deserialization RCE in SolarWinds Web Help Desk.',
+      },
+      {
+        cveId: 'CVE-2024-5274',
+        cvss: 8.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 67,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Google Chrome V8',
+        desc: 'Type confusion in V8 JavaScript engine allowing sandbox escape.',
+      },
+      {
+        cveId: 'CVE-2024-4671',
+        cvss: 8.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 67,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Google Chrome Visuals',
+        desc: 'Use-after-free in Chrome Visuals component.',
+      },
+      {
+        cveId: 'CVE-2024-21413',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 34,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Microsoft Outlook',
+        desc: 'Remote code execution via malicious hyperlink in Outlook (MonikerLink).',
+      },
+      {
+        cveId: 'CVE-2024-21412',
+        cvss: 8.1,
+        severity: VulnerabilitySeverity.high,
+        hosts: 45,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Windows SmartScreen',
+        desc: 'Security feature bypass in Windows SmartScreen.',
+      },
+      {
+        cveId: 'CVE-2024-20353',
+        cvss: 8.6,
+        severity: VulnerabilitySeverity.high,
+        hosts: 2,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Cisco ASA/FTD',
+        desc: 'Denial of service in Cisco ASA/FTD web services.',
+      },
+      {
+        cveId: 'CVE-2024-20359',
+        cvss: 6.0,
+        severity: VulnerabilitySeverity.medium,
+        hosts: 2,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Cisco ASA',
+        desc: 'Persistent local code execution in Cisco ASA.',
+      },
+      {
+        cveId: 'CVE-2024-3400',
+        cvss: 10.0,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Palo Alto PAN-OS',
+        desc: 'Command injection in GlobalProtect allowing root RCE.',
+      },
+      {
+        cveId: 'CVE-2024-6387',
+        cvss: 8.1,
+        severity: VulnerabilitySeverity.high,
+        hosts: 89,
+        exploit: false,
+        patch: PatchStatus.scheduled,
+        software: 'OpenSSH',
+        desc: 'Signal handler race condition (regreSSHion) allowing root RCE.',
+      },
+      {
+        cveId: 'CVE-2024-29824',
+        cvss: 9.6,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Ivanti EPM',
+        desc: 'SQL injection in Ivanti Endpoint Manager Core server.',
+      },
+      {
+        cveId: 'CVE-2024-0012',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Palo Alto PAN-OS',
+        desc: 'Authentication bypass in PAN-OS management interface.',
+      },
+      {
+        cveId: 'CVE-2024-9474',
+        cvss: 7.2,
+        severity: VulnerabilitySeverity.high,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Palo Alto PAN-OS',
+        desc: 'Privilege escalation in PAN-OS management interface.',
+      },
+      {
+        cveId: 'CVE-2024-47575',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'FortiManager',
+        desc: 'Missing authentication in FortiManager fgfmd daemon.',
+      },
+      {
+        cveId: 'CVE-2024-11477',
+        cvss: 7.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 120,
+        exploit: false,
+        patch: PatchStatus.scheduled,
+        software: '7-Zip',
+        desc: 'Integer underflow in 7-Zip Zstandard decompression.',
+      },
+      {
+        cveId: 'CVE-2024-43451',
+        cvss: 6.5,
+        severity: VulnerabilitySeverity.medium,
+        hosts: 45,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Windows NTLM',
+        desc: 'NTLM hash disclosure via NTLMv2 hash in crafted file.',
+      },
+      {
+        cveId: 'CVE-2024-49039',
+        cvss: 8.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 45,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Windows Task Scheduler',
+        desc: 'Privilege escalation via Windows Task Scheduler.',
+      },
+      {
+        cveId: 'CVE-2023-36884',
+        cvss: 8.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 34,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Microsoft Office',
+        desc: 'HTML RCE via crafted Office document (Storm-0978).',
+      },
+      {
+        cveId: 'CVE-2023-38831',
+        cvss: 7.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 56,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'WinRAR',
+        desc: 'Code execution when opening crafted RAR archive.',
+      },
+      {
+        cveId: 'CVE-2024-20698',
+        cvss: 7.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 45,
+        exploit: false,
+        patch: PatchStatus.scheduled,
+        software: 'Windows Kernel',
+        desc: 'Windows Kernel elevation of privilege vulnerability.',
+      },
+      {
+        cveId: 'CVE-2024-30051',
+        cvss: 7.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 45,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'Windows DWM',
+        desc: 'Windows DWM Core Library elevation of privilege.',
+      },
+      {
+        cveId: 'CVE-2024-21338',
+        cvss: 7.8,
+        severity: VulnerabilitySeverity.high,
+        hosts: 45,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Windows Kernel',
+        desc: 'AppLocker bypass via Windows Kernel vulnerability (Lazarus Group).',
+      },
+      {
+        cveId: 'CVE-2024-24919',
+        cvss: 8.6,
+        severity: VulnerabilitySeverity.high,
+        hosts: 3,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Check Point Quantum',
+        desc: 'Information disclosure in Check Point Security Gateways.',
+      },
+      {
+        cveId: 'CVE-2024-40711',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Veeam Backup',
+        desc: 'Unauthenticated RCE in Veeam Backup & Replication.',
+      },
+      {
+        cveId: 'CVE-2024-29973',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 2,
+        exploit: true,
+        patch: PatchStatus.patch_pending,
+        software: 'Zyxel NAS',
+        desc: 'Command injection in Zyxel NAS devices.',
+      },
+      {
+        cveId: 'CVE-2024-36401',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'GeoServer',
+        desc: 'RCE via OGC filter evaluation in GeoServer.',
+      },
+      {
+        cveId: 'CVE-2024-22252',
+        cvss: 9.3,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 5,
+        exploit: false,
+        patch: PatchStatus.scheduled,
+        software: 'VMware ESXi',
+        desc: 'Use-after-free in VMware ESXi XHCI USB controller.',
+      },
+      {
+        cveId: 'CVE-2024-37085',
+        cvss: 7.2,
+        severity: VulnerabilitySeverity.high,
+        hosts: 5,
+        exploit: true,
+        patch: PatchStatus.patching,
+        software: 'VMware ESXi',
+        desc: 'Authentication bypass in VMware ESXi Active Directory integration.',
+      },
+      {
+        cveId: 'CVE-2024-23113',
+        cvss: 9.8,
+        severity: VulnerabilitySeverity.critical,
+        hosts: 1,
+        exploit: true,
+        patch: PatchStatus.mitigated,
+        software: 'Fortinet FortiOS',
+        desc: 'Format string vulnerability in FortiOS fgfmd daemon.',
+      },
+    ]
+
+    for (const v of vulns) {
+      await prisma.vulnerability.upsert({
+        where: { tenantId_cveId: { tenantId, cveId: v.cveId } },
+        update: {},
+        create: {
+          tenantId,
+          cveId: v.cveId,
+          cvssScore: v.cvss,
+          severity: v.severity,
+          description: v.desc,
+          affectedHosts: v.hosts,
+          exploitAvailable: v.exploit,
+          patchStatus: v.patch,
+          affectedSoftware: v.software,
+          remediation:
+            v.patch === PatchStatus.mitigated
+              ? `Patch applied. Verify all instances of ${v.software} are updated.`
+              : `Update ${v.software} to latest version. Apply vendor workarounds if patch unavailable.`,
+          discoveredAt: randomDate(90),
+          patchedAt: v.patch === PatchStatus.mitigated ? randomDate(30) : null,
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: vulns.length }, 'Seeded vulnerabilities')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed vulnerabilities')
+  }
+}
+
+// ─── 4. AI Agents ─────────────────────────────────────────────
+
+async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const agents = [
+      {
+        name: 'Sentinel Triage Agent',
+        description: 'Automated alert triage and initial classification using behavioral analysis.',
+        model: 'anthropic.claude-3-sonnet',
+        tier: AiAgentTier.L1,
+        status: AiAgentStatus.online,
+        totalTasks: 4523,
+        totalTokens: BigInt(12500000),
+        totalCost: 187.5,
+        avgTimeMs: 2300,
+        tools: [
+          {
+            name: 'alert_classify',
+            description: 'Classifies alerts by severity and type using ML models',
+            schema: { type: 'object', properties: { alertId: { type: 'string' } } },
+          },
+          {
+            name: 'ioc_enrich',
+            description: 'Enriches IOCs with threat intelligence feeds',
+            schema: {
+              type: 'object',
+              properties: { iocValue: { type: 'string' }, iocType: { type: 'string' } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Classify alert: Multiple failed SSH logins from 203.0.113.42',
+            output:
+              'Classification: Brute Force Attack (T1110.001). Severity: HIGH. Confidence: 92%.',
+            tokensUsed: 850,
+            cost: 0.013,
+            durationMs: 1800,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Classify alert: Suspicious PowerShell encoded command',
+            output:
+              'Classification: Malicious Script Execution (T1059.001). Severity: CRITICAL. Confidence: 88%.',
+            tokensUsed: 920,
+            cost: 0.014,
+            durationMs: 2100,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Enrich IOC: evil-domain.xyz',
+            output:
+              'Domain registered 3 days ago. Hosting: bulletproof. Associated with LockBit ransomware campaign.',
+            tokensUsed: 1200,
+            cost: 0.018,
+            durationMs: 3400,
+            status: AiAgentSessionStatus.completed,
+          },
+        ],
+      },
+      {
+        name: 'Hunt Orchestrator',
+        description:
+          'Coordinates threat hunting campaigns using natural language queries across data sources.',
+        model: 'anthropic.claude-3-sonnet',
+        tier: AiAgentTier.L2,
+        status: AiAgentStatus.online,
+        totalTasks: 1287,
+        totalTokens: BigInt(8900000),
+        totalCost: 133.5,
+        avgTimeMs: 4500,
+        tools: [
+          {
+            name: 'query_wazuh',
+            description: 'Executes search queries against Wazuh indices',
+            schema: {
+              type: 'object',
+              properties: { query: { type: 'string' }, timeRange: { type: 'string' } },
+            },
+          },
+          {
+            name: 'query_graylog',
+            description: 'Searches Graylog streams for matching events',
+            schema: { type: 'object', properties: { query: { type: 'string' } } },
+          },
+          {
+            name: 'correlate_events',
+            description: 'Correlates events across multiple data sources',
+            schema: {
+              type: 'object',
+              properties: { eventIds: { type: 'array', items: { type: 'string' } } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Hunt for lateral movement via SMB in the last 48 hours',
+            output:
+              'Found 23 suspicious SMB sessions. 3 endpoints show signs of pass-the-hash. Recommend isolation.',
+            tokensUsed: 2100,
+            cost: 0.032,
+            durationMs: 5600,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Detect DNS tunneling activity',
+            output:
+              'Identified beaconing pattern from workstation-17 to update-service.xyz. 47MB exfiltrated.',
+            tokensUsed: 1800,
+            cost: 0.027,
+            durationMs: 4200,
+            status: AiAgentSessionStatus.completed,
+          },
+        ],
+      },
+      {
+        name: 'Incident Responder',
+        description:
+          'Automated incident response orchestration with containment and remediation actions.',
+        model: 'anthropic.claude-3-sonnet',
+        tier: AiAgentTier.L2,
+        status: AiAgentStatus.online,
+        totalTasks: 892,
+        totalTokens: BigInt(6200000),
+        totalCost: 93.0,
+        avgTimeMs: 3800,
+        tools: [
+          {
+            name: 'isolate_host',
+            description: 'Isolates a host from the network via EDR',
+            schema: { type: 'object', properties: { hostname: { type: 'string' } } },
+          },
+          {
+            name: 'block_ioc',
+            description: 'Blocks an IOC at firewall/proxy level',
+            schema: {
+              type: 'object',
+              properties: { iocValue: { type: 'string' }, iocType: { type: 'string' } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Contain host: workstation-101 (suspected ransomware)',
+            output: 'Host isolated via EDR. Snapshot captured. Network quarantine applied.',
+            tokensUsed: 650,
+            cost: 0.01,
+            durationMs: 2800,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Block C2 domain: evil-domain.xyz',
+            output: 'Domain blocked on proxy, DNS sinkhole configured, firewall rules updated.',
+            tokensUsed: 580,
+            cost: 0.009,
+            durationMs: 1900,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Remediate CVE-2024-21762 on FortiGate devices',
+            output: null,
+            tokensUsed: 0,
+            cost: 0,
+            durationMs: 0,
+            status: AiAgentSessionStatus.running,
+          },
+        ],
+      },
+      {
+        name: 'Compliance Auditor',
+        description:
+          'Evaluates security controls against compliance frameworks and generates reports.',
+        model: 'anthropic.claude-3-haiku',
+        tier: AiAgentTier.L1,
+        status: AiAgentStatus.online,
+        totalTasks: 234,
+        totalTokens: BigInt(3100000),
+        totalCost: 15.5,
+        avgTimeMs: 1800,
+        tools: [
+          {
+            name: 'assess_control',
+            description: 'Assesses a compliance control against evidence',
+            schema: {
+              type: 'object',
+              properties: { controlId: { type: 'string' }, framework: { type: 'string' } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Assess ISO 27001 A.12.4.1 Event Logging',
+            output: 'Control PASSED. Centralized logging via Wazuh+Graylog. 98% coverage.',
+            tokensUsed: 450,
+            cost: 0.002,
+            durationMs: 1200,
+            status: AiAgentSessionStatus.completed,
+          },
+        ],
+      },
+      {
+        name: 'Vulnerability Prioritizer',
+        description:
+          'Prioritizes vulnerabilities based on asset criticality, exploit availability, and threat context.',
+        model: 'anthropic.claude-3-sonnet',
+        tier: AiAgentTier.L3,
+        status: AiAgentStatus.degraded,
+        totalTasks: 567,
+        totalTokens: BigInt(4800000),
+        totalCost: 72.0,
+        avgTimeMs: 3200,
+        tools: [
+          {
+            name: 'score_vulnerability',
+            description: 'Calculates risk-adjusted vulnerability score',
+            schema: { type: 'object', properties: { cveId: { type: 'string' } } },
+          },
+          {
+            name: 'map_assets',
+            description: 'Maps vulnerable assets to business criticality',
+            schema: {
+              type: 'object',
+              properties: { assetIds: { type: 'array', items: { type: 'string' } } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Prioritize CVE-2024-3094 for remediation',
+            output:
+              'CRITICAL priority. XZ Utils backdoor affects 3 SSH-exposed servers. Exploit in the wild. Immediate patching required.',
+            tokensUsed: 1100,
+            cost: 0.017,
+            durationMs: 2900,
+            status: AiAgentSessionStatus.completed,
+          },
+          {
+            input: 'Assess risk of CVE-2024-6387 across infrastructure',
+            output: null,
+            tokensUsed: 200,
+            cost: 0.003,
+            durationMs: 15000,
+            status: AiAgentSessionStatus.failed,
+          },
+        ],
+      },
+      {
+        name: 'Report Generator',
+        description:
+          'Generates executive and technical security reports with AI-powered analysis summaries.',
+        model: 'anthropic.claude-3-haiku',
+        tier: AiAgentTier.L0,
+        status: AiAgentStatus.maintenance,
+        totalTasks: 145,
+        totalTokens: BigInt(2000000),
+        totalCost: 10.0,
+        avgTimeMs: 5500,
+        tools: [
+          {
+            name: 'generate_report',
+            description: 'Generates formatted security reports',
+            schema: {
+              type: 'object',
+              properties: { reportType: { type: 'string' }, dateRange: { type: 'string' } },
+            },
+          },
+        ],
+        sessions: [
+          {
+            input: 'Generate weekly executive summary',
+            output:
+              'Executive Security Report generated. 12 critical alerts, 4 incidents, 2 resolved. Threat level: ELEVATED.',
+            tokensUsed: 3200,
+            cost: 0.016,
+            durationMs: 8500,
+            status: AiAgentSessionStatus.completed,
+          },
+        ],
+      },
+    ]
+
+    for (const agent of agents) {
+      const existing = await prisma.aiAgent.findFirst({
+        where: { tenantId, name: agent.name },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      await prisma.aiAgent.create({
+        data: {
+          tenantId,
+          name: agent.name,
+          description: agent.description,
+          model: agent.model,
+          tier: agent.tier,
+          status: agent.status,
+          totalTasks: agent.totalTasks,
+          totalTokens: agent.totalTokens,
+          totalCost: agent.totalCost,
+          avgTimeMs: agent.avgTimeMs,
+          tools: {
+            create: agent.tools.map(t => ({
+              name: t.name,
+              description: t.description,
+              schema: t.schema as Prisma.InputJsonValue,
+            })),
+          },
+          sessions: {
+            create: agent.sessions.map((s, idx) => ({
+              input: s.input,
+              output: s.output,
+              tokensUsed: s.tokensUsed,
+              cost: s.cost,
+              durationMs: s.durationMs,
+              status: s.status,
+              startedAt: new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000),
+              completedAt:
+                s.status !== AiAgentSessionStatus.running
+                  ? new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000 + s.durationMs)
+                  : null,
+            })),
+          },
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: agents.length }, 'Seeded AI agents')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed AI agents')
+  }
+}
+
+// ─── 5. UEBA ──────────────────────────────────────────────────
+
+async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const entities = [
+      {
+        name: 'john.doe',
+        type: UebaEntityType.user,
+        risk: 85.2,
+        level: UebaRiskLevel.critical,
+        topAnomaly: 'Impossible travel: login from 2 countries within 30 minutes',
+      },
+      {
+        name: 'jane.smith',
+        type: UebaEntityType.user,
+        risk: 72.1,
+        level: UebaRiskLevel.high,
+        topAnomaly: 'Accessed 15 sensitive repos outside business hours',
+      },
+      {
+        name: 'svc-backup',
+        type: UebaEntityType.service_account,
+        risk: 91.5,
+        level: UebaRiskLevel.critical,
+        topAnomaly: 'Service account used interactively from unknown workstation',
+      },
+      {
+        name: 'web-prod-03',
+        type: UebaEntityType.host,
+        risk: 67.8,
+        level: UebaRiskLevel.high,
+        topAnomaly: 'Outbound data transfer 5x baseline to external IP',
+      },
+      {
+        name: 'admin.ops',
+        type: UebaEntityType.user,
+        risk: 45.3,
+        level: UebaRiskLevel.medium,
+        topAnomaly: 'Password reset for 12 accounts in 5 minutes',
+      },
+      {
+        name: 'dc-01',
+        type: UebaEntityType.host,
+        risk: 88.9,
+        level: UebaRiskLevel.critical,
+        topAnomaly: 'NTDS.dit access attempt detected',
+      },
+      {
+        name: 'erp-app-01',
+        type: UebaEntityType.application,
+        risk: 34.2,
+        level: UebaRiskLevel.medium,
+        topAnomaly: 'Unusual API call pattern from unknown client',
+      },
+      {
+        name: 'contractor.ext',
+        type: UebaEntityType.user,
+        risk: 78.4,
+        level: UebaRiskLevel.high,
+        topAnomaly: 'VPN connection from 3 different countries in 24 hours',
+      },
+      {
+        name: 'svc-deploy',
+        type: UebaEntityType.service_account,
+        risk: 62.1,
+        level: UebaRiskLevel.high,
+        topAnomaly: 'Scheduled task created with encoded PowerShell payload',
+      },
+      {
+        name: 'mail-relay-01',
+        type: UebaEntityType.host,
+        risk: 56.7,
+        level: UebaRiskLevel.medium,
+        topAnomaly: 'Outbound SMTP to 200+ unique domains in 1 hour',
+      },
+      {
+        name: 'dev.intern',
+        type: UebaEntityType.user,
+        risk: 23.1,
+        level: UebaRiskLevel.low,
+        topAnomaly: 'Access to production database (first time)',
+      },
+      {
+        name: 'vpn-gw-01',
+        type: UebaEntityType.host,
+        risk: 41.2,
+        level: UebaRiskLevel.medium,
+        topAnomaly: 'Failed authentication spike from Tor exit node',
+      },
+      {
+        name: 'crm-api',
+        type: UebaEntityType.application,
+        risk: 15.0,
+        level: UebaRiskLevel.normal,
+        topAnomaly: null,
+      },
+      {
+        name: 'mike.johnson',
+        type: UebaEntityType.user,
+        risk: 95.0,
+        level: UebaRiskLevel.critical,
+        topAnomaly: 'Downloaded 2.3GB from SharePoint before resignation notice',
+      },
+      {
+        name: 'svc-monitoring',
+        type: UebaEntityType.service_account,
+        risk: 8.5,
+        level: UebaRiskLevel.normal,
+        topAnomaly: null,
+      },
+      {
+        name: 'build-server-01',
+        type: UebaEntityType.host,
+        risk: 52.3,
+        level: UebaRiskLevel.medium,
+        topAnomaly: 'Cryptominer process detected consuming 98% CPU',
+      },
+      {
+        name: 'sarah.chen',
+        type: UebaEntityType.user,
+        risk: 31.4,
+        level: UebaRiskLevel.low,
+        topAnomaly: 'Login from new device type',
+      },
+      {
+        name: 'db-prod-01',
+        type: UebaEntityType.host,
+        risk: 74.6,
+        level: UebaRiskLevel.high,
+        topAnomaly: 'Bulk SELECT queries on PII tables from new application',
+      },
+      {
+        name: 'ci-runner-02',
+        type: UebaEntityType.host,
+        risk: 28.9,
+        level: UebaRiskLevel.low,
+        topAnomaly: 'Outbound connection to npm registry mirror in unusual country',
+      },
+      {
+        name: 'hr-portal',
+        type: UebaEntityType.application,
+        risk: 19.7,
+        level: UebaRiskLevel.normal,
+        topAnomaly: null,
+      },
+    ]
+
+    const anomalyTemplates = [
+      {
+        anomalyType: 'impossible_travel',
+        description:
+          'Login detected from geographically distant locations within impossible travel time',
+        severity: UebaRiskLevel.critical,
+        score: 92.5,
+      },
+      {
+        anomalyType: 'unusual_access_time',
+        description: 'Resource access outside of normal working hours pattern',
+        severity: UebaRiskLevel.medium,
+        score: 45.0,
+      },
+      {
+        anomalyType: 'data_exfiltration',
+        description: 'Data transfer volume exceeds 3 standard deviations from baseline',
+        severity: UebaRiskLevel.high,
+        score: 78.3,
+      },
+      {
+        anomalyType: 'privilege_escalation',
+        description: 'Unexpected privilege elevation or admin group membership change',
+        severity: UebaRiskLevel.critical,
+        score: 88.1,
+      },
+      {
+        anomalyType: 'lateral_movement',
+        description: 'Sequential authentication to multiple hosts in short timeframe',
+        severity: UebaRiskLevel.high,
+        score: 71.2,
+      },
+      {
+        anomalyType: 'credential_abuse',
+        description: 'Service account used for interactive login',
+        severity: UebaRiskLevel.critical,
+        score: 95.0,
+      },
+      {
+        anomalyType: 'new_device',
+        description: 'Authentication from previously unseen device or user agent',
+        severity: UebaRiskLevel.low,
+        score: 25.0,
+      },
+      {
+        anomalyType: 'bulk_download',
+        description: 'Unusual volume of file downloads from cloud storage',
+        severity: UebaRiskLevel.high,
+        score: 82.4,
+      },
+    ]
+
+    for (const entity of entities) {
+      const existing = await prisma.uebaEntity.findFirst({
+        where: { tenantId, entityName: entity.name, entityType: entity.type },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      const trendData = Array.from({ length: 30 }, (_, i) => ({
+        date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10),
+        score: Math.max(0, entity.risk + Math.sin(i * 0.5) * 15),
+      }))
+
+      const anomalyCount =
+        entity.level === UebaRiskLevel.normal
+          ? 0
+          : entity.level === UebaRiskLevel.low
+            ? 2
+            : entity.level === UebaRiskLevel.medium
+              ? 3
+              : 4
+
+      const createdEntity = await prisma.uebaEntity.create({
+        data: {
+          tenantId,
+          entityName: entity.name,
+          entityType: entity.type,
+          riskScore: entity.risk,
+          riskLevel: entity.level,
+          topAnomaly: entity.topAnomaly,
+          trendData: trendData as unknown as Prisma.InputJsonValue,
+          lastSeenAt: randomDate(3),
+        },
+      })
+
+      for (let a = 0; a < anomalyCount; a++) {
+        const tmpl = anomalyTemplates[a % anomalyTemplates.length]!
+        await prisma.uebaAnomaly.create({
+          data: {
+            tenantId,
+            entityId: createdEntity.id,
+            anomalyType: tmpl.anomalyType,
+            description: tmpl.description,
+            severity: tmpl.severity,
+            score: tmpl.score,
+            detectedAt: randomDate(14),
+            resolved: a === 0 ? false : Math.random() > 0.5,
+          },
+        })
+      }
+    }
+
+    // ML Models
+    const mlModels = [
+      {
+        name: 'User Behavior Baseline',
+        modelType: MlModelType.anomaly_detection,
+        accuracy: 0.94,
+        status: MlModelStatus.active,
+        dataPoints: 1250000,
+        description: 'Baseline model for user login patterns, access times, and resource usage.',
+      },
+      {
+        name: 'Lateral Movement Detector',
+        modelType: MlModelType.classification,
+        accuracy: 0.89,
+        status: MlModelStatus.active,
+        dataPoints: 850000,
+        description: 'Classifies network authentication patterns as normal or lateral movement.',
+      },
+      {
+        name: 'Data Exfiltration Scorer',
+        modelType: MlModelType.time_series,
+        accuracy: 0.91,
+        status: MlModelStatus.active,
+        dataPoints: 2100000,
+        description:
+          'Time-series model tracking data transfer volumes and detecting anomalous outbound transfers.',
+      },
+      {
+        name: 'Entity Risk Clusterer',
+        modelType: MlModelType.clustering,
+        accuracy: 0.87,
+        status: MlModelStatus.training,
+        dataPoints: 500000,
+        description:
+          'Clusters entities by behavioral similarity to identify peer groups and outliers.',
+      },
+    ]
+
+    for (const model of mlModels) {
+      await prisma.mlModel.upsert({
+        where: { tenantId_name: { tenantId, name: model.name } },
+        update: {},
+        create: {
+          tenantId,
+          name: model.name,
+          modelType: model.modelType,
+          accuracy: model.accuracy,
+          status: model.status,
+          dataPoints: model.dataPoints,
+          description: model.description,
+          lastTrained: model.status === MlModelStatus.training ? null : randomDate(7),
+        },
+      })
+    }
+
+    logger.info(
+      { tenant: tenantSlug, entities: entities.length, models: mlModels.length },
+      'Seeded UEBA'
+    )
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed UEBA')
+  }
+}
+
+// ─── 6. Attack Paths ──────────────────────────────────────────
+
+async function seedAttackPaths(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const year = new Date().getFullYear()
+    const paths = [
+      {
+        title: 'External Phishing to Domain Admin',
+        description:
+          'Attack path from spear phishing email through credential theft to full domain compromise.',
+        severity: AttackPathSeverity.critical,
+        status: AttackPathStatus.active,
+        assets: 24,
+        coverage: 0.85,
+        tactics: [
+          'Initial Access',
+          'Execution',
+          'Credential Access',
+          'Lateral Movement',
+          'Privilege Escalation',
+        ],
+        techniques: ['T1566.001', 'T1204.002', 'T1003.001', 'T1021.002', 'T1068'],
+        stages: [
+          {
+            name: 'Phishing Email Delivery',
+            technique: 'T1566.001',
+            status: 'active',
+            assets: ['mail-relay-01'],
+          },
+          {
+            name: 'Macro Execution',
+            technique: 'T1204.002',
+            status: 'active',
+            assets: ['workstation-101'],
+          },
+          {
+            name: 'Credential Dumping',
+            technique: 'T1003.001',
+            status: 'active',
+            assets: ['workstation-101'],
+          },
+          {
+            name: 'Lateral Movement via RDP',
+            technique: 'T1021.001',
+            status: 'active',
+            assets: ['dc-01'],
+          },
+          {
+            name: 'Domain Admin Achieved',
+            technique: 'T1068',
+            status: 'active',
+            assets: ['dc-01', 'dc-02'],
+          },
+        ],
+      },
+      {
+        title: 'VPN Compromise to Data Exfiltration',
+        description:
+          'Exploitation of VPN vulnerability leading to internal network access and data theft.',
+        severity: AttackPathSeverity.critical,
+        status: AttackPathStatus.active,
+        assets: 15,
+        coverage: 0.72,
+        tactics: ['Initial Access', 'Persistence', 'Collection', 'Exfiltration'],
+        techniques: ['T1190', 'T1505.003', 'T1005', 'T1041'],
+        stages: [
+          { name: 'VPN Exploit', technique: 'T1190', status: 'active', assets: ['vpn-gw-01'] },
+          {
+            name: 'Web Shell Persistence',
+            technique: 'T1505.003',
+            status: 'active',
+            assets: ['vpn-gw-01'],
+          },
+          {
+            name: 'Internal Recon',
+            technique: 'T1046',
+            status: 'active',
+            assets: ['internal-network'],
+          },
+          { name: 'Data Collection', technique: 'T1005', status: 'active', assets: ['db-prod-01'] },
+          {
+            name: 'HTTPS Exfiltration',
+            technique: 'T1041',
+            status: 'active',
+            assets: ['db-prod-01'],
+          },
+        ],
+      },
+      {
+        title: 'Supply Chain to Ransomware',
+        description:
+          'Compromised software supply chain leading to ransomware deployment across infrastructure.',
+        severity: AttackPathSeverity.critical,
+        status: AttackPathStatus.mitigated,
+        assets: 45,
+        coverage: 0.91,
+        tactics: ['Initial Access', 'Execution', 'Impact'],
+        techniques: ['T1195.002', 'T1059.001', 'T1486'],
+        stages: [
+          {
+            name: 'Malicious Package',
+            technique: 'T1195.002',
+            status: 'mitigated',
+            assets: ['build-server-01'],
+          },
+          {
+            name: 'Code Execution',
+            technique: 'T1059.001',
+            status: 'mitigated',
+            assets: ['build-server-01'],
+          },
+          {
+            name: 'Ransomware Deploy',
+            technique: 'T1486',
+            status: 'mitigated',
+            assets: ['file-server-01'],
+          },
+        ],
+      },
+      {
+        title: 'Insider Threat Data Theft',
+        description:
+          'Malicious insider using legitimate access to exfiltrate sensitive data before departure.',
+        severity: AttackPathSeverity.high,
+        status: AttackPathStatus.active,
+        assets: 8,
+        coverage: 0.65,
+        tactics: ['Collection', 'Exfiltration'],
+        techniques: ['T1530', 'T1567', 'T1052.001'],
+        stages: [
+          {
+            name: 'Cloud Storage Access',
+            technique: 'T1530',
+            status: 'active',
+            assets: ['sharepoint'],
+          },
+          {
+            name: 'Bulk Download',
+            technique: 'T1567',
+            status: 'active',
+            assets: ['workstation-202'],
+          },
+          {
+            name: 'USB Exfiltration',
+            technique: 'T1052.001',
+            status: 'active',
+            assets: ['workstation-202'],
+          },
+        ],
+      },
+      {
+        title: 'Cloud Misconfiguration Exploit',
+        description:
+          'Exploitation of misconfigured S3 bucket to access sensitive data and pivot to EC2.',
+        severity: AttackPathSeverity.high,
+        status: AttackPathStatus.resolved,
+        assets: 6,
+        coverage: 0.55,
+        tactics: ['Initial Access', 'Privilege Escalation', 'Collection'],
+        techniques: ['T1190', 'T1078.004', 'T1530'],
+        stages: [
+          {
+            name: 'Public S3 Access',
+            technique: 'T1190',
+            status: 'resolved',
+            assets: ['s3-bucket'],
+          },
+          { name: 'IAM Key Theft', technique: 'T1078.004', status: 'resolved', assets: ['iam'] },
+          { name: 'EC2 Pivot', technique: 'T1530', status: 'resolved', assets: ['ec2-prod'] },
+        ],
+      },
+      {
+        title: 'Kerberoasting to Lateral Movement',
+        description:
+          'Service ticket extraction leading to offline password cracking and lateral movement.',
+        severity: AttackPathSeverity.high,
+        status: AttackPathStatus.active,
+        assets: 12,
+        coverage: 0.68,
+        tactics: ['Credential Access', 'Lateral Movement'],
+        techniques: ['T1558.003', 'T1550.002'],
+        stages: [
+          { name: 'SPN Enumeration', technique: 'T1558.003', status: 'active', assets: ['dc-01'] },
+          {
+            name: 'Ticket Extraction',
+            technique: 'T1558.003',
+            status: 'active',
+            assets: ['workstation-101'],
+          },
+          {
+            name: 'Offline Cracking',
+            technique: 'T1558.003',
+            status: 'active',
+            assets: ['attacker-host'],
+          },
+          {
+            name: 'Pass-the-Hash',
+            technique: 'T1550.002',
+            status: 'active',
+            assets: ['erp-server-01'],
+          },
+        ],
+      },
+      {
+        title: 'IoT Device to Network Compromise',
+        description:
+          'Exploitation of unpatched IoT device as initial foothold into corporate network.',
+        severity: AttackPathSeverity.medium,
+        status: AttackPathStatus.mitigated,
+        assets: 3,
+        coverage: 0.42,
+        tactics: ['Initial Access', 'Discovery', 'Lateral Movement'],
+        techniques: ['T1190', 'T1046', 'T1021.002'],
+        stages: [
+          {
+            name: 'IoT Exploit',
+            technique: 'T1190',
+            status: 'mitigated',
+            assets: ['iot-camera-03'],
+          },
+          {
+            name: 'Network Scan',
+            technique: 'T1046',
+            status: 'mitigated',
+            assets: ['iot-camera-03'],
+          },
+          {
+            name: 'SMB Pivot',
+            technique: 'T1021.002',
+            status: 'mitigated',
+            assets: ['file-server-01'],
+          },
+        ],
+      },
+      {
+        title: 'Email Compromise to Wire Fraud',
+        description:
+          'Business email compromise targeting finance department for fraudulent wire transfers.',
+        severity: AttackPathSeverity.high,
+        status: AttackPathStatus.active,
+        assets: 5,
+        coverage: 0.48,
+        tactics: ['Initial Access', 'Collection', 'Impact'],
+        techniques: ['T1566.002', 'T1114.002', 'T1657'],
+        stages: [
+          {
+            name: 'Credential Phishing',
+            technique: 'T1566.002',
+            status: 'active',
+            assets: ['mail'],
+          },
+          {
+            name: 'Mailbox Monitoring',
+            technique: 'T1114.002',
+            status: 'active',
+            assets: ['exchange'],
+          },
+          {
+            name: 'Fraudulent Transfer',
+            technique: 'T1657',
+            status: 'active',
+            assets: ['finance-app'],
+          },
+        ],
+      },
+      {
+        title: 'CI/CD Pipeline Poisoning',
+        description:
+          'Compromise of CI/CD pipeline to inject malicious code into production deployments.',
+        severity: AttackPathSeverity.critical,
+        status: AttackPathStatus.active,
+        assets: 10,
+        coverage: 0.78,
+        tactics: ['Initial Access', 'Execution', 'Impact'],
+        techniques: ['T1195.002', 'T1059', 'T1565.001'],
+        stages: [
+          {
+            name: 'Repository Compromise',
+            technique: 'T1195.002',
+            status: 'active',
+            assets: ['gitlab'],
+          },
+          {
+            name: 'Pipeline Manipulation',
+            technique: 'T1059',
+            status: 'active',
+            assets: ['ci-runner-01'],
+          },
+          {
+            name: 'Malicious Deploy',
+            technique: 'T1565.001',
+            status: 'active',
+            assets: ['web-prod-03'],
+          },
+        ],
+      },
+      {
+        title: 'DNS Tunneling Exfiltration Chain',
+        description:
+          'Data exfiltration via DNS tunneling after initial compromise through drive-by download.',
+        severity: AttackPathSeverity.medium,
+        status: AttackPathStatus.resolved,
+        assets: 4,
+        coverage: 0.52,
+        tactics: ['Initial Access', 'Command and Control', 'Exfiltration'],
+        techniques: ['T1189', 'T1071.004', 'T1048.003'],
+        stages: [
+          {
+            name: 'Drive-by Download',
+            technique: 'T1189',
+            status: 'resolved',
+            assets: ['workstation-101'],
+          },
+          {
+            name: 'DNS C2 Channel',
+            technique: 'T1071.004',
+            status: 'resolved',
+            assets: ['workstation-101'],
+          },
+          {
+            name: 'DNS Exfiltration',
+            technique: 'T1048.003',
+            status: 'resolved',
+            assets: ['workstation-101'],
+          },
+        ],
+      },
+    ]
+
+    for (let i = 0; i < paths.length; i++) {
+      globalAttackPathCounter++
+      const p = paths[i]!
+      const pathNumber = `AP-${year}-${String(globalAttackPathCounter).padStart(4, '0')}`
+
+      await prisma.attackPath.upsert({
+        where: { pathNumber },
+        update: {},
+        create: {
+          tenantId,
+          pathNumber,
+          title: p.title,
+          description: p.description,
+          severity: p.severity,
+          status: p.status,
+          stages: p.stages as unknown as Prisma.InputJsonValue,
+          affectedAssets: p.assets,
+          killChainCoverage: p.coverage,
+          mitreTactics: p.tactics,
+          mitreTechniques: p.techniques,
+          detectedAt: randomDate(30),
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: paths.length }, 'Seeded attack paths')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed attack paths')
+  }
+}
+
+// ─── 7. SOAR Playbooks ────────────────────────────────────────
+
+async function seedSoar(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const playbooks = [
+      {
+        name: 'Phishing Email Response',
+        description:
+          'Automated response to reported phishing emails including quarantine, IOC extraction, and user notification.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 89,
+        steps: [
+          { name: 'Extract IOCs', action: 'extract_iocs' },
+          { name: 'Check Reputation', action: 'threat_intel_lookup' },
+          { name: 'Quarantine Email', action: 'quarantine_message' },
+          { name: 'Notify User', action: 'send_notification' },
+          { name: 'Update Blocklist', action: 'update_blocklist' },
+        ],
+      },
+      {
+        name: 'Malware Containment',
+        description: 'Isolate infected endpoint, collect forensic data, and initiate remediation.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 34,
+        steps: [
+          { name: 'Isolate Host', action: 'edr_isolate' },
+          { name: 'Capture Memory', action: 'memory_dump' },
+          { name: 'Collect Artifacts', action: 'collect_forensics' },
+          { name: 'Scan Network', action: 'lateral_scan' },
+        ],
+      },
+      {
+        name: 'Brute Force Mitigation',
+        description:
+          'Block source IPs, reset affected credentials, and enable enhanced monitoring.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 156,
+        steps: [
+          { name: 'Block Source IP', action: 'firewall_block' },
+          { name: 'Reset Passwords', action: 'reset_credentials' },
+          { name: 'Enable MFA', action: 'enforce_mfa' },
+        ],
+      },
+      {
+        name: 'Vulnerability Scan Orchestration',
+        description:
+          'Scheduled vulnerability scanning across all asset groups with automated ticketing.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.scheduled,
+        execCount: 52,
+        steps: [
+          { name: 'Discover Assets', action: 'asset_discovery' },
+          { name: 'Run Scan', action: 'vuln_scan' },
+          { name: 'Parse Results', action: 'parse_results' },
+          { name: 'Create Tickets', action: 'create_jira_tickets' },
+          { name: 'Send Report', action: 'email_report' },
+        ],
+      },
+      {
+        name: 'Incident Escalation',
+        description:
+          'Automated escalation workflow for critical incidents including stakeholder notification.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.incident,
+        execCount: 23,
+        steps: [
+          { name: 'Classify Severity', action: 'classify' },
+          { name: 'Page On-Call', action: 'pagerduty_alert' },
+          { name: 'Create War Room', action: 'create_slack_channel' },
+          { name: 'Notify CISO', action: 'email_executive' },
+        ],
+      },
+      {
+        name: 'Threat Intel Enrichment',
+        description: 'Enrich alerts with threat intelligence from multiple sources.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 412,
+        steps: [
+          { name: 'Query VirusTotal', action: 'vt_lookup' },
+          { name: 'Query MISP', action: 'misp_lookup' },
+          { name: 'Query Shodan', action: 'shodan_lookup' },
+          { name: 'Score Threat', action: 'calculate_score' },
+          { name: 'Update Alert', action: 'update_alert' },
+          { name: 'Generate Report', action: 'create_report' },
+        ],
+      },
+      {
+        name: 'Data Exfiltration Response',
+        description:
+          'Respond to detected data exfiltration by blocking channels and preserving evidence.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 8,
+        steps: [
+          { name: 'Block Destination', action: 'firewall_block' },
+          { name: 'Isolate Source', action: 'edr_isolate' },
+          { name: 'Capture Traffic', action: 'pcap_capture' },
+          { name: 'Alert Legal', action: 'notify_legal' },
+        ],
+      },
+      {
+        name: 'User Account Compromise',
+        description:
+          'Response to compromised user accounts including session termination and credential reset.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.alert,
+        execCount: 67,
+        steps: [
+          { name: 'Terminate Sessions', action: 'revoke_sessions' },
+          { name: 'Reset Password', action: 'reset_password' },
+          { name: 'Review Access Logs', action: 'query_logs' },
+          { name: 'Enable MFA', action: 'enforce_mfa' },
+          { name: 'Notify User', action: 'send_notification' },
+        ],
+      },
+      {
+        name: 'Compliance Check Automation',
+        description: 'Automated daily compliance checks against configured frameworks.',
+        status: SoarPlaybookStatus.draft,
+        trigger: SoarTriggerType.scheduled,
+        execCount: 0,
+        steps: [
+          { name: 'Collect Evidence', action: 'gather_evidence' },
+          { name: 'Run Checks', action: 'evaluate_controls' },
+          { name: 'Generate Report', action: 'compliance_report' },
+        ],
+      },
+      {
+        name: 'Ransomware Response',
+        description: 'Emergency response playbook for ransomware incidents.',
+        status: SoarPlaybookStatus.active,
+        trigger: SoarTriggerType.incident,
+        execCount: 3,
+        steps: [
+          { name: 'Isolate Network Segment', action: 'network_isolate' },
+          { name: 'Disable Share Access', action: 'disable_smb' },
+          { name: 'Snapshot Backups', action: 'verify_backups' },
+          { name: 'Collect IOCs', action: 'extract_iocs' },
+          { name: 'Notify Management', action: 'escalate' },
+          { name: 'Engage IR Firm', action: 'contact_dfir' },
+        ],
+      },
+    ]
+
+    for (const pb of playbooks) {
+      const existing = await prisma.soarPlaybook.findFirst({
+        where: { tenantId, name: pb.name },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      const playbook = await prisma.soarPlaybook.create({
+        data: {
+          tenantId,
+          name: pb.name,
+          description: pb.description,
+          status: pb.status,
+          triggerType: pb.trigger,
+          triggerConditions:
+            pb.trigger === SoarTriggerType.scheduled
+              ? ({ cron: '0 2 * * *', timezone: 'UTC' } as Prisma.InputJsonValue)
+              : ({
+                  severity: ['critical', 'high'],
+                  source: ['wazuh', 'graylog'],
+                } as Prisma.InputJsonValue),
+          steps: pb.steps as unknown as Prisma.InputJsonValue,
+          executionCount: pb.execCount,
+          lastExecutedAt: pb.execCount > 0 ? randomDate(7) : null,
+          createdBy: `admin@${tenantSlug}.io`,
+        },
+      })
+
+      // Create 3-8 executions per playbook
+      const execCount = Math.min(pb.execCount, 3 + (playbooks.indexOf(pb) % 6))
+      const statuses = [
+        SoarExecutionStatus.completed,
+        SoarExecutionStatus.completed,
+        SoarExecutionStatus.completed,
+        SoarExecutionStatus.failed,
+        SoarExecutionStatus.completed,
+        SoarExecutionStatus.completed,
+        SoarExecutionStatus.running,
+        SoarExecutionStatus.cancelled,
+      ]
+
+      for (let e = 0; e < execCount; e++) {
+        const execStatus = statuses[e % statuses.length]!
+        const totalSteps = pb.steps.length
+        const stepsCompleted =
+          execStatus === SoarExecutionStatus.completed
+            ? totalSteps
+            : execStatus === SoarExecutionStatus.running
+              ? Math.floor(totalSteps / 2)
+              : execStatus === SoarExecutionStatus.failed
+                ? Math.max(1, totalSteps - 2)
+                : 0
+        const startedAt = new Date(Date.now() - (execCount - e) * 86_400_000)
+
+        await prisma.soarExecution.create({
+          data: {
+            tenantId,
+            playbookId: playbook.id,
+            status: execStatus,
+            triggerSource:
+              pb.trigger === SoarTriggerType.scheduled
+                ? 'cron'
+                : `alert-${randomUUID().slice(0, 8)}`,
+            triggeredBy: `analyst.l2@${tenantSlug}.io`,
+            startedAt,
+            completedAt:
+              execStatus === SoarExecutionStatus.running
+                ? null
+                : new Date(startedAt.getTime() + 30_000 * totalSteps),
+            stepsCompleted,
+            totalSteps,
+            output:
+              execStatus === SoarExecutionStatus.completed
+                ? ({ result: 'success', actionsCompleted: totalSteps } as Prisma.InputJsonValue)
+                : Prisma.DbNull,
+            error:
+              execStatus === SoarExecutionStatus.failed
+                ? 'Connection timeout to external service'
+                : null,
+          },
+        })
+      }
+    }
+
+    logger.info({ tenant: tenantSlug, count: playbooks.length }, 'Seeded SOAR playbooks')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed SOAR')
+  }
+}
+
+// ─── 8. Compliance ────────────────────────────────────────────
+
+async function seedCompliance(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const frameworks = [
+      {
+        name: 'ISO/IEC 27001:2022',
+        standard: ComplianceStandard.iso_27001,
+        version: '2022',
+        controls: [
+          {
+            num: 'A.5.1',
+            title: 'Information Security Policies',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'A.5.2',
+            title: 'Information Security Roles',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'A.6.1', title: 'Screening', status: ComplianceControlStatus.passed },
+          {
+            num: 'A.6.2',
+            title: 'Terms and Conditions of Employment',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'A.7.1',
+            title: 'Physical Security Perimeters',
+            status: ComplianceControlStatus.partially_met,
+          },
+          { num: 'A.7.2', title: 'Physical Entry', status: ComplianceControlStatus.passed },
+          { num: 'A.8.1', title: 'User Endpoint Devices', status: ComplianceControlStatus.passed },
+          {
+            num: 'A.8.2',
+            title: 'Privileged Access Rights',
+            status: ComplianceControlStatus.failed,
+          },
+          {
+            num: 'A.8.3',
+            title: 'Information Access Restriction',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'A.8.5', title: 'Secure Authentication', status: ComplianceControlStatus.passed },
+          {
+            num: 'A.8.7',
+            title: 'Protection Against Malware',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'A.8.8',
+            title: 'Management of Technical Vulnerabilities',
+            status: ComplianceControlStatus.partially_met,
+          },
+          { num: 'A.8.15', title: 'Logging', status: ComplianceControlStatus.passed },
+          { num: 'A.8.16', title: 'Monitoring Activities', status: ComplianceControlStatus.passed },
+        ],
+      },
+      {
+        name: 'NIST Cybersecurity Framework 2.0',
+        standard: ComplianceStandard.nist,
+        version: '2.0',
+        controls: [
+          {
+            num: 'GV.OC-01',
+            title: 'Organizational Context',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'GV.RM-01',
+            title: 'Risk Management Strategy',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'ID.AM-01',
+            title: 'Asset Inventories',
+            status: ComplianceControlStatus.partially_met,
+          },
+          {
+            num: 'ID.AM-02',
+            title: 'Software Inventories',
+            status: ComplianceControlStatus.partially_met,
+          },
+          {
+            num: 'ID.RA-01',
+            title: 'Vulnerability Identification',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'PR.AA-01', title: 'Identity Management', status: ComplianceControlStatus.passed },
+          {
+            num: 'PR.AA-03',
+            title: 'Multi-Factor Authentication',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'PR.AT-01',
+            title: 'Security Awareness Training',
+            status: ComplianceControlStatus.failed,
+          },
+          {
+            num: 'PR.DS-01',
+            title: 'Data-at-Rest Protection',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'PR.DS-02',
+            title: 'Data-in-Transit Protection',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'DE.CM-01', title: 'Network Monitoring', status: ComplianceControlStatus.passed },
+          {
+            num: 'DE.CM-06',
+            title: 'External Service Provider Monitoring',
+            status: ComplianceControlStatus.not_assessed,
+          },
+          {
+            num: 'RS.MA-01',
+            title: 'Incident Management Plan',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: 'RC.RP-01',
+            title: 'Recovery Plan Execution',
+            status: ComplianceControlStatus.partially_met,
+          },
+          {
+            num: 'RC.CO-01',
+            title: 'Recovery Communication',
+            status: ComplianceControlStatus.passed,
+          },
+        ],
+      },
+      {
+        name: 'PCI DSS v4.0',
+        standard: ComplianceStandard.pci_dss,
+        version: '4.0',
+        controls: [
+          {
+            num: '1.1.1',
+            title: 'Network Security Controls Defined',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: '1.2.1',
+            title: 'Inbound Traffic Restricted',
+            status: ComplianceControlStatus.passed,
+          },
+          {
+            num: '2.2.1',
+            title: 'System Hardening Standards',
+            status: ComplianceControlStatus.partially_met,
+          },
+          {
+            num: '3.1.1',
+            title: 'Account Data Retention Policies',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: '3.5.1', title: 'PAN Storage Protection', status: ComplianceControlStatus.passed },
+          {
+            num: '4.2.1',
+            title: 'Strong Cryptography for Transmission',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: '5.2.1', title: 'Anti-Malware Deployed', status: ComplianceControlStatus.passed },
+          {
+            num: '6.2.1',
+            title: 'Secure Development Practices',
+            status: ComplianceControlStatus.failed,
+          },
+          {
+            num: '7.2.1',
+            title: 'Access Control Model Defined',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: '8.3.1', title: 'Strong Authentication', status: ComplianceControlStatus.passed },
+          {
+            num: '9.1.1',
+            title: 'Physical Access Controls',
+            status: ComplianceControlStatus.partially_met,
+          },
+          { num: '10.2.1', title: 'Audit Logs Enabled', status: ComplianceControlStatus.passed },
+          {
+            num: '11.3.1',
+            title: 'Vulnerability Scanning',
+            status: ComplianceControlStatus.passed,
+          },
+        ],
+      },
+      {
+        name: 'SOC 2 Type II',
+        standard: ComplianceStandard.soc2,
+        version: 'Type II',
+        controls: [
+          {
+            num: 'CC1.1',
+            title: 'COSO Principle 1 — Integrity and Ethics',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'CC1.2', title: 'Board Oversight', status: ComplianceControlStatus.passed },
+          { num: 'CC2.1', title: 'Information Quality', status: ComplianceControlStatus.passed },
+          {
+            num: 'CC3.1',
+            title: 'Risk Assessment Process',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'CC4.1', title: 'Monitoring Activities', status: ComplianceControlStatus.passed },
+          {
+            num: 'CC5.1',
+            title: 'Control Activities Selection',
+            status: ComplianceControlStatus.partially_met,
+          },
+          {
+            num: 'CC6.1',
+            title: 'Logical and Physical Access',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'CC6.2', title: 'Access Credentials', status: ComplianceControlStatus.passed },
+          { num: 'CC6.3', title: 'Access Removal', status: ComplianceControlStatus.failed },
+          { num: 'CC7.1', title: 'Detection of Changes', status: ComplianceControlStatus.passed },
+          {
+            num: 'CC7.2',
+            title: 'Monitoring for Anomalies',
+            status: ComplianceControlStatus.passed,
+          },
+          { num: 'CC8.1', title: 'Change Management', status: ComplianceControlStatus.passed },
+          { num: 'CC9.1', title: 'Risk Mitigation', status: ComplianceControlStatus.passed },
+        ],
+      },
+    ]
+
+    for (const fw of frameworks) {
+      const passedCount = fw.controls.filter(
+        c => c.status === ComplianceControlStatus.passed
+      ).length
+      const failedCount = fw.controls.filter(
+        c => c.status === ComplianceControlStatus.failed
+      ).length
+      const overallScore = (passedCount / fw.controls.length) * 100
+
+      const existing = await prisma.complianceFramework.findFirst({
+        where: { tenantId, standard: fw.standard, version: fw.version },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      await prisma.complianceFramework.create({
+        data: {
+          tenantId,
+          name: fw.name,
+          description: `${fw.name} compliance framework assessment for ${tenantSlug}.`,
+          standard: fw.standard,
+          version: fw.version,
+          totalControls: fw.controls.length,
+          passedControls: passedCount,
+          failedControls: failedCount,
+          overallScore: Math.round(overallScore * 10) / 10,
+          lastAssessedAt: randomDate(14),
+          controls: {
+            create: fw.controls.map(c => ({
+              controlNumber: c.num,
+              title: c.title,
+              description: `Assessment of ${c.title} control requirements.`,
+              status: c.status,
+              evidence:
+                c.status === ComplianceControlStatus.passed
+                  ? 'Evidence collected from automated scanning and manual review. All criteria met.'
+                  : c.status === ComplianceControlStatus.failed
+                    ? 'Gap identified. Remediation plan required.'
+                    : null,
+              assessedAt: c.status !== ComplianceControlStatus.not_assessed ? randomDate(14) : null,
+              assessedBy:
+                c.status !== ComplianceControlStatus.not_assessed ? `admin@${tenantSlug}.io` : null,
+            })),
+          },
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: frameworks.length }, 'Seeded compliance frameworks')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed compliance')
+  }
+}
+
+// ─── 9. Reports ───────────────────────────────────────────────
+
+async function seedReports(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const reports = [
+      {
+        name: 'Weekly Executive Summary — W10 2025',
+        type: ReportType.executive,
+        format: ReportFormat.pdf,
+        status: ReportStatus.completed,
+        fileSize: BigInt(245000),
+      },
+      {
+        name: 'Monthly Compliance Report — Feb 2025',
+        type: ReportType.compliance,
+        format: ReportFormat.pdf,
+        status: ReportStatus.completed,
+        fileSize: BigInt(1250000),
+      },
+      {
+        name: 'Incident Report — Ransomware INC-2025-0001',
+        type: ReportType.incident,
+        format: ReportFormat.pdf,
+        status: ReportStatus.completed,
+        fileSize: BigInt(890000),
+      },
+      {
+        name: 'Quarterly Threat Landscape Q1 2025',
+        type: ReportType.threat,
+        format: ReportFormat.pdf,
+        status: ReportStatus.completed,
+        fileSize: BigInt(2100000),
+      },
+      {
+        name: 'Alert Export — March 2025',
+        type: ReportType.custom,
+        format: ReportFormat.csv,
+        status: ReportStatus.completed,
+        fileSize: BigInt(456000),
+      },
+      {
+        name: 'Vulnerability Assessment Report',
+        type: ReportType.custom,
+        format: ReportFormat.html,
+        status: ReportStatus.generating,
+        fileSize: null,
+      },
+      {
+        name: 'Weekly Executive Summary — W11 2025',
+        type: ReportType.executive,
+        format: ReportFormat.pdf,
+        status: ReportStatus.failed,
+        fileSize: null,
+      },
+    ]
+
+    // Idempotent: skip if already seeded
+    const existingCount = await prisma.report.count({ where: { tenantId } })
+    if (existingCount >= reports.length) return
+
+    for (const r of reports) {
+      await prisma.report.create({
+        data: {
+          tenantId,
+          name: r.name,
+          description: `Auto-generated ${r.type} report for ${tenantSlug}.`,
+          type: r.type,
+          format: r.format,
+          status: r.status,
+          generatedBy: `admin@${tenantSlug}.io`,
+          parameters: { dateRange: 'last_30_days', includeCharts: true } as Prisma.InputJsonValue,
+          fileUrl:
+            r.status === ReportStatus.completed
+              ? `/reports/${tenantSlug}/${r.name.toLowerCase().split(' ').join('-')}.${r.format}`
+              : null,
+          fileSize: r.fileSize,
+          generatedAt: r.status === ReportStatus.completed ? randomDate(7) : null,
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: reports.length }, 'Seeded reports')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed reports')
+  }
+}
+
+// ─── 10. System Health ────────────────────────────────────────
+
+async function seedSystemHealth(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    // Idempotent: skip if already seeded
+    const existingChecks = await prisma.systemHealthCheck.count({ where: { tenantId } })
+    if (existingChecks >= 8) return
+
+    const healthChecks = [
+      {
+        serviceName: 'Wazuh Manager',
+        serviceType: ServiceType.connector,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 45,
+      },
+      {
+        serviceName: 'Graylog SIEM',
+        serviceType: ServiceType.connector,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 78,
+      },
+      {
+        serviceName: 'PostgreSQL Primary',
+        serviceType: ServiceType.database,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 12,
+      },
+      {
+        serviceName: 'AuraSpear API',
+        serviceType: ServiceType.api,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 23,
+      },
+      {
+        serviceName: 'Redis Queue',
+        serviceType: ServiceType.queue,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 3,
+      },
+      {
+        serviceName: 'MinIO Object Storage',
+        serviceType: ServiceType.storage,
+        status: ServiceStatus.degraded,
+        responseTimeMs: 234,
+        error: 'High latency on bucket operations — disk I/O saturation detected',
+      },
+      {
+        serviceName: 'Velociraptor EDR',
+        serviceType: ServiceType.connector,
+        status: ServiceStatus.down,
+        responseTimeMs: null,
+        error: 'Connection refused: Velociraptor service not running',
+      },
+      {
+        serviceName: 'MISP Threat Intel',
+        serviceType: ServiceType.connector,
+        status: ServiceStatus.healthy,
+        responseTimeMs: 156,
+      },
+    ]
+
+    for (const hc of healthChecks) {
+      await prisma.systemHealthCheck.create({
+        data: {
+          tenantId,
+          serviceName: hc.serviceName,
+          serviceType: hc.serviceType,
+          status: hc.status,
+          responseTimeMs: hc.responseTimeMs,
+          lastCheckedAt: new Date(),
+          errorMessage: 'error' in hc ? (hc as { error: string }).error : null,
+          metadata: { version: '1.0.0', region: 'us-east-1' } as Prisma.InputJsonValue,
+        },
+      })
+    }
+
+    // System Metrics — 10 snapshots
+    const metricSnapshots = [
+      { metricName: 'api_server_cpu', metricType: MetricType.cpu, value: 42.5, unit: 'percent' },
+      {
+        metricName: 'api_server_memory',
+        metricType: MetricType.memory,
+        value: 68.2,
+        unit: 'percent',
+      },
+      {
+        metricName: 'database_disk_usage',
+        metricType: MetricType.disk,
+        value: 45.8,
+        unit: 'percent',
+      },
+      {
+        metricName: 'ingest_network_throughput',
+        metricType: MetricType.network,
+        value: 125.6,
+        unit: 'mbps',
+      },
+      {
+        metricName: 'alert_processing_queue',
+        metricType: MetricType.queue_depth,
+        value: 23,
+        unit: 'messages',
+      },
+      {
+        metricName: 'api_response_latency_p99',
+        metricType: MetricType.latency,
+        value: 145,
+        unit: 'ms',
+      },
+      { metricName: 'wazuh_indexer_cpu', metricType: MetricType.cpu, value: 67.3, unit: 'percent' },
+      {
+        metricName: 'graylog_heap_usage',
+        metricType: MetricType.memory,
+        value: 82.1,
+        unit: 'percent',
+      },
+      { metricName: 'log_storage_disk', metricType: MetricType.disk, value: 71.4, unit: 'percent' },
+      {
+        metricName: 'event_correlation_latency',
+        metricType: MetricType.latency,
+        value: 89,
+        unit: 'ms',
+      },
+    ]
+
+    const existingMetrics = await prisma.systemMetric.count({ where: { tenantId } })
+    if (existingMetrics >= metricSnapshots.length) return
+
+    for (const m of metricSnapshots) {
+      await prisma.systemMetric.create({
+        data: {
+          tenantId,
+          metricName: m.metricName,
+          metricType: m.metricType,
+          value: m.value,
+          unit: m.unit,
+          tags: { host: 'soc-primary', environment: 'production' } as Prisma.InputJsonValue,
+          recordedAt: new Date(),
+        },
+      })
+    }
+
+    logger.info(
+      { tenant: tenantSlug, checks: healthChecks.length, metrics: metricSnapshots.length },
+      'Seeded system health'
+    )
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed system health')
+  }
+}
+
+// ─── 11. Normalization Pipelines ──────────────────────────────
+
+async function seedNormalization(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const pipelines = [
+      {
+        name: 'Wazuh Syslog Parser',
+        sourceType: NormalizationSourceType.syslog,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(15230000),
+        errors: 12,
+      },
+      {
+        name: 'Graylog JSON Ingestion',
+        sourceType: NormalizationSourceType.json,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(8940000),
+        errors: 3,
+      },
+      {
+        name: 'Windows Event Log Parser',
+        sourceType: NormalizationSourceType.json,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(22100000),
+        errors: 45,
+      },
+      {
+        name: 'Firewall CEF Parser',
+        sourceType: NormalizationSourceType.cef,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(6780000),
+        errors: 8,
+      },
+      {
+        name: 'IDS LEEF Parser',
+        sourceType: NormalizationSourceType.leef,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(3450000),
+        errors: 2,
+      },
+      {
+        name: 'CSV Threat Feed Importer',
+        sourceType: NormalizationSourceType.csv,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(125000),
+        errors: 0,
+      },
+      {
+        name: 'Linux Audit Log Parser',
+        sourceType: NormalizationSourceType.syslog,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(9800000),
+        errors: 15,
+      },
+      {
+        name: 'Cloud Trail JSON Parser',
+        sourceType: NormalizationSourceType.json,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(4560000),
+        errors: 7,
+      },
+      {
+        name: 'Custom Application Log Parser',
+        sourceType: NormalizationSourceType.custom,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(1230000),
+        errors: 23,
+      },
+      {
+        name: 'DNS Query Log Parser',
+        sourceType: NormalizationSourceType.syslog,
+        status: NormalizationPipelineStatus.active,
+        processed: BigInt(45670000),
+        errors: 1,
+      },
+      {
+        name: 'Email Gateway CEF Parser',
+        sourceType: NormalizationSourceType.cef,
+        status: NormalizationPipelineStatus.inactive,
+        processed: BigInt(890000),
+        errors: 156,
+      },
+      {
+        name: 'Legacy SNMP Trap Parser',
+        sourceType: NormalizationSourceType.custom,
+        status: NormalizationPipelineStatus.error,
+        processed: BigInt(34000),
+        errors: 2340,
+      },
+    ]
+
+    for (const p of pipelines) {
+      await prisma.normalizationPipeline.upsert({
+        where: { tenantId_name: { tenantId, name: p.name } },
+        update: {},
+        create: {
+          tenantId,
+          name: p.name,
+          description: `Normalization pipeline for ${p.sourceType} log sources. Parses and maps fields to ECS schema.`,
+          sourceType: p.sourceType,
+          status: p.status,
+          parserConfig: {
+            format: p.sourceType,
+            delimiter: p.sourceType === NormalizationSourceType.csv ? ',' : null,
+            timestampField: '@timestamp',
+            encoding: 'UTF-8',
+          } as Prisma.InputJsonValue,
+          fieldMappings: {
+            source_ip: 'source.ip',
+            dest_ip: 'destination.ip',
+            severity: 'event.severity',
+            message: 'message',
+            timestamp: '@timestamp',
+          } as Prisma.InputJsonValue,
+          processedCount: p.processed,
+          errorCount: p.errors,
+          lastProcessedAt:
+            p.status === NormalizationPipelineStatus.error ? randomDate(30) : randomDate(1),
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: pipelines.length }, 'Seeded normalization pipelines')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed normalization')
+  }
+}
+
+// ─── 12. Detection Rules ──────────────────────────────────────
+
+async function seedDetectionRules(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const year = new Date().getFullYear()
+    const rules = [
+      {
+        name: 'Failed Login Threshold',
+        ruleType: DetectionRuleType.threshold,
+        severity: DetectionRuleSeverity.high,
+        status: DetectionRuleStatus.active,
+        hitCount: 1234,
+        fpCount: 23,
+      },
+      {
+        name: 'Anomalous Process Creation',
+        ruleType: DetectionRuleType.anomaly,
+        severity: DetectionRuleSeverity.critical,
+        status: DetectionRuleStatus.active,
+        hitCount: 89,
+        fpCount: 12,
+      },
+      {
+        name: 'Brute Force then Lateral Movement',
+        ruleType: DetectionRuleType.chain,
+        severity: DetectionRuleSeverity.critical,
+        status: DetectionRuleStatus.active,
+        hitCount: 7,
+        fpCount: 1,
+      },
+      {
+        name: 'Daily Compliance Scan',
+        ruleType: DetectionRuleType.scheduled,
+        severity: DetectionRuleSeverity.info,
+        status: DetectionRuleStatus.active,
+        hitCount: 365,
+        fpCount: 0,
+      },
+      {
+        name: 'Port Scan Detection',
+        ruleType: DetectionRuleType.threshold,
+        severity: DetectionRuleSeverity.medium,
+        status: DetectionRuleStatus.active,
+        hitCount: 567,
+        fpCount: 89,
+      },
+      {
+        name: 'Unusual DNS Query Pattern',
+        ruleType: DetectionRuleType.anomaly,
+        severity: DetectionRuleSeverity.high,
+        status: DetectionRuleStatus.active,
+        hitCount: 234,
+        fpCount: 34,
+      },
+      {
+        name: 'Privilege Escalation Chain',
+        ruleType: DetectionRuleType.chain,
+        severity: DetectionRuleSeverity.critical,
+        status: DetectionRuleStatus.active,
+        hitCount: 12,
+        fpCount: 2,
+      },
+      {
+        name: 'Outbound Traffic Volume Alert',
+        ruleType: DetectionRuleType.threshold,
+        severity: DetectionRuleSeverity.high,
+        status: DetectionRuleStatus.active,
+        hitCount: 145,
+        fpCount: 45,
+      },
+      {
+        name: 'Suspicious PowerShell Pattern',
+        ruleType: DetectionRuleType.anomaly,
+        severity: DetectionRuleSeverity.critical,
+        status: DetectionRuleStatus.testing,
+        hitCount: 34,
+        fpCount: 8,
+      },
+      {
+        name: 'Off-Hours Access Detection',
+        ruleType: DetectionRuleType.scheduled,
+        severity: DetectionRuleSeverity.low,
+        status: DetectionRuleStatus.active,
+        hitCount: 892,
+        fpCount: 234,
+      },
+      {
+        name: 'Multiple Account Lockouts',
+        ruleType: DetectionRuleType.threshold,
+        severity: DetectionRuleSeverity.medium,
+        status: DetectionRuleStatus.active,
+        hitCount: 345,
+        fpCount: 56,
+      },
+      {
+        name: 'File Integrity Change Burst',
+        ruleType: DetectionRuleType.anomaly,
+        severity: DetectionRuleSeverity.high,
+        status: DetectionRuleStatus.active,
+        hitCount: 67,
+        fpCount: 15,
+      },
+      {
+        name: 'Phishing then Credential Use',
+        ruleType: DetectionRuleType.chain,
+        severity: DetectionRuleSeverity.high,
+        status: DetectionRuleStatus.testing,
+        hitCount: 5,
+        fpCount: 1,
+      },
+      {
+        name: 'Weekly Vulnerability Report',
+        ruleType: DetectionRuleType.scheduled,
+        severity: DetectionRuleSeverity.info,
+        status: DetectionRuleStatus.active,
+        hitCount: 52,
+        fpCount: 0,
+      },
+      {
+        name: 'Deprecated SSL/TLS Usage',
+        ruleType: DetectionRuleType.threshold,
+        severity: DetectionRuleSeverity.low,
+        status: DetectionRuleStatus.disabled,
+        hitCount: 2345,
+        fpCount: 1890,
+      },
+    ]
+
+    for (let i = 0; i < rules.length; i++) {
+      globalDetectionRuleCounter++
+      const r = rules[i]!
+      const ruleNumber = `DR-${year}-${String(globalDetectionRuleCounter).padStart(4, '0')}`
+
+      await prisma.detectionRule.upsert({
+        where: { ruleNumber },
+        update: {},
+        create: {
+          tenantId,
+          ruleNumber,
+          name: r.name,
+          description: `Detection rule: ${r.name}. Type: ${r.ruleType}. Monitors for security events matching configured conditions.`,
+          ruleType: r.ruleType,
+          severity: r.severity,
+          status: r.status,
+          conditions:
+            r.ruleType === DetectionRuleType.threshold
+              ? ({
+                  field: 'event.count',
+                  operator: 'gte',
+                  value: 10,
+                  window: '5m',
+                } as Prisma.InputJsonValue)
+              : r.ruleType === DetectionRuleType.chain
+                ? ({
+                    steps: [
+                      { event: 'auth_failure', count: 5 },
+                      { event: 'auth_success', within: '10m' },
+                    ],
+                  } as Prisma.InputJsonValue)
+                : ({ model: 'baseline', deviation: 3.0 } as Prisma.InputJsonValue),
+          actions: {
+            notify: true,
+            severity: r.severity,
+            createAlert: true,
+            channels: ['siem', 'slack'],
+          } as Prisma.InputJsonValue,
+          hitCount: r.hitCount,
+          falsePositiveCount: r.fpCount,
+          lastTriggeredAt: r.hitCount > 0 ? randomDate(3) : null,
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+        },
+      })
+    }
+
+    logger.info({ tenant: tenantSlug, count: rules.length }, 'Seeded detection rules')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed detection rules')
+  }
+}
+
+// ─── 13. Cloud Security ───────────────────────────────────────
+
+async function seedCloudSecurity(tenantId: string, tenantSlug: string): Promise<void> {
+  try {
+    const accounts = [
+      {
+        provider: CloudProvider.aws,
+        accountId: '123456789012',
+        alias: 'Production AWS',
+        status: CloudAccountStatus.connected,
+        region: 'us-east-1',
+        complianceScore: 78.5,
+        findings: [
+          {
+            resourceType: 'S3 Bucket',
+            resourceId: 'arn:aws:s3:::prod-data-bucket',
+            severity: CloudFindingSeverity.critical,
+            title: 'S3 Bucket Publicly Accessible',
+            status: CloudFindingStatus.open,
+            remediation: 'Enable bucket ACL and block public access settings.',
+          },
+          {
+            resourceType: 'EC2 Instance',
+            resourceId: 'i-0abc123def456',
+            severity: CloudFindingSeverity.high,
+            title: 'EC2 Instance with Public SSH Access',
+            status: CloudFindingStatus.open,
+            remediation: 'Restrict security group inbound SSH to VPN CIDR only.',
+          },
+          {
+            resourceType: 'IAM User',
+            resourceId: 'arn:aws:iam::123456789012:user/deploy-bot',
+            severity: CloudFindingSeverity.high,
+            title: 'IAM User with Unused Access Keys',
+            status: CloudFindingStatus.resolved,
+            remediation: 'Rotate or delete unused access keys older than 90 days.',
+          },
+          {
+            resourceType: 'RDS Instance',
+            resourceId: 'arn:aws:rds:us-east-1:123456789012:db:prod-db',
+            severity: CloudFindingSeverity.medium,
+            title: 'RDS Instance Not Encrypted',
+            status: CloudFindingStatus.open,
+            remediation: 'Enable encryption at rest using AWS KMS.',
+          },
+          {
+            resourceType: 'Lambda Function',
+            resourceId: 'arn:aws:lambda:us-east-1:123456789012:function:data-processor',
+            severity: CloudFindingSeverity.low,
+            title: 'Lambda Function Using Deprecated Runtime',
+            status: CloudFindingStatus.open,
+            remediation: 'Upgrade runtime from Node.js 16 to Node.js 20.',
+          },
+          {
+            resourceType: 'CloudTrail',
+            resourceId: 'arn:aws:cloudtrail:us-east-1:123456789012:trail/main',
+            severity: CloudFindingSeverity.info,
+            title: 'CloudTrail Log File Validation Disabled',
+            status: CloudFindingStatus.suppressed,
+            remediation: 'Enable log file validation for tamper detection.',
+          },
+          {
+            resourceType: 'EBS Volume',
+            resourceId: 'vol-0abc123',
+            severity: CloudFindingSeverity.medium,
+            title: 'Unencrypted EBS Volume Attached to Production Instance',
+            status: CloudFindingStatus.open,
+            remediation: 'Create encrypted snapshot and replace volume.',
+          },
+          {
+            resourceType: 'Security Group',
+            resourceId: 'sg-0abc123',
+            severity: CloudFindingSeverity.high,
+            title: 'Security Group Allows 0.0.0.0/0 on Port 3389',
+            status: CloudFindingStatus.open,
+            remediation: 'Restrict RDP access to corporate VPN range only.',
+          },
+        ],
+      },
+      {
+        provider: CloudProvider.azure,
+        accountId: 'a1b2c3d4-e5f6-7890-abcd-subscription01',
+        alias: 'Azure Production',
+        status: CloudAccountStatus.connected,
+        region: 'eastus',
+        complianceScore: 82.3,
+        findings: [
+          {
+            resourceType: 'Storage Account',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.Storage/storageAccounts/proddata',
+            severity: CloudFindingSeverity.high,
+            title: 'Storage Account Allows Blob Public Access',
+            status: CloudFindingStatus.open,
+            remediation: 'Disable blob public access on storage account.',
+          },
+          {
+            resourceType: 'Virtual Machine',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.Compute/virtualMachines/web-01',
+            severity: CloudFindingSeverity.medium,
+            title: 'VM Missing Endpoint Protection',
+            status: CloudFindingStatus.open,
+            remediation: 'Install and configure Microsoft Defender for Endpoint.',
+          },
+          {
+            resourceType: 'Key Vault',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.KeyVault/vaults/prod-kv',
+            severity: CloudFindingSeverity.low,
+            title: 'Key Vault Soft Delete Not Enabled',
+            status: CloudFindingStatus.resolved,
+            remediation: 'Enable soft delete and purge protection.',
+          },
+          {
+            resourceType: 'SQL Database',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.Sql/servers/prod-sql',
+            severity: CloudFindingSeverity.high,
+            title: 'SQL Server Firewall Allows Azure Services',
+            status: CloudFindingStatus.open,
+            remediation: 'Restrict to specific VNet and private endpoints.',
+          },
+          {
+            resourceType: 'Network Security Group',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.Network/nsg/web-nsg',
+            severity: CloudFindingSeverity.critical,
+            title: 'NSG Rule Allows All Inbound Traffic',
+            status: CloudFindingStatus.open,
+            remediation: 'Remove allow-all inbound rule. Apply least-privilege access.',
+          },
+          {
+            resourceType: 'App Service',
+            resourceId:
+              '/subscriptions/a1b2c3d4/resourceGroups/prod/providers/Microsoft.Web/sites/api-app',
+            severity: CloudFindingSeverity.medium,
+            title: 'App Service Using HTTP Instead of HTTPS',
+            status: CloudFindingStatus.resolved,
+            remediation: 'Enable HTTPS Only setting.',
+          },
+        ],
+      },
+      {
+        provider: CloudProvider.gcp,
+        accountId: 'auraspear-prod-12345',
+        alias: 'GCP Analytics',
+        status: CloudAccountStatus.connected,
+        region: 'us-central1',
+        complianceScore: 88.7,
+        findings: [
+          {
+            resourceType: 'GCS Bucket',
+            resourceId: 'projects/auraspear-prod-12345/buckets/analytics-data',
+            severity: CloudFindingSeverity.high,
+            title: 'GCS Bucket with Uniform Access Not Enforced',
+            status: CloudFindingStatus.open,
+            remediation: 'Enable uniform bucket-level access.',
+          },
+          {
+            resourceType: 'Compute Instance',
+            resourceId: 'projects/auraspear-prod-12345/zones/us-central1-a/instances/worker-01',
+            severity: CloudFindingSeverity.medium,
+            title: 'Compute Instance with Default Service Account',
+            status: CloudFindingStatus.open,
+            remediation: 'Create and assign a least-privilege custom service account.',
+          },
+          {
+            resourceType: 'BigQuery Dataset',
+            resourceId: 'projects/auraspear-prod-12345/datasets/user_analytics',
+            severity: CloudFindingSeverity.low,
+            title: 'BigQuery Dataset Accessible by allAuthenticatedUsers',
+            status: CloudFindingStatus.resolved,
+            remediation: 'Remove allAuthenticatedUsers binding. Grant specific IAM roles.',
+          },
+          {
+            resourceType: 'Firewall Rule',
+            resourceId: 'projects/auraspear-prod-12345/global/firewalls/allow-ssh',
+            severity: CloudFindingSeverity.high,
+            title: 'Firewall Rule Allows SSH from 0.0.0.0/0',
+            status: CloudFindingStatus.open,
+            remediation: 'Restrict SSH source ranges to IAP tunnel or VPN.',
+          },
+          {
+            resourceType: 'Cloud SQL',
+            resourceId: 'projects/auraspear-prod-12345/instances/analytics-db',
+            severity: CloudFindingSeverity.medium,
+            title: 'Cloud SQL Instance Without SSL Enforcement',
+            status: CloudFindingStatus.open,
+            remediation: 'Enable SSL enforcement for all connections.',
+          },
+          {
+            resourceType: 'GKE Cluster',
+            resourceId: 'projects/auraspear-prod-12345/locations/us-central1/clusters/analytics',
+            severity: CloudFindingSeverity.critical,
+            title: 'GKE Cluster with Legacy ABAC Enabled',
+            status: CloudFindingStatus.open,
+            remediation: 'Disable legacy ABAC and use RBAC exclusively.',
+          },
+        ],
+      },
+    ]
+
+    for (const acc of accounts) {
+      const existing = await prisma.cloudAccount.findFirst({
+        where: { tenantId, provider: acc.provider, accountId: acc.accountId },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      const createdAccount = await prisma.cloudAccount.create({
+        data: {
+          tenantId,
+          provider: acc.provider,
+          accountId: acc.accountId,
+          alias: acc.alias,
+          status: acc.status,
+          region: acc.region,
+          lastScanAt: randomDate(1),
+          findingsCount: acc.findings.length,
+          complianceScore: acc.complianceScore,
+        },
+      })
+
+      for (const f of acc.findings) {
+        await prisma.cloudFinding.create({
+          data: {
+            tenantId,
+            cloudAccountId: createdAccount.id,
+            resourceType: f.resourceType,
+            resourceId: f.resourceId,
+            severity: f.severity,
+            title: f.title,
+            description: `${f.title}. This finding was detected during automated cloud security assessment.`,
+            status: f.status,
+            remediationSteps: f.remediation,
+            detectedAt: randomDate(14),
+            resolvedAt: f.status === CloudFindingStatus.resolved ? randomDate(7) : null,
+          },
+        })
+      }
+    }
+
+    logger.info({ tenant: tenantSlug, count: accounts.length }, 'Seeded cloud security')
+  } catch (error) {
+    logger.warn({ tenant: tenantSlug, error }, 'Failed to seed cloud security')
+  }
+}
+
 // ─── Main seed function ────────────────────────────────────────
 
 async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise<string[]> {
@@ -1454,6 +5011,43 @@ async function main(): Promise<void> {
     if (match?.[1]) {
       globalCaseCounter = Number.parseInt(match[1], 10)
     }
+  }
+
+  // Initialize global counters for Phase 1-4 modules
+  const maxIncident = await prisma.incident.findFirst({
+    orderBy: { incidentNumber: 'desc' },
+    select: { incidentNumber: true },
+  })
+  if (maxIncident?.incidentNumber) {
+    const m = maxIncident.incidentNumber.match(/INC-\d+-(\d+)/)
+    if (m?.[1]) globalIncidentCounter = Number.parseInt(m[1], 10)
+  }
+
+  const maxCorrRule = await prisma.correlationRule.findFirst({
+    orderBy: { ruleNumber: 'desc' },
+    select: { ruleNumber: true },
+  })
+  if (maxCorrRule?.ruleNumber) {
+    const m = maxCorrRule.ruleNumber.match(/CR-\d+-(\d+)/)
+    if (m?.[1]) globalCorrelationRuleCounter = Number.parseInt(m[1], 10)
+  }
+
+  const maxAttackPath = await prisma.attackPath.findFirst({
+    orderBy: { pathNumber: 'desc' },
+    select: { pathNumber: true },
+  })
+  if (maxAttackPath?.pathNumber) {
+    const m = maxAttackPath.pathNumber.match(/AP-\d+-(\d+)/)
+    if (m?.[1]) globalAttackPathCounter = Number.parseInt(m[1], 10)
+  }
+
+  const maxDetRule = await prisma.detectionRule.findFirst({
+    orderBy: { ruleNumber: 'desc' },
+    select: { ruleNumber: true },
+  })
+  if (maxDetRule?.ruleNumber) {
+    const m = maxDetRule.ruleNumber.match(/DR-\d+-(\d+)/)
+    if (m?.[1]) globalDetectionRuleCounter = Number.parseInt(m[1], 10)
   }
 
   for (const profile of TENANT_PROFILES) {
@@ -1564,17 +5158,22 @@ async function main(): Promise<void> {
     const assignableUserIds = assignableUsers.map(u => u.userId)
 
     // ─── Connectors ───
+    const encryptionKey = process.env.CONFIG_ENCRYPTION_KEY
     for (const connector of profile.connectors) {
+      const encryptedConfig = encryptionKey
+        ? encrypt(JSON.stringify(connector.config), encryptionKey)
+        : JSON.stringify(connector.config)
+
       await prisma.connectorConfig.upsert({
         where: { tenantId_type: { tenantId, type: connector.type } },
-        update: {},
+        update: { encryptedConfig },
         create: {
           tenantId,
           type: connector.type,
           name: connector.name,
           authType: connector.authType,
           enabled: connector.enabled,
-          encryptedConfig: JSON.stringify({ placeholder: true }),
+          encryptedConfig,
         },
       })
     }
@@ -1608,6 +5207,25 @@ async function main(): Promise<void> {
       },
       'Seeded intel'
     )
+
+    // ─── AI Audit Logs (idempotent via count check) ───
+    await seedAiAuditLogs(tenantId, profile.slug)
+    logger.info({ tenant: profile.slug, count: AI_AUDIT_TARGET_COUNT }, 'Seeded AI audit logs')
+
+    // ─── Phase 1-4 Modules ───
+    await seedIncidents(tenantId, profile.slug)
+    await seedCorrelationRules(tenantId, profile.slug)
+    await seedVulnerabilities(tenantId, profile.slug)
+    await seedAiAgents(tenantId, profile.slug)
+    await seedUeba(tenantId, profile.slug)
+    await seedAttackPaths(tenantId, profile.slug)
+    await seedSoar(tenantId, profile.slug)
+    await seedCompliance(tenantId, profile.slug)
+    await seedReports(tenantId, profile.slug)
+    await seedSystemHealth(tenantId, profile.slug)
+    await seedNormalization(tenantId, profile.slug)
+    await seedDetectionRules(tenantId, profile.slug)
+    await seedCloudSecurity(tenantId, profile.slug)
   }
 
   logger.info('Seed completed.')

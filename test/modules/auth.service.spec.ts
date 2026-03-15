@@ -34,19 +34,17 @@ const mockConfigService = {
   }),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    user: {
-      findUnique: jest.fn(),
-      update: jest.fn(),
-      upsert: jest.fn(),
-    },
-    tenantMembership: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      upsert: jest.fn(),
-    },
+    findUserByEmailWithMemberships: jest.fn(),
+    updateLastLogin: jest.fn(),
+    findUserByIdWithTenantMemberships: jest.fn(),
+    findUserByIdWithActiveMembershipCheck: jest.fn(),
+    findMembershipByUserAndTenant: jest.fn(),
+    findActiveMembershipsWithTenant: jest.fn(),
+    findUserByIdWithAllActiveMemberships: jest.fn(),
+    upsertUserByOidcSub: jest.fn(),
+    upsertTenantMembership: jest.fn(),
   }
 }
 
@@ -76,14 +74,14 @@ const mockUserRecord = {
 
 describe('AuthService', () => {
   let service: AuthService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     mockTokenBlacklist.isBlacklisted.mockResolvedValue(false)
     service = new AuthService(
-      prisma as never,
+      repository as never,
       mockConfigService as never,
       mockTokenBlacklist as never,
       mockAppLogger as never
@@ -96,10 +94,10 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return tokens, user payload, and tenants on valid credentials', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByEmailWithMemberships.mockResolvedValue(mockUserRecord)
       mockedBcrypt.compare.mockResolvedValue(true as never)
       mockedJwt.sign.mockReturnValue('mock-token' as never)
-      prisma.user.update.mockResolvedValue(mockUserRecord)
+      repository.updateLastLogin.mockResolvedValue(mockUserRecord)
 
       const result = await service.login('analyst@auraspear.com', 'password123')
 
@@ -119,7 +117,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 for non-existent user (with timing attack prevention)', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByEmailWithMemberships.mockResolvedValue(null)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.login('nobody@test.com', 'password123')).rejects.toThrow(
@@ -134,7 +132,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 for wrong password', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByEmailWithMemberships.mockResolvedValue(mockUserRecord)
       mockedBcrypt.compare.mockResolvedValue(false as never)
 
       await expect(service.login('analyst@auraspear.com', 'wrong-password')).rejects.toThrow(
@@ -151,7 +149,7 @@ describe('AuthService', () => {
 
     it('should throw 401 for user with no active memberships', async () => {
       const userNoMemberships = { ...mockUserRecord, memberships: [] }
-      prisma.user.findUnique.mockResolvedValue(userNoMemberships)
+      repository.findUserByEmailWithMemberships.mockResolvedValue(userNoMemberships)
       mockedBcrypt.compare.mockResolvedValue(true as never)
 
       await expect(service.login('analyst@auraspear.com', 'password123')).rejects.toThrow(
@@ -167,17 +165,14 @@ describe('AuthService', () => {
     })
 
     it('should update lastLoginAt on successful login', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByEmailWithMemberships.mockResolvedValue(mockUserRecord)
       mockedBcrypt.compare.mockResolvedValue(true as never)
       mockedJwt.sign.mockReturnValue('mock-token' as never)
-      prisma.user.update.mockResolvedValue(mockUserRecord)
+      repository.updateLastLogin.mockResolvedValue(mockUserRecord)
 
       await service.login('analyst@auraspear.com', 'password123')
 
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: USER_ID },
-        data: { lastLoginAt: expect.objectContaining({}) },
-      })
+      expect(repository.updateLastLogin).toHaveBeenCalledWith(USER_ID)
     })
   })
 
@@ -439,7 +434,7 @@ describe('AuthService', () => {
     })
 
     it('should return new token pair', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
 
       const result = await service.refreshTokens('old-refresh-token')
 
@@ -448,7 +443,7 @@ describe('AuthService', () => {
     })
 
     it('should blacklist old refresh token JTI', async () => {
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
 
       await service.refreshTokens('old-refresh-token')
 
@@ -459,7 +454,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when user no longer exists', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByIdWithTenantMemberships.mockResolvedValue(null)
 
       await expect(service.refreshTokens('old-refresh-token')).rejects.toThrow(BusinessException)
 
@@ -473,7 +468,10 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when user has no active memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue({ ...mockUserRecord, memberships: [] })
+      repository.findUserByIdWithTenantMemberships.mockResolvedValue({
+        ...mockUserRecord,
+        memberships: [],
+      })
 
       await expect(service.refreshTokens('old-refresh-token')).rejects.toThrow(BusinessException)
 
@@ -494,7 +492,7 @@ describe('AuthService', () => {
         impersonatorEmail: 'admin@auraspear.com',
       }
       mockedJwt.verify.mockReturnValue(impersonationPayload as never)
-      prisma.user.findUnique.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
 
       await service.refreshTokens('impersonation-refresh-token')
 
@@ -546,7 +544,7 @@ describe('AuthService', () => {
 
   describe('validateUserActive', () => {
     it('should succeed for active user with active memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findUserByIdWithActiveMembershipCheck.mockResolvedValue({
         id: USER_ID,
         memberships: [{ id: 'membership-001' }],
       })
@@ -555,7 +553,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 for non-existent user', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByIdWithActiveMembershipCheck.mockResolvedValue(null)
 
       await expect(service.validateUserActive('non-existent')).rejects.toThrow(BusinessException)
 
@@ -569,7 +567,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 for user with no active memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findUserByIdWithActiveMembershipCheck.mockResolvedValue({
         id: USER_ID,
         memberships: [],
       })
@@ -592,7 +590,7 @@ describe('AuthService', () => {
 
   describe('validateMembershipActive', () => {
     it('should succeed for active membership', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         status: 'active',
@@ -602,7 +600,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 for inactive membership', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         status: 'inactive',
@@ -622,7 +620,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when membership does not exist', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipByUserAndTenant.mockResolvedValue(null)
 
       await expect(service.validateMembershipActive(USER_ID, TENANT_ID)).rejects.toThrow(
         BusinessException
@@ -643,7 +641,7 @@ describe('AuthService', () => {
 
   describe('getUserTenants', () => {
     it('should return list of tenant memberships', async () => {
-      prisma.tenantMembership.findMany.mockResolvedValue([
+      repository.findActiveMembershipsWithTenant.mockResolvedValue([
         {
           tenantId: TENANT_ID,
           tenant: mockTenant,
@@ -676,7 +674,7 @@ describe('AuthService', () => {
     })
 
     it('should return empty array for no memberships', async () => {
-      prisma.tenantMembership.findMany.mockResolvedValue([])
+      repository.findActiveMembershipsWithTenant.mockResolvedValue([])
 
       const result = await service.getUserTenants(USER_ID)
 
@@ -717,7 +715,7 @@ describe('AuthService', () => {
     }
 
     it('should return admin tokens when ending valid impersonation', async () => {
-      prisma.user.findUnique.mockResolvedValue(adminUser)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(adminUser)
       mockedJwt.sign.mockReturnValue('admin-token' as never)
 
       const result = await service.endImpersonation(impersonationCaller)
@@ -758,7 +756,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when original admin not found', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(null)
 
       await expect(service.endImpersonation(impersonationCaller)).rejects.toThrow(BusinessException)
 
@@ -772,7 +770,10 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when admin has no active memberships', async () => {
-      prisma.user.findUnique.mockResolvedValue({ ...adminUser, memberships: [] })
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue({
+        ...adminUser,
+        memberships: [],
+      })
 
       await expect(service.endImpersonation(impersonationCaller)).rejects.toThrow(BusinessException)
 
@@ -792,13 +793,13 @@ describe('AuthService', () => {
 
   describe('findOrCreateUser', () => {
     it('should create new user with SOC_ANALYST_L1 role', async () => {
-      prisma.user.upsert.mockResolvedValue({
+      repository.upsertUserByOidcSub.mockResolvedValue({
         id: 'new-user-001',
         oidcSub: 'oidc-sub-123',
         email: 'newuser@auraspear.com',
         name: 'New User',
       })
-      prisma.tenantMembership.upsert.mockResolvedValue({
+      repository.upsertTenantMembership.mockResolvedValue({
         userId: 'new-user-001',
         tenantId: TENANT_ID,
         role: UserRole.SOC_ANALYST_L1,
@@ -814,31 +815,27 @@ describe('AuthService', () => {
       expect(result.id).toBe('new-user-001')
       expect(result.role).toBe(UserRole.SOC_ANALYST_L1)
 
-      expect(prisma.user.upsert).toHaveBeenCalledWith({
-        where: { oidcSub: 'oidc-sub-123' },
-        update: { email: 'newuser@auraspear.com', name: 'New User' },
-        create: { oidcSub: 'oidc-sub-123', email: 'newuser@auraspear.com', name: 'New User' },
-      })
+      expect(repository.upsertUserByOidcSub).toHaveBeenCalledWith(
+        'oidc-sub-123',
+        'newuser@auraspear.com',
+        'New User'
+      )
 
-      expect(prisma.tenantMembership.upsert).toHaveBeenCalledWith({
-        where: { userId_tenantId: { userId: 'new-user-001', tenantId: TENANT_ID } },
-        update: {},
-        create: {
-          userId: 'new-user-001',
-          tenantId: TENANT_ID,
-          role: UserRole.SOC_ANALYST_L1,
-        },
-      })
+      expect(repository.upsertTenantMembership).toHaveBeenCalledWith(
+        'new-user-001',
+        TENANT_ID,
+        UserRole.SOC_ANALYST_L1
+      )
     })
 
     it('should return existing user', async () => {
-      prisma.user.upsert.mockResolvedValue({
+      repository.upsertUserByOidcSub.mockResolvedValue({
         id: USER_ID,
         oidcSub: 'oidc-existing',
         email: 'analyst@auraspear.com',
         name: 'Test Analyst',
       })
-      prisma.tenantMembership.upsert.mockResolvedValue({
+      repository.upsertTenantMembership.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         role: UserRole.SOC_ANALYST_L2,
@@ -856,7 +853,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 on provisioning failure', async () => {
-      prisma.user.upsert.mockRejectedValue(new Error('Database connection failed'))
+      repository.upsertUserByOidcSub.mockRejectedValue(new Error('Database connection failed'))
 
       await expect(
         service.findOrCreateUser(TENANT_ID, 'oidc-fail', 'fail@test.com', 'Fail User')

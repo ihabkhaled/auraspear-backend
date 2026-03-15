@@ -30,24 +30,18 @@ const mockUser: JwtPayload = {
   tenantSlug: 'test-tenant',
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    connectorConfig: {
-      findFirst: jest.fn(),
-    },
-    alert: {
-      findFirst: jest.fn(),
-      findMany: jest.fn().mockResolvedValue([]),
-    },
-    aiAuditLog: {
-      create: jest.fn(),
-    },
+    findEnabledConnectorByType: jest.fn(),
+    createAuditLog: jest.fn(),
+    findAlertByIdAndTenant: jest.fn(),
+    findRelatedAlerts: jest.fn().mockResolvedValue([]),
   }
 }
 
-function createService(prisma: ReturnType<typeof createMockPrisma>) {
+function createService(repository: ReturnType<typeof createMockRepository>) {
   return new AiService(
-    prisma as never,
+    repository as never,
     mockAppLogger as never,
     mockConnectorsService as never,
     mockBedrockService as never
@@ -55,14 +49,14 @@ function createService(prisma: ReturnType<typeof createMockPrisma>) {
 }
 
 describe('AiService', () => {
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let service: AiService
 
   beforeEach(() => {
     jest.clearAllMocks()
     mockConnectorsService.getDecryptedConfig.mockResolvedValue(null)
-    prisma = createMockPrisma()
-    service = createService(prisma)
+    repository = createMockRepository()
+    service = createService(repository)
   })
 
   /* ------------------------------------------------------------------ */
@@ -71,12 +65,12 @@ describe('AiService', () => {
 
   describe('aiHunt', () => {
     it('should return response with reasoning array and confidence', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'detect lateral movement' }, mockUser)
 
@@ -91,7 +85,7 @@ describe('AiService', () => {
     })
 
     it('should throw 403 when Bedrock connector not enabled', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue(null)
+      repository.findEnabledConnectorByType.mockResolvedValue(null)
 
       await expect(service.aiHunt({ query: 'detect lateral movement' }, mockUser)).rejects.toThrow(
         BusinessException
@@ -106,12 +100,12 @@ describe('AiService', () => {
     })
 
     it('should generate hunt-specific response for brute force queries', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'brute force attacks on login' }, mockUser)
 
@@ -120,12 +114,12 @@ describe('AiService', () => {
     })
 
     it('should generate hunt-specific response for C2 queries', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'detect C2 beacon traffic' }, mockUser)
 
@@ -134,12 +128,12 @@ describe('AiService', () => {
     })
 
     it('should generate generic response for unrecognized queries', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'unusual network patterns' }, mockUser)
 
@@ -148,36 +142,34 @@ describe('AiService', () => {
     })
 
     it('should log audit record after successful hunt', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiHunt({ query: 'test query' }, mockUser)
 
-      expect(prisma.aiAuditLog.create).toHaveBeenCalledWith(
+      expect(repository.createAuditLog).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: 'tenant-1',
-            actor: 'user-1',
-            action: 'ai_hunt',
-            model: 'rule-based',
-            inputTokens: 0,
-            outputTokens: 0,
-          }),
+          tenantId: 'tenant-1',
+          actor: 'user-1',
+          action: 'ai_hunt',
+          model: 'rule-based',
+          inputTokens: 0,
+          outputTokens: 0,
         })
       )
     })
 
     it('should handle audit log failure gracefully without throwing', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockRejectedValue(new Error('Table not found'))
+      repository.createAuditLog.mockRejectedValue(new Error('Table not found'))
 
       // Should not throw even if audit logging fails
       const result = await service.aiHunt({ query: 'test query' }, mockUser)
@@ -212,13 +204,13 @@ describe('AiService', () => {
     }
 
     it('should return investigation response', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue(mockAlert)
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiInvestigate(dto, mockUser)
 
@@ -234,7 +226,7 @@ describe('AiService', () => {
     })
 
     it('should throw 403 when AI not enabled', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue(null)
+      repository.findEnabledConnectorByType.mockResolvedValue(null)
 
       await expect(service.aiInvestigate(dto, mockUser)).rejects.toThrow(BusinessException)
 
@@ -247,12 +239,12 @@ describe('AiService', () => {
     })
 
     it('should throw 404 when alert not found', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue(null)
+      repository.findAlertByIdAndTenant.mockResolvedValue(null)
 
       await expect(service.aiInvestigate(dto, mockUser)).rejects.toThrow(BusinessException)
 
@@ -265,42 +257,36 @@ describe('AiService', () => {
     })
 
     it('should validate alert belongs to the caller tenant', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue(mockAlert)
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiInvestigate(dto, mockUser)
 
-      expect(prisma.alert.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'alert-1', tenantId: 'tenant-1' },
-        })
-      )
+      expect(repository.findAlertByIdAndTenant).toHaveBeenCalledWith('alert-1', 'tenant-1')
     })
 
     it('should log audit record after investigation', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.alert.findFirst.mockResolvedValue(mockAlert)
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiInvestigate(dto, mockUser)
 
-      expect(prisma.aiAuditLog.create).toHaveBeenCalledWith(
+      expect(repository.createAuditLog).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: 'tenant-1',
-            actor: 'user-1',
-            action: 'ai_investigate',
-            model: 'rule-based',
-          }),
+          tenantId: 'tenant-1',
+          actor: 'user-1',
+          action: 'ai_investigate',
+          model: 'rule-based',
         })
       )
     })
@@ -314,12 +300,12 @@ describe('AiService', () => {
     const body = { prompt: 'Explain MITRE T1059 technique' }
 
     it('should return explanation response with confidence 0.95', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiExplain(body, mockUser)
 
@@ -334,7 +320,7 @@ describe('AiService', () => {
     })
 
     it('should throw 403 when AI not enabled', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue(null)
+      repository.findEnabledConnectorByType.mockResolvedValue(null)
 
       await expect(service.aiExplain(body, mockUser)).rejects.toThrow(BusinessException)
 
@@ -347,36 +333,34 @@ describe('AiService', () => {
     })
 
     it('should log audit record after explanation', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiExplain(body, mockUser)
 
-      expect(prisma.aiAuditLog.create).toHaveBeenCalledWith(
+      expect(repository.createAuditLog).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: 'tenant-1',
-            actor: 'user-1',
-            action: 'ai_explain',
-            model: 'anthropic.claude-3-sonnet',
-            inputTokens: 892,
-            outputTokens: 1654,
-          }),
+          tenantId: 'tenant-1',
+          actor: 'user-1',
+          action: 'ai_explain',
+          model: 'anthropic.claude-3-sonnet',
+          inputTokens: 892,
+          outputTokens: 1654,
         })
       )
     })
 
     it('should include reasoning steps in the response', async () => {
-      prisma.connectorConfig.findFirst.mockResolvedValue({
+      repository.findEnabledConnectorByType.mockResolvedValue({
         id: 'conn-1',
         type: 'bedrock',
         enabled: true,
       })
-      prisma.aiAuditLog.create.mockResolvedValue({})
+      repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiExplain(body, mockUser)
 
@@ -385,7 +369,7 @@ describe('AiService', () => {
     })
 
     it('should throw 503 when ensureAiEnabled encounters an unexpected error', async () => {
-      prisma.connectorConfig.findFirst.mockRejectedValue(new Error('Database connection lost'))
+      repository.findEnabledConnectorByType.mockRejectedValue(new Error('Database connection lost'))
 
       try {
         await service.aiExplain(body, mockUser)

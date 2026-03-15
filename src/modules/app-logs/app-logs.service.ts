@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogsRepository } from './app-logs.repository'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { PaginatedApplicationLogs, ApplicationLogRecord } from './app-logs.types'
 import type { SearchAppLogsDto } from './dto/search-app-logs.dto'
 import type { Prisma } from '@prisma/client'
@@ -10,7 +10,7 @@ import type { Prisma } from '@prisma/client'
 export class AppLogsService {
   private readonly logger = new Logger(AppLogsService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly appLogsRepository: AppLogsRepository) {}
 
   async search(dto: SearchAppLogsDto, scopedTenantId?: string): Promise<PaginatedApplicationLogs> {
     const where: Prisma.ApplicationLogWhereInput = {}
@@ -81,15 +81,12 @@ export class AppLogsService {
       }
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.applicationLog.findMany({
-        where,
-        orderBy: this.buildOrderBy(dto.sortBy, dto.sortOrder),
-        skip: (dto.page - 1) * dto.limit,
-        take: dto.limit,
-      }),
-      this.prisma.applicationLog.count({ where }),
-    ])
+    const [data, total] = await this.appLogsRepository.findManyAndCount({
+      where,
+      orderBy: this.buildOrderBy(dto.sortBy, dto.sortOrder),
+      skip: (dto.page - 1) * dto.limit,
+      take: dto.limit,
+    })
 
     return {
       data,
@@ -98,7 +95,7 @@ export class AppLogsService {
   }
 
   async findById(id: string, scopedTenantId?: string): Promise<ApplicationLogRecord> {
-    const log = await this.prisma.applicationLog.findUnique({ where: { id } })
+    const log = await this.appLogsRepository.findById(id)
 
     if (!log) {
       throw new BusinessException(404, 'Application log not found', 'errors.appLogs.notFound')

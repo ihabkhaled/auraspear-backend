@@ -10,46 +10,30 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    connectorConfig: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-    },
-    connectorSyncJob: {
-      groupBy: jest.fn(),
-      findMany: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      findUnique: jest.fn(),
-    },
-    grafanaDashboard: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    velociraptorEndpoint: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    velociraptorHunt: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    shuffleWorkflow: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-    },
-    logstashPipelineLog: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-      createMany: jest.fn(),
-    },
+    findConnectorConfigs: jest.fn(),
+    groupBySyncJobStatus: jest.fn(),
+    createSyncJob: jest.fn(),
+    findSyncJobById: jest.fn(),
+    updateSyncJob: jest.fn(),
+    findManySyncJobs: jest.fn(),
+    countSyncJobs: jest.fn(),
+    findManyGrafanaDashboards: jest.fn(),
+    countGrafanaDashboards: jest.fn(),
+    upsertGrafanaDashboard: jest.fn(),
+    findManyVelociraptorEndpoints: jest.fn(),
+    countVelociraptorEndpoints: jest.fn(),
+    upsertVelociraptorEndpoint: jest.fn(),
+    findManyVelociraptorHunts: jest.fn(),
+    countVelociraptorHunts: jest.fn(),
+    upsertVelociraptorHunt: jest.fn(),
+    findManyLogstashLogs: jest.fn(),
+    countLogstashLogs: jest.fn(),
+    createLogstashLog: jest.fn(),
+    findManyShuffleWorkflows: jest.fn(),
+    countShuffleWorkflows: jest.fn(),
+    upsertShuffleWorkflow: jest.fn(),
   }
 }
 
@@ -88,11 +72,11 @@ function createMockConnectorServices() {
 }
 
 function createService(
-  prisma: ReturnType<typeof createMockPrisma>,
+  repository: ReturnType<typeof createMockRepository>,
   services: ReturnType<typeof createMockConnectorServices>
 ) {
   return new DataExplorerService(
-    prisma as never,
+    repository as never,
     services.connectorsService as never,
     services.graylog as never,
     services.grafana as never,
@@ -106,15 +90,15 @@ function createService(
 }
 
 describe('DataExplorerService', () => {
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let services: ReturnType<typeof createMockConnectorServices>
   let service: DataExplorerService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     services = createMockConnectorServices()
-    service = createService(prisma, services)
+    service = createService(repository, services)
   })
 
   /* ------------------------------------------------------------------ */
@@ -123,11 +107,11 @@ describe('DataExplorerService', () => {
 
   describe('getOverview', () => {
     it('should return connectors and sync job summary', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findConnectorConfigs.mockResolvedValue([
         { type: 'graylog', enabled: true, lastTestOk: true, lastSyncAt: new Date('2025-01-01') },
         { type: 'grafana', enabled: false, lastTestOk: false, lastSyncAt: null },
       ])
-      prisma.connectorSyncJob.groupBy.mockResolvedValue([
+      repository.groupBySyncJobStatus.mockResolvedValue([
         { status: 'running', connectorType: 'grafana', _count: 2 },
         { status: 'completed', connectorType: 'graylog', _count: 10 },
         { status: 'failed', connectorType: 'logstash', _count: 1 },
@@ -156,8 +140,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should handle empty connectors and sync jobs', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([])
-      prisma.connectorSyncJob.groupBy.mockResolvedValue([])
+      repository.findConnectorConfigs.mockResolvedValue([])
+      repository.groupBySyncJobStatus.mockResolvedValue([])
 
       const result = await service.getOverview(TENANT_ID)
 
@@ -251,8 +235,8 @@ describe('DataExplorerService', () => {
   describe('getGrafanaDashboards', () => {
     it('should return paginated dashboards from DB', async () => {
       const dashboards = [{ id: 'd1', uid: 'abc', title: 'Dashboard 1', tags: ['prod'] }]
-      prisma.grafanaDashboard.findMany.mockResolvedValue(dashboards)
-      prisma.grafanaDashboard.count.mockResolvedValue(1)
+      repository.findManyGrafanaDashboards.mockResolvedValue(dashboards)
+      repository.countGrafanaDashboards.mockResolvedValue(1)
 
       const result = await service.getGrafanaDashboards(TENANT_ID, {
         page: 1,
@@ -266,8 +250,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should apply search filter', async () => {
-      prisma.grafanaDashboard.findMany.mockResolvedValue([])
-      prisma.grafanaDashboard.count.mockResolvedValue(0)
+      repository.findManyGrafanaDashboards.mockResolvedValue([])
+      repository.countGrafanaDashboards.mockResolvedValue(0)
 
       await service.getGrafanaDashboards(TENANT_ID, {
         page: 1,
@@ -276,7 +260,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.grafanaDashboard.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyGrafanaDashboards).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             title: { contains: 'api', mode: 'insensitive' },
@@ -286,8 +270,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by tag', async () => {
-      prisma.grafanaDashboard.findMany.mockResolvedValue([])
-      prisma.grafanaDashboard.count.mockResolvedValue(0)
+      repository.findManyGrafanaDashboards.mockResolvedValue([])
+      repository.countGrafanaDashboards.mockResolvedValue(0)
 
       await service.getGrafanaDashboards(TENANT_ID, {
         page: 1,
@@ -296,7 +280,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.grafanaDashboard.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyGrafanaDashboards).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             tags: { has: 'production' },
@@ -306,8 +290,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by folder', async () => {
-      prisma.grafanaDashboard.findMany.mockResolvedValue([])
-      prisma.grafanaDashboard.count.mockResolvedValue(0)
+      repository.findManyGrafanaDashboards.mockResolvedValue([])
+      repository.countGrafanaDashboards.mockResolvedValue(0)
 
       await service.getGrafanaDashboards(TENANT_ID, {
         page: 1,
@@ -316,7 +300,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.grafanaDashboard.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyGrafanaDashboards).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             folderTitle: { contains: 'SOC', mode: 'insensitive' },
@@ -326,8 +310,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by starred', async () => {
-      prisma.grafanaDashboard.findMany.mockResolvedValue([])
-      prisma.grafanaDashboard.count.mockResolvedValue(0)
+      repository.findManyGrafanaDashboards.mockResolvedValue([])
+      repository.countGrafanaDashboards.mockResolvedValue(0)
 
       await service.getGrafanaDashboards(TENANT_ID, {
         page: 1,
@@ -336,7 +320,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.grafanaDashboard.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyGrafanaDashboards).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             isStarred: true,
@@ -346,8 +330,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should handle pagination correctly', async () => {
-      prisma.grafanaDashboard.findMany.mockResolvedValue([])
-      prisma.grafanaDashboard.count.mockResolvedValue(50)
+      repository.findManyGrafanaDashboards.mockResolvedValue([])
+      repository.countGrafanaDashboards.mockResolvedValue(50)
 
       const result = await service.getGrafanaDashboards(TENANT_ID, {
         page: 3,
@@ -357,7 +341,7 @@ describe('DataExplorerService', () => {
 
       expect(result.pagination.total).toBe(50)
       expect(result.pagination.page).toBe(3)
-      expect(prisma.grafanaDashboard.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyGrafanaDashboards).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 20, take: 10 })
       )
     })
@@ -376,19 +360,18 @@ describe('DataExplorerService', () => {
           isStarred: false,
         },
       ])
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.grafanaDashboard.upsert.mockResolvedValue({})
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.upsertGrafanaDashboard.mockResolvedValue({})
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncGrafanaDashboards(TENANT_ID)
 
       expect(result.synced).toBe(1)
-      expect(prisma.grafanaDashboard.upsert).toHaveBeenCalledTimes(1)
-      expect(prisma.connectorSyncJob.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: 'completed', recordsSynced: 1 }),
-        })
+      expect(repository.upsertGrafanaDashboard).toHaveBeenCalledTimes(1)
+      expect(repository.updateSyncJob).toHaveBeenCalledWith(
+        'job-1',
+        expect.objectContaining({ status: 'completed', recordsSynced: 1 })
       )
     })
 
@@ -410,14 +393,14 @@ describe('DataExplorerService', () => {
       services.grafana.getDashboards.mockResolvedValue([
         { title: 'No UID' }, // uid missing
       ])
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncGrafanaDashboards(TENANT_ID)
 
       expect(result.synced).toBe(0)
-      expect(prisma.grafanaDashboard.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertGrafanaDashboard).not.toHaveBeenCalled()
     })
   })
 
@@ -571,10 +554,10 @@ describe('DataExplorerService', () => {
 
   describe('getVelociraptorEndpoints', () => {
     it('should return paginated endpoints from DB', async () => {
-      prisma.velociraptorEndpoint.findMany.mockResolvedValue([
+      repository.findManyVelociraptorEndpoints.mockResolvedValue([
         { id: 'e1', hostname: 'host1', os: 'Windows' },
       ])
-      prisma.velociraptorEndpoint.count.mockResolvedValue(1)
+      repository.countVelociraptorEndpoints.mockResolvedValue(1)
 
       const result = await service.getVelociraptorEndpoints(TENANT_ID, {
         page: 1,
@@ -587,8 +570,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by hostname search', async () => {
-      prisma.velociraptorEndpoint.findMany.mockResolvedValue([])
-      prisma.velociraptorEndpoint.count.mockResolvedValue(0)
+      repository.findManyVelociraptorEndpoints.mockResolvedValue([])
+      repository.countVelociraptorEndpoints.mockResolvedValue(0)
 
       await service.getVelociraptorEndpoints(TENANT_ID, {
         page: 1,
@@ -597,7 +580,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.velociraptorEndpoint.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorEndpoints).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             hostname: { contains: 'server', mode: 'insensitive' },
@@ -607,8 +590,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by OS', async () => {
-      prisma.velociraptorEndpoint.findMany.mockResolvedValue([])
-      prisma.velociraptorEndpoint.count.mockResolvedValue(0)
+      repository.findManyVelociraptorEndpoints.mockResolvedValue([])
+      repository.countVelociraptorEndpoints.mockResolvedValue(0)
 
       await service.getVelociraptorEndpoints(TENANT_ID, {
         page: 1,
@@ -617,7 +600,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.velociraptorEndpoint.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorEndpoints).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             os: { contains: 'Windows', mode: 'insensitive' },
@@ -627,8 +610,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by label', async () => {
-      prisma.velociraptorEndpoint.findMany.mockResolvedValue([])
-      prisma.velociraptorEndpoint.count.mockResolvedValue(0)
+      repository.findManyVelociraptorEndpoints.mockResolvedValue([])
+      repository.countVelociraptorEndpoints.mockResolvedValue(0)
 
       await service.getVelociraptorEndpoints(TENANT_ID, {
         page: 1,
@@ -637,7 +620,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.velociraptorEndpoint.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorEndpoints).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             labels: { has: 'production' },
@@ -647,8 +630,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should handle pagination correctly', async () => {
-      prisma.velociraptorEndpoint.findMany.mockResolvedValue([])
-      prisma.velociraptorEndpoint.count.mockResolvedValue(200)
+      repository.findManyVelociraptorEndpoints.mockResolvedValue([])
+      repository.countVelociraptorEndpoints.mockResolvedValue(200)
 
       const result = await service.getVelociraptorEndpoints(TENANT_ID, {
         page: 5,
@@ -658,7 +641,7 @@ describe('DataExplorerService', () => {
 
       expect(result.pagination.total).toBe(200)
       expect(result.pagination.page).toBe(5)
-      expect(prisma.velociraptorEndpoint.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorEndpoints).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 40, take: 10 })
       )
     })
@@ -666,10 +649,10 @@ describe('DataExplorerService', () => {
 
   describe('getVelociraptorHunts', () => {
     it('should return paginated hunts from DB', async () => {
-      prisma.velociraptorHunt.findMany.mockResolvedValue([
+      repository.findManyVelociraptorHunts.mockResolvedValue([
         { id: 'h1', huntId: 'H.1234', description: 'Test hunt' },
       ])
-      prisma.velociraptorHunt.count.mockResolvedValue(1)
+      repository.countVelociraptorHunts.mockResolvedValue(1)
 
       const result = await service.getVelociraptorHunts(TENANT_ID, {
         page: 1,
@@ -682,8 +665,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by description search', async () => {
-      prisma.velociraptorHunt.findMany.mockResolvedValue([])
-      prisma.velociraptorHunt.count.mockResolvedValue(0)
+      repository.findManyVelociraptorHunts.mockResolvedValue([])
+      repository.countVelociraptorHunts.mockResolvedValue(0)
 
       await service.getVelociraptorHunts(TENANT_ID, {
         page: 1,
@@ -692,7 +675,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.velociraptorHunt.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorHunts).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             description: { contains: 'malware', mode: 'insensitive' },
@@ -702,8 +685,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by state', async () => {
-      prisma.velociraptorHunt.findMany.mockResolvedValue([])
-      prisma.velociraptorHunt.count.mockResolvedValue(0)
+      repository.findManyVelociraptorHunts.mockResolvedValue([])
+      repository.countVelociraptorHunts.mockResolvedValue(0)
 
       await service.getVelociraptorHunts(TENANT_ID, {
         page: 1,
@@ -712,7 +695,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.velociraptorHunt.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyVelociraptorHunts).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             state: 'RUNNING',
@@ -747,10 +730,10 @@ describe('DataExplorerService', () => {
 
   describe('getShuffleWorkflows', () => {
     it('should return paginated workflows from DB', async () => {
-      prisma.shuffleWorkflow.findMany.mockResolvedValue([
+      repository.findManyShuffleWorkflows.mockResolvedValue([
         { id: 'w1', name: 'Workflow 1', isValid: true },
       ])
-      prisma.shuffleWorkflow.count.mockResolvedValue(1)
+      repository.countShuffleWorkflows.mockResolvedValue(1)
 
       const result = await service.getShuffleWorkflows(TENANT_ID, {
         page: 1,
@@ -763,8 +746,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by valid status', async () => {
-      prisma.shuffleWorkflow.findMany.mockResolvedValue([])
-      prisma.shuffleWorkflow.count.mockResolvedValue(0)
+      repository.findManyShuffleWorkflows.mockResolvedValue([])
+      repository.countShuffleWorkflows.mockResolvedValue(0)
 
       await service.getShuffleWorkflows(TENANT_ID, {
         page: 1,
@@ -773,7 +756,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.shuffleWorkflow.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyShuffleWorkflows).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ isValid: true }),
         })
@@ -781,8 +764,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by invalid status', async () => {
-      prisma.shuffleWorkflow.findMany.mockResolvedValue([])
-      prisma.shuffleWorkflow.count.mockResolvedValue(0)
+      repository.findManyShuffleWorkflows.mockResolvedValue([])
+      repository.countShuffleWorkflows.mockResolvedValue(0)
 
       await service.getShuffleWorkflows(TENANT_ID, {
         page: 1,
@@ -791,7 +774,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.shuffleWorkflow.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyShuffleWorkflows).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ isValid: false }),
         })
@@ -799,8 +782,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by name search', async () => {
-      prisma.shuffleWorkflow.findMany.mockResolvedValue([])
-      prisma.shuffleWorkflow.count.mockResolvedValue(0)
+      repository.findManyShuffleWorkflows.mockResolvedValue([])
+      repository.countShuffleWorkflows.mockResolvedValue(0)
 
       await service.getShuffleWorkflows(TENANT_ID, {
         page: 1,
@@ -809,7 +792,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'asc',
       })
 
-      expect(prisma.shuffleWorkflow.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyShuffleWorkflows).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             name: { contains: 'alert', mode: 'insensitive' },
@@ -819,8 +802,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should handle pagination correctly', async () => {
-      prisma.shuffleWorkflow.findMany.mockResolvedValue([])
-      prisma.shuffleWorkflow.count.mockResolvedValue(75)
+      repository.findManyShuffleWorkflows.mockResolvedValue([])
+      repository.countShuffleWorkflows.mockResolvedValue(75)
 
       const result = await service.getShuffleWorkflows(TENANT_ID, {
         page: 4,
@@ -830,7 +813,7 @@ describe('DataExplorerService', () => {
 
       expect(result.pagination.total).toBe(75)
       expect(result.pagination.page).toBe(4)
-      expect(prisma.shuffleWorkflow.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyShuffleWorkflows).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 30, take: 10 })
       )
     })
@@ -842,15 +825,15 @@ describe('DataExplorerService', () => {
       services.shuffle.getWorkflows.mockResolvedValue([
         { id: 'wf1', name: 'Alert Handler', is_valid: true, tags: ['alert'] },
       ])
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.shuffleWorkflow.upsert.mockResolvedValue({})
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.upsertShuffleWorkflow.mockResolvedValue({})
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncShuffleWorkflows(TENANT_ID)
 
       expect(result.synced).toBe(1)
-      expect(prisma.shuffleWorkflow.upsert).toHaveBeenCalledTimes(1)
+      expect(repository.upsertShuffleWorkflow).toHaveBeenCalledTimes(1)
     })
 
     it('should throw BusinessException when Shuffle is unreachable', async () => {
@@ -869,14 +852,14 @@ describe('DataExplorerService', () => {
     it('should skip workflows with missing id', async () => {
       services.connectorsService.getDecryptedConfig.mockResolvedValue({ url: 'http://shuffle' })
       services.shuffle.getWorkflows.mockResolvedValue([{ name: 'No ID Workflow' }])
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncShuffleWorkflows(TENANT_ID)
 
       expect(result.synced).toBe(0)
-      expect(prisma.shuffleWorkflow.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertShuffleWorkflow).not.toHaveBeenCalled()
     })
   })
 
@@ -907,18 +890,18 @@ describe('DataExplorerService', () => {
         ],
         columns: ['hunt_id'],
       })
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.velociraptorEndpoint.upsert.mockResolvedValue({})
-      prisma.velociraptorHunt.upsert.mockResolvedValue({})
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.upsertVelociraptorEndpoint.mockResolvedValue({})
+      repository.upsertVelociraptorHunt.mockResolvedValue({})
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncVelociraptorMetadata(TENANT_ID)
 
       expect(result.endpoints).toBe(1)
       expect(result.hunts).toBe(1)
-      expect(prisma.velociraptorEndpoint.upsert).toHaveBeenCalledTimes(1)
-      expect(prisma.velociraptorHunt.upsert).toHaveBeenCalledTimes(1)
+      expect(repository.upsertVelociraptorEndpoint).toHaveBeenCalledTimes(1)
+      expect(repository.upsertVelociraptorHunt).toHaveBeenCalledTimes(1)
     })
 
     it('should throw when velociraptor not configured', async () => {
@@ -933,14 +916,14 @@ describe('DataExplorerService', () => {
         { os_info: { fqdn: 'no-id', system: 'Linux' } },
       ])
       services.velociraptor.runVQL.mockResolvedValue({ rows: [], columns: [] })
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncVelociraptorMetadata(TENANT_ID)
 
       expect(result.endpoints).toBe(0)
-      expect(prisma.velociraptorEndpoint.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertVelociraptorEndpoint).not.toHaveBeenCalled()
     })
   })
 
@@ -950,10 +933,10 @@ describe('DataExplorerService', () => {
 
   describe('getSyncJobs', () => {
     it('should return paginated sync jobs', async () => {
-      prisma.connectorSyncJob.findMany.mockResolvedValue([
+      repository.findManySyncJobs.mockResolvedValue([
         { id: 'j1', connectorType: 'grafana', status: 'completed', recordsSynced: 5 },
       ])
-      prisma.connectorSyncJob.count.mockResolvedValue(1)
+      repository.countSyncJobs.mockResolvedValue(1)
 
       const result = await service.getSyncJobs(TENANT_ID, {
         page: 1,
@@ -966,8 +949,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by connector type', async () => {
-      prisma.connectorSyncJob.findMany.mockResolvedValue([])
-      prisma.connectorSyncJob.count.mockResolvedValue(0)
+      repository.findManySyncJobs.mockResolvedValue([])
+      repository.countSyncJobs.mockResolvedValue(0)
 
       await service.getSyncJobs(TENANT_ID, {
         page: 1,
@@ -976,7 +959,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.connectorSyncJob.findMany).toHaveBeenCalledWith(
+      expect(repository.findManySyncJobs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ connectorType: 'grafana' }),
         })
@@ -987,23 +970,21 @@ describe('DataExplorerService', () => {
   describe('triggerSync', () => {
     it('should create a sync job and return job ID', async () => {
       services.connectorsService.getDecryptedConfig.mockResolvedValue({ url: 'http://grafana' })
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
 
       // Mock the background sync methods to prevent unhandled rejections
       services.grafana.getDashboards.mockResolvedValue([])
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.triggerSync(TENANT_ID, 'grafana' as never, 'admin@test.com')
 
       expect(result.jobId).toBe('job-99')
-      expect(prisma.connectorSyncJob.create).toHaveBeenCalledWith(
+      expect(repository.createSyncJob).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: TENANT_ID,
-            connectorType: 'grafana',
-            initiatedBy: 'admin@test.com',
-          }),
+          tenantId: TENANT_ID,
+          connectorType: 'grafana',
+          initiatedBy: 'admin@test.com',
         })
       )
     })
@@ -1077,8 +1058,8 @@ describe('DataExplorerService', () => {
           metadata: {},
         },
       ]
-      prisma.logstashPipelineLog.findMany.mockResolvedValue(mockLogs)
-      prisma.logstashPipelineLog.count.mockResolvedValue(1)
+      repository.findManyLogstashLogs.mockResolvedValue(mockLogs)
+      repository.countLogstashLogs.mockResolvedValue(1)
 
       const result = await service.getLogstashLogs(TENANT_ID, {
         page: 1,
@@ -1089,7 +1070,7 @@ describe('DataExplorerService', () => {
       expect(result.data).toEqual(mockLogs)
       expect(result.pagination.total).toBe(1)
       expect(result.pagination.page).toBe(1)
-      expect(prisma.logstashPipelineLog.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyLogstashLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { tenantId: TENANT_ID },
           skip: 0,
@@ -1099,8 +1080,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by search term', async () => {
-      prisma.logstashPipelineLog.findMany.mockResolvedValue([])
-      prisma.logstashPipelineLog.count.mockResolvedValue(0)
+      repository.findManyLogstashLogs.mockResolvedValue([])
+      repository.countLogstashLogs.mockResolvedValue(0)
 
       await service.getLogstashLogs(TENANT_ID, {
         page: 1,
@@ -1109,7 +1090,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.logstashPipelineLog.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyLogstashLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             tenantId: TENANT_ID,
@@ -1120,8 +1101,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by level', async () => {
-      prisma.logstashPipelineLog.findMany.mockResolvedValue([])
-      prisma.logstashPipelineLog.count.mockResolvedValue(0)
+      repository.findManyLogstashLogs.mockResolvedValue([])
+      repository.countLogstashLogs.mockResolvedValue(0)
 
       await service.getLogstashLogs(TENANT_ID, {
         page: 1,
@@ -1130,7 +1111,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.logstashPipelineLog.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyLogstashLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             tenantId: TENANT_ID,
@@ -1141,8 +1122,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should filter by pipelineId', async () => {
-      prisma.logstashPipelineLog.findMany.mockResolvedValue([])
-      prisma.logstashPipelineLog.count.mockResolvedValue(0)
+      repository.findManyLogstashLogs.mockResolvedValue([])
+      repository.countLogstashLogs.mockResolvedValue(0)
 
       await service.getLogstashLogs(TENANT_ID, {
         page: 1,
@@ -1151,7 +1132,7 @@ describe('DataExplorerService', () => {
         sortOrder: 'desc',
       })
 
-      expect(prisma.logstashPipelineLog.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyLogstashLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             tenantId: TENANT_ID,
@@ -1162,8 +1143,8 @@ describe('DataExplorerService', () => {
     })
 
     it('should handle pagination correctly', async () => {
-      prisma.logstashPipelineLog.findMany.mockResolvedValue([])
-      prisma.logstashPipelineLog.count.mockResolvedValue(100)
+      repository.findManyLogstashLogs.mockResolvedValue([])
+      repository.countLogstashLogs.mockResolvedValue(100)
 
       const result = await service.getLogstashLogs(TENANT_ID, {
         page: 3,
@@ -1173,7 +1154,7 @@ describe('DataExplorerService', () => {
 
       expect(result.pagination.total).toBe(100)
       expect(result.pagination.page).toBe(3)
-      expect(prisma.logstashPipelineLog.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyLogstashLogs).toHaveBeenCalledWith(
         expect.objectContaining({
           skip: 20,
           take: 10,
@@ -1201,25 +1182,23 @@ describe('DataExplorerService', () => {
           },
         },
       })
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
-      prisma.logstashPipelineLog.create.mockResolvedValue({})
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
+      repository.createLogstashLog.mockResolvedValue({})
 
       const result = await service.syncLogstashLogs(TENANT_ID)
 
       expect(result.synced).toBe(2)
-      expect(prisma.logstashPipelineLog.create).toHaveBeenCalledTimes(2)
-      expect(prisma.logstashPipelineLog.create).toHaveBeenCalledWith(
+      expect(repository.createLogstashLog).toHaveBeenCalledTimes(2)
+      expect(repository.createLogstashLog).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: TENANT_ID,
-            pipelineId: 'main',
-            eventsIn: 5000,
-            eventsOut: 4800,
-            eventsFiltered: 200,
-            durationMs: 1500,
-          }),
+          tenantId: TENANT_ID,
+          pipelineId: 'main',
+          eventsIn: 5000,
+          eventsOut: 4800,
+          eventsFiltered: 200,
+          durationMs: 1500,
         })
       )
     })
@@ -1249,10 +1228,10 @@ describe('DataExplorerService', () => {
           broken: { events: { in: 0, out: 0, filtered: 0, duration_in_millis: 0 } },
         },
       })
-      prisma.connectorSyncJob.create.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
-      prisma.connectorSyncJob.findUnique.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
-      prisma.connectorSyncJob.update.mockResolvedValue({})
-      prisma.logstashPipelineLog.create
+      repository.createSyncJob.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
+      repository.updateSyncJob.mockResolvedValue({})
+      repository.createLogstashLog
         .mockResolvedValueOnce({})
         .mockRejectedValueOnce(new Error('DB error'))
 

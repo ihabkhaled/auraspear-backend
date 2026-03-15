@@ -278,4 +278,107 @@ export class WazuhService {
 
     return { hits: hitItems, total }
   }
+
+  /**
+   * Fetch ALL matching alerts using OpenSearch scroll API.
+   * Scrolls through all pages until no more hits are returned.
+   * Max 10,000 events as a safety cap to prevent memory exhaustion.
+   */
+  async searchAllAlerts(
+    config: Record<string, unknown>,
+    query: Record<string, unknown>,
+    index: string = 'wazuh-alerts-*'
+  ): Promise<{ hits: unknown[]; total: number }> {
+    const indexerUrl = (config.indexerUrl ?? config.opensearchUrl) as string | undefined
+    if (!indexerUrl) {
+      throw new Error('Wazuh Indexer URL not configured')
+    }
+
+    const username = config.indexerUsername ?? config.username
+    const password = config.indexerPassword ?? config.password
+
+    if (!/^[\w*-]+$/.test(index)) {
+      throw new Error('Invalid index name')
+    }
+
+    const authHeader = basicAuth(username as string, password as string)
+    const tlsOption = config.verifyTls !== false
+    const maxEvents = 10_000
+    const scrollBatchSize = 1000
+
+    // Initial search with scroll context (1 minute TTL)
+    const scrollQuery = { ...query, size: scrollBatchSize }
+    const initialResponse = await connectorFetch(`${indexerUrl}/${index}/_search?scroll=1m`, {
+      method: 'POST',
+      headers: { Authorization: authHeader },
+      body: scrollQuery,
+      rejectUnauthorized: tlsOption,
+      allowPrivateNetwork: true,
+      timeoutMs: 30_000,
+    })
+
+    if (initialResponse.status !== 200) {
+      throw new Error(`Wazuh Indexer search failed: status ${initialResponse.status}`)
+    }
+
+    const initialBody = initialResponse.data as Record<string, unknown>
+    const hitsWrapper = initialBody.hits as Record<string, unknown>
+    const totalObject = hitsWrapper.total as Record<string, unknown> | number
+    const total = typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
+    let scrollId = initialBody._scroll_id as string | undefined
+
+    const allHits: unknown[] = [...((hitsWrapper.hits ?? []) as unknown[])]
+
+    // Scroll through remaining pages
+    while (scrollId && allHits.length < total && allHits.length < maxEvents) {
+      const scrollResponse = await connectorFetch(`${indexerUrl}/_search/scroll`, {
+        method: 'POST',
+        headers: { Authorization: authHeader },
+        body: { scroll: '1m', scroll_id: scrollId },
+        rejectUnauthorized: tlsOption,
+        allowPrivateNetwork: true,
+        timeoutMs: 30_000,
+      })
+
+      if (scrollResponse.status !== 200) {
+        break
+      }
+
+      const scrollBody = scrollResponse.data as Record<string, unknown>
+      const scrollHits = scrollBody.hits as Record<string, unknown>
+      const batch = (scrollHits.hits ?? []) as unknown[]
+
+      if (batch.length === 0) {
+        break
+      }
+
+      allHits.push(...batch)
+      scrollId = scrollBody._scroll_id as string | undefined
+    }
+
+    // Clean up scroll context (fire and forget)
+    if (scrollId) {
+      connectorFetch(`${indexerUrl}/_search/scroll`, {
+        method: 'DELETE',
+        headers: { Authorization: authHeader },
+        body: { scroll_id: [scrollId] },
+        rejectUnauthorized: tlsOption,
+        allowPrivateNetwork: true,
+      }).catch(() => {
+        // Scroll cleanup is best-effort
+      })
+    }
+
+    this.appLogger.info('Wazuh full alert search completed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'searchAllAlerts',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: 'searchAllAlerts',
+      metadata: { connectorType: 'wazuh', index, resultCount: allHits.length, total },
+    })
+
+    return { hits: allHits, total }
+  }
 }

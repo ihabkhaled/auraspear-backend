@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { DataExplorerRepository } from './data-explorer.repository'
 import {
   AppLogFeature,
   AppLogOutcome,
@@ -10,7 +11,6 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GrafanaService } from '../connectors/services/grafana.service'
 import { GraylogService } from '../connectors/services/graylog.service'
@@ -38,7 +38,7 @@ export class DataExplorerService {
   private readonly logger = new Logger(DataExplorerService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: DataExplorerRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly graylogService: GraylogService,
     private readonly grafanaService: GrafanaService,
@@ -66,21 +66,8 @@ export class DataExplorerService {
     }
   }> {
     const [connectors, syncSummary] = await Promise.all([
-      this.prisma.connectorConfig.findMany({
-        where: { tenantId },
-        select: {
-          type: true,
-          enabled: true,
-          lastTestOk: true,
-          lastSyncAt: true,
-        },
-        orderBy: { type: 'asc' },
-      }),
-      this.prisma.connectorSyncJob.groupBy({
-        by: ['status', 'connectorType'],
-        where: { tenantId },
-        _count: true,
-      }),
+      this.repository.findConnectorConfigs(tenantId),
+      this.repository.groupBySyncJobStatus(tenantId),
     ])
 
     const summary = {
@@ -185,13 +172,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.grafanaDashboard.findMany({
+      this.repository.findManyGrafanaDashboards({
         where,
         orderBy: { [dto.sortBy ?? 'title']: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.grafanaDashboard.count({ where }),
+      this.repository.countGrafanaDashboards(where),
     ])
 
     this.logAction('getGrafanaDashboards', tenantId, { total })
@@ -228,7 +215,7 @@ export class DataExplorerService {
             continue
           }
 
-          await this.prisma.grafanaDashboard.upsert({
+          await this.repository.upsertGrafanaDashboard({
             where: { tenantId_uid: { tenantId, uid } },
             create: {
               tenantId,
@@ -392,13 +379,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.velociraptorEndpoint.findMany({
+      this.repository.findManyVelociraptorEndpoints({
         where,
         orderBy: { [dto.sortBy ?? 'hostname']: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.velociraptorEndpoint.count({ where }),
+      this.repository.countVelociraptorEndpoints(where),
     ])
 
     this.logAction('getVelociraptorEndpoints', tenantId, { total })
@@ -415,13 +402,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.velociraptorHunt.findMany({
+      this.repository.findManyVelociraptorHunts({
         where,
         orderBy: { [dto.sortBy ?? 'createdAt']: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.velociraptorHunt.count({ where }),
+      this.repository.countVelociraptorHunts(where),
     ])
 
     this.logAction('getVelociraptorHunts', tenantId, { total })
@@ -473,7 +460,7 @@ export class DataExplorerService {
             continue
           }
 
-          await this.prisma.velociraptorEndpoint.upsert({
+          await this.repository.upsertVelociraptorEndpoint({
             where: { tenantId_clientId: { tenantId, clientId } },
             create: {
               tenantId,
@@ -531,7 +518,7 @@ export class DataExplorerService {
           }
 
           const stats = (hunt['stats'] ?? {}) as Record<string, unknown>
-          await this.prisma.velociraptorHunt.upsert({
+          await this.repository.upsertVelociraptorHunt({
             where: { tenantId_huntId: { tenantId, huntId } },
             create: {
               tenantId,
@@ -590,13 +577,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.logstashPipelineLog.findMany({
+      this.repository.findManyLogstashLogs({
         where,
         orderBy: { [dto.sortBy ?? 'timestamp']: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.logstashPipelineLog.count({ where }),
+      this.repository.countLogstashLogs(where),
     ])
 
     this.logAction('getLogstashLogs', tenantId, { total })
@@ -627,21 +614,19 @@ export class DataExplorerService {
           const pipelineStat = stats as Record<string, unknown>
           const events = (pipelineStat['events'] ?? {}) as Record<string, unknown>
 
-          await this.prisma.logstashPipelineLog.create({
-            data: {
-              tenantId,
-              pipelineId,
-              timestamp: new Date(),
-              level: LogLevel.INFO,
-              message: `Pipeline ${pipelineId} stats snapshot`,
-              source: pipelineId,
-              eventsIn: Number(events['in'] ?? 0),
-              eventsOut: Number(events['out'] ?? 0),
-              eventsFiltered: Number(events['filtered'] ?? 0),
-              durationMs: Number(events['duration_in_millis'] ?? 0),
-              metadata: JSON.parse(JSON.stringify(pipelineStat)),
-              syncedAt: new Date(),
-            },
+          await this.repository.createLogstashLog({
+            tenantId,
+            pipelineId,
+            timestamp: new Date(),
+            level: LogLevel.INFO,
+            message: `Pipeline ${pipelineId} stats snapshot`,
+            source: pipelineId,
+            eventsIn: Number(events['in'] ?? 0),
+            eventsOut: Number(events['out'] ?? 0),
+            eventsFiltered: Number(events['filtered'] ?? 0),
+            durationMs: Number(events['duration_in_millis'] ?? 0),
+            metadata: JSON.parse(JSON.stringify(pipelineStat)),
+            syncedAt: new Date(),
           })
           synced++
         } catch {
@@ -673,13 +658,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.shuffleWorkflow.findMany({
+      this.repository.findManyShuffleWorkflows({
         where,
         orderBy: { [dto.sortBy ?? 'name']: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.shuffleWorkflow.count({ where }),
+      this.repository.countShuffleWorkflows(where),
     ])
 
     this.logAction('getShuffleWorkflows', tenantId, { total })
@@ -713,7 +698,7 @@ export class DataExplorerService {
             continue
           }
 
-          await this.prisma.shuffleWorkflow.upsert({
+          await this.repository.upsertShuffleWorkflow({
             where: { tenantId_workflowId: { tenantId, workflowId } },
             create: {
               tenantId,
@@ -762,13 +747,13 @@ export class DataExplorerService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.connectorSyncJob.findMany({
+      this.repository.findManySyncJobs({
         where,
         orderBy: { startedAt: dto.sortOrder },
         skip: (dto.page - 1) * dto.limit,
         take: dto.limit,
       }),
-      this.prisma.connectorSyncJob.count({ where }),
+      this.repository.countSyncJobs(where),
     ])
 
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
@@ -814,14 +799,12 @@ export class DataExplorerService {
     connectorType: ConnectorType,
     initiatedBy = 'system'
   ) {
-    return this.prisma.connectorSyncJob.create({
-      data: {
-        tenantId,
-        connectorType,
-        status: SyncJobStatus.RUNNING,
-        initiatedBy,
-        startedAt: new Date(),
-      },
+    return this.repository.createSyncJob({
+      tenantId,
+      connectorType,
+      status: SyncJobStatus.RUNNING,
+      initiatedBy,
+      startedAt: new Date(),
     })
   }
 
@@ -830,34 +813,28 @@ export class DataExplorerService {
     recordsSynced: number,
     recordsFailed: number
   ): Promise<void> {
-    const job = await this.prisma.connectorSyncJob.findUnique({ where: { id: jobId } })
+    const job = await this.repository.findSyncJobById(jobId)
     const durationMs = job ? Date.now() - job.startedAt.getTime() : null
 
-    await this.prisma.connectorSyncJob.update({
-      where: { id: jobId },
-      data: {
-        status: SyncJobStatus.COMPLETED,
-        recordsSynced,
-        recordsFailed,
-        durationMs,
-        completedAt: new Date(),
-      },
+    await this.repository.updateSyncJob(jobId, {
+      status: SyncJobStatus.COMPLETED,
+      recordsSynced,
+      recordsFailed,
+      durationMs,
+      completedAt: new Date(),
     })
   }
 
   private async failSyncJob(jobId: string, recordsFailed: number, error: unknown): Promise<void> {
-    const job = await this.prisma.connectorSyncJob.findUnique({ where: { id: jobId } })
+    const job = await this.repository.findSyncJobById(jobId)
     const durationMs = job ? Date.now() - job.startedAt.getTime() : null
 
-    await this.prisma.connectorSyncJob.update({
-      where: { id: jobId },
-      data: {
-        status: SyncJobStatus.FAILED,
-        recordsFailed,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        durationMs,
-        completedAt: new Date(),
-      },
+    await this.repository.updateSyncJob(jobId, {
+      status: SyncJobStatus.FAILED,
+      recordsFailed,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      durationMs,
+      completedAt: new Date(),
     })
   }
 

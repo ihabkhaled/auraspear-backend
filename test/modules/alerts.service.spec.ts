@@ -8,17 +8,18 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    alert: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      count: jest.fn(),
-      update: jest.fn(),
-      groupBy: jest.fn(),
-      upsert: jest.fn(),
-    },
-    $queryRaw: jest.fn(),
+    findManyAndCount: jest.fn(),
+    findFirstByIdAndTenant: jest.fn(),
+    updateByIdAndTenant: jest.fn(),
+    upsertByTenantAndExternalId: jest.fn(),
+    groupBySeverity: jest.fn(),
+    queryTrend: jest.fn(),
+    queryMitreTechniqueCounts: jest.fn(),
+    queryTopTargetedAssets: jest.fn(),
+    countByTenantAndIds: jest.fn(),
+    countByTenantAndId: jest.fn(),
   }
 }
 
@@ -81,18 +82,18 @@ function buildMockAlert(overrides: Record<string, unknown> = {}) {
 
 describe('AlertsService', () => {
   let service: AlertsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let connectorsService: ReturnType<typeof createMockConnectorsService>
   let wazuhService: ReturnType<typeof createMockWazuhService>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     connectorsService = createMockConnectorsService()
     wazuhService = createMockWazuhService()
     jest.clearAllMocks()
 
     service = new AlertsService(
-      prisma as never,
+      repository as never,
       connectorsService as never,
       wazuhService as never,
       mockAppLogger as never
@@ -105,8 +106,7 @@ describe('AlertsService', () => {
   describe('search', () => {
     it('should return paginated results with data and pagination meta', async () => {
       const alerts = [buildMockAlert(), buildMockAlert({ id: 'alert-002' })]
-      prisma.alert.findMany.mockResolvedValue(alerts)
-      prisma.alert.count.mockResolvedValue(2)
+      repository.findManyAndCount.mockResolvedValue([alerts, 2])
 
       const result = await service.search(TENANT_ID, buildDefaultQuery())
 
@@ -119,142 +119,128 @@ describe('AlertsService', () => {
         hasNext: false,
         hasPrev: false,
       })
-      expect(prisma.alert.findMany).toHaveBeenCalledTimes(1)
-      expect(prisma.alert.count).toHaveBeenCalledTimes(1)
+      expect(repository.findManyAndCount).toHaveBeenCalledTimes(1)
     })
 
     it('should filter by single severity', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ severity: 'critical' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.severity).toBe('critical')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.severity).toBe('critical')
     })
 
     it('should filter by comma-separated multiple severities', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ severity: 'critical,high' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.severity).toEqual({ in: ['critical', 'high'] })
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.severity).toEqual({ in: ['critical', 'high'] })
     })
 
     it('should ignore invalid severities in comma-separated list', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ severity: 'critical,bogus' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.severity).toBe('critical')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.severity).toBe('critical')
     })
 
     it('should filter by status', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ status: 'new_alert' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.status).toBe('new_alert')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.status).toBe('new_alert')
     })
 
     it('should filter by source', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ source: 'wazuh' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.source).toBe('wazuh')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.source).toBe('wazuh')
     })
 
     it('should filter by agentName with case-insensitive contains', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ agentName: 'web-01' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.agentName).toEqual({ contains: 'web-01', mode: 'insensitive' })
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.agentName).toEqual({ contains: 'web-01', mode: 'insensitive' })
     })
 
     it('should filter by ruleGroup with case-insensitive contains on ruleName', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ ruleGroup: 'SSH' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.ruleName).toEqual({ contains: 'SSH', mode: 'insensitive' })
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.ruleName).toEqual({ contains: 'SSH', mode: 'insensitive' })
     })
 
     it('should filter by timeRange 24h', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       const before = new Date()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '24h' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.timestamp).toBeDefined()
-      expect(whereArgument.timestamp.gte).toBeInstanceOf(Date)
-      const diffMs = before.getTime() - whereArgument.timestamp.gte.getTime()
-      // Should be approximately 24 hours (86400000ms), allow 5s tolerance
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.timestamp).toBeDefined()
+      expect(callArguments.where.timestamp.gte).toBeInstanceOf(Date)
+      const diffMs = before.getTime() - callArguments.where.timestamp.gte.getTime()
       expect(diffMs).toBeGreaterThan(86400000 - 5000)
       expect(diffMs).toBeLessThan(86400000 + 5000)
     })
 
     it('should filter by timeRange 7d', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       const before = new Date()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '7d' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.timestamp).toBeDefined()
-      const diffMs = before.getTime() - whereArgument.timestamp.gte.getTime()
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.timestamp).toBeDefined()
+      const diffMs = before.getTime() - callArguments.where.timestamp.gte.getTime()
       const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
       expect(diffMs).toBeGreaterThan(sevenDaysMs - 5000)
       expect(diffMs).toBeLessThan(sevenDaysMs + 5000)
     })
 
     it('should filter by timeRange 30d', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       const before = new Date()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '30d' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.timestamp).toBeDefined()
-      const diffMs = before.getTime() - whereArgument.timestamp.gte.getTime()
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.timestamp).toBeDefined()
+      const diffMs = before.getTime() - callArguments.where.timestamp.gte.getTime()
       const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000
       expect(diffMs).toBeGreaterThan(thirtyDaysMs - 5000)
       expect(diffMs).toBeLessThan(thirtyDaysMs + 5000)
     })
 
     it('should filter by explicit from/to date range', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       const from = '2025-01-01T00:00:00Z'
       const to = '2025-06-01T00:00:00Z'
       await service.search(TENANT_ID, buildDefaultQuery({ from, to }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.timestamp.gte).toEqual(new Date(from))
-      expect(whereArgument.timestamp.lte).toEqual(new Date(to))
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.timestamp.gte).toEqual(new Date(from))
+      expect(callArguments.where.timestamp.lte).toEqual(new Date(to))
     })
 
     it('should prefer timeRange over explicit from/to', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(
         TENANT_ID,
@@ -265,41 +251,37 @@ describe('AlertsService', () => {
         })
       )
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      // Should use timeRange (gte only), not explicit from/to (gte + lte from 2020)
-      expect(whereArgument.timestamp.gte).toBeInstanceOf(Date)
-      expect(whereArgument.timestamp.lte).toBeUndefined()
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.timestamp.gte).toBeInstanceOf(Date)
+      expect(callArguments.where.timestamp.lte).toBeUndefined()
     })
 
     it('should apply KQL query severity:"critical" (quoted value)', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ query: 'severity:"critical"' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.severity).toBe('critical')
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.severity).toBe('critical')
     })
 
     it('should apply KQL query agent.name:"web-01" (quoted value)', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ query: 'agent.name:"web-01"' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.agentName).toEqual({ contains: 'web-01', mode: 'insensitive' })
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.agentName).toEqual({ contains: 'web-01', mode: 'insensitive' })
     })
 
     it('should apply KQL free text search across multiple columns', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ query: 'suspicious login' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.OR).toBeDefined()
-      expect(whereArgument.OR).toEqual(
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.OR).toBeDefined()
+      expect(callArguments.where.OR).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ title: { contains: 'suspicious login', mode: 'insensitive' } }),
           expect.objectContaining({
@@ -313,8 +295,7 @@ describe('AlertsService', () => {
     })
 
     it('should handle empty results', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       const result = await service.search(TENANT_ID, buildDefaultQuery())
 
@@ -324,29 +305,27 @@ describe('AlertsService', () => {
     })
 
     it('should apply correct pagination skip and take', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(100)
+      repository.findManyAndCount.mockResolvedValue([[], 100])
 
       await service.search(TENANT_ID, buildDefaultQuery({ page: 3, limit: 10 }))
 
-      expect(prisma.alert.findMany).toHaveBeenCalledWith(
+      expect(repository.findManyAndCount).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 20, take: 10 })
       )
     })
 
     it('should not apply KQL parsing when query is wildcard *', async () => {
-      prisma.alert.findMany.mockResolvedValue([])
-      prisma.alert.count.mockResolvedValue(0)
+      repository.findManyAndCount.mockResolvedValue([[], 0])
 
       await service.search(TENANT_ID, buildDefaultQuery({ query: '*' }))
 
-      const whereArgument = prisma.alert.findMany.mock.calls[0][0].where
-      expect(whereArgument.OR).toBeUndefined()
+      const callArguments = repository.findManyAndCount.mock.calls[0][0]
+      expect(callArguments.where.OR).toBeUndefined()
     })
 
-    it('should rethrow errors from prisma', async () => {
+    it('should rethrow errors from repository', async () => {
       const dbError = new Error('Database connection lost')
-      prisma.alert.findMany.mockRejectedValue(dbError)
+      repository.findManyAndCount.mockRejectedValue(dbError)
 
       try {
         await service.search(TENANT_ID, buildDefaultQuery())
@@ -363,18 +342,16 @@ describe('AlertsService', () => {
   describe('findById', () => {
     it('should return alert when found', async () => {
       const alert = buildMockAlert()
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       const result = await service.findById(TENANT_ID, ALERT_ID)
 
       expect(result).toEqual(alert)
-      expect(prisma.alert.findFirst).toHaveBeenCalledWith({
-        where: { id: ALERT_ID, tenantId: TENANT_ID },
-      })
+      expect(repository.findFirstByIdAndTenant).toHaveBeenCalledWith(ALERT_ID, TENANT_ID)
     })
 
     it('should throw BusinessException 404 when not found', async () => {
-      prisma.alert.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenant.mockResolvedValue(null)
 
       try {
         await service.findById(TENANT_ID, 'nonexistent-id')
@@ -392,32 +369,33 @@ describe('AlertsService', () => {
   describe('acknowledge', () => {
     it('should update status to acknowledged with acknowledgedBy and acknowledgedAt', async () => {
       const alert = buildMockAlert({ status: 'new_alert' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       const updatedAlert = buildMockAlert({
         status: 'acknowledged',
         acknowledgedBy: USER_EMAIL,
         acknowledgedAt: new Date(),
       })
-      prisma.alert.update.mockResolvedValue(updatedAlert)
+      repository.updateByIdAndTenant.mockResolvedValue(updatedAlert)
 
       const result = await service.acknowledge(TENANT_ID, ALERT_ID, USER_EMAIL)
 
       expect(result.status).toBe('acknowledged')
       expect(result.acknowledgedBy).toBe(USER_EMAIL)
-      expect(prisma.alert.update).toHaveBeenCalledWith({
-        where: { id: ALERT_ID, tenantId: TENANT_ID },
-        data: expect.objectContaining({
+      expect(repository.updateByIdAndTenant).toHaveBeenCalledWith(
+        ALERT_ID,
+        TENANT_ID,
+        expect.objectContaining({
           status: 'acknowledged',
           acknowledgedBy: USER_EMAIL,
           acknowledgedAt: expect.any(Date),
-        }),
-      })
+        })
+      )
     })
 
     it('should throw BusinessException 400 when alert is already closed', async () => {
       const alert = buildMockAlert({ status: 'closed' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.acknowledge(TENANT_ID, ALERT_ID, USER_EMAIL)
@@ -430,7 +408,7 @@ describe('AlertsService', () => {
 
     it('should throw BusinessException 400 when alert is already resolved', async () => {
       const alert = buildMockAlert({ status: 'resolved' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.acknowledge(TENANT_ID, ALERT_ID, USER_EMAIL)
@@ -442,7 +420,7 @@ describe('AlertsService', () => {
     })
 
     it('should throw BusinessException 404 when alert does not exist', async () => {
-      prisma.alert.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenant.mockResolvedValue(null)
 
       try {
         await service.acknowledge(TENANT_ID, 'nonexistent', USER_EMAIL)
@@ -460,23 +438,22 @@ describe('AlertsService', () => {
   describe('investigate', () => {
     it('should update status to in_progress', async () => {
       const alert = buildMockAlert({ status: 'new_alert' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       const updatedAlert = buildMockAlert({ status: 'in_progress' })
-      prisma.alert.update.mockResolvedValue(updatedAlert)
+      repository.updateByIdAndTenant.mockResolvedValue(updatedAlert)
 
       const result = await service.investigate(TENANT_ID, ALERT_ID)
 
       expect(result.status).toBe('in_progress')
-      expect(prisma.alert.update).toHaveBeenCalledWith({
-        where: { id: ALERT_ID, tenantId: TENANT_ID },
-        data: { status: 'in_progress' },
+      expect(repository.updateByIdAndTenant).toHaveBeenCalledWith(ALERT_ID, TENANT_ID, {
+        status: 'in_progress',
       })
     })
 
     it('should throw BusinessException 400 when alert is closed', async () => {
       const alert = buildMockAlert({ status: 'closed' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.investigate(TENANT_ID, ALERT_ID)
@@ -489,7 +466,7 @@ describe('AlertsService', () => {
 
     it('should throw BusinessException 400 when alert is resolved', async () => {
       const alert = buildMockAlert({ status: 'resolved' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.investigate(TENANT_ID, ALERT_ID)
@@ -501,7 +478,7 @@ describe('AlertsService', () => {
     })
 
     it('should throw BusinessException 404 when alert does not exist', async () => {
-      prisma.alert.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenant.mockResolvedValue(null)
 
       try {
         await service.investigate(TENANT_ID, 'nonexistent')
@@ -521,7 +498,7 @@ describe('AlertsService', () => {
 
     it('should update status to closed with resolution, closedAt, closedBy', async () => {
       const alert = buildMockAlert({ status: 'in_progress' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       const updatedAlert = buildMockAlert({
         status: 'closed',
@@ -529,27 +506,28 @@ describe('AlertsService', () => {
         closedBy: USER_EMAIL,
         closedAt: new Date(),
       })
-      prisma.alert.update.mockResolvedValue(updatedAlert)
+      repository.updateByIdAndTenant.mockResolvedValue(updatedAlert)
 
       const result = await service.close(TENANT_ID, ALERT_ID, RESOLUTION, USER_EMAIL)
 
       expect(result.status).toBe('closed')
       expect(result.resolution).toBe(RESOLUTION)
       expect(result.closedBy).toBe(USER_EMAIL)
-      expect(prisma.alert.update).toHaveBeenCalledWith({
-        where: { id: ALERT_ID, tenantId: TENANT_ID },
-        data: expect.objectContaining({
+      expect(repository.updateByIdAndTenant).toHaveBeenCalledWith(
+        ALERT_ID,
+        TENANT_ID,
+        expect.objectContaining({
           status: 'closed',
           resolution: RESOLUTION,
           closedBy: USER_EMAIL,
           closedAt: expect.any(Date),
-        }),
-      })
+        })
+      )
     })
 
     it('should throw BusinessException 400 when alert is already closed', async () => {
       const alert = buildMockAlert({ status: 'closed' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.close(TENANT_ID, ALERT_ID, RESOLUTION, USER_EMAIL)
@@ -562,7 +540,7 @@ describe('AlertsService', () => {
 
     it('should throw BusinessException 400 when alert is already resolved', async () => {
       const alert = buildMockAlert({ status: 'resolved' })
-      prisma.alert.findFirst.mockResolvedValue(alert)
+      repository.findFirstByIdAndTenant.mockResolvedValue(alert)
 
       try {
         await service.close(TENANT_ID, ALERT_ID, RESOLUTION, USER_EMAIL)
@@ -574,7 +552,7 @@ describe('AlertsService', () => {
     })
 
     it('should throw BusinessException 404 when alert does not exist', async () => {
-      prisma.alert.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenant.mockResolvedValue(null)
 
       try {
         await service.close(TENANT_ID, 'nonexistent', RESOLUTION, USER_EMAIL)
@@ -628,12 +606,12 @@ describe('AlertsService', () => {
         hits: [buildWazuhHit(), buildWazuhHit({ timestamp: '2025-06-01T11:00:00Z' })],
         total: 2,
       })
-      prisma.alert.upsert.mockResolvedValue(buildMockAlert())
+      repository.upsertByTenantAndExternalId.mockResolvedValue(buildMockAlert())
 
       const result = await service.ingestFromWazuh(TENANT_ID)
 
       expect(result.ingested).toBe(2)
-      expect(prisma.alert.upsert).toHaveBeenCalledTimes(2)
+      expect(repository.upsertByTenantAndExternalId).toHaveBeenCalledTimes(2)
       expect(connectorsService.getDecryptedConfig).toHaveBeenCalledWith(TENANT_ID, 'wazuh')
     })
 
@@ -649,7 +627,7 @@ describe('AlertsService', () => {
       }
 
       expect(wazuhService.searchAlerts).not.toHaveBeenCalled()
-      expect(prisma.alert.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertByTenantAndExternalId).not.toHaveBeenCalled()
     })
 
     it('should handle partial batch failures (some upserts fail, some succeed)', async () => {
@@ -663,16 +641,15 @@ describe('AlertsService', () => {
         total: 3,
       })
 
-      prisma.alert.upsert
+      repository.upsertByTenantAndExternalId
         .mockResolvedValueOnce(buildMockAlert())
         .mockRejectedValueOnce(new Error('Unique constraint violation'))
         .mockResolvedValueOnce(buildMockAlert({ id: 'alert-003' }))
 
       const result = await service.ingestFromWazuh(TENANT_ID)
 
-      // 2 succeeded, 1 failed
       expect(result.ingested).toBe(2)
-      expect(prisma.alert.upsert).toHaveBeenCalledTimes(3)
+      expect(repository.upsertByTenantAndExternalId).toHaveBeenCalledTimes(3)
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
@@ -688,7 +665,7 @@ describe('AlertsService', () => {
         expect(error).toBe(wazuhError)
       }
 
-      expect(prisma.alert.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertByTenantAndExternalId).not.toHaveBeenCalled()
     })
 
     it('should handle empty hits from Wazuh', async () => {
@@ -698,7 +675,7 @@ describe('AlertsService', () => {
       const result = await service.ingestFromWazuh(TENANT_ID)
 
       expect(result.ingested).toBe(0)
-      expect(prisma.alert.upsert).not.toHaveBeenCalled()
+      expect(repository.upsertByTenantAndExternalId).not.toHaveBeenCalled()
     })
 
     it('should map high-level Wazuh rules to critical severity', async () => {
@@ -713,12 +690,12 @@ describe('AlertsService', () => {
         },
       }
       wazuhService.searchAlerts.mockResolvedValue({ hits: [criticalHit], total: 1 })
-      prisma.alert.upsert.mockResolvedValue(buildMockAlert())
+      repository.upsertByTenantAndExternalId.mockResolvedValue(buildMockAlert())
 
       await service.ingestFromWazuh(TENANT_ID)
 
-      const upsertCall = prisma.alert.upsert.mock.calls[0][0]
-      expect(upsertCall.create.severity).toBe('critical')
+      const upsertCall = repository.upsertByTenantAndExternalId.mock.calls[0]
+      expect(upsertCall[2].severity).toBe('critical')
     })
 
     it('should map low-level Wazuh rules to low severity', async () => {
@@ -733,12 +710,12 @@ describe('AlertsService', () => {
         },
       }
       wazuhService.searchAlerts.mockResolvedValue({ hits: [lowHit], total: 1 })
-      prisma.alert.upsert.mockResolvedValue(buildMockAlert())
+      repository.upsertByTenantAndExternalId.mockResolvedValue(buildMockAlert())
 
       await service.ingestFromWazuh(TENANT_ID)
 
-      const upsertCall = prisma.alert.upsert.mock.calls[0][0]
-      expect(upsertCall.create.severity).toBe('low')
+      const upsertCall = repository.upsertByTenantAndExternalId.mock.calls[0]
+      expect(upsertCall[2].severity).toBe('low')
     })
   })
 
@@ -747,7 +724,7 @@ describe('AlertsService', () => {
   // ---------------------------------------------------------------------------
   describe('getCountsBySeverity', () => {
     it('should return counts grouped by severity', async () => {
-      prisma.alert.groupBy.mockResolvedValue([
+      repository.groupBySeverity.mockResolvedValue([
         { severity: 'critical', _count: 5 },
         { severity: 'high', _count: 12 },
         { severity: 'medium', _count: 30 },
@@ -764,24 +741,20 @@ describe('AlertsService', () => {
         low: 45,
         info: 100,
       })
-      expect(prisma.alert.groupBy).toHaveBeenCalledWith({
-        by: ['severity'],
-        where: { tenantId: TENANT_ID },
-        _count: true,
-      })
+      expect(repository.groupBySeverity).toHaveBeenCalledWith(TENANT_ID)
     })
 
     it('should handle empty results', async () => {
-      prisma.alert.groupBy.mockResolvedValue([])
+      repository.groupBySeverity.mockResolvedValue([])
 
       const result = await service.getCountsBySeverity(TENANT_ID)
 
       expect(result).toEqual({})
     })
 
-    it('should rethrow errors from prisma', async () => {
+    it('should rethrow errors from repository', async () => {
       const dbError = new Error('Database error')
-      prisma.alert.groupBy.mockRejectedValue(dbError)
+      repository.groupBySeverity.mockRejectedValue(dbError)
 
       try {
         await service.getCountsBySeverity(TENANT_ID)
@@ -797,7 +770,7 @@ describe('AlertsService', () => {
   // ---------------------------------------------------------------------------
   describe('getTrend', () => {
     it('should return trend data with date/count from raw query', async () => {
-      prisma.$queryRaw.mockResolvedValue([
+      repository.queryTrend.mockResolvedValue([
         { date: '2025-05-30', count: BigInt(10) },
         { date: '2025-05-31', count: BigInt(15) },
         { date: '2025-06-01', count: BigInt(8) },
@@ -813,7 +786,7 @@ describe('AlertsService', () => {
     })
 
     it('should convert bigint count to number', async () => {
-      prisma.$queryRaw.mockResolvedValue([{ date: '2025-06-01', count: BigInt(999999) }])
+      repository.queryTrend.mockResolvedValue([{ date: '2025-06-01', count: BigInt(999999) }])
 
       const result = await service.getTrend(TENANT_ID, 7)
 
@@ -822,16 +795,16 @@ describe('AlertsService', () => {
     })
 
     it('should handle empty results', async () => {
-      prisma.$queryRaw.mockResolvedValue([])
+      repository.queryTrend.mockResolvedValue([])
 
       const result = await service.getTrend(TENANT_ID, 30)
 
       expect(result).toEqual([])
     })
 
-    it('should rethrow errors from prisma', async () => {
+    it('should rethrow errors from repository', async () => {
       const dbError = new Error('Raw query failed')
-      prisma.$queryRaw.mockRejectedValue(dbError)
+      repository.queryTrend.mockRejectedValue(dbError)
 
       try {
         await service.getTrend(TENANT_ID, 30)
@@ -847,7 +820,7 @@ describe('AlertsService', () => {
   // ---------------------------------------------------------------------------
   describe('getMitreTechniqueCounts', () => {
     it('should return technique/count pairs from raw query', async () => {
-      prisma.$queryRaw.mockResolvedValue([
+      repository.queryMitreTechniqueCounts.mockResolvedValue([
         { technique: 'T1078', count: BigInt(25) },
         { technique: 'T1110', count: BigInt(18) },
         { technique: 'T1059', count: BigInt(12) },
@@ -863,7 +836,9 @@ describe('AlertsService', () => {
     })
 
     it('should convert bigint counts to numbers', async () => {
-      prisma.$queryRaw.mockResolvedValue([{ technique: 'T1078', count: BigInt(42) }])
+      repository.queryMitreTechniqueCounts.mockResolvedValue([
+        { technique: 'T1078', count: BigInt(42) },
+      ])
 
       const result = await service.getMitreTechniqueCounts(TENANT_ID)
 
@@ -872,16 +847,16 @@ describe('AlertsService', () => {
     })
 
     it('should handle empty results', async () => {
-      prisma.$queryRaw.mockResolvedValue([])
+      repository.queryMitreTechniqueCounts.mockResolvedValue([])
 
       const result = await service.getMitreTechniqueCounts(TENANT_ID)
 
       expect(result).toEqual([])
     })
 
-    it('should rethrow errors from prisma', async () => {
+    it('should rethrow errors from repository', async () => {
       const dbError = new Error('Query failed')
-      prisma.$queryRaw.mockRejectedValue(dbError)
+      repository.queryMitreTechniqueCounts.mockRejectedValue(dbError)
 
       try {
         await service.getMitreTechniqueCounts(TENANT_ID)
@@ -897,7 +872,7 @@ describe('AlertsService', () => {
   // ---------------------------------------------------------------------------
   describe('getTopTargetedAssets', () => {
     it('should return asset/count pairs', async () => {
-      prisma.$queryRaw.mockResolvedValue([
+      repository.queryTopTargetedAssets.mockResolvedValue([
         { asset: 'web-server-01', count: BigInt(50) },
         { asset: 'db-server-02', count: BigInt(30) },
         { asset: 'app-server-03', count: BigInt(15) },
@@ -913,7 +888,9 @@ describe('AlertsService', () => {
     })
 
     it('should convert bigint counts to numbers', async () => {
-      prisma.$queryRaw.mockResolvedValue([{ asset: 'server-01', count: BigInt(1234) }])
+      repository.queryTopTargetedAssets.mockResolvedValue([
+        { asset: 'server-01', count: BigInt(1234) },
+      ])
 
       const result = await service.getTopTargetedAssets(TENANT_ID, 5)
 
@@ -922,16 +899,16 @@ describe('AlertsService', () => {
     })
 
     it('should handle empty results', async () => {
-      prisma.$queryRaw.mockResolvedValue([])
+      repository.queryTopTargetedAssets.mockResolvedValue([])
 
       const result = await service.getTopTargetedAssets(TENANT_ID, 10)
 
       expect(result).toEqual([])
     })
 
-    it('should rethrow errors from prisma', async () => {
+    it('should rethrow errors from repository', async () => {
       const dbError = new Error('Query failed')
-      prisma.$queryRaw.mockRejectedValue(dbError)
+      repository.queryTopTargetedAssets.mockRejectedValue(dbError)
 
       try {
         await service.getTopTargetedAssets(TENANT_ID, 10)

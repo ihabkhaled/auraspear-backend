@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Interval } from '@nestjs/schedule'
+import { ConnectorSyncRepository } from './connector-sync.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, ConnectorType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { AlertsService } from '../alerts/alerts.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GraylogService } from '../connectors/services/graylog.service'
 import { IntelService } from '../intel/intel.service'
-import type { Prisma } from '@prisma/client'
+import type { ConnectorType as PrismaConnectorType, Prisma } from '@prisma/client'
 
 /** Sync runs every 2 minutes (120 000 ms). */
 const SYNC_INTERVAL_MS = 120_000
@@ -29,7 +29,7 @@ export class ConnectorSyncService {
   private running = false
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: ConnectorSyncRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly alertsService: AlertsService,
     private readonly intelService: IntelService,
@@ -85,17 +85,10 @@ export class ConnectorSyncService {
   }
 
   private async syncAllTenants(): Promise<void> {
-    const connectors = await this.prisma.connectorConfig.findMany({
-      where: {
-        enabled: true,
-        syncEnabled: true,
-        type: { in: SYNCABLE_TYPES },
-      },
-      select: {
-        tenantId: true,
-        type: true,
-        lastSyncAt: true,
-      },
+    const connectors = await this.repository.findSyncableConnectors({
+      enabled: true,
+      syncEnabled: true,
+      types: SYNCABLE_TYPES,
     })
 
     if (connectors.length === 0) {
@@ -148,13 +141,13 @@ export class ConnectorSyncService {
 
     try {
       switch (type) {
-        case 'wazuh':
+        case ConnectorType.WAZUH:
           ingested = await this.syncWazuh(tenantId)
           break
-        case 'graylog':
+        case ConnectorType.GRAYLOG:
           ingested = await this.syncGraylog(tenantId)
           break
-        case 'misp':
+        case ConnectorType.MISP:
           ingested = await this.syncMisp(tenantId)
           break
         default:
@@ -162,10 +155,7 @@ export class ConnectorSyncService {
       }
 
       // Update lastSyncAt timestamp
-      await this.prisma.connectorConfig.updateMany({
-        where: { tenantId, type: type as Prisma.EnumConnectorTypeFilter },
-        data: { lastSyncAt: new Date() },
-      })
+      await this.repository.updateConnectorSyncTimestamp(tenantId, type as PrismaConnectorType)
 
       this.appLogger.info(`Sync completed for ${type}: ${ingested} records`, {
         feature: AppLogFeature.CONNECTORS,
@@ -233,7 +223,7 @@ export class ConnectorSyncService {
           const timestamp = new Date((event.timestamp ?? new Date().toISOString()) as string)
           const source_ = (event.source ?? '') as string
 
-          return this.prisma.alert.upsert({
+          return this.repository.upsertAlert({
             where: { tenantId_externalId: { tenantId, externalId } },
             create: {
               tenantId,

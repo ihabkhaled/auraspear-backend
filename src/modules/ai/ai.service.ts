@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
+import { AiRepository } from './ai.repository'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
 import {
@@ -12,12 +13,11 @@ import {
   ConnectorType,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { BedrockService } from '../connectors/services/bedrock.service'
 import type { AiResponse } from './ai.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Alert, Prisma } from '@prisma/client'
 
 interface AiAuditRecord {
@@ -41,7 +41,7 @@ export class AiService {
   private readonly MODEL = 'anthropic.claude-3-sonnet'
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly aiRepository: AiRepository,
     private readonly appLogger: AppLoggerService,
     private readonly connectorsService: ConnectorsService,
     private readonly bedrockService: BedrockService
@@ -53,13 +53,10 @@ export class AiService {
 
   private async ensureAiEnabled(tenantId: string): Promise<void> {
     try {
-      const connector = await this.prisma.connectorConfig.findFirst({
-        where: {
-          tenantId,
-          type: ConnectorType.BEDROCK,
-          enabled: true,
-        },
-      })
+      const connector = await this.aiRepository.findEnabledConnectorByType(
+        tenantId,
+        ConnectorType.BEDROCK
+      )
 
       if (!connector) {
         this.appLogger.warn('AI features not enabled for tenant', {
@@ -112,18 +109,16 @@ export class AiService {
 
   private async logAudit(record: AiAuditRecord): Promise<void> {
     try {
-      await this.prisma.aiAuditLog.create({
-        data: {
-          tenantId: record.tenantId,
-          actor: record.userId,
-          action: record.action,
-          model: record.model,
-          inputTokens: record.inputTokens,
-          outputTokens: record.outputTokens,
-          durationMs: record.latencyMs,
-          prompt: record.prompt,
-          response: record.response,
-        },
+      await this.aiRepository.createAuditLog({
+        tenantId: record.tenantId,
+        actor: record.userId,
+        action: record.action,
+        model: record.model,
+        inputTokens: record.inputTokens,
+        outputTokens: record.outputTokens,
+        durationMs: record.latencyMs,
+        prompt: record.prompt,
+        response: record.response,
       })
     } catch {
       this.logger.warn('ai_audit_logs table not available; audit record stored in memory only')
@@ -312,9 +307,7 @@ export class AiService {
     await this.ensureAiEnabled(user.tenantId)
 
     // Load full alert data
-    const fullAlert = await this.prisma.alert.findFirst({
-      where: { id: dto.alertId, tenantId: user.tenantId },
-    })
+    const fullAlert = await this.aiRepository.findAlertByIdAndTenant(dto.alertId, user.tenantId)
 
     if (!fullAlert) {
       this.appLogger.warn('AI investigation failed — alert not found', {
@@ -568,22 +561,9 @@ export class AiService {
       return []
     }
 
-    return this.prisma.alert.findMany({
-      where: {
-        tenantId,
-        id: { not: alert.id },
-        timestamp: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) },
-        OR: orConditions,
-      },
-      select: {
-        id: true,
-        title: true,
-        severity: true,
-        timestamp: true,
-      },
-      take: 20,
-      orderBy: { timestamp: 'desc' },
-    })
+    const sinceDate = new Date(Date.now() - 48 * 60 * 60 * 1000)
+
+    return this.aiRepository.findRelatedAlerts(tenantId, alert.id, sinceDate, orConditions)
   }
 
   /* ---------------------------------------------------------------- */

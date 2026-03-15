@@ -1,5 +1,6 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common'
 import { NotificationsGateway } from './notifications.gateway'
+import { NotificationsRepository } from './notifications.repository'
 import {
   AppLogFeature,
   AppLogOutcome,
@@ -10,7 +11,6 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { NotificationResponse, PaginatedNotifications } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -31,7 +31,7 @@ interface CreateNotificationParameters {
 @Injectable()
 export class NotificationsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly notificationsRepository: NotificationsRepository,
     private readonly appLogger: AppLoggerService,
     @Inject(forwardRef(() => NotificationsGateway))
     private readonly gateway: NotificationsGateway
@@ -44,25 +44,17 @@ export class NotificationsService {
     limit: number
   ): Promise<PaginatedNotifications> {
     const where = { tenantId, recipientUserId }
-    const [notifications, total] = await Promise.all([
-      this.prisma.notification.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.notification.count({ where }),
-    ])
+    const [notifications, total] = await this.notificationsRepository.findManyAndCount({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    })
 
     // Batch resolve actor names
     const actorIds = [...new Set(notifications.map(n => n.actorUserId))]
     const actors =
-      actorIds.length > 0
-        ? await this.prisma.user.findMany({
-            where: { id: { in: actorIds } },
-            select: { id: true, name: true, email: true },
-          })
-        : []
+      actorIds.length > 0 ? await this.notificationsRepository.findUsersByIds(actorIds) : []
     const actorMap = new Map(actors.map(a => [a.id, a]))
 
     const data: NotificationResponse[] = notifications.map(n => {
@@ -87,15 +79,15 @@ export class NotificationsService {
   }
 
   async getUnreadCount(tenantId: string, recipientUserId: string): Promise<number> {
-    return this.prisma.notification.count({
-      where: { tenantId, recipientUserId, readAt: null },
-    })
+    return this.notificationsRepository.countUnread(tenantId, recipientUserId)
   }
 
   async markAsRead(notificationId: string, user: JwtPayload): Promise<void> {
-    const notification = await this.prisma.notification.findFirst({
-      where: { id: notificationId, tenantId: user.tenantId, recipientUserId: user.sub },
-    })
+    const notification = await this.notificationsRepository.findFirstByIdAndRecipient(
+      notificationId,
+      user.tenantId,
+      user.sub
+    )
     if (!notification) {
       throw new BusinessException(404, 'Notification not found', 'errors.notifications.notFound')
     }
@@ -103,17 +95,11 @@ export class NotificationsService {
       return
     }
 
-    await this.prisma.notification.update({
-      where: { id: notificationId },
-      data: { readAt: new Date() },
-    })
+    await this.notificationsRepository.markAsRead(notificationId, user.tenantId)
   }
 
   async markAllAsRead(tenantId: string, recipientUserId: string): Promise<void> {
-    await this.prisma.notification.updateMany({
-      where: { tenantId, recipientUserId, readAt: null },
-      data: { readAt: new Date() },
-    })
+    await this.notificationsRepository.markAllAsRead(tenantId, recipientUserId)
   }
 
   /**
@@ -127,25 +113,20 @@ export class NotificationsService {
     }
 
     // Resolve actor name
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: params.actorUserId },
-      select: { name: true },
-    })
+    const actorUser = await this.notificationsRepository.findUserById(params.actorUserId)
     const actorName = actorUser?.name ?? params.actorEmail
 
-    await this.prisma.notification.create({
-      data: {
-        tenantId: params.tenantId,
-        type: params.type,
-        actorUserId: params.actorUserId,
-        recipientUserId: params.recipientUserId,
-        title: params.title,
-        message: params.message,
-        entityType: params.entityType,
-        entityId: params.entityId,
-        caseId: params.caseId ?? null,
-        caseCommentId: params.caseCommentId ?? null,
-      },
+    await this.notificationsRepository.createNotification({
+      tenantId: params.tenantId,
+      type: params.type,
+      actorUserId: params.actorUserId,
+      recipientUserId: params.recipientUserId,
+      title: params.title,
+      message: params.message,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      caseId: params.caseId ?? null,
+      caseCommentId: params.caseCommentId ?? null,
     })
 
     const unreadCount = await this.getUnreadCount(params.tenantId, params.recipientUserId)
@@ -194,10 +175,7 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: actorUserId },
-      select: { name: true },
-    })
+    const actorUser = await this.notificationsRepository.findUserById(actorUserId)
     const actorName = actorUser?.name ?? actorEmail
 
     await this.createAndEmitNotification({
@@ -222,10 +200,7 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: actorUserId },
-      select: { name: true },
-    })
+    const actorUser = await this.notificationsRepository.findUserById(actorUserId)
     const actorName = actorUser?.name ?? actorEmail
 
     await this.createAndEmitNotification({
@@ -414,17 +389,11 @@ export class NotificationsService {
     }
 
     // Resolve actor name
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: actor.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.notificationsRepository.findUserById(actor.sub)
     const actorName = actorUser?.name ?? actor.email
 
     // Get case number for notification message
-    const caseRecord = await this.prisma.case.findUnique({
-      where: { id: caseId },
-      select: { caseNumber: true },
-    })
+    const caseRecord = await this.notificationsRepository.findCaseById(caseId)
     const caseNumber = caseRecord?.caseNumber ?? caseId
 
     const notificationData = recipientIds.map(recipientUserId => ({
@@ -441,10 +410,7 @@ export class NotificationsService {
     }))
 
     // Use skipDuplicates to handle idempotency (unique constraint on recipientUserId + caseCommentId)
-    await this.prisma.notification.createMany({
-      data: notificationData,
-      skipDuplicates: true,
-    })
+    await this.notificationsRepository.createManyNotifications(notificationData, true)
 
     // Emit real-time WebSocket events to each recipient
     const unreadCounts = await Promise.all(

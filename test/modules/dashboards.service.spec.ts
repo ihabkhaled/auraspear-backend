@@ -7,19 +7,25 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    case: {
-      count: jest.fn(),
-    },
-    alert: {
-      count: jest.fn(),
-      groupBy: jest.fn(),
-    },
-    connectorConfig: {
-      findMany: jest.fn(),
-    },
-    $queryRaw: jest.fn(),
+    countOpenCases: jest.fn(),
+    countAlertsSince: jest.fn(),
+    countResolvedAlertsSince: jest.fn(),
+    getAvgResolutionMsSince: jest.fn(),
+    countAlertsBetween: jest.fn(),
+    countAlertsBetweenExclusiveEnd: jest.fn(),
+    countCriticalAlertsBetween: jest.fn(),
+    countCriticalAlertsBetweenExclusiveEnd: jest.fn(),
+    countCasesCreatedBetween: jest.fn(),
+    countCasesCreatedBetweenExclusiveEnd: jest.fn(),
+    getAvgResolutionMsBetween: jest.fn(),
+    getAvgResolutionMsBetweenExclusiveEnd: jest.fn(),
+    getAlertCountsByDateAndSeverity: jest.fn(),
+    groupAlertsBySeveritySince: jest.fn(),
+    getTopMitreTechniques: jest.fn(),
+    getTopTargetedAssets: jest.fn(),
+    findEnabledConnectors: jest.fn(),
   }
 }
 
@@ -33,14 +39,14 @@ const TENANT_ID = 'tenant-001'
 
 describe('DashboardsService', () => {
   let service: DashboardsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let connectorsService: ReturnType<typeof createMockConnectorsService>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     connectorsService = createMockConnectorsService()
     service = new DashboardsService(
-      prisma as never,
+      repository as never,
       connectorsService as never,
       mockAppLogger as never
     )
@@ -54,29 +60,29 @@ describe('DashboardsService', () => {
   describe('getSummary', () => {
     it('should return all KPI fields with correct values', async () => {
       // openCases
-      prisma.case.count.mockResolvedValueOnce(12)
+      repository.countOpenCases.mockResolvedValueOnce(12)
       // alertsLast24h
-      prisma.alert.count.mockResolvedValueOnce(45)
+      repository.countAlertsSince.mockResolvedValueOnce(45)
       // resolvedLast24h
-      prisma.alert.count.mockResolvedValueOnce(8)
+      repository.countResolvedAlertsSince.mockResolvedValueOnce(8)
       // avgResolutionTime (overall MTTR)
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: 300000 }])
+      repository.getAvgResolutionMsSince.mockResolvedValueOnce([{ avg_ms: 300000 }])
       // alertsCurrentWeek
-      prisma.alert.count.mockResolvedValueOnce(150)
+      repository.countAlertsBetween.mockResolvedValueOnce(150)
       // criticalCurrentWeek
-      prisma.alert.count.mockResolvedValueOnce(20)
+      repository.countCriticalAlertsBetween.mockResolvedValueOnce(20)
       // casesCurrentWeek
-      prisma.case.count.mockResolvedValueOnce(10)
+      repository.countCasesCreatedBetween.mockResolvedValueOnce(10)
       // mttrCurrentWeek
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: 240000 }])
+      repository.getAvgResolutionMsBetween.mockResolvedValueOnce([{ avg_ms: 240000 }])
       // alertsPreviousWeek
-      prisma.alert.count.mockResolvedValueOnce(100)
+      repository.countAlertsBetweenExclusiveEnd.mockResolvedValueOnce(100)
       // criticalPreviousWeek
-      prisma.alert.count.mockResolvedValueOnce(10)
+      repository.countCriticalAlertsBetweenExclusiveEnd.mockResolvedValueOnce(10)
       // casesPreviousWeek
-      prisma.case.count.mockResolvedValueOnce(8)
+      repository.countCasesCreatedBetweenExclusiveEnd.mockResolvedValueOnce(8)
       // mttrPreviousWeek
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: 200000 }])
+      repository.getAvgResolutionMsBetweenExclusiveEnd.mockResolvedValueOnce([{ avg_ms: 200000 }])
       // getEnabledConnectors
       connectorsService.getEnabledConnectors.mockResolvedValueOnce([
         { type: 'wazuh', name: 'Wazuh' },
@@ -104,14 +110,23 @@ describe('DashboardsService', () => {
     })
 
     it('should return N/A for MTTR when no resolved alerts exist', async () => {
-      prisma.case.count.mockResolvedValue(0)
-      prisma.alert.count.mockResolvedValue(0)
+      repository.countOpenCases.mockResolvedValue(0)
+      repository.countAlertsSince.mockResolvedValue(0)
+      repository.countResolvedAlertsSince.mockResolvedValue(0)
       // avgResolutionTime — no resolved alerts
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: null }])
+      repository.getAvgResolutionMsSince.mockResolvedValueOnce([{ avg_ms: null }])
+      // Current week
+      repository.countAlertsBetween.mockResolvedValue(0)
+      repository.countCriticalAlertsBetween.mockResolvedValue(0)
+      repository.countCasesCreatedBetween.mockResolvedValue(0)
       // mttrCurrentWeek
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: null }])
+      repository.getAvgResolutionMsBetween.mockResolvedValueOnce([{ avg_ms: null }])
+      // Previous week
+      repository.countAlertsBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.countCriticalAlertsBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.countCasesCreatedBetweenExclusiveEnd.mockResolvedValue(0)
       // mttrPreviousWeek
-      prisma.$queryRaw.mockResolvedValueOnce([{ avg_ms: null }])
+      repository.getAvgResolutionMsBetweenExclusiveEnd.mockResolvedValueOnce([{ avg_ms: null }])
       connectorsService.getEnabledConnectors.mockResolvedValueOnce([])
 
       const result = await service.getSummary(TENANT_ID)
@@ -120,15 +135,18 @@ describe('DashboardsService', () => {
     })
 
     it('should calculate trend as 100 when previousValue is 0 and currentValue > 0', async () => {
-      prisma.case.count.mockResolvedValue(0)
-      prisma.alert.count
-        .mockResolvedValueOnce(0) // alertsLast24h
-        .mockResolvedValueOnce(0) // resolvedLast24h
-        .mockResolvedValueOnce(15) // alertsCurrentWeek
-        .mockResolvedValueOnce(5) // criticalCurrentWeek
-        .mockResolvedValueOnce(0) // alertsPreviousWeek
-        .mockResolvedValueOnce(0) // criticalPreviousWeek
-      prisma.$queryRaw.mockResolvedValue([{ avg_ms: null }])
+      repository.countOpenCases.mockResolvedValue(0)
+      repository.countAlertsSince.mockResolvedValueOnce(0)
+      repository.countResolvedAlertsSince.mockResolvedValueOnce(0)
+      repository.getAvgResolutionMsSince.mockResolvedValue([{ avg_ms: null }])
+      repository.countAlertsBetween.mockResolvedValueOnce(15)
+      repository.countCriticalAlertsBetween.mockResolvedValueOnce(5)
+      repository.countCasesCreatedBetween.mockResolvedValue(0)
+      repository.getAvgResolutionMsBetween.mockResolvedValue([{ avg_ms: null }])
+      repository.countAlertsBetweenExclusiveEnd.mockResolvedValueOnce(0)
+      repository.countCriticalAlertsBetweenExclusiveEnd.mockResolvedValueOnce(0)
+      repository.countCasesCreatedBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.getAvgResolutionMsBetweenExclusiveEnd.mockResolvedValue([{ avg_ms: null }])
       connectorsService.getEnabledConnectors.mockResolvedValueOnce([])
 
       const result = await service.getSummary(TENANT_ID)
@@ -140,9 +158,18 @@ describe('DashboardsService', () => {
     })
 
     it('should calculate trend as 0 when both current and previous are 0', async () => {
-      prisma.case.count.mockResolvedValue(0)
-      prisma.alert.count.mockResolvedValue(0)
-      prisma.$queryRaw.mockResolvedValue([{ avg_ms: null }])
+      repository.countOpenCases.mockResolvedValue(0)
+      repository.countAlertsSince.mockResolvedValue(0)
+      repository.countResolvedAlertsSince.mockResolvedValue(0)
+      repository.getAvgResolutionMsSince.mockResolvedValue([{ avg_ms: null }])
+      repository.countAlertsBetween.mockResolvedValue(0)
+      repository.countCriticalAlertsBetween.mockResolvedValue(0)
+      repository.countCasesCreatedBetween.mockResolvedValue(0)
+      repository.getAvgResolutionMsBetween.mockResolvedValue([{ avg_ms: null }])
+      repository.countAlertsBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.countCriticalAlertsBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.countCasesCreatedBetweenExclusiveEnd.mockResolvedValue(0)
+      repository.getAvgResolutionMsBetweenExclusiveEnd.mockResolvedValue([{ avg_ms: null }])
       connectorsService.getEnabledConnectors.mockResolvedValueOnce([])
 
       const result = await service.getSummary(TENANT_ID)
@@ -154,21 +181,18 @@ describe('DashboardsService', () => {
     })
 
     it('should calculate negative trend when current is less than previous', async () => {
-      prisma.case.count
-        .mockResolvedValueOnce(5) // openCases
-        .mockResolvedValueOnce(3) // casesCurrentWeek
-        .mockResolvedValueOnce(6) // casesPreviousWeek
-      prisma.alert.count
-        .mockResolvedValueOnce(10) // alertsLast24h
-        .mockResolvedValueOnce(2) // resolvedLast24h
-        .mockResolvedValueOnce(80) // alertsCurrentWeek
-        .mockResolvedValueOnce(5) // criticalCurrentWeek
-        .mockResolvedValueOnce(100) // alertsPreviousWeek
-        .mockResolvedValueOnce(10) // criticalPreviousWeek
-      prisma.$queryRaw
-        .mockResolvedValueOnce([{ avg_ms: 180000 }]) // avgResolutionTime
-        .mockResolvedValueOnce([{ avg_ms: 150000 }]) // mttrCurrentWeek
-        .mockResolvedValueOnce([{ avg_ms: 200000 }]) // mttrPreviousWeek
+      repository.countOpenCases.mockResolvedValueOnce(5)
+      repository.countAlertsSince.mockResolvedValueOnce(10)
+      repository.countResolvedAlertsSince.mockResolvedValueOnce(2)
+      repository.getAvgResolutionMsSince.mockResolvedValueOnce([{ avg_ms: 180000 }])
+      repository.countAlertsBetween.mockResolvedValueOnce(80)
+      repository.countCriticalAlertsBetween.mockResolvedValueOnce(5)
+      repository.countCasesCreatedBetween.mockResolvedValueOnce(3)
+      repository.getAvgResolutionMsBetween.mockResolvedValueOnce([{ avg_ms: 150000 }])
+      repository.countAlertsBetweenExclusiveEnd.mockResolvedValueOnce(100)
+      repository.countCriticalAlertsBetweenExclusiveEnd.mockResolvedValueOnce(10)
+      repository.countCasesCreatedBetweenExclusiveEnd.mockResolvedValueOnce(6)
+      repository.getAvgResolutionMsBetweenExclusiveEnd.mockResolvedValueOnce([{ avg_ms: 200000 }])
       connectorsService.getEnabledConnectors.mockResolvedValueOnce([
         { type: 'wazuh', name: 'Wazuh' },
       ])
@@ -192,7 +216,7 @@ describe('DashboardsService', () => {
 
   describe('getAlertTrend', () => {
     it('should return trend data pivoted by severity', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
         { date: '2026-03-01', severity: 'critical', count: 5n },
         { date: '2026-03-01', severity: 'high', count: 10n },
         { date: '2026-03-01', severity: 'medium', count: 20n },
@@ -228,7 +252,7 @@ describe('DashboardsService', () => {
     })
 
     it('should convert bigint counts to number', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
         { date: '2026-03-10', severity: 'critical', count: 999n },
       ])
 
@@ -239,7 +263,7 @@ describe('DashboardsService', () => {
     })
 
     it('should return empty trend when no data', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([])
+      repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([])
 
       const result = await service.getAlertTrend(TENANT_ID, 7)
 
@@ -247,7 +271,7 @@ describe('DashboardsService', () => {
     })
 
     it('should aggregate multiple severities for the same date', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
         { date: '2026-03-05', severity: 'critical', count: 2n },
         { date: '2026-03-05', severity: 'high', count: 8n },
         { date: '2026-03-05', severity: 'medium', count: 15n },
@@ -275,7 +299,7 @@ describe('DashboardsService', () => {
 
   describe('getSeverityDistribution', () => {
     it('should return distribution with counts and percentages', async () => {
-      prisma.alert.groupBy.mockResolvedValueOnce([
+      repository.groupAlertsBySeveritySince.mockResolvedValueOnce([
         { severity: 'critical', _count: 10 },
         { severity: 'high', _count: 30 },
         { severity: 'medium', _count: 40 },
@@ -299,7 +323,7 @@ describe('DashboardsService', () => {
     })
 
     it('should handle empty distribution (total=0 gives percentage=0)', async () => {
-      prisma.alert.groupBy.mockResolvedValueOnce([])
+      repository.groupAlertsBySeveritySince.mockResolvedValueOnce([])
 
       const result = await service.getSeverityDistribution(TENANT_ID)
 
@@ -309,7 +333,7 @@ describe('DashboardsService', () => {
 
     it('should calculate percentages correctly with rounding', async () => {
       // 7 + 3 = 10 total => 70% and 30%
-      prisma.alert.groupBy.mockResolvedValueOnce([
+      repository.groupAlertsBySeveritySince.mockResolvedValueOnce([
         { severity: 'critical', _count: 7 },
         { severity: 'high', _count: 3 },
       ])
@@ -324,7 +348,7 @@ describe('DashboardsService', () => {
 
     it('should handle uneven percentage splits', async () => {
       // 1 + 2 = 3 total => 33.3% and 66.7%
-      prisma.alert.groupBy.mockResolvedValueOnce([
+      repository.groupAlertsBySeveritySince.mockResolvedValueOnce([
         { severity: 'low', _count: 1 },
         { severity: 'high', _count: 2 },
       ])
@@ -346,7 +370,7 @@ describe('DashboardsService', () => {
 
   describe('getMitreTopTechniques', () => {
     it('should return technique IDs and counts', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getTopMitreTechniques.mockResolvedValueOnce([
         { technique: 'T1059', count: 10n },
         { technique: 'T1053', count: 8n },
         { technique: 'T1071', count: 5n },
@@ -363,7 +387,7 @@ describe('DashboardsService', () => {
     })
 
     it('should convert bigint counts to number', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([{ technique: 'T1059', count: 1234n }])
+      repository.getTopMitreTechniques.mockResolvedValueOnce([{ technique: 'T1059', count: 1234n }])
 
       const result = await service.getMitreTopTechniques(TENANT_ID)
 
@@ -372,7 +396,7 @@ describe('DashboardsService', () => {
     })
 
     it('should return empty techniques array when no data', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([])
+      repository.getTopMitreTechniques.mockResolvedValueOnce([])
 
       const result = await service.getMitreTopTechniques(TENANT_ID)
 
@@ -387,7 +411,7 @@ describe('DashboardsService', () => {
   describe('getTopTargetedAssets', () => {
     it('should return hostname, alertCount, criticalCount, and lastSeen', async () => {
       const lastSeen = new Date('2026-03-10T12:00:00Z')
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getTopTargetedAssets.mockResolvedValueOnce([
         { hostname: 'web-01', alert_count: 50n, critical_count: 5n, last_seen: lastSeen },
         { hostname: 'db-01', alert_count: 30n, critical_count: 2n, last_seen: lastSeen },
       ])
@@ -402,7 +426,7 @@ describe('DashboardsService', () => {
     })
 
     it('should convert bigint fields to number', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([
+      repository.getTopTargetedAssets.mockResolvedValueOnce([
         {
           hostname: 'app-01',
           alert_count: 9999n,
@@ -420,7 +444,7 @@ describe('DashboardsService', () => {
     })
 
     it('should return empty assets array when no data', async () => {
-      prisma.$queryRaw.mockResolvedValueOnce([])
+      repository.getTopTargetedAssets.mockResolvedValueOnce([])
 
       const result = await service.getTopTargetedAssets(TENANT_ID)
 
@@ -434,7 +458,7 @@ describe('DashboardsService', () => {
 
   describe('getPipelineHealth', () => {
     it('should return healthy status when lastTestOk is true', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValueOnce([
+      repository.findEnabledConnectors.mockResolvedValueOnce([
         {
           type: 'wazuh',
           name: 'Wazuh SIEM',
@@ -454,7 +478,7 @@ describe('DashboardsService', () => {
     })
 
     it('should return down status when lastTestOk is false', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValueOnce([
+      repository.findEnabledConnectors.mockResolvedValueOnce([
         {
           type: 'misp',
           name: 'MISP Feed',
@@ -471,7 +495,7 @@ describe('DashboardsService', () => {
     })
 
     it('should return unknown status when lastTestOk is null', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValueOnce([
+      repository.findEnabledConnectors.mockResolvedValueOnce([
         {
           type: 'graylog',
           name: 'Graylog',
@@ -488,7 +512,7 @@ describe('DashboardsService', () => {
     })
 
     it('should handle multiple connectors with mixed statuses', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValueOnce([
+      repository.findEnabledConnectors.mockResolvedValueOnce([
         {
           type: 'wazuh',
           name: 'Wazuh',
@@ -521,7 +545,7 @@ describe('DashboardsService', () => {
     })
 
     it('should handle empty connectors list', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValueOnce([])
+      repository.findEnabledConnectors.mockResolvedValueOnce([])
 
       const result = await service.getPipelineHealth(TENANT_ID)
 

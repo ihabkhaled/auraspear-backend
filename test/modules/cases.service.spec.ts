@@ -15,65 +15,41 @@ const mockNotificationsService = {
   notifyCaseActivity: jest.fn().mockResolvedValue(undefined),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    case: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      findUniqueOrThrow: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-      updateMany: jest.fn(),
-    },
-    caseCycle: {
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-    },
-    caseTimeline: {
-      create: jest.fn(),
-    },
-    caseNote: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-    },
-    caseTask: {
-      findFirst: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    caseArtifact: {
-      findFirst: jest.fn(),
-      create: jest.fn(),
-      delete: jest.fn(),
-    },
-    caseComment: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      findUniqueOrThrow: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-    },
-    caseCommentMention: {
-      createMany: jest.fn(),
-      deleteMany: jest.fn(),
-    },
-    alert: {
-      count: jest.fn(),
-    },
-    user: {
-      findUnique: jest.fn(),
-      findMany: jest.fn(),
-    },
-    tenantMembership: {
-      findUnique: jest.fn(),
-      count: jest.fn(),
-      findMany: jest.fn(),
-    },
-    $transaction: jest.fn(),
-    $queryRaw: jest.fn(),
+    findUserById: jest.fn(),
+    findUserNameById: jest.fn(),
+    findUserByEmail: jest.fn(),
+    findUsersByEmails: jest.fn(),
+    findUsersByIds: jest.fn(),
+    findCasesAndCount: jest.fn(),
+    findCaseByIdAndTenant: jest.fn(),
+    countAlertsByTenantAndIds: jest.fn(),
+    countAlertByTenantAndId: jest.fn(),
+    findMembershipByUserAndTenant: jest.fn(),
+    countActiveMentionMemberships: jest.fn(),
+    searchMentionableMembers: jest.fn(),
+    createCaseTransaction: jest.fn(),
+    updateCaseTransaction: jest.fn(),
+    softDeleteCaseTransaction: jest.fn(),
+    linkAlertTransaction: jest.fn(),
+    findCaseNotesAndCount: jest.fn(),
+    addNoteTransaction: jest.fn(),
+    findCommentsAndCount: jest.fn(),
+    findCommentByIdAndCase: jest.fn(),
+    addCommentTransaction: jest.fn(),
+    updateCommentTransaction: jest.fn(),
+    softDeleteCommentTransaction: jest.fn(),
+    createTask: jest.fn(),
+    findTaskByIdAndCase: jest.fn(),
+    updateTask: jest.fn(),
+    deleteTask: jest.fn(),
+    createTimeline: jest.fn(),
+    findArtifactDuplicate: jest.fn(),
+    createArtifact: jest.fn(),
+    findArtifactByIdAndCase: jest.fn(),
+    deleteArtifact: jest.fn(),
+    findCaseCycleById: jest.fn(),
   }
 }
 
@@ -89,13 +65,13 @@ const mockUser = {
 
 describe('CasesService', () => {
   let service: CasesService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     service = new CasesService(
-      prisma as never,
+      repository as never,
       mockAppLogger as never,
       mockNotificationsService as never
     )
@@ -144,11 +120,11 @@ describe('CasesService', () => {
         },
       ]
 
-      prisma.case.findMany.mockResolvedValue(rawCases)
-      prisma.case.count.mockResolvedValue(2)
-      prisma.user.findMany.mockResolvedValue([
+      repository.findCasesAndCount.mockResolvedValue([rawCases, 2])
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Alice', email: 'alice@test.com' },
       ])
+      repository.findUsersByEmails.mockResolvedValue([{ email: 'admin@test.com', name: 'Admin' }])
 
       const result = await service.listCases(TENANT_ID, 1, 20)
 
@@ -195,28 +171,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      // $transaction receives a callback; we execute it with a mock tx
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            caseCycle: {
-              findFirst: jest.fn().mockResolvedValue({ id: 'cycle-active' }),
-            },
-            case: {
-              findFirst: jest.fn(),
-              create: jest.fn().mockResolvedValue({ id: 'case-new' }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(createdCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-            $queryRaw: jest.fn().mockResolvedValue(null),
-          }
-          return callback(tx)
-        }
-      )
-
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.createCaseTransaction.mockResolvedValue(createdCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = {
         title: 'New incident',
@@ -228,7 +185,7 @@ describe('CasesService', () => {
 
       expect(result.caseNumber).toBe('SOC-2026-001')
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.createCaseTransaction).toHaveBeenCalled()
     })
 
     it('should create case without cycle when no active cycle', async () => {
@@ -254,27 +211,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            caseCycle: {
-              findFirst: jest.fn().mockResolvedValue(null),
-            },
-            case: {
-              findFirst: jest.fn(),
-              create: jest.fn().mockResolvedValue({ id: 'case-new' }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(createdCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-            $queryRaw: jest.fn().mockResolvedValue(null),
-          }
-          return callback(tx)
-        }
-      )
-
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.createCaseTransaction.mockResolvedValue(createdCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = {
         title: 'New incident',
@@ -317,26 +256,24 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(rawCase)
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(rawCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-001',
         name: 'Alice',
         email: 'alice@test.com',
       })
+      repository.findUserByEmail.mockResolvedValue({ name: 'Admin' })
 
       const result = await service.getCaseById('case-1', TENANT_ID)
 
       expect(result.ownerName).toBe('Alice')
       expect(result.ownerEmail).toBe('alice@test.com')
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.case.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'case-1', tenantId: TENANT_ID },
-        })
-      )
+      expect(repository.findCaseByIdAndTenant).toHaveBeenCalledWith('case-1', TENANT_ID)
     })
 
     it('should throw when case not found', async () => {
-      prisma.case.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(null)
 
       await expect(service.getCaseById('nonexistent', TENANT_ID)).rejects.toThrow(BusinessException)
     })
@@ -348,7 +285,6 @@ describe('CasesService', () => {
 
   describe('updateCase', () => {
     it('should update case status and create timeline entry', async () => {
-      // getCaseById is called internally — mock findFirst for it
       const existingCase = {
         id: 'case-1',
         tenantId: TENANT_ID,
@@ -371,11 +307,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-001',
         name: 'Alice',
         email: 'alice@test.com',
       })
+      repository.findUserByEmail.mockResolvedValue({ name: 'Admin' })
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
 
       const updatedCase = {
         ...existingCase,
@@ -396,27 +335,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       const dto = { status: 'in_progress' }
 
       const result = await service.updateCase('case-1', dto as never, mockUser as never)
 
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.updateCaseTransaction).toHaveBeenCalled()
     })
 
     it('should reject updating a closed case (non-reopen, non-assignee change)', async () => {
@@ -442,8 +368,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       // Attempt to update title on a closed case (not a reopen or assignee change)
       const dto = { title: 'Updated title' }
@@ -459,7 +386,7 @@ describe('CasesService', () => {
         expect((error as BusinessException).message).toBe('Cannot update a closed case')
       }
 
-      expect(prisma.$transaction).not.toHaveBeenCalled()
+      expect(repository.updateCaseTransaction).not.toHaveBeenCalled()
     })
 
     it('should allow re-opening a closed case', async () => {
@@ -485,8 +412,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
 
       const reopenedCase = {
         ...closedCase,
@@ -499,27 +428,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(reopenedCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(reopenedCase)
 
       const dto = { status: 'open' }
 
       // Should NOT throw — re-opening is allowed
       const result = await service.updateCase('case-1', dto as never, mockUser as never)
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.updateCaseTransaction).toHaveBeenCalled()
     })
 
     it('should allow assignee change on a closed case', async () => {
@@ -545,9 +461,15 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-002',
+        name: 'Bob',
+        email: 'bob@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: 'user-002',
         tenantId: TENANT_ID,
         status: 'active',
@@ -563,27 +485,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       const dto = { ownerUserId: 'user-002' }
 
       // Should NOT throw — assignee change is allowed on closed cases
       const result = await service.updateCase('case-1', dto as never, mockUser as never)
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.updateCaseTransaction).toHaveBeenCalled()
     })
 
     it('should notify new assignee when ownerUserId changes', async () => {
@@ -609,9 +518,15 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice', email: 'alice@test.com' })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-002',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: 'user-002',
         tenantId: TENANT_ID,
         status: 'active',
@@ -627,18 +542,7 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: { create: jest.fn().mockResolvedValue({}) },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       await service.updateCase('case-1', { ownerUserId: 'user-002' } as never, mockUser as never)
 
@@ -675,9 +579,15 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice', email: 'alice@test.com' })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-002',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: 'user-002',
         tenantId: TENANT_ID,
         status: 'active',
@@ -693,18 +603,7 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: { create: jest.fn().mockResolvedValue({}) },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       await service.updateCase('case-1', { ownerUserId: 'user-002' } as never, mockUser as never)
 
@@ -741,8 +640,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice', email: 'alice@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-005',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
 
       const updatedCase = {
         ...existingCase,
@@ -754,18 +659,7 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: { create: jest.fn().mockResolvedValue({}) },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       await service.updateCase('case-1', { status: 'in_progress' } as never, mockUser as never)
 
@@ -804,8 +698,14 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice', email: 'alice@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'user-005',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findUserNameById.mockResolvedValue({ name: 'Analyst' })
 
       const updatedCase = {
         ...existingCase,
@@ -817,18 +717,7 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: { create: jest.fn().mockResolvedValue({}) },
-          }
-          return callback(tx)
-        }
-      )
+      repository.updateCaseTransaction.mockResolvedValue(updatedCase)
 
       await service.updateCase('case-1', { title: 'New title' } as never, mockUser as never)
 
@@ -873,8 +762,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = { alertId: 'alert-1' }
 
@@ -889,7 +779,7 @@ describe('CasesService', () => {
         expect((error as BusinessException).message).toBe('Cannot link alerts to a closed case')
       }
 
-      expect(prisma.$transaction).not.toHaveBeenCalled()
+      expect(repository.linkAlertTransaction).not.toHaveBeenCalled()
     })
 
     it('should link alert to an open case', async () => {
@@ -915,9 +805,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(openCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.alert.count.mockResolvedValue(1)
+      repository.findCaseByIdAndTenant.mockResolvedValue(openCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.countAlertByTenantAndId.mockResolvedValue(1)
 
       const updatedCase = {
         ...openCase,
@@ -929,26 +820,13 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              findUniqueOrThrow: jest.fn().mockResolvedValue(updatedCase),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.linkAlertTransaction.mockResolvedValue(updatedCase)
 
       const dto = { alertId: 'alert-1' }
 
       const result = await service.linkAlert('case-1', dto as never, mockUser as never)
       expect(result.tenantName).toBe('AuraSpear')
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.linkAlertTransaction).toHaveBeenCalled()
     })
 
     it('should reject duplicate alert link', async () => {
@@ -974,9 +852,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(caseWithAlert)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.alert.count.mockResolvedValue(1)
+      repository.findCaseByIdAndTenant.mockResolvedValue(caseWithAlert)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.countAlertByTenantAndId.mockResolvedValue(1)
 
       const dto = { alertId: 'alert-1' }
 
@@ -1014,10 +893,11 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(openCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(openCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
       // Alert does not belong to tenant
-      prisma.alert.count.mockResolvedValue(0)
+      repository.countAlertByTenantAndId.mockResolvedValue(0)
 
       const dto = { alertId: 'alert-foreign' }
 
@@ -1061,8 +941,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = { body: 'This is a note' }
 
@@ -1077,7 +958,7 @@ describe('CasesService', () => {
         expect((error as BusinessException).message).toBe('Cannot add notes to a closed case')
       }
 
-      expect(prisma.$transaction).not.toHaveBeenCalled()
+      expect(repository.addNoteTransaction).not.toHaveBeenCalled()
     })
 
     it('should add note to an open case', async () => {
@@ -1103,8 +984,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(openCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(openCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const createdNote = {
         id: 'note-1',
@@ -1115,26 +997,14 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            caseNote: {
-              create: jest.fn().mockResolvedValue(createdNote),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.addNoteTransaction.mockResolvedValue(createdNote)
 
       const dto = { body: 'Investigation note' }
 
       const result = await service.addCaseNote('case-1', dto as never, mockUser as never)
       expect(result.body).toBe('Investigation note')
       expect(result.author).toBe(mockUser.email)
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.addNoteTransaction).toHaveBeenCalled()
     })
   })
 
@@ -1166,27 +1036,16 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            },
-            caseTimeline: {
-              create: jest.fn().mockResolvedValue({}),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.softDeleteCaseTransaction.mockResolvedValue(undefined)
 
       const result = await service.deleteCase('case-1', TENANT_ID, mockUser.email)
 
       expect(result.deleted).toBe(true)
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.softDeleteCaseTransaction).toHaveBeenCalled()
     })
   })
 
@@ -1196,7 +1055,6 @@ describe('CasesService', () => {
 
   describe('createTask', () => {
     it('should create task with timeline entry', async () => {
-      // Mock getCaseById (called internally)
       const existingCase = {
         id: 'case-1',
         tenantId: TENANT_ID,
@@ -1219,8 +1077,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const createdTask = {
         id: 'task-1',
@@ -1232,8 +1091,8 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseTask.create.mockResolvedValue(createdTask)
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.createTask.mockResolvedValue(createdTask)
+      repository.createTimeline.mockResolvedValue({})
 
       const dto = { title: 'Review logs' }
 
@@ -1241,21 +1100,17 @@ describe('CasesService', () => {
 
       expect(result.title).toBe('Review logs')
       expect(result.status).toBe('pending')
-      expect(prisma.caseTask.create).toHaveBeenCalledWith(
+      expect(repository.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            title: 'Review logs',
-            status: 'pending',
-          }),
+          caseId: 'case-1',
+          title: 'Review logs',
+          status: 'pending',
         })
       )
-      expect(prisma.caseTimeline.create).toHaveBeenCalledWith(
+      expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            actor: mockUser.email,
-          }),
+          caseId: 'case-1',
+          actor: mockUser.email,
         })
       )
     })
@@ -1283,8 +1138,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const createdTask = {
         id: 'task-1',
@@ -1296,8 +1152,8 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseTask.create.mockResolvedValue(createdTask)
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.createTask.mockResolvedValue(createdTask)
+      repository.createTimeline.mockResolvedValue({})
 
       const dto = {
         title: 'Analyze malware',
@@ -1335,10 +1191,15 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue({
+        id: 'owner-user',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
 
-      prisma.caseTask.create.mockResolvedValue({
+      repository.createTask.mockResolvedValue({
         id: 'task-1',
         caseId: 'case-1',
         title: 'Investigate',
@@ -1347,7 +1208,7 @@ describe('CasesService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.createTimeline.mockResolvedValue({})
 
       await service.createTask('case-1', { title: 'Investigate' } as never, mockUser as never)
 
@@ -1386,8 +1247,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = { title: 'New task' }
 
@@ -1403,7 +1265,7 @@ describe('CasesService', () => {
       }
 
       // Ensure no task was created
-      expect(prisma.caseTask.create).not.toHaveBeenCalled()
+      expect(repository.createTask).not.toHaveBeenCalled()
     })
   })
 
@@ -1413,7 +1275,6 @@ describe('CasesService', () => {
 
   describe('updateTask', () => {
     it('should update task status and add timeline entry', async () => {
-      // Mock getCaseById
       const existingCase = {
         id: 'case-1',
         tenantId: TENANT_ID,
@@ -1436,7 +1297,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const existingTask = {
         id: 'task-1',
@@ -1448,29 +1311,26 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseTask.findFirst.mockResolvedValue(existingTask)
+      repository.findTaskByIdAndCase.mockResolvedValue(existingTask)
 
       const updatedTask = {
         ...existingTask,
         status: 'completed',
       }
-      prisma.caseTask.update.mockResolvedValue(updatedTask)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.updateTask.mockResolvedValue(updatedTask)
+      repository.createTimeline.mockResolvedValue({})
 
       const dto = { status: 'completed' }
 
       const result = await service.updateTask('case-1', 'task-1', dto as never, mockUser as never)
 
       expect(result.status).toBe('completed')
-      expect(prisma.caseTask.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'task-1' },
-          data: expect.objectContaining({ status: 'completed' }),
-        })
+      expect(repository.updateTask).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({ status: 'completed' })
       )
       // Timeline should be created because status changed
-      expect(prisma.caseTimeline.create).toHaveBeenCalled()
+      expect(repository.createTimeline).toHaveBeenCalled()
     })
 
     it('should update task title without timeline when status unchanged', async () => {
@@ -1496,7 +1356,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const existingTask = {
         id: 'task-1',
@@ -1508,14 +1370,13 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseTask.findFirst.mockResolvedValue(existingTask)
+      repository.findTaskByIdAndCase.mockResolvedValue(existingTask)
 
       const updatedTask = {
         ...existingTask,
         title: 'Review all logs',
       }
-      prisma.caseTask.update.mockResolvedValue(updatedTask)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
+      repository.updateTask.mockResolvedValue(updatedTask)
 
       const dto = { title: 'Review all logs' }
 
@@ -1523,7 +1384,7 @@ describe('CasesService', () => {
 
       expect(result.title).toBe('Review all logs')
       // Timeline should NOT be created when only title changed (no status change)
-      expect(prisma.caseTimeline.create).not.toHaveBeenCalled()
+      expect(repository.createTimeline).not.toHaveBeenCalled()
     })
 
     it('should throw when task not found', async () => {
@@ -1549,9 +1410,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue(null)
-      prisma.caseTask.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findTaskByIdAndCase.mockResolvedValue(null)
 
       await expect(
         service.updateTask('case-1', 'nonexistent', { title: 'x' } as never, mockUser as never)
@@ -1587,7 +1449,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const existingTask = {
         id: 'task-1',
@@ -1599,23 +1463,18 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseTask.findFirst.mockResolvedValue(existingTask)
-      prisma.caseTask.delete.mockResolvedValue(existingTask)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.findTaskByIdAndCase.mockResolvedValue(existingTask)
+      repository.deleteTask.mockResolvedValue(existingTask)
+      repository.createTimeline.mockResolvedValue({})
 
       const result = await service.deleteTask('case-1', 'task-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(prisma.caseTask.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'task-1' } })
-      )
-      expect(prisma.caseTimeline.create).toHaveBeenCalledWith(
+      expect(repository.deleteTask).toHaveBeenCalledWith('task-1')
+      expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            actor: mockUser.email,
-          }),
+          caseId: 'case-1',
+          actor: mockUser.email,
         })
       )
     })
@@ -1643,9 +1502,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue(null)
-      prisma.caseTask.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findTaskByIdAndCase.mockResolvedValue(null)
 
       await expect(service.deleteTask('case-1', 'nonexistent', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -1681,10 +1541,12 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       // No duplicate
-      prisma.caseArtifact.findFirst.mockResolvedValue(null)
+      repository.findArtifactDuplicate.mockResolvedValue(null)
 
       const createdArtifact = {
         id: 'artifact-1',
@@ -1696,9 +1558,8 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseArtifact.create.mockResolvedValue(createdArtifact)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.createArtifact.mockResolvedValue(createdArtifact)
+      repository.createTimeline.mockResolvedValue({})
 
       const dto = { type: 'ip', value: '192.168.1.1' }
 
@@ -1707,22 +1568,18 @@ describe('CasesService', () => {
       expect(result.type).toBe('ip')
       expect(result.value).toBe('192.168.1.1')
       expect(result.source).toBe('manual')
-      expect(prisma.caseArtifact.create).toHaveBeenCalledWith(
+      expect(repository.createArtifact).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            type: 'ip',
-            value: '192.168.1.1',
-            source: 'manual',
-          }),
+          caseId: 'case-1',
+          type: 'ip',
+          value: '192.168.1.1',
+          source: 'manual',
         })
       )
-      expect(prisma.caseTimeline.create).toHaveBeenCalledWith(
+      expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            actor: mockUser.email,
-          }),
+          caseId: 'case-1',
+          actor: mockUser.email,
         })
       )
     })
@@ -1750,10 +1607,16 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.caseArtifact.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findArtifactDuplicate.mockResolvedValue(null)
+      repository.findUserById.mockResolvedValue({
+        id: 'owner-user',
+        name: 'Alice',
+        email: 'alice@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
 
-      prisma.caseArtifact.create.mockResolvedValue({
+      repository.createArtifact.mockResolvedValue({
         id: 'artifact-1',
         caseId: 'case-1',
         type: 'ip',
@@ -1762,8 +1625,7 @@ describe('CasesService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       })
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.createTimeline.mockResolvedValue({})
 
       await service.createArtifact(
         'case-1',
@@ -1806,7 +1668,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(closedCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const dto = { type: 'ip', value: '10.0.0.1' }
 
@@ -1822,7 +1686,7 @@ describe('CasesService', () => {
       }
 
       // Ensure no artifact was created
-      expect(prisma.caseArtifact.create).not.toHaveBeenCalled()
+      expect(repository.createArtifact).not.toHaveBeenCalled()
     })
 
     it('should reject duplicate artifact (same type + value)', async () => {
@@ -1848,11 +1712,12 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       // Duplicate exists
-      prisma.caseArtifact.findFirst.mockResolvedValue({
+      repository.findArtifactDuplicate.mockResolvedValue({
         id: 'artifact-existing',
         caseId: 'case-1',
         type: 'ip',
@@ -1902,7 +1767,9 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const existingArtifact = {
         id: 'artifact-1',
@@ -1914,23 +1781,18 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseArtifact.findFirst.mockResolvedValue(existingArtifact)
-      prisma.caseArtifact.delete.mockResolvedValue(existingArtifact)
-      prisma.user.findUnique.mockResolvedValue({ name: 'Alice' })
-      prisma.caseTimeline.create.mockResolvedValue({})
+      repository.findArtifactByIdAndCase.mockResolvedValue(existingArtifact)
+      repository.deleteArtifact.mockResolvedValue(existingArtifact)
+      repository.createTimeline.mockResolvedValue({})
 
       const result = await service.deleteArtifact('case-1', 'artifact-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(prisma.caseArtifact.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'artifact-1' } })
-      )
-      expect(prisma.caseTimeline.create).toHaveBeenCalledWith(
+      expect(repository.deleteArtifact).toHaveBeenCalledWith('artifact-1')
+      expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            caseId: 'case-1',
-            actor: mockUser.email,
-          }),
+          caseId: 'case-1',
+          actor: mockUser.email,
         })
       )
     })
@@ -1958,9 +1820,10 @@ describe('CasesService', () => {
         tenant: { name: 'AuraSpear' },
       }
 
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue(null)
-      prisma.caseArtifact.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findArtifactByIdAndCase.mockResolvedValue(null)
 
       await expect(
         service.deleteArtifact('case-1', 'nonexistent', mockUser as never)
@@ -1996,8 +1859,9 @@ describe('CasesService', () => {
     }
 
     it('should return paginated comments', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const mockComments = [
         {
@@ -2013,9 +1877,8 @@ describe('CasesService', () => {
         },
       ]
 
-      prisma.caseComment.findMany.mockResolvedValue(mockComments)
-      prisma.caseComment.count.mockResolvedValue(1)
-      prisma.user.findMany.mockResolvedValue([
+      repository.findCommentsAndCount.mockResolvedValue([mockComments, 1])
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
       ])
 
@@ -2028,10 +1891,10 @@ describe('CasesService', () => {
     })
 
     it('should return empty list for case with no comments', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findMany.mockResolvedValue([])
-      prisma.caseComment.count.mockResolvedValue(0)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentsAndCount.mockResolvedValue([[], 0])
 
       const result = await service.listCaseComments('case-1', TENANT_ID, 1, 20)
 
@@ -2040,7 +1903,7 @@ describe('CasesService', () => {
     })
 
     it('should throw if case not found', async () => {
-      prisma.case.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(null)
 
       await expect(service.listCaseComments('nonexistent', TENANT_ID)).rejects.toThrow(
         BusinessException
@@ -2048,8 +1911,9 @@ describe('CasesService', () => {
     })
 
     it('should resolve mention users in batch', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const mockComments = [
         {
@@ -2067,9 +1931,8 @@ describe('CasesService', () => {
         },
       ]
 
-      prisma.caseComment.findMany.mockResolvedValue(mockComments)
-      prisma.caseComment.count.mockResolvedValue(1)
-      prisma.user.findMany.mockResolvedValue([
+      repository.findCommentsAndCount.mockResolvedValue([mockComments, 1])
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Author', email: 'author@test.com' },
         { id: 'user-002', name: 'Mentioned', email: 'mentioned@test.com' },
       ])
@@ -2105,8 +1968,9 @@ describe('CasesService', () => {
     }
 
     it('should create a comment successfully', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const createdComment = {
         id: 'comment-new',
@@ -2120,18 +1984,9 @@ describe('CasesService', () => {
         mentions: [],
       }
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: {
-            create: jest.fn().mockResolvedValue(createdComment),
-            findUniqueOrThrow: jest.fn().mockResolvedValue(createdComment),
-          },
-          caseCommentMention: { createMany: jest.fn() },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.addCommentTransaction.mockResolvedValue(createdComment)
 
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
       ])
 
@@ -2147,8 +2002,9 @@ describe('CasesService', () => {
 
     it('should reject comment on closed case', async () => {
       const closedCase = { ...existingCase, status: 'closed' }
-      prisma.case.findFirst.mockResolvedValue(closedCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(closedCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       await expect(
         service.addCaseComment(
@@ -2160,9 +2016,10 @@ describe('CasesService', () => {
     })
 
     it('should reject invalid mentioned users', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.tenantMembership.count.mockResolvedValue(0)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.countActiveMentionMemberships.mockResolvedValue(0)
 
       await expect(
         service.addCaseComment(
@@ -2174,9 +2031,10 @@ describe('CasesService', () => {
     })
 
     it('should create mentions when valid users provided', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.tenantMembership.count.mockResolvedValue(1)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.countActiveMentionMemberships.mockResolvedValue(1)
 
       const createdComment = {
         id: 'comment-new',
@@ -2192,19 +2050,9 @@ describe('CasesService', () => {
         ],
       }
 
-      const mockCreateMany = jest.fn()
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: {
-            create: jest.fn().mockResolvedValue({ ...createdComment, mentions: [] }),
-            findUniqueOrThrow: jest.fn().mockResolvedValue(createdComment),
-          },
-          caseCommentMention: { createMany: mockCreateMany },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.addCommentTransaction.mockResolvedValue(createdComment)
 
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
         { id: 'user-002', name: 'Mentioned', email: 'mentioned@test.com' },
       ])
@@ -2216,15 +2064,20 @@ describe('CasesService', () => {
       )
 
       expect(result.mentions).toHaveLength(1)
-      expect(mockCreateMany).toHaveBeenCalledWith({
-        data: [{ commentId: 'comment-new', userId: 'user-002' }],
-      })
+      expect(repository.addCommentTransaction).toHaveBeenCalledWith(
+        'case-1',
+        'user-001',
+        'Hello @user2',
+        ['user-002'],
+        expect.objectContaining({ type: expect.anything() })
+      )
     })
 
     it('should deduplicate mention ids', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.tenantMembership.count.mockResolvedValue(1)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.countActiveMentionMemberships.mockResolvedValue(1)
 
       const createdComment = {
         id: 'comment-new',
@@ -2240,19 +2093,9 @@ describe('CasesService', () => {
         ],
       }
 
-      const mockCreateMany = jest.fn()
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: {
-            create: jest.fn().mockResolvedValue(createdComment),
-            findUniqueOrThrow: jest.fn().mockResolvedValue(createdComment),
-          },
-          caseCommentMention: { createMany: mockCreateMany },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.addCommentTransaction.mockResolvedValue(createdComment)
 
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
         { id: 'user-002', name: 'Mentioned', email: 'mentioned@test.com' },
       ])
@@ -2263,12 +2106,10 @@ describe('CasesService', () => {
         mockUser as never
       )
 
-      expect(prisma.tenantMembership.count).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            userId: { in: ['user-002'] },
-          }),
-        })
+      expect(repository.countActiveMentionMemberships).toHaveBeenCalledWith(
+        ['user-002'],
+        TENANT_ID,
+        expect.anything()
       )
     })
 
@@ -2278,8 +2119,13 @@ describe('CasesService', () => {
         ownerUserId: 'owner-user',
       }
 
-      prisma.case.findFirst.mockResolvedValue(caseWithOwner)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
+      repository.findCaseByIdAndTenant.mockResolvedValue(caseWithOwner)
+      repository.findUserById.mockResolvedValue({
+        id: 'owner-user',
+        name: 'Owner',
+        email: 'owner@test.com',
+      })
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const createdComment = {
         id: 'comment-new',
@@ -2293,18 +2139,9 @@ describe('CasesService', () => {
         mentions: [],
       }
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: {
-            create: jest.fn().mockResolvedValue(createdComment),
-            findUniqueOrThrow: jest.fn().mockResolvedValue(createdComment),
-          },
-          caseCommentMention: { createMany: jest.fn() },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.addCommentTransaction.mockResolvedValue(createdComment)
 
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
       ])
 
@@ -2362,9 +2199,10 @@ describe('CasesService', () => {
     }
 
     it('should update own comment', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue(existingComment)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue(existingComment)
 
       const updatedComment = {
         ...existingComment,
@@ -2373,18 +2211,9 @@ describe('CasesService', () => {
         mentions: [],
       }
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: {
-            update: jest.fn().mockResolvedValue(updatedComment),
-            findUniqueOrThrow: jest.fn().mockResolvedValue(updatedComment),
-          },
-          caseCommentMention: { deleteMany: jest.fn(), createMany: jest.fn() },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.updateCommentTransaction.mockResolvedValue(updatedComment)
 
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Analyst', email: 'analyst@auraspear.com' },
       ])
 
@@ -2400,9 +2229,10 @@ describe('CasesService', () => {
     })
 
     it('should reject editing another user comment when not admin', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue({
         ...existingComment,
         authorId: 'other-user',
       })
@@ -2420,9 +2250,10 @@ describe('CasesService', () => {
     })
 
     it('should throw if comment not found', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue(null)
 
       await expect(
         service.updateCaseComment(
@@ -2459,9 +2290,10 @@ describe('CasesService', () => {
     }
 
     it('should soft-delete own comment', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue({
         id: 'comment-1',
         caseId: 'case-1',
         authorId: 'user-001',
@@ -2470,12 +2302,7 @@ describe('CasesService', () => {
         isDeleted: false,
       })
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({
-          caseComment: { update: jest.fn() },
-          caseTimeline: { create: jest.fn() },
-        })
-      })
+      repository.softDeleteCommentTransaction.mockResolvedValue(undefined)
 
       const result = await service.deleteCaseComment('case-1', 'comment-1', mockUser as never)
 
@@ -2483,9 +2310,10 @@ describe('CasesService', () => {
     })
 
     it('should reject deleting another user comment when not admin', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue({
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue({
         id: 'comment-1',
         caseId: 'case-1',
         authorId: 'other-user',
@@ -2502,9 +2330,10 @@ describe('CasesService', () => {
     })
 
     it('should throw if comment not found', async () => {
-      prisma.case.findFirst.mockResolvedValue(existingCase)
-      prisma.user.findUnique.mockResolvedValue({ name: 'User', email: 'user@test.com' })
-      prisma.caseComment.findFirst.mockResolvedValue(null)
+      repository.findCaseByIdAndTenant.mockResolvedValue(existingCase)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
+      repository.findCommentByIdAndCase.mockResolvedValue(null)
 
       await expect(
         service.deleteCaseComment('case-1', 'nonexistent', mockUser as never)
@@ -2514,7 +2343,7 @@ describe('CasesService', () => {
 
   describe('searchMentionableUsers', () => {
     it('should return matching users in tenant', async () => {
-      prisma.tenantMembership.findMany.mockResolvedValue([
+      repository.searchMentionableMembers.mockResolvedValue([
         {
           id: 'membership-1',
           userId: 'user-001',
@@ -2530,7 +2359,7 @@ describe('CasesService', () => {
     })
 
     it('should return empty array when no match', async () => {
-      prisma.tenantMembership.findMany.mockResolvedValue([])
+      repository.searchMentionableMembers.mockResolvedValue([])
 
       const result = await service.searchMentionableUsers(TENANT_ID, 'nonexistent', 10)
 

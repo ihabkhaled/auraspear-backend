@@ -33,35 +33,26 @@ const CALLER_EMAIL = 'admin@acme.com'
 
 const now = new Date('2025-06-01T00:00:00Z')
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    tenant: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      count: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    tenantMembership: {
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      updateMany: jest.fn(),
-      update: jest.fn(),
-      count: jest.fn(),
-    },
-    user: {
-      findUnique: jest.fn(),
-      findMany: jest.fn(),
-      create: jest.fn(),
-      count: jest.fn(),
-      upsert: jest.fn(),
-      update: jest.fn(),
-    },
-    $transaction: jest.fn(),
+    findAllTenantsWithCounts: jest.fn(),
+    findByIdWithCounts: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    deactivateAllMemberships: jest.fn(),
+    findMembershipsWithUsers: jest.fn(),
+    findActiveMembersWithUsers: jest.fn(),
+    findUserByEmail: jest.fn(),
+    findMembershipByUserAndTenant: jest.fn(),
+    findUserWithTenantMembership: jest.fn(),
+    findOrCreateUserWithMembership: jest.fn(),
+    findMembershipWithUser: jest.fn(),
+    updateMembershipRole: jest.fn(),
+    updateUser: jest.fn(),
+    updateMembershipStatus: jest.fn(),
+    updateMembershipStatusWithUser: jest.fn(),
+    findTenantById: jest.fn(),
+    findUserById: jest.fn(),
   }
 }
 
@@ -115,13 +106,13 @@ function makeUserRow(overrides: Record<string, unknown> = {}) {
 
 describe('TenantsService', () => {
   let service: TenantsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     service = new TenantsService(
-      prisma as never,
+      repository as never,
       authService as never,
       mockAppLogger as never,
       mockNotificationsService as never
@@ -134,7 +125,7 @@ describe('TenantsService', () => {
   describe('findAll', () => {
     it('should return paginated tenants with counts', async () => {
       const tenantRow = makeTenantRow()
-      prisma.$transaction.mockResolvedValue([[tenantRow], 1])
+      repository.findAllTenantsWithCounts.mockResolvedValue([[tenantRow], 1])
 
       const result = await service.findAll(1, 20)
 
@@ -157,7 +148,7 @@ describe('TenantsService', () => {
     })
 
     it('should handle search filter', async () => {
-      prisma.$transaction.mockResolvedValue([[], 0])
+      repository.findAllTenantsWithCounts.mockResolvedValue([[], 0])
 
       const result = await service.findAll(1, 10, 'search-term')
 
@@ -167,7 +158,7 @@ describe('TenantsService', () => {
     })
 
     it('should handle empty results', async () => {
-      prisma.$transaction.mockResolvedValue([[], 0])
+      repository.findAllTenantsWithCounts.mockResolvedValue([[], 0])
 
       const result = await service.findAll(1, 20)
 
@@ -186,7 +177,7 @@ describe('TenantsService', () => {
   /* ------------------------------------------------------------------ */
   describe('findById', () => {
     it('should return tenant with counts', async () => {
-      prisma.tenant.findUnique.mockResolvedValue(makeTenantRow())
+      repository.findByIdWithCounts.mockResolvedValue(makeTenantRow())
 
       const result = await service.findById(TENANT_ID)
 
@@ -202,7 +193,7 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when tenant not found', async () => {
-      prisma.tenant.findUnique.mockResolvedValue(null)
+      repository.findByIdWithCounts.mockResolvedValue(null)
 
       await expect(service.findById('nonexistent')).rejects.toThrow(BusinessException)
       await expect(service.findById('nonexistent')).rejects.toMatchObject({
@@ -217,18 +208,16 @@ describe('TenantsService', () => {
   describe('create', () => {
     it('should create tenant and return it', async () => {
       const created = { id: 'new-tenant', name: 'New Co', slug: 'new-co', createdAt: now }
-      prisma.tenant.create.mockResolvedValue(created)
+      repository.create.mockResolvedValue(created)
 
       const result = await service.create({ name: 'New Co', slug: 'new-co' })
 
       expect(result).toEqual(created)
-      expect(prisma.tenant.create).toHaveBeenCalledWith({
-        data: { name: 'New Co', slug: 'new-co' },
-      })
+      expect(repository.create).toHaveBeenCalledWith({ name: 'New Co', slug: 'new-co' })
     })
 
     it('should throw 409 when slug already exists', async () => {
-      prisma.tenant.create.mockRejectedValue(new Error('Unique constraint failed on the fields'))
+      repository.create.mockRejectedValue(new Error('Unique constraint failed on the fields'))
 
       await expect(service.create({ name: 'Dup', slug: 'existing-slug' })).rejects.toThrow(
         BusinessException
@@ -245,15 +234,12 @@ describe('TenantsService', () => {
   describe('update', () => {
     it('should update and return tenant', async () => {
       const updated = { id: TENANT_ID, name: 'Updated Name', slug: 'acme-corp', createdAt: now }
-      prisma.tenant.update.mockResolvedValue(updated)
+      repository.update.mockResolvedValue(updated)
 
       const result = await service.update(TENANT_ID, { name: 'Updated Name' })
 
       expect(result).toEqual(updated)
-      expect(prisma.tenant.update).toHaveBeenCalledWith({
-        where: { id: TENANT_ID },
-        data: { name: 'Updated Name' },
-      })
+      expect(repository.update).toHaveBeenCalledWith(TENANT_ID, { name: 'Updated Name' })
     })
   })
 
@@ -262,16 +248,15 @@ describe('TenantsService', () => {
   /* ------------------------------------------------------------------ */
   describe('remove', () => {
     it('should deactivate all memberships and return { deleted: true }', async () => {
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          tenantMembership: { updateMany: jest.fn().mockResolvedValue({ count: 3 }) },
-        }
-        return fn(tx)
-      })
+      repository.deactivateAllMemberships.mockResolvedValue(undefined)
 
       const result = await service.remove(TENANT_ID)
 
       expect(result).toEqual({ deleted: true })
+      expect(repository.deactivateAllMemberships).toHaveBeenCalledWith(
+        TENANT_ID,
+        MembershipStatus.INACTIVE
+      )
     })
   })
 
@@ -281,7 +266,7 @@ describe('TenantsService', () => {
   describe('findUsers', () => {
     it('should return paginated users with role/status filtering', async () => {
       const membership = makeMembershipRow()
-      prisma.$transaction.mockResolvedValue([[membership], 1])
+      repository.findMembershipsWithUsers.mockResolvedValue([[membership], 1])
 
       const result = await service.findUsers(
         TENANT_ID,
@@ -306,7 +291,7 @@ describe('TenantsService', () => {
     })
 
     it('should handle search by name/email', async () => {
-      prisma.$transaction.mockResolvedValue([[], 0])
+      repository.findMembershipsWithUsers.mockResolvedValue([[], 0])
 
       const result = await service.findUsers(TENANT_ID, 1, 20, 'jane')
 
@@ -320,7 +305,7 @@ describe('TenantsService', () => {
   /* ------------------------------------------------------------------ */
   describe('findMembers', () => {
     it('should return lightweight member list (id, name, email)', async () => {
-      prisma.tenantMembership.findMany.mockResolvedValue([
+      repository.findActiveMembersWithUsers.mockResolvedValue([
         { user: { id: 'u1', name: 'Alice', email: 'alice@acme.com' } },
         { user: { id: 'u2', name: 'Bob', email: 'bob@acme.com' } },
       ])
@@ -331,11 +316,6 @@ describe('TenantsService', () => {
         { id: 'u1', name: 'Alice', email: 'alice@acme.com' },
         { id: 'u2', name: 'Bob', email: 'bob@acme.com' },
       ])
-      expect(prisma.tenantMembership.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { tenantId: TENANT_ID, status: MembershipStatus.ACTIVE },
-        })
-      )
     })
   })
 
@@ -344,7 +324,7 @@ describe('TenantsService', () => {
   /* ------------------------------------------------------------------ */
   describe('checkEmail', () => {
     it('should return { exists: false, alreadyInTenant: false } for new email', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       const result = await service.checkEmail(TENANT_ID, 'new@acme.com')
 
@@ -352,12 +332,15 @@ describe('TenantsService', () => {
     })
 
     it('should return { exists: true, alreadyInTenant: true } for existing tenant member', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findUserByEmail.mockResolvedValue({
         id: USER_ID,
         name: 'Jane',
         email: 'jane@acme.com',
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID })
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+      })
 
       const result = await service.checkEmail(TENANT_ID, 'jane@acme.com')
 
@@ -369,14 +352,11 @@ describe('TenantsService', () => {
     })
 
     it('should normalize email (lowercase + trim)', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue(null)
 
       await service.checkEmail(TENANT_ID, '  Test@Acme.COM  ')
 
-      expect(prisma.user.findUnique).toHaveBeenCalledWith({
-        where: { email: 'test@acme.com' },
-        select: { id: true, name: true, email: true },
-      })
+      expect(repository.findUserByEmail).toHaveBeenCalledWith('test@acme.com')
     })
   })
 
@@ -394,18 +374,20 @@ describe('TenantsService', () => {
         createdAt: now,
       }
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(existingUser), create: jest.fn() },
-          tenantMembership: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(membership),
-          },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: existingUser,
+        membership: null,
       })
-
-      prisma.tenant.findUnique.mockResolvedValue({ name: 'Acme Corp' })
+      repository.findOrCreateUserWithMembership.mockResolvedValue({
+        user: existingUser,
+        membership,
+        isExisting: true,
+      })
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        name: 'Acme Corp',
+        slug: 'acme-corp',
+      })
 
       const result = await service.assignUser(
         TENANT_ID,
@@ -445,18 +427,19 @@ describe('TenantsService', () => {
         createdAt: now,
       }
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(createdUser),
-          },
-          tenantMembership: {
-            findUnique: jest.fn(),
-            create: jest.fn().mockResolvedValue(membership),
-          },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: null,
+        membership: null,
+      })
+      repository.findOrCreateUserWithMembership.mockResolvedValue({
+        user: createdUser,
+        membership,
+        isExisting: false,
+      })
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        name: 'Acme Corp',
+        slug: 'acme-corp',
       })
 
       const result = await service.assignUser(
@@ -506,12 +489,9 @@ describe('TenantsService', () => {
     it('should throw 403 when trying to reassign protected user', async () => {
       const protectedUser = makeUserRow({ isProtected: true })
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(protectedUser) },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: protectedUser,
+        membership: null,
       })
 
       await expect(
@@ -524,12 +504,9 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(protectedUser) },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: protectedUser,
+        membership: null,
       })
 
       await expect(
@@ -548,15 +525,9 @@ describe('TenantsService', () => {
     it('should throw 409 when user already in tenant', async () => {
       const existingUser = makeUserRow()
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(existingUser) },
-          tenantMembership: {
-            findUnique: jest.fn().mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID }),
-            create: jest.fn(),
-          },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: existingUser,
+        membership: { role: UserRole.SOC_ANALYST_L1, status: MembershipStatus.ACTIVE },
       })
 
       await expect(
@@ -569,15 +540,9 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(existingUser) },
-          tenantMembership: {
-            findUnique: jest.fn().mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID }),
-            create: jest.fn(),
-          },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: existingUser,
+        membership: { role: UserRole.SOC_ANALYST_L1, status: MembershipStatus.ACTIVE },
       })
 
       await expect(
@@ -594,12 +559,9 @@ describe('TenantsService', () => {
     })
 
     it('should throw 400 when name missing for new user', async () => {
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: null,
+        membership: null,
       })
 
       await expect(
@@ -612,12 +574,9 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: null,
+        membership: null,
       })
 
       await expect(
@@ -634,12 +593,9 @@ describe('TenantsService', () => {
     })
 
     it('should throw 400 when password missing for new user', async () => {
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: null,
+        membership: null,
       })
 
       await expect(
@@ -652,12 +608,9 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-          tenantMembership: { findUnique: jest.fn(), create: jest.fn() },
-        }
-        return fn(tx)
+      repository.findUserWithTenantMembership.mockResolvedValue({
+        user: null,
+        membership: null,
       })
 
       await expect(
@@ -680,15 +633,15 @@ describe('TenantsService', () => {
   describe('updateUser', () => {
     it('should update user name and role', async () => {
       const membership = makeMembershipRow()
-      prisma.tenantMembership.findUnique
+      repository.findMembershipWithUser
         .mockResolvedValueOnce(membership) // first lookup
         .mockResolvedValueOnce({
           ...membership,
           role: UserRole.SOC_ANALYST_L2,
           user: { ...membership.user, name: 'Jane Updated' },
         }) // after update lookup
-      prisma.tenantMembership.update.mockResolvedValue({})
-      prisma.user.update.mockResolvedValue({})
+      repository.updateMembershipRole.mockResolvedValue({})
+      repository.updateUser.mockResolvedValue({})
 
       const result = await service.updateUser(
         TENANT_ID,
@@ -745,7 +698,7 @@ describe('TenantsService', () => {
       const protectedMembership = makeMembershipRow({
         user: { ...makeMembershipRow().user, isProtected: true },
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.updateUser(
@@ -758,7 +711,7 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.updateUser(
@@ -776,7 +729,7 @@ describe('TenantsService', () => {
 
     it('should throw 403 when non-GLOBAL_ADMIN modifies GLOBAL_ADMIN user', async () => {
       const globalAdminMembership = makeMembershipRow({ role: UserRole.GLOBAL_ADMIN })
-      prisma.tenantMembership.findUnique.mockResolvedValue(globalAdminMembership)
+      repository.findMembershipWithUser.mockResolvedValue(globalAdminMembership)
 
       await expect(
         service.updateUser(
@@ -789,7 +742,7 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(globalAdminMembership)
+      repository.findMembershipWithUser.mockResolvedValue(globalAdminMembership)
 
       await expect(
         service.updateUser(
@@ -806,7 +759,7 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when user not found', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.updateUser(
@@ -819,7 +772,7 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.updateUser(
@@ -842,8 +795,8 @@ describe('TenantsService', () => {
   describe('removeUser', () => {
     it('should set membership status to INACTIVE', async () => {
       const membership = makeMembershipRow()
-      prisma.tenantMembership.findUnique.mockResolvedValue(membership)
-      prisma.tenantMembership.update.mockResolvedValue({})
+      repository.findMembershipWithUser.mockResolvedValue(membership)
+      repository.updateMembershipStatus.mockResolvedValue({})
 
       const result = await service.removeUser(
         TENANT_ID,
@@ -854,10 +807,11 @@ describe('TenantsService', () => {
       )
 
       expect(result).toEqual({ deleted: true })
-      expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
-        where: { userId_tenantId: { userId: USER_ID, tenantId: TENANT_ID } },
-        data: { status: MembershipStatus.INACTIVE },
-      })
+      expect(repository.updateMembershipStatus).toHaveBeenCalledWith(
+        USER_ID,
+        TENANT_ID,
+        MembershipStatus.INACTIVE
+      )
       expect(mockNotificationsService.notifyUserRemoved).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
@@ -882,13 +836,13 @@ describe('TenantsService', () => {
       const protectedMembership = makeMembershipRow({
         user: { ...makeMembershipRow().user, isProtected: true },
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.removeUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -898,13 +852,13 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when user not found', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.removeUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -920,10 +874,10 @@ describe('TenantsService', () => {
   describe('restoreUser', () => {
     it('should restore INACTIVE membership to ACTIVE', async () => {
       const inactiveMembership = makeMembershipRow({ status: MembershipStatus.INACTIVE })
-      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveMembership)
+      repository.findMembershipWithUser.mockResolvedValue(inactiveMembership)
 
       const restoredMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
-      prisma.tenantMembership.update.mockResolvedValue(restoredMembership)
+      repository.updateMembershipStatusWithUser.mockResolvedValue(restoredMembership)
 
       const result = await service.restoreUser(
         TENANT_ID,
@@ -937,11 +891,11 @@ describe('TenantsService', () => {
         id: USER_ID,
         status: MembershipStatus.ACTIVE,
       })
-      expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
-        where: { userId_tenantId: { userId: USER_ID, tenantId: TENANT_ID } },
-        data: { status: MembershipStatus.ACTIVE },
-        include: { user: true },
-      })
+      expect(repository.updateMembershipStatusWithUser).toHaveBeenCalledWith(
+        USER_ID,
+        TENANT_ID,
+        MembershipStatus.ACTIVE
+      )
       expect(mockNotificationsService.notifyUserRestored).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
@@ -951,7 +905,7 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when not found', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.restoreUser(
@@ -963,7 +917,7 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.restoreUser(
@@ -980,13 +934,13 @@ describe('TenantsService', () => {
 
     it('should throw 400 when user not deleted (status !== INACTIVE)', async () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
-      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+      repository.findMembershipWithUser.mockResolvedValue(activeMembership)
 
       await expect(
         service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+      repository.findMembershipWithUser.mockResolvedValue(activeMembership)
 
       await expect(
         service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1000,13 +954,13 @@ describe('TenantsService', () => {
         status: MembershipStatus.INACTIVE,
         role: UserRole.GLOBAL_ADMIN,
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
+      repository.findMembershipWithUser.mockResolvedValue(inactiveGlobalAdmin)
 
       await expect(
         service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(inactiveGlobalAdmin)
+      repository.findMembershipWithUser.mockResolvedValue(inactiveGlobalAdmin)
 
       await expect(
         service.restoreUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1022,10 +976,10 @@ describe('TenantsService', () => {
   describe('blockUser', () => {
     it('should set status to SUSPENDED', async () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
-      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+      repository.findMembershipWithUser.mockResolvedValue(activeMembership)
 
       const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
-      prisma.tenantMembership.update.mockResolvedValue(suspendedMembership)
+      repository.updateMembershipStatusWithUser.mockResolvedValue(suspendedMembership)
 
       const result = await service.blockUser(
         TENANT_ID,
@@ -1063,13 +1017,13 @@ describe('TenantsService', () => {
       const protectedMembership = makeMembershipRow({
         user: { ...makeMembershipRow().user, isProtected: true },
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(protectedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
 
       await expect(
         service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1080,13 +1034,13 @@ describe('TenantsService', () => {
 
     it('should throw 400 when already blocked', async () => {
       const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
-      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(suspendedMembership)
 
       await expect(
         service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(suspendedMembership)
 
       await expect(
         service.blockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1096,13 +1050,13 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when not found', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.blockUser(TENANT_ID, 'nonexistent', UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1118,10 +1072,10 @@ describe('TenantsService', () => {
   describe('unblockUser', () => {
     it('should set status from SUSPENDED to ACTIVE', async () => {
       const suspendedMembership = makeMembershipRow({ status: MembershipStatus.SUSPENDED })
-      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedMembership)
+      repository.findMembershipWithUser.mockResolvedValue(suspendedMembership)
 
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
-      prisma.tenantMembership.update.mockResolvedValue(activeMembership)
+      repository.updateMembershipStatusWithUser.mockResolvedValue(activeMembership)
 
       const result = await service.unblockUser(
         TENANT_ID,
@@ -1145,13 +1099,13 @@ describe('TenantsService', () => {
 
     it('should throw 400 when not blocked', async () => {
       const activeMembership = makeMembershipRow({ status: MembershipStatus.ACTIVE })
-      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+      repository.findMembershipWithUser.mockResolvedValue(activeMembership)
 
       await expect(
         service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership)
+      repository.findMembershipWithUser.mockResolvedValue(activeMembership)
 
       await expect(
         service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1165,13 +1119,13 @@ describe('TenantsService', () => {
         status: MembershipStatus.SUSPENDED,
         role: UserRole.GLOBAL_ADMIN,
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
+      repository.findMembershipWithUser.mockResolvedValue(suspendedGlobalAdmin)
 
       await expect(
         service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(suspendedGlobalAdmin)
+      repository.findMembershipWithUser.mockResolvedValue(suspendedGlobalAdmin)
 
       await expect(
         service.unblockUser(TENANT_ID, USER_ID, UserRole.TENANT_ADMIN, CALLER_ID, CALLER_EMAIL)
@@ -1181,7 +1135,7 @@ describe('TenantsService', () => {
     })
 
     it('should throw 404 when not found', async () => {
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.unblockUser(
@@ -1193,7 +1147,7 @@ describe('TenantsService', () => {
         )
       ).rejects.toThrow(BusinessException)
 
-      prisma.tenantMembership.findUnique.mockResolvedValue(null)
+      repository.findMembershipWithUser.mockResolvedValue(null)
 
       await expect(
         service.unblockUser(
@@ -1222,14 +1176,18 @@ describe('TenantsService', () => {
     }
 
     it('should return impersonation tokens', async () => {
-      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+      })
+      repository.findUserById.mockResolvedValue({
         id: USER_ID,
         email: 'analyst@acme.com',
         name: 'Jane Doe',
         isProtected: false,
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         role: UserRole.SOC_ANALYST_L1,
@@ -1281,8 +1239,12 @@ describe('TenantsService', () => {
     })
 
     it('should throw 403 for protected user', async () => {
-      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+      })
+      repository.findUserById.mockResolvedValue({
         id: USER_ID,
         email: 'analyst@acme.com',
         name: 'Jane Doe',
@@ -1293,8 +1255,12 @@ describe('TenantsService', () => {
         BusinessException
       )
 
-      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+      })
+      repository.findUserById.mockResolvedValue({
         id: USER_ID,
         email: 'analyst@acme.com',
         name: 'Jane Doe',
@@ -1311,14 +1277,18 @@ describe('TenantsService', () => {
     it('should throw 403 when caller does not have higher role than target', async () => {
       const tenantAdminCaller = { ...callerPayload, role: UserRole.TENANT_ADMIN }
 
-      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+      })
+      repository.findUserById.mockResolvedValue({
         id: USER_ID,
         email: 'other-admin@acme.com',
         name: 'Other Admin',
         isProtected: false,
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         role: UserRole.TENANT_ADMIN,
@@ -1329,14 +1299,18 @@ describe('TenantsService', () => {
         BusinessException
       )
 
-      prisma.tenant.findUnique.mockResolvedValue({ id: TENANT_ID, slug: 'acme-corp' })
-      prisma.user.findUnique.mockResolvedValue({
+      repository.findTenantById.mockResolvedValue({
+        id: TENANT_ID,
+        slug: 'acme-corp',
+        name: 'Acme Corp',
+      })
+      repository.findUserById.mockResolvedValue({
         id: USER_ID,
         email: 'other-admin@acme.com',
         name: 'Other Admin',
         isProtected: false,
       })
-      prisma.tenantMembership.findUnique.mockResolvedValue({
+      repository.findMembershipByUserAndTenant.mockResolvedValue({
         userId: USER_ID,
         tenantId: TENANT_ID,
         role: UserRole.TENANT_ADMIN,

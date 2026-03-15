@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ConnectorsController } from './connectors.controller'
+import { ConnectorsRepository } from './connectors.repository'
 import { ConnectorsService } from './connectors.service'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { BedrockService } from './services/bedrock.service'
@@ -17,6 +18,7 @@ import { WazuhService } from './services/wazuh.service'
   imports: [AppLogsModule],
   controllers: [ConnectorsController],
   providers: [
+    ConnectorsRepository,
     ConnectorsService,
     WazuhService,
     OpenSearchService,

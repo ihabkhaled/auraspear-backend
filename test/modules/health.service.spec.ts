@@ -27,9 +27,9 @@ const mockConfigService = {
   }),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+    pingDatabase: jest.fn().mockResolvedValue(undefined),
   }
 }
 
@@ -41,11 +41,11 @@ function createMockConnectorsService() {
 }
 
 function createService(
-  prisma: ReturnType<typeof createMockPrisma>,
+  repository: ReturnType<typeof createMockRepository>,
   connectorsService: ReturnType<typeof createMockConnectorsService>
 ) {
   return new HealthService(
-    prisma as never,
+    repository as never,
     mockConfigService as never,
     connectorsService as never,
     mockAppLogger as never
@@ -53,15 +53,15 @@ function createService(
 }
 
 describe('HealthService', () => {
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let connectorsService: ReturnType<typeof createMockConnectorsService>
   let service: HealthService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     connectorsService = createMockConnectorsService()
-    service = createService(prisma, connectorsService)
+    service = createService(repository, connectorsService)
   })
 
   /* ------------------------------------------------------------------ */
@@ -70,9 +70,6 @@ describe('HealthService', () => {
 
   describe('getOverallHealth', () => {
     it('should return HEALTHY when both DB and Redis are up', async () => {
-      // DB mock is already set to resolve successfully in createMockPrisma
-      // Redis mock is set to resolve 'PONG' in the ioredis mock
-
       const result = await service.getOverallHealth()
 
       expect(result.status).toBe(HealthStatus.HEALTHY)
@@ -86,7 +83,7 @@ describe('HealthService', () => {
     })
 
     it('should return DEGRADED when DB is down but Redis is up', async () => {
-      prisma.$queryRaw.mockRejectedValue(new Error('Connection refused'))
+      repository.pingDatabase.mockRejectedValue(new Error('Connection refused'))
 
       const result = await service.getOverallHealth()
 
@@ -96,7 +93,6 @@ describe('HealthService', () => {
     })
 
     it('should return DEGRADED when Redis is down but DB is up', async () => {
-      // Access the Redis mock on the service instance and make ping reject
       const redisInstance = (service as Record<string, unknown>)['redis'] as {
         ping: jest.Mock
       }
@@ -110,7 +106,7 @@ describe('HealthService', () => {
     })
 
     it('should return DOWN when both DB and Redis are down', async () => {
-      prisma.$queryRaw.mockRejectedValue(new Error('DB connection refused'))
+      repository.pingDatabase.mockRejectedValue(new Error('DB connection refused'))
       const redisInstance = (service as Record<string, unknown>)['redis'] as {
         ping: jest.Mock
       }
@@ -127,7 +123,6 @@ describe('HealthService', () => {
       const result = await service.getOverallHealth()
 
       expect(result.timestamp).toBeDefined()
-      // Verify it's a valid ISO date string
       const parsed = new Date(result.timestamp)
       expect(parsed.toISOString()).toBe(result.timestamp)
     })

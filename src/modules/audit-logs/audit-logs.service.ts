@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AuditLogsRepository } from './audit-logs.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { AuditLogRecord, PaginatedAuditLogs } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
 import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
@@ -24,7 +24,7 @@ export class AuditLogsService {
   private readonly logger = new Logger(AuditLogsService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly auditLogsRepository: AuditLogsRepository,
     private readonly appLogger: AppLoggerService
   ) {}
 
@@ -54,15 +54,12 @@ export class AuditLogsService {
     }
 
     try {
-      const [data, total] = await Promise.all([
-        this.prisma.auditLog.findMany({
-          where,
-          orderBy: this.buildOrderBy(query.sortBy, query.sortOrder),
-          skip: (query.page - 1) * query.limit,
-          take: query.limit,
-        }),
-        this.prisma.auditLog.count({ where }),
-      ])
+      const [data, total] = await this.auditLogsRepository.findManyAndCount({
+        where,
+        orderBy: this.buildOrderBy(query.sortBy, query.sortOrder),
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      })
 
       this.appLogger.info(`Searched audit logs page=${query.page} total=${total}`, {
         feature: AppLogFeature.SYSTEM,
@@ -122,17 +119,15 @@ export class AuditLogsService {
 
   async create(data: CreateAuditLogData): Promise<AuditLogRecord> {
     try {
-      const entry = await this.prisma.auditLog.create({
-        data: {
-          tenantId: data.tenantId,
-          actor: data.actor,
-          role: data.role,
-          action: data.action,
-          resource: data.resource,
-          resourceId: data.resourceId ?? null,
-          details: data.details ?? null,
-          ipAddress: data.ipAddress ?? null,
-        },
+      const entry = await this.auditLogsRepository.create({
+        tenantId: data.tenantId,
+        actor: data.actor,
+        role: data.role,
+        action: data.action,
+        resource: data.resource,
+        resourceId: data.resourceId ?? null,
+        details: data.details ?? null,
+        ipAddress: data.ipAddress ?? null,
       })
 
       this.logger.log(

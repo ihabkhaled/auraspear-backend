@@ -108,6 +108,52 @@
 - **Validation**: Zod schemas for all DTOs (no class-validator)
 - **Logging**: nestjs-pino (structured JSON logs)
 - **Security**: Helmet, Throttler, SSRF protection, AES-256-GCM encryption at rest
+- **Architecture**: Repository pattern with strict layering
+
+### Layering (strict separation)
+
+```
+Controller → Service → Repository → Prisma
+              ↓
+            Utils
+```
+
+- **Controllers**: HTTP routing, parameter extraction, validation delegation, response return. No business logic. Call ONE service method and return. Always have `@Roles()` + `RolesGuard` on mutations.
+- **Services**: Thin orchestrators. Call repository methods and util functions. NEVER import `PrismaService`. NEVER have long procedural blocks. Every 3-5 lines of cohesive logic must be extracted to a util function.
+- **Repositories**: Pure data access. Accept fully-built query params, return raw Prisma results. EVERY method takes `tenantId`. No business logic, no conditionals, no transforms, no `BusinessException`.
+- **Utils**: All business logic lives here. Mappers, transformers, filter builders, calculators, validators, formatters — all exported named functions in `<module>.utils.ts`.
+- **Types**: All interfaces/types in `<module>.types.ts` or `src/common/interfaces/`. Never inline in services/controllers.
+- **Constants**: All shared constants in `<module>.constants.ts` or `src/common/constants/`. Never inline.
+- **Enums**: Every string literal must be an enum. Enums in `<module>.enums.ts` or `src/common/interfaces/`.
+- **DTOs**: Zod schemas in `<module>.dto.ts`. Every string field has `.max()`. Every array field has `.max()`.
+
+### Architecture Enforcement
+
+- **NEVER call Prisma directly from service files** — All data access through repository.
+- **NEVER put business logic in controllers** — Controllers only route and delegate.
+- **NEVER put logic in repositories** — Pure data access only, no conditionals or transforms.
+- **NEVER inline logic in service methods** — Extract to utils every 3-5 lines of cohesive logic.
+- **NEVER duplicate logic across services** — Extract to shared utils or services.
+
+### File Structure Per Module
+
+```
+src/modules/<module>/
+├── <module>.module.ts
+├── <module>.controller.ts
+├── <module>.service.ts
+├── <module>.repository.ts
+├── <module>.utils.ts
+├── <module>.types.ts
+├── <module>.enums.ts
+├── <module>.constants.ts
+├── dto/
+│   └── <module>.dto.ts
+├── __tests__/
+│   ├── <module>.service.spec.ts
+│   ├── <module>.controller.spec.ts
+│   └── <module>.e2e.spec.ts
+```
 
 ---
 
@@ -517,14 +563,33 @@ export class AlertsController {
 
 ### Service Pattern
 
-Services contain business logic. Use NestJS `Logger` instead of `console.log`.
+Services are thin orchestrators. Call repository methods and util functions. Use NestJS `Logger` instead of `console.log`. NEVER import `PrismaService` — use the repository.
 
 ```typescript
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name)
 
+  constructor(private readonly alertsRepository: AlertsRepository) {}
+}
+```
+
+### Repository Pattern
+
+Repositories handle all Prisma data access. Pure data operations only — no business logic, no conditionals, no `BusinessException`.
+
+```typescript
+@Injectable()
+export class AlertsRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findByTenant(tenantId: string, page: number, limit: number) {
+    return this.prisma.alert.findMany({
+      where: { tenantId },
+      skip: (page - 1) * limit,
+      take: limit,
+    })
+  }
 }
 ```
 
@@ -549,8 +614,12 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 
 - All files use **kebab-case**: `auth.guard.ts`, `create-case.dto.ts`, `ssrf.util.ts`
 - Modules follow NestJS conventions: `*.module.ts`, `*.controller.ts`, `*.service.ts`
+- Repositories: `<module>.repository.ts` — pure data access layer
+- Utils: `<module>.utils.ts` — business logic functions (mappers, transformers, validators)
 - DTOs in `dto/` subdirectory per module
 - Type/interface files: `<module>.types.ts` at the module root (e.g. `alerts.types.ts`)
+- Enum files: `<module>.enums.ts` — module-specific enums
+- Constants files: `<module>.constants.ts` — module-specific constants
 - Exported domain types go in `*.types.ts`, NOT in service files
 - Internal-only interfaces (not used outside the file) stay in the service file
 - Connector adapter services share types from `connectors.types.ts`
@@ -563,6 +632,58 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 - Test guards, utils, and pipes — services tested via e2e
 - Test files have relaxed ESLint rules (no `any` enforcement, no return type requirements)
 - Run tests before committing: `npm test`
+
+### Testing Requirements Per Module
+
+For every module, the following test coverage is required:
+
+- Unit tests for services and utils
+- Integration/e2e tests for all endpoints
+- Validation tests (invalid inputs, boundary values)
+- RBAC tests (unauthorized access denied)
+- Tenant isolation tests (cannot access other tenant data)
+- Error path tests (missing data, invalid state transitions)
+- Seed idempotency validation
+
+Run before claiming done:
+
+```bash
+npm run lint
+npm run build
+npm test
+```
+
+---
+
+## Migration Rules
+
+- **ALWAYS generate a migration when schema changes**: `npx prisma migrate dev --name <descriptive-name>`
+- **NEVER edit existing migrations** — Create new ones.
+- Test migration applies cleanly on fresh DB.
+- Seed must work after migration.
+
+---
+
+## Code Quality Checklist
+
+Before committing any module:
+
+- [ ] No `any` types
+- [ ] No ESLint disables
+- [ ] No `console.log`
+- [ ] No raw string literals (all enums)
+- [ ] No Prisma in services (all in repository)
+- [ ] No business logic in controllers
+- [ ] No logic in repositories
+- [ ] All service methods are short (logic in utils)
+- [ ] All queries tenant-scoped
+- [ ] All mutations have RBAC guards
+- [ ] All DTOs have Zod with `.max()`
+- [ ] All exceptions use `BusinessException` with `messageKey`
+- [ ] All `messageKey`s in all 6 i18n files
+- [ ] All tests pass
+- [ ] Lint passes
+- [ ] Build passes
 
 ---
 

@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { CaseCyclesRepository } from './case-cycles.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './case-cycles.types'
 import type { CloseCaseCycleDto } from './dto/close-case-cycle.dto'
 import type { CreateCaseCycleDto } from './dto/create-case-cycle.dto'
@@ -16,7 +16,7 @@ export class CaseCyclesService {
   private readonly logger = new Logger(CaseCyclesService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly caseCyclesRepository: CaseCyclesRepository,
     private readonly appLogger: AppLoggerService
   ) {}
 
@@ -39,19 +39,12 @@ export class CaseCyclesService {
     }
 
     try {
-      const [cycles, total] = await Promise.all([
-        this.prisma.caseCycle.findMany({
-          where,
-          skip: (page - 1) * limit,
-          take: limit,
-          orderBy: this.buildOrderBy(sortBy, sortOrder),
-          include: {
-            _count: { select: { cases: true } },
-            cases: { select: { status: true } },
-          },
-        }),
-        this.prisma.caseCycle.count({ where }),
-      ])
+      const [cycles, total] = await this.caseCyclesRepository.findManyWithCasesAndCount({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: this.buildOrderBy(sortBy, sortOrder),
+      })
 
       const data: CaseCycleRecord[] = cycles.map(cycle => {
         const openCount = cycle.cases.filter(c => c.status !== 'closed').length
@@ -102,11 +95,8 @@ export class CaseCyclesService {
   async getOrphanedStats(
     tenantId: string
   ): Promise<{ caseCount: number; openCount: number; closedCount: number }> {
-    const [total, openCases, closedCases] = await Promise.all([
-      this.prisma.case.count({ where: { tenantId, cycleId: null } }),
-      this.prisma.case.count({ where: { tenantId, cycleId: null, status: { not: 'closed' } } }),
-      this.prisma.case.count({ where: { tenantId, cycleId: null, status: 'closed' } }),
-    ])
+    const [total, openCases, closedCases] =
+      await this.caseCyclesRepository.countOrphanedCases(tenantId)
 
     return { caseCount: total, openCount: openCases, closedCount: closedCases }
   }
@@ -137,13 +127,7 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async getActiveCycle(tenantId: string): Promise<CaseCycleRecord | null> {
-    const cycle = await this.prisma.caseCycle.findFirst({
-      where: { tenantId, status: 'active' },
-      include: {
-        _count: { select: { cases: true } },
-        cases: { select: { status: true } },
-      },
-    })
+    const cycle = await this.caseCyclesRepository.findFirstActive(tenantId)
 
     if (!cycle) {
       this.appLogger.info('No active case cycle found', {
@@ -187,16 +171,7 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async getCycleById(id: string, tenantId: string): Promise<CaseCycleDetail> {
-    const cycle = await this.prisma.caseCycle.findFirst({
-      where: { id, tenantId },
-      include: {
-        _count: { select: { cases: true } },
-        cases: {
-          orderBy: { createdAt: 'desc' },
-          include: { tenant: { select: { name: true } } },
-        },
-      },
-    })
+    const cycle = await this.caseCyclesRepository.findFirstByIdAndTenantWithCases(id, tenantId)
 
     if (!cycle) {
       this.appLogger.warn(`Case cycle not found id=${id}`, {
@@ -214,15 +189,14 @@ export class CaseCyclesService {
     }
 
     // Resolve case owners in batch
-    const ownerIds = cycle.cases.map(c => c.ownerUserId).filter((id): id is string => id !== null)
+    const ownerIds = cycle.cases
+      .map(c => c.ownerUserId)
+      .filter((ownerId): ownerId is string => ownerId !== null)
     const uniqueOwnerIds = [...new Set(ownerIds)]
 
     const ownerMap = new Map<string, { name: string; email: string }>()
     if (uniqueOwnerIds.length > 0) {
-      const owners = await this.prisma.user.findMany({
-        where: { id: { in: uniqueOwnerIds } },
-        select: { id: true, name: true, email: true },
-      })
+      const owners = await this.caseCyclesRepository.findUsersByIds(uniqueOwnerIds)
       for (const o of owners) {
         ownerMap.set(o.id, { name: o.name, email: o.email })
       }
@@ -283,16 +257,14 @@ export class CaseCyclesService {
     await this.checkDateOverlap(user.tenantId, dto.startDate, dto.endDate ?? null)
 
     // Create as closed — user must explicitly activate
-    const cycle = await this.prisma.caseCycle.create({
-      data: {
-        tenantId: user.tenantId,
-        name: dto.name,
-        description: dto.description ?? null,
-        status: 'closed',
-        startDate: dto.startDate,
-        endDate: dto.endDate ?? null,
-        createdBy: user.email,
-      },
+    const cycle = await this.caseCyclesRepository.create({
+      tenantId: user.tenantId,
+      name: dto.name,
+      description: dto.description ?? null,
+      status: 'closed',
+      startDate: dto.startDate,
+      endDate: dto.endDate ?? null,
+      createdBy: user.email,
     })
 
     this.logger.log(
@@ -331,13 +303,10 @@ export class CaseCyclesService {
     dto: UpdateCaseCycleDto,
     user: JwtPayload
   ): Promise<CaseCycleRecord> {
-    const existing = await this.prisma.caseCycle.findFirst({
-      where: { id, tenantId: user.tenantId },
-      include: {
-        _count: { select: { cases: true } },
-        cases: { select: { status: true } },
-      },
-    })
+    const existing = await this.caseCyclesRepository.findFirstByIdAndTenantWithCounts(
+      id,
+      user.tenantId
+    )
 
     if (!existing) {
       throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
@@ -381,10 +350,7 @@ export class CaseCyclesService {
       }
     }
 
-    const updated = await this.prisma.caseCycle.update({
-      where: { id },
-      data: updateData,
-    })
+    const updated = await this.caseCyclesRepository.update(id, updateData)
 
     const openCount = existing.cases.filter(c => c.status !== 'closed').length
     const closedCount = existing.cases.filter(c => c.status === 'closed').length
@@ -420,13 +386,10 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async activateCycle(id: string, user: JwtPayload): Promise<CaseCycleRecord> {
-    const existing = await this.prisma.caseCycle.findFirst({
-      where: { id, tenantId: user.tenantId },
-      include: {
-        _count: { select: { cases: true } },
-        cases: { select: { status: true } },
-      },
-    })
+    const existing = await this.caseCyclesRepository.findFirstByIdAndTenantWithCounts(
+      id,
+      user.tenantId
+    )
 
     if (!existing) {
       throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
@@ -459,25 +422,11 @@ export class CaseCyclesService {
     }
 
     // Atomically deactivate any currently active cycle and activate this one
-    const result = await this.prisma.$transaction(async tx => {
-      await tx.caseCycle.updateMany({
-        where: { tenantId: user.tenantId, status: 'active', id: { not: id } },
-        data: {
-          status: 'closed',
-          closedBy: user.email,
-          closedAt: new Date(),
-        },
-      })
-
-      return tx.caseCycle.update({
-        where: { id },
-        data: {
-          status: 'active',
-          closedBy: null,
-          closedAt: null,
-        },
-      })
-    })
+    const result = await this.caseCyclesRepository.activateCycleTransaction(
+      id,
+      user.tenantId,
+      user.email
+    )
 
     const openCount = existing.cases.filter(c => c.status !== 'closed').length
     const closedCount = existing.cases.filter(c => c.status === 'closed').length
@@ -509,10 +458,10 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async deleteCycle(id: string, user: JwtPayload): Promise<{ deleted: boolean }> {
-    const existing = await this.prisma.caseCycle.findFirst({
-      where: { id, tenantId: user.tenantId },
-      include: { _count: { select: { cases: true } } },
-    })
+    const existing = await this.caseCyclesRepository.findFirstByIdAndTenantWithCaseCount(
+      id,
+      user.tenantId
+    )
 
     if (!existing) {
       throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
@@ -528,15 +477,9 @@ export class CaseCyclesService {
 
     if (existing._count.cases > 0) {
       // Unlink cases from this cycle (set cycleId to null) then delete
-      await this.prisma.$transaction(async tx => {
-        await tx.case.updateMany({
-          where: { cycleId: id, tenantId: user.tenantId },
-          data: { cycleId: null },
-        })
-        await tx.caseCycle.delete({ where: { id } })
-      })
+      await this.caseCyclesRepository.deleteCycleWithCasesTransaction(id, user.tenantId)
     } else {
-      await this.prisma.caseCycle.delete({ where: { id } })
+      await this.caseCyclesRepository.deleteCycle(id)
     }
 
     this.appLogger.info(`Deleted case cycle "${existing.name}"`, {
@@ -562,13 +505,10 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
 
   async closeCycle(id: string, dto: CloseCaseCycleDto, user: JwtPayload): Promise<CaseCycleRecord> {
-    const existing = await this.prisma.caseCycle.findFirst({
-      where: { id, tenantId: user.tenantId },
-      include: {
-        _count: { select: { cases: true } },
-        cases: { select: { status: true } },
-      },
-    })
+    const existing = await this.caseCyclesRepository.findFirstByIdAndTenantWithCounts(
+      id,
+      user.tenantId
+    )
 
     if (!existing) {
       this.appLogger.warn(`Case cycle not found for close id=${id}`, {
@@ -609,14 +549,11 @@ export class CaseCyclesService {
     }
 
     const now = new Date()
-    const updated = await this.prisma.caseCycle.update({
-      where: { id },
-      data: {
-        status: 'closed',
-        closedBy: user.email,
-        closedAt: now,
-        endDate: dto.endDate ?? now,
-      },
+    const updated = await this.caseCyclesRepository.update(id, {
+      status: 'closed',
+      closedBy: user.email,
+      closedAt: now,
+      endDate: dto.endDate ?? now,
     })
 
     const openCount = existing.cases.filter(c => c.status !== 'closed').length
@@ -675,10 +612,7 @@ export class CaseCyclesService {
       where.id = { not: excludeId }
     }
 
-    const cycles = await this.prisma.caseCycle.findMany({
-      where,
-      select: { id: true, name: true, startDate: true, endDate: true },
-    })
+    const cycles = await this.caseCyclesRepository.findManyForOverlapCheck(where)
 
     for (const cycle of cycles) {
       if (this.datesOverlap(startDate, endDate, cycle.startDate, cycle.endDate)) {

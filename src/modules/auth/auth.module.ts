@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common'
 import { AuthController } from './auth.controller'
+import { AuthRepository } from './auth.repository'
 import { AuthService } from './auth.service'
 import { TokenBlacklistService } from './token-blacklist.service'
 import { AppLogsModule } from '../app-logs/app-logs.module'
@@ -8,7 +9,7 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
 @Module({
   imports: [AppLogsModule],
   controllers: [AuthController],
-  providers: [AuthService, TokenBlacklistService],
+  providers: [AuthRepository, AuthService, TokenBlacklistService],
   exports: [AuthService],
 })
 export class AuthModule {}

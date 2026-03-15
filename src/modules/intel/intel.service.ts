@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { IntelRepository } from './intel.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { MispService } from '../connectors/services/misp.service'
 import type {
@@ -19,7 +19,7 @@ export class IntelService {
   private readonly logger = new Logger(IntelService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly intelRepository: IntelRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly mispService: MispService,
     private readonly appLogger: AppLoggerService
@@ -30,16 +30,8 @@ export class IntelService {
    */
   async getStats(tenantId: string): Promise<IntelStatsResponse> {
     const [iocCounts, threatActorCount] = await Promise.all([
-      this.prisma.intelIOC.groupBy({
-        by: ['iocType'],
-        where: { tenantId, active: true },
-        _count: { id: true },
-      }),
-      this.prisma.intelMispEvent.findMany({
-        where: { tenantId },
-        select: { organization: true },
-        distinct: ['organization'],
-      }),
+      this.intelRepository.groupActiveIOCsByType(tenantId),
+      this.intelRepository.findDistinctOrganizations(tenantId),
     ])
 
     const countByType = new Map<string, number>()
@@ -101,13 +93,13 @@ export class IntelService {
     const where: Prisma.IntelMispEventWhereInput = { tenantId }
 
     const [data, total] = await Promise.all([
-      this.prisma.intelMispEvent.findMany({
+      this.intelRepository.findManyMispEvents({
         where,
         orderBy: this.buildMispOrderBy(sortBy, sortOrder),
         skip: (page - 1) * limit,
         take: limit,
       }),
-      this.prisma.intelMispEvent.count({ where }),
+      this.intelRepository.countMispEvents(where),
     ])
 
     this.appLogger.info('Retrieved recent MISP events', {
@@ -162,13 +154,13 @@ export class IntelService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.intelIOC.findMany({
+      this.intelRepository.findManyIOCs({
         where,
         orderBy: this.buildIOCOrderBy(sortBy, sortOrder),
         skip: (page - 1) * limit,
         take: limit,
       }),
-      this.prisma.intelIOC.count({ where }),
+      this.intelRepository.countIOCs(where),
     ])
 
     this.appLogger.info('Searched IOCs', {
@@ -207,10 +199,7 @@ export class IntelService {
       metadata: { alertCount: alertIds.length },
     })
 
-    const alerts = await this.prisma.alert.findMany({
-      where: { tenantId, id: { in: alertIds } },
-      select: { id: true, sourceIp: true, destinationIp: true },
-    })
+    const alerts = await this.intelRepository.findAlertsByIds(tenantId, alertIds)
 
     // Collect all unique IP addresses from the alerts
     const ipSet = new Set<string>()
@@ -227,15 +216,7 @@ export class IntelService {
 
     // Find IOCs whose values match any of the collected IPs
     const matchingIOCs =
-      ips.length > 0
-        ? await this.prisma.intelIOC.findMany({
-            where: {
-              tenantId,
-              active: true,
-              iocValue: { in: ips },
-            },
-          })
-        : []
+      ips.length > 0 ? await this.intelRepository.findActiveIOCsByValues(tenantId, ips) : []
 
     // Build a lookup map: IP -> IOC records
     const iocByValue = new Map<
@@ -346,7 +327,7 @@ export class IntelService {
       const rawEvents = await this.mispService.getEvents(config, 50)
       const eventUpserts = this.buildEventUpserts(tenantId, rawEvents)
       const eventResults = await Promise.allSettled(
-        eventUpserts.map(upsert => this.prisma.intelMispEvent.upsert(upsert))
+        eventUpserts.map(upsert => this.intelRepository.upsertMispEvent(upsert))
       )
 
       for (const result of eventResults) {
@@ -364,7 +345,7 @@ export class IntelService {
 
       const iocUpserts = this.buildIOCUpserts(tenantId, attributes)
       const iocResults = await Promise.allSettled(
-        iocUpserts.map(upsert => this.prisma.intelIOC.upsert(upsert))
+        iocUpserts.map(upsert => this.intelRepository.upsertIOC(upsert))
       )
 
       for (const result of iocResults) {

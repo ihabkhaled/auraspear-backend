@@ -18,15 +18,15 @@ const mockConfigService = {
   get: jest.fn().mockReturnValue(ENCRYPTION_KEY),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    connectorConfig: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
+    findAllByTenant: jest.fn(),
+    findByTenantAndType: jest.fn(),
+    findEnabledStatus: jest.fn(),
+    findEnabledByTenant: jest.fn(),
+    create: jest.fn(),
+    updateByTenantAndType: jest.fn(),
+    deleteByTenantAndType: jest.fn(),
   }
 }
 
@@ -49,11 +49,11 @@ function buildEncryptedConfig(config: Record<string, unknown>): string {
 }
 
 function createService(
-  prisma: ReturnType<typeof createMockPrisma>,
+  repository: ReturnType<typeof createMockRepository>,
   services: ReturnType<typeof createMockConnectorServices>
 ) {
   return new ConnectorsService(
-    prisma as never,
+    repository as never,
     mockConfigService as never,
     services.wazuh as never,
     services.graylog as never,
@@ -69,15 +69,15 @@ function createService(
 }
 
 describe('ConnectorsService', () => {
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let services: ReturnType<typeof createMockConnectorServices>
   let service: ConnectorsService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     services = createMockConnectorServices()
-    service = createService(prisma, services)
+    service = createService(repository, services)
   })
 
   /* ------------------------------------------------------------------ */
@@ -90,7 +90,7 @@ describe('ConnectorsService', () => {
       expect(
         () =>
           new ConnectorsService(
-            prisma as never,
+            repository as never,
             badConfig as never,
             services.wazuh as never,
             services.graylog as never,
@@ -111,7 +111,7 @@ describe('ConnectorsService', () => {
       expect(
         () =>
           new ConnectorsService(
-            prisma as never,
+            repository as never,
             badConfig as never,
             services.wazuh as never,
             services.graylog as never,
@@ -135,7 +135,7 @@ describe('ConnectorsService', () => {
   describe('findAll', () => {
     it('should return all connectors for a tenant with masked secrets', async () => {
       const config = { baseUrl: 'https://wazuh.local:55000', password: 'secret' }
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findAllByTenant.mockResolvedValue([
         {
           type: 'wazuh',
           name: 'Wazuh',
@@ -157,7 +157,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return empty array when no connectors exist', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([])
+      repository.findAllByTenant.mockResolvedValue([])
 
       const result = await service.findAll(TENANT_ID)
 
@@ -172,7 +172,7 @@ describe('ConnectorsService', () => {
   describe('findByType', () => {
     it('should return connector with masked config', async () => {
       const config = { baseUrl: 'https://grafana.local', apiKey: 'secret-key' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'grafana',
         name: 'Grafana',
         enabled: true,
@@ -191,7 +191,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should throw 404 when connector not found', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findByTenantAndType.mockResolvedValue(null)
 
       await expect(service.findByType(TENANT_ID, 'nonexistent')).rejects.toThrow(BusinessException)
 
@@ -210,8 +210,8 @@ describe('ConnectorsService', () => {
 
   describe('create', () => {
     it('should create a new connector and return masked config', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
-      prisma.connectorConfig.create.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue(null)
+      repository.create.mockResolvedValue({
         type: 'logstash',
         name: 'Logstash',
         enabled: true,
@@ -234,11 +234,11 @@ describe('ConnectorsService', () => {
 
       expect(result.type).toBe('logstash')
       expect(result.name).toBe('Logstash')
-      expect(prisma.connectorConfig.create).toHaveBeenCalled()
+      expect(repository.create).toHaveBeenCalled()
     })
 
     it('should throw 409 when connector already exists', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue({ type: 'wazuh' })
+      repository.findByTenantAndType.mockResolvedValue({ type: 'wazuh' })
 
       const dto = {
         type: 'wazuh',
@@ -266,14 +266,14 @@ describe('ConnectorsService', () => {
   describe('update', () => {
     it('should update connector name and enabled status', async () => {
       const existingConfig = { baseUrl: 'https://wazuh.local', password: 'old-secret' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         name: 'Wazuh',
         enabled: true,
         authType: 'basic',
         encryptedConfig: buildEncryptedConfig(existingConfig),
       })
-      prisma.connectorConfig.update.mockResolvedValue({
+      repository.updateByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         name: 'Wazuh Updated',
         enabled: false,
@@ -291,7 +291,7 @@ describe('ConnectorsService', () => {
 
       expect(result.name).toBe('Wazuh Updated')
       expect(result.enabled).toBe(false)
-      expect(prisma.connectorConfig.update).toHaveBeenCalled()
+      expect(repository.updateByTenantAndType).toHaveBeenCalled()
     })
 
     it('should preserve existing secrets when REDACTED value is sent', async () => {
@@ -300,27 +300,28 @@ describe('ConnectorsService', () => {
         password: 'real-secret',
         username: 'admin',
       }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         name: 'Wazuh',
         enabled: true,
         authType: 'basic',
         encryptedConfig: buildEncryptedConfig(existingConfig),
       })
-      prisma.connectorConfig.update.mockImplementation(async (args: Record<string, unknown>) => {
-        return {
-          type: 'wazuh',
-          name: 'Wazuh',
-          enabled: true,
-          authType: 'basic',
-          encryptedConfig:
-            (args.data as Record<string, unknown>).encryptedConfig ??
-            buildEncryptedConfig(existingConfig),
-          lastTestAt: null,
-          lastTestOk: null,
-          lastError: null,
+      repository.updateByTenantAndType.mockImplementation(
+        async (_tenantId: string, _type: string, data: Record<string, unknown>) => {
+          return {
+            type: 'wazuh',
+            name: 'Wazuh',
+            enabled: true,
+            authType: 'basic',
+            encryptedConfig:
+              (data.encryptedConfig as string) ?? buildEncryptedConfig(existingConfig),
+            lastTestAt: null,
+            lastTestOk: null,
+            lastError: null,
+          }
         }
-      })
+      )
 
       await service.update(TENANT_ID, 'wazuh', {
         config: {
@@ -331,11 +332,11 @@ describe('ConnectorsService', () => {
       } as never)
 
       // Verify that the update was called with encrypted config (not the redacted placeholder)
-      expect(prisma.connectorConfig.update).toHaveBeenCalledWith(
+      expect(repository.updateByTenantAndType).toHaveBeenCalledWith(
+        TENANT_ID,
+        'wazuh',
         expect.objectContaining({
-          data: expect.objectContaining({
-            encryptedConfig: expect.any(String),
-          }),
+          encryptedConfig: expect.any(String),
         })
       )
     })
@@ -347,14 +348,14 @@ describe('ConnectorsService', () => {
         username: 'admin',
         tenant: 'default',
       }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         name: 'Wazuh',
         enabled: true,
         authType: 'basic',
         encryptedConfig: buildEncryptedConfig(existingConfig),
       })
-      prisma.connectorConfig.update.mockResolvedValue({
+      repository.updateByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         name: 'Wazuh',
         enabled: true,
@@ -370,11 +371,11 @@ describe('ConnectorsService', () => {
         config: { baseUrl: 'https://wazuh-new.local' },
       } as never)
 
-      expect(prisma.connectorConfig.update).toHaveBeenCalled()
+      expect(repository.updateByTenantAndType).toHaveBeenCalled()
     })
 
     it('should throw 404 when connector not found for update', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findByTenantAndType.mockResolvedValue(null)
 
       await expect(
         service.update(TENANT_ID, 'nonexistent', { name: 'X' } as never)
@@ -394,21 +395,17 @@ describe('ConnectorsService', () => {
 
   describe('remove', () => {
     it('should delete connector and return confirmation', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue({ type: 'logstash' })
-      prisma.connectorConfig.delete.mockResolvedValue({})
+      repository.findByTenantAndType.mockResolvedValue({ type: 'logstash' })
+      repository.deleteByTenantAndType.mockResolvedValue({})
 
       const result = await service.remove(TENANT_ID, 'logstash')
 
       expect(result.deleted).toBe(true)
-      expect(prisma.connectorConfig.delete).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { tenantId_type: { tenantId: TENANT_ID, type: 'logstash' } },
-        })
-      )
+      expect(repository.deleteByTenantAndType).toHaveBeenCalledWith(TENANT_ID, 'logstash')
     })
 
     it('should throw 404 when connector not found for removal', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findByTenantAndType.mockResolvedValue(null)
 
       await expect(service.remove(TENANT_ID, 'nonexistent')).rejects.toThrow(BusinessException)
 
@@ -427,20 +424,18 @@ describe('ConnectorsService', () => {
 
   describe('toggle', () => {
     it('should enable a connector', async () => {
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
 
       const result = await service.toggle(TENANT_ID, 'wazuh', true)
 
       expect(result).toEqual({ type: 'wazuh', enabled: true })
-      expect(prisma.connectorConfig.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { enabled: true },
-        })
-      )
+      expect(repository.updateByTenantAndType).toHaveBeenCalledWith(TENANT_ID, 'wazuh', {
+        enabled: true,
+      })
     })
 
     it('should disable a connector', async () => {
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
 
       const result = await service.toggle(TENANT_ID, 'wazuh', false)
 
@@ -455,11 +450,11 @@ describe('ConnectorsService', () => {
   describe('testConnection', () => {
     it('should test wazuh connection and return success result', async () => {
       const config = { baseUrl: 'https://wazuh.local', username: 'admin', password: 'secret' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.wazuh.testConnection.mockResolvedValue({
         ok: true,
         details: 'Wazuh v4.9.0 reachable',
@@ -476,11 +471,11 @@ describe('ConnectorsService', () => {
 
     it('should test graylog connection', async () => {
       const config = { baseUrl: 'https://graylog.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'graylog',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.graylog.testConnection.mockResolvedValue({
         ok: true,
         details: 'Graylog reachable',
@@ -493,11 +488,11 @@ describe('ConnectorsService', () => {
 
     it('should handle failed connection test', async () => {
       const config = { baseUrl: 'https://wazuh.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.wazuh.testConnection.mockResolvedValue({
         ok: false,
         details: 'Connection refused',
@@ -511,11 +506,11 @@ describe('ConnectorsService', () => {
 
     it('should handle exceptions during connection test', async () => {
       const config = { baseUrl: 'https://wazuh.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.wazuh.testConnection.mockRejectedValue(new Error('self-signed certificate'))
 
       const result = await service.testConnection(TENANT_ID, 'wazuh')
@@ -525,7 +520,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should throw 404 when connector not found for test', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findByTenantAndType.mockResolvedValue(null)
 
       await expect(service.testConnection(TENANT_ID, 'nonexistent')).rejects.toThrow(
         BusinessException
@@ -534,11 +529,11 @@ describe('ConnectorsService', () => {
 
     it('should update lastTestAt and lastTestOk after test', async () => {
       const config = { baseUrl: 'https://wazuh.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.wazuh.testConnection.mockResolvedValue({
         ok: true,
         details: 'OK',
@@ -546,24 +541,24 @@ describe('ConnectorsService', () => {
 
       await service.testConnection(TENANT_ID, 'wazuh')
 
-      expect(prisma.connectorConfig.update).toHaveBeenCalledWith(
+      expect(repository.updateByTenantAndType).toHaveBeenCalledWith(
+        TENANT_ID,
+        'wazuh',
         expect.objectContaining({
-          data: expect.objectContaining({
-            lastTestOk: true,
-            lastTestAt: expect.any(Date),
-            lastError: null,
-          }),
+          lastTestOk: true,
+          lastTestAt: expect.any(Date),
+          lastError: null,
         })
       )
     })
 
     it('should save error details when test fails', async () => {
       const config = { baseUrl: 'https://wazuh.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'wazuh',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
       services.wazuh.testConnection.mockResolvedValue({
         ok: false,
         details: 'Authentication failed',
@@ -571,23 +566,23 @@ describe('ConnectorsService', () => {
 
       await service.testConnection(TENANT_ID, 'wazuh')
 
-      expect(prisma.connectorConfig.update).toHaveBeenCalledWith(
+      expect(repository.updateByTenantAndType).toHaveBeenCalledWith(
+        TENANT_ID,
+        'wazuh',
         expect.objectContaining({
-          data: expect.objectContaining({
-            lastTestOk: false,
-            lastError: 'Authentication failed',
-          }),
+          lastTestOk: false,
+          lastError: 'Authentication failed',
         })
       )
     })
 
     it('should handle unknown connector type gracefully', async () => {
       const config = { baseUrl: 'https://unknown.local' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         type: 'unknown',
         encryptedConfig: buildEncryptedConfig(config),
       })
-      prisma.connectorConfig.update.mockResolvedValue({})
+      repository.updateByTenantAndType.mockResolvedValue({})
 
       const result = await service.testConnection(TENANT_ID, 'unknown')
 
@@ -610,11 +605,11 @@ describe('ConnectorsService', () => {
 
       for (const connectorType of types) {
         const config = { baseUrl: 'https://test.local' }
-        prisma.connectorConfig.findUnique.mockResolvedValue({
+        repository.findByTenantAndType.mockResolvedValue({
           type: connectorType,
           encryptedConfig: buildEncryptedConfig(config),
         })
-        prisma.connectorConfig.update.mockResolvedValue({})
+        repository.updateByTenantAndType.mockResolvedValue({})
         services[connectorType].testConnection.mockResolvedValue({
           ok: true,
           details: 'OK',
@@ -635,7 +630,7 @@ describe('ConnectorsService', () => {
   describe('getDecryptedConfig', () => {
     it('should return decrypted config for enabled connector', async () => {
       const config = { baseUrl: 'https://wazuh.local', password: 'secret' }
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         enabled: true,
         encryptedConfig: buildEncryptedConfig(config),
       })
@@ -646,7 +641,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return null for disabled connector', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue({
+      repository.findByTenantAndType.mockResolvedValue({
         enabled: false,
         encryptedConfig: buildEncryptedConfig({}),
       })
@@ -657,7 +652,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return null when connector does not exist', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findByTenantAndType.mockResolvedValue(null)
 
       const result = await service.getDecryptedConfig(TENANT_ID, 'nonexistent')
 
@@ -671,7 +666,7 @@ describe('ConnectorsService', () => {
 
   describe('isEnabled', () => {
     it('should return true for enabled connector', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue({ enabled: true })
+      repository.findEnabledStatus.mockResolvedValue({ enabled: true })
 
       const result = await service.isEnabled(TENANT_ID, 'wazuh')
 
@@ -679,7 +674,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return false for disabled connector', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue({ enabled: false })
+      repository.findEnabledStatus.mockResolvedValue({ enabled: false })
 
       const result = await service.isEnabled(TENANT_ID, 'wazuh')
 
@@ -687,7 +682,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return false when connector does not exist', async () => {
-      prisma.connectorConfig.findUnique.mockResolvedValue(null)
+      repository.findEnabledStatus.mockResolvedValue(null)
 
       const result = await service.isEnabled(TENANT_ID, 'nonexistent')
 
@@ -701,7 +696,7 @@ describe('ConnectorsService', () => {
 
   describe('getEnabledConnectors', () => {
     it('should return list of enabled connectors', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findEnabledByTenant.mockResolvedValue([
         { type: 'wazuh', name: 'Wazuh' },
         { type: 'grafana', name: 'Grafana' },
       ])
@@ -713,7 +708,7 @@ describe('ConnectorsService', () => {
     })
 
     it('should return empty array when no connectors are enabled', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([])
+      repository.findEnabledByTenant.mockResolvedValue([])
 
       const result = await service.getEnabledConnectors(TENANT_ID)
 

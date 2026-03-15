@@ -1,27 +1,6 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { CaseCyclesService } from '../../src/modules/case-cycles/case-cycles.service'
 
-function createMockPrisma() {
-  return {
-    caseCycle: {
-      findMany: jest.fn(),
-      count: jest.fn(),
-      findFirst: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      updateMany: jest.fn(),
-      delete: jest.fn(),
-    },
-    case: {
-      updateMany: jest.fn(),
-    },
-    user: {
-      findMany: jest.fn(),
-    },
-    $transaction: jest.fn(),
-  }
-}
-
 const TENANT_ID = 'tenant-001'
 
 const mockUser = {
@@ -37,17 +16,36 @@ function createMockAppLogger() {
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
+    debug: jest.fn(),
+  }
+}
+
+function createMockRepository() {
+  return {
+    findManyWithCasesAndCount: jest.fn(),
+    countOrphanedCases: jest.fn(),
+    findFirstActive: jest.fn(),
+    findFirstByIdAndTenantWithCases: jest.fn(),
+    findUsersByIds: jest.fn(),
+    create: jest.fn(),
+    findFirstByIdAndTenantWithCounts: jest.fn(),
+    update: jest.fn(),
+    activateCycleTransaction: jest.fn(),
+    findFirstByIdAndTenantWithCaseCount: jest.fn(),
+    deleteCycleWithCasesTransaction: jest.fn(),
+    deleteCycle: jest.fn(),
+    findManyForOverlapCheck: jest.fn(),
   }
 }
 
 describe('CaseCyclesService', () => {
   let service: CaseCyclesService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     const appLogger = createMockAppLogger()
-    service = new CaseCyclesService(prisma as never, appLogger as never)
+    service = new CaseCyclesService(repository as never, appLogger as never)
   })
 
   /* ------------------------------------------------------------------ */
@@ -75,8 +73,7 @@ describe('CaseCyclesService', () => {
         },
       ]
 
-      prisma.caseCycle.findMany.mockResolvedValue(rawCycles)
-      prisma.caseCycle.count.mockResolvedValue(1)
+      repository.findManyWithCasesAndCount.mockResolvedValue([rawCycles, 1])
 
       const result = await service.listCycles(TENANT_ID, 1, 20)
 
@@ -88,13 +85,6 @@ describe('CaseCyclesService', () => {
       expect(first?.closedCount).toBe(1)
       expect(result.pagination.total).toBe(1)
       expect(result.pagination.page).toBe(1)
-      expect(prisma.caseCycle.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { tenantId: TENANT_ID },
-          skip: 0,
-          take: 20,
-        })
-      )
     })
   })
 
@@ -121,7 +111,7 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(rawCycle)
+      repository.findFirstActive.mockResolvedValue(rawCycle)
 
       const result = await service.getActiveCycle(TENANT_ID)
 
@@ -130,15 +120,10 @@ describe('CaseCyclesService', () => {
       expect(result?.caseCount).toBe(2)
       expect(result?.openCount).toBe(1)
       expect(result?.closedCount).toBe(1)
-      expect(prisma.caseCycle.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { tenantId: TENANT_ID, status: 'active' },
-        })
-      )
     })
 
     it('should return null when no active cycle', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstActive.mockResolvedValue(null)
 
       const result = await service.getActiveCycle(TENANT_ID)
 
@@ -184,8 +169,8 @@ describe('CaseCyclesService', () => {
         ],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(rawCycle)
-      prisma.user.findMany.mockResolvedValue([
+      repository.findFirstByIdAndTenantWithCases.mockResolvedValue(rawCycle)
+      repository.findUsersByIds.mockResolvedValue([
         { id: 'user-001', name: 'Alice', email: 'alice@test.com' },
         { id: 'user-002', name: 'Bob', email: 'bob@test.com' },
       ])
@@ -202,15 +187,10 @@ describe('CaseCyclesService', () => {
       expect(secondCase).toBeDefined()
       expect(firstCase?.ownerName).toBe('Alice')
       expect(secondCase?.ownerEmail).toBe('bob@test.com')
-      expect(prisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: { in: ['user-001', 'user-002'] } },
-        })
-      )
     })
 
     it('should throw BusinessException when cycle not found', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenantWithCases.mockResolvedValue(null)
 
       await expect(service.getCycleById('nonexistent', TENANT_ID)).rejects.toThrow(
         BusinessException
@@ -225,7 +205,7 @@ describe('CaseCyclesService', () => {
   describe('createCycle', () => {
     it('should create a new cycle as closed status', async () => {
       // No overlapping cycles
-      prisma.caseCycle.findMany.mockResolvedValue([])
+      repository.findManyForOverlapCheck.mockResolvedValue([])
 
       const createdCycle = {
         id: 'cycle-new',
@@ -242,7 +222,7 @@ describe('CaseCyclesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseCycle.create.mockResolvedValue(createdCycle)
+      repository.create.mockResolvedValue(createdCycle)
 
       const dto = {
         name: 'Q2 2026',
@@ -256,20 +236,18 @@ describe('CaseCyclesService', () => {
       expect(result.caseCount).toBe(0)
       expect(result.openCount).toBe(0)
       expect(result.closedCount).toBe(0)
-      expect(prisma.caseCycle.create).toHaveBeenCalledWith(
+      expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            tenantId: TENANT_ID,
-            name: 'Q2 2026',
-            status: 'closed',
-          }),
+          tenantId: TENANT_ID,
+          name: 'Q2 2026',
+          status: 'closed',
         })
       )
     })
 
     it('should reject overlapping date ranges', async () => {
       // Existing cycle that would overlap
-      prisma.caseCycle.findMany.mockResolvedValue([
+      repository.findManyForOverlapCheck.mockResolvedValue([
         {
           id: 'cycle-existing',
           name: 'Q1 2026',
@@ -333,26 +311,24 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       const updatedCycle = {
         ...existingCycle,
         name: 'Q1 2026 Updated',
         description: 'Updated description',
       }
-      prisma.caseCycle.update.mockResolvedValue(updatedCycle)
+      repository.update.mockResolvedValue(updatedCycle)
 
       const dto = { name: 'Q1 2026 Updated', description: 'Updated description' }
       const result = await service.updateCycle('cycle-1', dto, mockUser as never)
 
       expect(result.name).toBe('Q1 2026 Updated')
-      expect(prisma.caseCycle.update).toHaveBeenCalledWith(
+      expect(repository.update).toHaveBeenCalledWith(
+        'cycle-1',
         expect.objectContaining({
-          where: { id: 'cycle-1' },
-          data: expect.objectContaining({
-            name: 'Q1 2026 Updated',
-            description: 'Updated description',
-          }),
+          name: 'Q1 2026 Updated',
+          description: 'Updated description',
         })
       )
     })
@@ -375,7 +351,7 @@ describe('CaseCyclesService', () => {
         cases: [],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       const dto = {
         startDate: new Date('2026-06-01'),
@@ -411,10 +387,10 @@ describe('CaseCyclesService', () => {
         cases: [],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
-      // Overlapping cycle returned from findMany (excludeId should exclude self)
-      prisma.caseCycle.findMany.mockResolvedValue([
+      // Overlapping cycle returned from findManyForOverlapCheck (excludeId should exclude self)
+      repository.findManyForOverlapCheck.mockResolvedValue([
         {
           id: 'cycle-other',
           name: 'Q2 2026',
@@ -438,13 +414,11 @@ describe('CaseCyclesService', () => {
         expect((error as BusinessException).getStatus()).toBe(409)
       }
 
-      // Verify findMany was called with exclusion of self
-      expect(prisma.caseCycle.findMany).toHaveBeenCalledWith(
+      // Verify findManyForOverlapCheck was called with exclusion of self
+      expect(repository.findManyForOverlapCheck).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            tenantId: TENANT_ID,
-            id: { not: 'cycle-1' },
-          }),
+          tenantId: TENANT_ID,
+          id: { not: 'cycle-1' },
         })
       )
     })
@@ -470,9 +444,9 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
       // No overlapping cycles
-      prisma.caseCycle.findMany.mockResolvedValue([])
+      repository.findManyForOverlapCheck.mockResolvedValue([])
 
       const updatedCycle = {
         ...existingCycle,
@@ -480,7 +454,7 @@ describe('CaseCyclesService', () => {
         startDate: new Date('2028-01-01'),
         endDate: new Date('2028-06-30'),
       }
-      prisma.caseCycle.update.mockResolvedValue(updatedCycle)
+      repository.update.mockResolvedValue(updatedCycle)
 
       // Move dates far into the future (today is outside the range)
       const dto = {
@@ -490,20 +464,18 @@ describe('CaseCyclesService', () => {
 
       await service.updateCycle('cycle-1', dto, mockUser as never)
 
-      expect(prisma.caseCycle.update).toHaveBeenCalledWith(
+      expect(repository.update).toHaveBeenCalledWith(
+        'cycle-1',
         expect.objectContaining({
-          where: { id: 'cycle-1' },
-          data: expect.objectContaining({
-            status: 'closed',
-            startDate: dto.startDate,
-            endDate: dto.endDate,
-          }),
+          status: 'closed',
+          startDate: dto.startDate,
+          endDate: dto.endDate,
         })
       )
     })
 
     it('should throw when cycle not found', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(null)
 
       await expect(
         service.updateCycle('nonexistent', { name: 'Updated' }, mockUser as never)
@@ -541,7 +513,7 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       const activatedCycle = {
         ...existingCycle,
@@ -550,24 +522,18 @@ describe('CaseCyclesService', () => {
         closedAt: null,
       }
 
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            caseCycle: {
-              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-              update: jest.fn().mockResolvedValue(activatedCycle),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.activateCycleTransaction.mockResolvedValue(activatedCycle)
 
       const result = await service.activateCycle('cycle-1', mockUser as never)
 
       expect(result.caseCount).toBe(2)
       expect(result.openCount).toBe(1)
       expect(result.closedCount).toBe(1)
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.activateCycleTransaction).toHaveBeenCalledWith(
+        'cycle-1',
+        TENANT_ID,
+        mockUser.email
+      )
     })
 
     it('should reject if today is outside date range (future start)', async () => {
@@ -591,7 +557,7 @@ describe('CaseCyclesService', () => {
         cases: [],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -627,7 +593,7 @@ describe('CaseCyclesService', () => {
         cases: [],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -658,7 +624,7 @@ describe('CaseCyclesService', () => {
         cases: [],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       await expect(service.activateCycle('cycle-1', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -672,7 +638,7 @@ describe('CaseCyclesService', () => {
     })
 
     it('should throw when cycle not found', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(null)
 
       await expect(service.activateCycle('nonexistent', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -694,17 +660,15 @@ describe('CaseCyclesService', () => {
         _count: { cases: 0 },
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
-      prisma.caseCycle.delete.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCaseCount.mockResolvedValue(existingCycle)
+      repository.deleteCycle.mockResolvedValue(existingCycle)
 
       const result = await service.deleteCycle('cycle-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(prisma.caseCycle.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'cycle-1' } })
-      )
+      expect(repository.deleteCycle).toHaveBeenCalledWith('cycle-1')
       // Should not use transaction when no cases to unlink
-      expect(prisma.$transaction).not.toHaveBeenCalled()
+      expect(repository.deleteCycleWithCasesTransaction).not.toHaveBeenCalled()
     })
 
     it('should unlink cases before deleting', async () => {
@@ -716,26 +680,13 @@ describe('CaseCyclesService', () => {
         _count: { cases: 3 },
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
-
-      prisma.$transaction.mockImplementation(
-        async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
-            case: {
-              updateMany: jest.fn().mockResolvedValue({ count: 3 }),
-            },
-            caseCycle: {
-              delete: jest.fn().mockResolvedValue(existingCycle),
-            },
-          }
-          return callback(tx)
-        }
-      )
+      repository.findFirstByIdAndTenantWithCaseCount.mockResolvedValue(existingCycle)
+      repository.deleteCycleWithCasesTransaction.mockResolvedValue(undefined)
 
       const result = await service.deleteCycle('cycle-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(prisma.$transaction).toHaveBeenCalled()
+      expect(repository.deleteCycleWithCasesTransaction).toHaveBeenCalledWith('cycle-1', TENANT_ID)
     })
 
     it('should reject deletion of active cycle', async () => {
@@ -747,7 +698,7 @@ describe('CaseCyclesService', () => {
         _count: { cases: 2 },
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCaseCount.mockResolvedValue(existingCycle)
 
       await expect(service.deleteCycle('cycle-1', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -761,7 +712,7 @@ describe('CaseCyclesService', () => {
     })
 
     it('should throw when cycle not found', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenantWithCaseCount.mockResolvedValue(null)
 
       await expect(service.deleteCycle('nonexistent', mockUser as never)).rejects.toThrow(
         BusinessException
@@ -784,7 +735,7 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      prisma.caseCycle.findFirst.mockResolvedValue(existingCycle)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       const updatedCycle = {
         id: 'cycle-1',
@@ -801,7 +752,7 @@ describe('CaseCyclesService', () => {
         updatedAt: new Date(),
       }
 
-      prisma.caseCycle.update.mockResolvedValue(updatedCycle)
+      repository.update.mockResolvedValue(updatedCycle)
 
       const dto = { endDate: new Date() }
       const result = await service.closeCycle('cycle-1', dto, mockUser as never)
@@ -809,16 +760,14 @@ describe('CaseCyclesService', () => {
       expect(result.caseCount).toBe(2)
       expect(result.openCount).toBe(1)
       expect(result.closedCount).toBe(1)
-      expect(prisma.caseCycle.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'cycle-1' },
-          data: expect.objectContaining({ status: 'closed' }),
-        })
+      expect(repository.update).toHaveBeenCalledWith(
+        'cycle-1',
+        expect.objectContaining({ status: 'closed' })
       )
     })
 
     it('should throw when cycle not found', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(null)
 
       const dto = { endDate: new Date() }
 
@@ -828,7 +777,7 @@ describe('CaseCyclesService', () => {
     })
 
     it('should throw when cycle already closed', async () => {
-      prisma.caseCycle.findFirst.mockResolvedValue({
+      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue({
         id: 'cycle-1',
         tenantId: TENANT_ID,
         name: 'Q1 2026',

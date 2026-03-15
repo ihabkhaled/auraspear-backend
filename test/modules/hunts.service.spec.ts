@@ -9,20 +9,18 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    huntSession: {
-      create: jest.fn(),
-      findMany: jest.fn(),
-      findFirst: jest.fn(),
-      count: jest.fn(),
-      update: jest.fn(),
-    },
-    huntEvent: {
-      createMany: jest.fn(),
-      findMany: jest.fn(),
-      count: jest.fn(),
-    },
+    createSession: jest.fn(),
+    updateSessionStatus: jest.fn(),
+    updateSessionCompletedWithEvents: jest.fn(),
+    createManyEvents: jest.fn(),
+    findSessionsPaginated: jest.fn(),
+    countSessions: jest.fn(),
+    findSessionByIdAndTenant: jest.fn(),
+    findSessionExistsByIdAndTenant: jest.fn(),
+    findEventsPaginated: jest.fn(),
+    countEvents: jest.fn(),
   }
 }
 
@@ -34,7 +32,7 @@ function createMockConnectorsService() {
 
 function createMockWazuhService() {
   return {
-    searchAlerts: jest.fn(),
+    searchAllAlerts: jest.fn(),
   }
 }
 
@@ -43,16 +41,16 @@ const USER_EMAIL = 'analyst@auraspear.com'
 
 describe('HuntsService', () => {
   let service: HuntsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
   let connectorsService: ReturnType<typeof createMockConnectorsService>
   let wazuhService: ReturnType<typeof createMockWazuhService>
 
   beforeEach(() => {
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     connectorsService = createMockConnectorsService()
     wazuhService = createMockWazuhService()
     service = new HuntsService(
-      prisma as never,
+      repository as never,
       connectorsService as never,
       wazuhService as never,
       mockAppLogger as never
@@ -81,7 +79,7 @@ describe('HuntsService', () => {
     }
 
     it('should create session, query Wazuh, extract events, and update status to completed', async () => {
-      prisma.huntSession.create.mockResolvedValueOnce(mockSession)
+      repository.createSession.mockResolvedValueOnce(mockSession)
       connectorsService.getDecryptedConfig.mockResolvedValueOnce({
         indexerUrl: 'https://wazuh.local:9200',
         indexerUsername: 'admin',
@@ -111,12 +109,12 @@ describe('HuntsService', () => {
         },
       ]
 
-      wazuhService.searchAlerts.mockResolvedValueOnce({
+      wazuhService.searchAllAlerts.mockResolvedValueOnce({
         hits: wazuhHits,
         total: 2,
       })
 
-      prisma.huntEvent.createMany.mockResolvedValueOnce({ count: 2 })
+      repository.createManyEvents.mockResolvedValueOnce(undefined)
 
       const updatedSession = {
         ...mockSession,
@@ -125,20 +123,18 @@ describe('HuntsService', () => {
         eventsFound: 2,
         events: [],
       }
-      prisma.huntSession.update.mockResolvedValueOnce(updatedSession)
+      repository.updateSessionCompletedWithEvents.mockResolvedValueOnce(updatedSession)
 
       const result = await service.runHunt(TENANT_ID, dto, USER_EMAIL)
 
       // Verify session creation
-      expect(prisma.huntSession.create).toHaveBeenCalledWith({
-        data: {
-          tenantId: TENANT_ID,
-          query: dto.query,
-          status: 'running',
-          startedBy: USER_EMAIL,
-          timeRange: dto.timeRange,
-          reasoning: ['Querying Wazuh Indexer for matching events'],
-        },
+      expect(repository.createSession).toHaveBeenCalledWith({
+        tenantId: TENANT_ID,
+        query: dto.query,
+        status: 'running',
+        startedBy: USER_EMAIL,
+        timeRange: dto.timeRange,
+        reasoning: ['Querying Wazuh Indexer for matching events'],
       })
 
       // Verify Wazuh connector config was fetched
@@ -148,11 +144,11 @@ describe('HuntsService', () => {
       )
 
       // Verify Wazuh was queried
-      expect(wazuhService.searchAlerts).toHaveBeenCalled()
+      expect(wazuhService.searchAllAlerts).toHaveBeenCalled()
 
       // Verify events were stored
-      expect(prisma.huntEvent.createMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
+      expect(repository.createManyEvents).toHaveBeenCalledWith(
+        expect.arrayContaining([
           expect.objectContaining({
             huntSessionId: sessionId,
             eventId: 'event-001',
@@ -168,29 +164,25 @@ describe('HuntsService', () => {
             sourceIp: '10.0.0.5',
             user: 'admin',
           }),
-        ]),
-      })
+        ])
+      )
 
       // Verify session was updated to completed
-      expect(prisma.huntSession.update).toHaveBeenCalledWith({
-        where: { id: sessionId },
-        data: expect.objectContaining({
+      expect(repository.updateSessionCompletedWithEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: sessionId,
           status: 'completed',
           eventsFound: 2,
-        }),
-        include: { events: true },
-      })
+        })
+      )
 
       expect(result.status).toBe('completed')
     })
 
     it('should throw 422 when Wazuh connector is not configured', async () => {
-      prisma.huntSession.create.mockResolvedValueOnce(mockSession)
+      repository.createSession.mockResolvedValueOnce(mockSession)
       connectorsService.getDecryptedConfig.mockResolvedValueOnce(null)
-      prisma.huntSession.update.mockResolvedValueOnce({
-        ...mockSession,
-        status: 'error',
-      })
+      repository.updateSessionStatus.mockResolvedValueOnce(undefined)
 
       try {
         await service.runHunt(TENANT_ID, dto, USER_EMAIL)
@@ -204,40 +196,31 @@ describe('HuntsService', () => {
       }
 
       // Verify session was updated to error before throwing
-      expect(prisma.huntSession.update).toHaveBeenCalledWith(
+      expect(repository.updateSessionStatus).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'error' }),
+          status: 'error',
         })
       )
     })
 
     it('should update session to ERROR when Wazuh query fails', async () => {
-      prisma.huntSession.create.mockResolvedValueOnce(mockSession)
+      repository.createSession.mockResolvedValueOnce(mockSession)
       connectorsService.getDecryptedConfig.mockResolvedValueOnce({
         indexerUrl: 'https://wazuh.local:9200',
         indexerUsername: 'admin',
         indexerPassword: 'secret',
       })
-      wazuhService.searchAlerts.mockRejectedValueOnce(
+      wazuhService.searchAllAlerts.mockRejectedValueOnce(
         new Error('Wazuh Indexer search failed: status 503')
       )
-      prisma.huntSession.update.mockResolvedValueOnce({
-        ...mockSession,
-        status: 'error',
-        reasoning: [
-          'Querying Wazuh Indexer for matching events',
-          'Query failed: Wazuh Indexer search failed: status 503',
-        ],
-      })
+      repository.updateSessionStatus.mockResolvedValueOnce(undefined)
 
       await expect(service.runHunt(TENANT_ID, dto, USER_EMAIL)).rejects.toThrow(BusinessException)
 
-      expect(prisma.huntSession.update).toHaveBeenCalledWith(
+      expect(repository.updateSessionStatus).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            status: 'error',
-            reasoning: expect.arrayContaining([expect.stringContaining('Query failed')]),
-          }),
+          status: 'error',
+          reasoning: expect.arrayContaining([expect.stringContaining('Query failed')]),
         })
       )
     })
@@ -245,7 +228,7 @@ describe('HuntsService', () => {
     it('should sanitize dangerous queries with script injection patterns', async () => {
       const maliciousDto = { query: 'script alert("xss")', timeRange: '24h' as const }
 
-      prisma.huntSession.create.mockResolvedValueOnce({
+      repository.createSession.mockResolvedValueOnce({
         ...mockSession,
         query: maliciousDto.query,
       })
@@ -254,11 +237,11 @@ describe('HuntsService', () => {
         indexerUsername: 'admin',
         indexerPassword: 'secret',
       })
-      wazuhService.searchAlerts.mockResolvedValueOnce({
+      wazuhService.searchAllAlerts.mockResolvedValueOnce({
         hits: [],
         total: 0,
       })
-      prisma.huntSession.update.mockResolvedValueOnce({
+      repository.updateSessionCompletedWithEvents.mockResolvedValueOnce({
         ...mockSession,
         status: 'completed',
         eventsFound: 0,
@@ -268,7 +251,7 @@ describe('HuntsService', () => {
       await service.runHunt(TENANT_ID, maliciousDto, USER_EMAIL)
 
       // Verify Wazuh was called with sanitized query (script keyword removed)
-      const searchCall = wazuhService.searchAlerts.mock.calls[0]
+      const searchCall = wazuhService.searchAllAlerts.mock.calls[0]
       const esQuery = searchCall[1] as Record<string, unknown>
       const boolQuery = (esQuery.query as Record<string, unknown>).bool as Record<string, unknown>
       const must = boolQuery.must as Array<Record<string, unknown>>
@@ -281,7 +264,7 @@ describe('HuntsService', () => {
       // A query that becomes empty after sanitization
       const emptyAfterSanitizeDto = { query: 'script', timeRange: '24h' as const }
 
-      prisma.huntSession.create.mockResolvedValueOnce({
+      repository.createSession.mockResolvedValueOnce({
         ...mockSession,
         query: emptyAfterSanitizeDto.query,
       })
@@ -296,18 +279,18 @@ describe('HuntsService', () => {
       )
     })
 
-    it('should handle zero events from Wazuh without calling createMany', async () => {
-      prisma.huntSession.create.mockResolvedValueOnce(mockSession)
+    it('should handle zero events from Wazuh without calling createManyEvents', async () => {
+      repository.createSession.mockResolvedValueOnce(mockSession)
       connectorsService.getDecryptedConfig.mockResolvedValueOnce({
         indexerUrl: 'https://wazuh.local:9200',
         indexerUsername: 'admin',
         indexerPassword: 'secret',
       })
-      wazuhService.searchAlerts.mockResolvedValueOnce({
+      wazuhService.searchAllAlerts.mockResolvedValueOnce({
         hits: [],
         total: 0,
       })
-      prisma.huntSession.update.mockResolvedValueOnce({
+      repository.updateSessionCompletedWithEvents.mockResolvedValueOnce({
         ...mockSession,
         status: 'completed',
         eventsFound: 0,
@@ -316,7 +299,7 @@ describe('HuntsService', () => {
 
       await service.runHunt(TENANT_ID, dto, USER_EMAIL)
 
-      expect(prisma.huntEvent.createMany).not.toHaveBeenCalled()
+      expect(repository.createManyEvents).not.toHaveBeenCalled()
     })
   })
 
@@ -351,8 +334,8 @@ describe('HuntsService', () => {
         },
       ]
 
-      prisma.huntSession.findMany.mockResolvedValueOnce(sessions)
-      prisma.huntSession.count.mockResolvedValueOnce(2)
+      repository.findSessionsPaginated.mockResolvedValueOnce(sessions)
+      repository.countSessions.mockResolvedValueOnce(2)
 
       const result = await service.listRuns(TENANT_ID, 1, 10)
 
@@ -366,17 +349,12 @@ describe('HuntsService', () => {
         hasPrev: false,
       })
 
-      expect(prisma.huntSession.findMany).toHaveBeenCalledWith({
-        where: { tenantId: TENANT_ID },
-        orderBy: { startedAt: 'desc' },
-        skip: 0,
-        take: 10,
-      })
+      expect(repository.findSessionsPaginated).toHaveBeenCalledWith(TENANT_ID, 0, 10)
     })
 
     it('should handle empty list', async () => {
-      prisma.huntSession.findMany.mockResolvedValueOnce([])
-      prisma.huntSession.count.mockResolvedValueOnce(0)
+      repository.findSessionsPaginated.mockResolvedValueOnce([])
+      repository.countSessions.mockResolvedValueOnce(0)
 
       const result = await service.listRuns(TENANT_ID, 1, 10)
 
@@ -388,7 +366,7 @@ describe('HuntsService', () => {
     })
 
     it('should calculate pagination correctly for page 2', async () => {
-      prisma.huntSession.findMany.mockResolvedValueOnce([
+      repository.findSessionsPaginated.mockResolvedValueOnce([
         {
           id: 'session-003',
           tenantId: TENANT_ID,
@@ -401,7 +379,7 @@ describe('HuntsService', () => {
           reasoning: [],
         },
       ])
-      prisma.huntSession.count.mockResolvedValueOnce(15)
+      repository.countSessions.mockResolvedValueOnce(15)
 
       const result = await service.listRuns(TENANT_ID, 2, 10)
 
@@ -414,12 +392,7 @@ describe('HuntsService', () => {
         hasPrev: true,
       })
 
-      expect(prisma.huntSession.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          skip: 10,
-          take: 10,
-        })
-      )
+      expect(repository.findSessionsPaginated).toHaveBeenCalledWith(TENANT_ID, 10, 10)
     })
   })
 
@@ -463,20 +436,17 @@ describe('HuntsService', () => {
         ],
       }
 
-      prisma.huntSession.findFirst.mockResolvedValueOnce(sessionWithEvents)
+      repository.findSessionByIdAndTenant.mockResolvedValueOnce(sessionWithEvents)
 
       const result = await service.getRun(TENANT_ID, 'session-001')
 
       expect(result.id).toBe('session-001')
       expect(result.events).toHaveLength(2)
-      expect(prisma.huntSession.findFirst).toHaveBeenCalledWith({
-        where: { id: 'session-001', tenantId: TENANT_ID },
-        include: { events: true },
-      })
+      expect(repository.findSessionByIdAndTenant).toHaveBeenCalledWith('session-001', TENANT_ID)
     })
 
     it('should throw 404 when session is not found', async () => {
-      prisma.huntSession.findFirst.mockResolvedValueOnce(null)
+      repository.findSessionByIdAndTenant.mockResolvedValueOnce(null)
 
       await expect(service.getRun(TENANT_ID, 'nonexistent-id')).rejects.toThrow(BusinessException)
       await expect(service.getRun(TENANT_ID, 'nonexistent-id')).rejects.toMatchObject({
@@ -491,7 +461,7 @@ describe('HuntsService', () => {
 
   describe('getEvents', () => {
     it('should return paginated events', async () => {
-      prisma.huntSession.findFirst.mockResolvedValueOnce({ id: 'session-001' })
+      repository.findSessionExistsByIdAndTenant.mockResolvedValueOnce({ id: 'session-001' })
 
       const events = [
         {
@@ -516,8 +486,8 @@ describe('HuntsService', () => {
         },
       ]
 
-      prisma.huntEvent.findMany.mockResolvedValueOnce(events)
-      prisma.huntEvent.count.mockResolvedValueOnce(2)
+      repository.findEventsPaginated.mockResolvedValueOnce(events)
+      repository.countEvents.mockResolvedValueOnce(2)
 
       const result = await service.getEvents(TENANT_ID, 'session-001', 1, 10)
 
@@ -531,16 +501,11 @@ describe('HuntsService', () => {
         hasPrev: false,
       })
 
-      expect(prisma.huntEvent.findMany).toHaveBeenCalledWith({
-        where: { huntSessionId: 'session-001' },
-        orderBy: { timestamp: 'desc' },
-        skip: 0,
-        take: 10,
-      })
+      expect(repository.findEventsPaginated).toHaveBeenCalledWith('session-001', 0, 10)
     })
 
     it('should throw 404 when session is not found', async () => {
-      prisma.huntSession.findFirst.mockResolvedValueOnce(null)
+      repository.findSessionExistsByIdAndTenant.mockResolvedValueOnce(null)
 
       await expect(service.getEvents(TENANT_ID, 'nonexistent-session', 1, 10)).rejects.toThrow(
         BusinessException
@@ -554,8 +519,8 @@ describe('HuntsService', () => {
     })
 
     it('should handle pagination for page 2 of events', async () => {
-      prisma.huntSession.findFirst.mockResolvedValueOnce({ id: 'session-001' })
-      prisma.huntEvent.findMany.mockResolvedValueOnce([
+      repository.findSessionExistsByIdAndTenant.mockResolvedValueOnce({ id: 'session-001' })
+      repository.findEventsPaginated.mockResolvedValueOnce([
         {
           id: 'event-011',
           huntSessionId: 'session-001',
@@ -567,7 +532,7 @@ describe('HuntsService', () => {
           description: 'Minor event',
         },
       ])
-      prisma.huntEvent.count.mockResolvedValueOnce(25)
+      repository.countEvents.mockResolvedValueOnce(25)
 
       const result = await service.getEvents(TENANT_ID, 'session-001', 2, 10)
 
@@ -580,18 +545,13 @@ describe('HuntsService', () => {
         hasPrev: true,
       })
 
-      expect(prisma.huntEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          skip: 10,
-          take: 10,
-        })
-      )
+      expect(repository.findEventsPaginated).toHaveBeenCalledWith('session-001', 10, 10)
     })
 
     it('should return empty data when no events exist for session', async () => {
-      prisma.huntSession.findFirst.mockResolvedValueOnce({ id: 'session-001' })
-      prisma.huntEvent.findMany.mockResolvedValueOnce([])
-      prisma.huntEvent.count.mockResolvedValueOnce(0)
+      repository.findSessionExistsByIdAndTenant.mockResolvedValueOnce({ id: 'session-001' })
+      repository.findEventsPaginated.mockResolvedValueOnce([])
+      repository.countEvents.mockResolvedValueOnce(0)
 
       const result = await service.getEvents(TENANT_ID, 'session-001', 1, 10)
 

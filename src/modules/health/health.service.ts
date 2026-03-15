@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
+import { HealthRepository } from './health.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
 
@@ -13,7 +13,7 @@ export class HealthService {
   private readonly redis: Redis
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: HealthRepository,
     private readonly configService: ConfigService,
     private readonly connectorsService: ConnectorsService,
     private readonly appLogger: AppLoggerService
@@ -151,7 +151,7 @@ export class HealthService {
   private async checkDatabase(): Promise<ComponentCheck> {
     const start = Date.now()
     try {
-      await this.prisma.$queryRaw`SELECT 1`
+      await this.repository.pingDatabase()
       return { status: HealthStatus.HEALTHY, latencyMs: Date.now() - start }
     } catch (error) {
       this.logger.error(

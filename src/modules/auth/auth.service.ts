@@ -3,12 +3,12 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
+import { AuthRepository } from './auth.repository'
 import { TokenBlacklistService } from './token-blacklist.service'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 interface TenantMembershipInfo {
@@ -30,7 +30,7 @@ export class AuthService {
   private readonly refreshExpiry: jwt.SignOptions['expiresIn']
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly authRepository: AuthRepository,
     private readonly configService: ConfigService,
     private readonly tokenBlacklistService: TokenBlacklistService,
     private readonly appLogger: AppLoggerService
@@ -59,15 +59,10 @@ export class AuthService {
     user: JwtPayload
     tenants: TenantMembershipInfo[]
   }> {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-      include: {
-        memberships: {
-          where: { status: MembershipStatus.ACTIVE },
-          include: { tenant: true },
-        },
-      },
-    })
+    const user = await this.authRepository.findUserByEmailWithMemberships(
+      email,
+      MembershipStatus.ACTIVE
+    )
 
     // Always run bcrypt.compare to prevent timing-based email enumeration.
     // If user doesn't exist or has no password, compare against a dummy hash
@@ -106,10 +101,7 @@ export class AuthService {
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    })
+    await this.authRepository.updateLastLogin(user.id)
 
     const firstMembership = user.memberships[0]
     if (!firstMembership) {
@@ -261,15 +253,11 @@ export class AuthService {
       await this.tokenBlacklistService.blacklist(payload.jti, remainingTtl)
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      include: {
-        memberships: {
-          where: { tenantId: payload.tenantId, status: MembershipStatus.ACTIVE },
-          include: { tenant: true },
-        },
-      },
-    })
+    const user = await this.authRepository.findUserByIdWithTenantMemberships(
+      payload.sub,
+      payload.tenantId,
+      MembershipStatus.ACTIVE
+    )
 
     if (!user) {
       this.appLogger.warn('Token refresh failed: user no longer exists', {
@@ -362,16 +350,10 @@ export class AuthService {
   }
 
   async validateUserActive(userId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        memberships: {
-          where: { status: MembershipStatus.ACTIVE },
-          select: { id: true },
-          take: 1,
-        },
-      },
-    })
+    const user = await this.authRepository.findUserByIdWithActiveMembershipCheck(
+      userId,
+      MembershipStatus.ACTIVE
+    )
 
     if (!user) {
       this.appLogger.warn('User validation failed: user no longer exists', {
@@ -402,9 +384,7 @@ export class AuthService {
 
   /** Check if a user has an active membership for the given tenant. */
   async validateMembershipActive(userId: string, tenantId: string): Promise<void> {
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-    })
+    const membership = await this.authRepository.findMembershipByUserAndTenant(userId, tenantId)
 
     if (membership?.status !== MembershipStatus.ACTIVE) {
       this.appLogger.warn('Membership validation failed: not active', {
@@ -422,10 +402,10 @@ export class AuthService {
   }
 
   async getUserTenants(userId: string): Promise<TenantMembershipInfo[]> {
-    const memberships = await this.prisma.tenantMembership.findMany({
-      where: { userId, status: MembershipStatus.ACTIVE },
-      include: { tenant: true },
-    })
+    const memberships = await this.authRepository.findActiveMembershipsWithTenant(
+      userId,
+      MembershipStatus.ACTIVE
+    )
 
     this.appLogger.info('User tenants retrieved', {
       feature: AppLogFeature.AUTH,
@@ -477,15 +457,10 @@ export class AuthService {
     }
 
     // Look up the original admin user
-    const admin = await this.prisma.user.findUnique({
-      where: { id: caller.impersonatorSub },
-      include: {
-        memberships: {
-          where: { status: MembershipStatus.ACTIVE },
-          include: { tenant: true },
-        },
-      },
-    })
+    const admin = await this.authRepository.findUserByIdWithAllActiveMemberships(
+      caller.impersonatorSub,
+      MembershipStatus.ACTIVE
+    )
 
     if (!admin) {
       this.appLogger.warn('End impersonation failed: original admin user no longer exists', {
@@ -571,26 +546,14 @@ export class AuthService {
   ): Promise<{ id: string; role: UserRole }> {
     try {
       // Upsert global user
-      const user = await this.prisma.user.upsert({
-        where: { oidcSub },
-        update: { email, name },
-        create: {
-          oidcSub,
-          email,
-          name,
-        },
-      })
+      const user = await this.authRepository.upsertUserByOidcSub(oidcSub, email, name)
 
       // Upsert tenant membership
-      const membership = await this.prisma.tenantMembership.upsert({
-        where: { userId_tenantId: { userId: user.id, tenantId } },
-        update: {},
-        create: {
-          userId: user.id,
-          tenantId,
-          role: UserRole.SOC_ANALYST_L1,
-        },
-      })
+      const membership = await this.authRepository.upsertTenantMembership(
+        user.id,
+        tenantId,
+        UserRole.SOC_ANALYST_L1
+      )
 
       this.appLogger.info('User found or created via OIDC', {
         feature: AppLogFeature.AUTH,

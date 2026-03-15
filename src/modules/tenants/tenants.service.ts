@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
+import { TenantsRepository } from './tenants.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import {
@@ -8,7 +9,6 @@ import {
   UserRole,
 } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { AuthService } from '../auth/auth.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
@@ -36,7 +36,7 @@ export class TenantsService {
   private readonly logger = new Logger(TenantsService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly tenantsRepository: TenantsRepository,
     @Inject(forwardRef(() => AuthService))
     private readonly authService: AuthService,
     private readonly appLogger: AppLoggerService,
@@ -83,24 +83,12 @@ export class TenantsService {
         break
     }
 
-    const [tenants, total] = await this.prisma.$transaction([
-      this.prisma.tenant.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          _count: {
-            select: {
-              memberships: true,
-              alerts: true,
-              cases: true,
-            },
-          },
-        },
-      }),
-      this.prisma.tenant.count({ where }),
-    ])
+    const [tenants, total] = await this.tenantsRepository.findAllTenantsWithCounts({
+      where,
+      orderBy,
+      skip: (page - 1) * limit,
+      take: limit,
+    })
 
     this.appLogger.info('Tenants listed', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -132,14 +120,7 @@ export class TenantsService {
   }
 
   async findById(id: string): Promise<TenantWithCounts> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: { memberships: true, alerts: true, cases: true },
-        },
-      },
-    })
+    const tenant = await this.tenantsRepository.findByIdWithCounts(id)
     if (!tenant) {
       this.appLogger.warn('Tenant not found', {
         feature: AppLogFeature.TENANTS,
@@ -174,9 +155,7 @@ export class TenantsService {
 
   async create(dto: CreateTenantDto): Promise<TenantRecord> {
     try {
-      const tenant = await this.prisma.tenant.create({
-        data: { name: dto.name, slug: dto.slug },
-      })
+      const tenant = await this.tenantsRepository.create({ name: dto.name, slug: dto.slug })
 
       this.appLogger.info('Tenant created', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -223,7 +202,7 @@ export class TenantsService {
   }
 
   async update(id: string, dto: UpdateTenantDto): Promise<TenantRecord> {
-    const tenant = await this.prisma.tenant.update({ where: { id }, data: dto })
+    const tenant = await this.tenantsRepository.update(id, dto)
 
     this.appLogger.info('Tenant updated', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -241,12 +220,7 @@ export class TenantsService {
 
   async remove(id: string): Promise<{ deleted: boolean }> {
     // Soft-delete: deactivate all memberships instead of destroying tenant data
-    await this.prisma.$transaction(async tx => {
-      await tx.tenantMembership.updateMany({
-        where: { tenantId: id },
-        data: { status: MembershipStatus.INACTIVE },
-      })
-    })
+    await this.tenantsRepository.deactivateAllMemberships(id, MembershipStatus.INACTIVE)
     this.logger.log(`Tenant ${id} soft-deleted: all memberships deactivated`)
 
     this.appLogger.info('Tenant soft-deleted', {
@@ -292,16 +266,12 @@ export class TenantsService {
         }
       }
 
-      const [memberships, total] = await this.prisma.$transaction([
-        this.prisma.tenantMembership.findMany({
-          where,
-          include: { user: true },
-          orderBy: this.buildUserOrderBy(sortBy, sortOrder),
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
-        this.prisma.tenantMembership.count({ where }),
-      ])
+      const [memberships, total] = await this.tenantsRepository.findMembershipsWithUsers({
+        where,
+        orderBy: this.buildUserOrderBy(sortBy, sortOrder),
+        skip: (page - 1) * limit,
+        take: limit,
+      })
 
       this.appLogger.info('Tenant users listed', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -350,11 +320,10 @@ export class TenantsService {
   /** Lightweight user list for assignee pickers — available to any authenticated user. */
   async findMembers(tenantId: string): Promise<Array<{ id: string; name: string; email: string }>> {
     try {
-      const memberships = await this.prisma.tenantMembership.findMany({
-        where: { tenantId, status: MembershipStatus.ACTIVE },
-        include: { user: { select: { id: true, name: true, email: true } } },
-        orderBy: { user: { name: 'asc' } },
-      })
+      const memberships = await this.tenantsRepository.findActiveMembersWithUsers(
+        tenantId,
+        MembershipStatus.ACTIVE
+      )
       this.appLogger.debug('Tenant members retrieved', {
         feature: AppLogFeature.TENANT_MEMBERS,
         action: 'findMembers',
@@ -409,18 +378,13 @@ export class TenantsService {
   }
 
   async checkEmail(tenantId: string, email: string): Promise<CheckEmailResult> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
-      select: { id: true, name: true, email: true },
-    })
+    const user = await this.tenantsRepository.findUserByEmail(email.toLowerCase().trim())
 
     if (!user) {
       return { exists: false, user: null, alreadyInTenant: false }
     }
 
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId: user.id, tenantId } },
-    })
+    const membership = await this.tenantsRepository.findMembershipByUserAndTenant(user.id, tenantId)
 
     this.appLogger.debug('Email check performed', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -468,110 +432,53 @@ export class TenantsService {
     const normalizedEmail = dto.email.toLowerCase().trim()
 
     try {
-      const result = await this.prisma.$transaction(async tx => {
-        const existing = await tx.user.findUnique({ where: { email: normalizedEmail } })
+      // Pre-validate: check if user exists and membership state before transaction
+      const { user: existingUser, membership: existingMembership } =
+        await this.tenantsRepository.findUserWithTenantMembership(normalizedEmail, tenantId)
 
-        let user: {
-          id: string
-          email: string
-          name: string
-          lastLoginAt: Date | null
-          mfaEnabled: boolean
-          isProtected: boolean
+      if (existingUser?.isProtected) {
+        throw new BusinessException(
+          403,
+          'Cannot assign a protected user to another tenant',
+          'errors.tenants.userProtected'
+        )
+      }
+
+      if (existingMembership) {
+        throw new BusinessException(
+          409,
+          'User is already a member of this tenant',
+          'errors.tenants.userAlreadyInTenant'
+        )
+      }
+
+      if (!existingUser) {
+        if (!dto.name || dto.name.trim().length === 0) {
+          throw new BusinessException(
+            400,
+            'Name is required when creating a new user',
+            'errors.validation.name.required'
+          )
         }
-
-        if (existing) {
-          if (existing.isProtected) {
-            this.appLogger.warn('Assign user failed: user is protected', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'assignUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.DENIED,
-              metadata: { tenantId, userId: existing.id, email: normalizedEmail },
-            })
-            throw new BusinessException(
-              403,
-              'Cannot assign a protected user to another tenant',
-              'errors.tenants.userProtected'
-            )
-          }
-
-          // Check if already in this tenant
-          const existingMembership = await tx.tenantMembership.findUnique({
-            where: { userId_tenantId: { userId: existing.id, tenantId } },
-          })
-
-          if (existingMembership) {
-            this.appLogger.warn('Assign user failed: user already in tenant', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'assignUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.FAILURE,
-              metadata: { tenantId, userId: existing.id, email: normalizedEmail },
-            })
-            throw new BusinessException(
-              409,
-              'User is already a member of this tenant',
-              'errors.tenants.userAlreadyInTenant'
-            )
-          }
-
-          user = existing
-        } else {
-          // New user — name and password are required
-          if (!dto.name || dto.name.trim().length === 0) {
-            this.appLogger.warn('Assign user failed: name required for new user', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'assignUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.FAILURE,
-              metadata: { tenantId, email: normalizedEmail },
-            })
-            throw new BusinessException(
-              400,
-              'Name is required when creating a new user',
-              'errors.validation.name.required'
-            )
-          }
-          if (!dto.password || dto.password.length === 0) {
-            this.appLogger.warn('Assign user failed: password required for new user', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'assignUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.FAILURE,
-              metadata: { tenantId, email: normalizedEmail },
-            })
-            throw new BusinessException(
-              400,
-              'Password is required when creating a new user',
-              'errors.validation.password.required'
-            )
-          }
-
-          const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
-          user = await tx.user.create({
-            data: {
-              email: normalizedEmail,
-              name: dto.name.trim(),
-              passwordHash,
-            },
-          })
+        if (!dto.password) {
+          throw new BusinessException(
+            400,
+            'Password is required when creating a new user',
+            'errors.validation.password.required'
+          )
         }
+      }
 
-        const membership = await tx.tenantMembership.create({
-          data: {
-            userId: user.id,
-            tenantId,
-            role: dto.role as UserRole,
-          },
-        })
+      const passwordHash = dto.password
+        ? await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+        : undefined
 
-        return { user, membership }
-      })
+      const result = await this.tenantsRepository.findOrCreateUserWithMembership(
+        tenantId,
+        normalizedEmail,
+        dto.role as string,
+        passwordHash ? { name: dto.name?.trim() ?? '', passwordHash } : undefined
+      )
 
       this.appLogger.info('User assigned to tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -588,10 +495,7 @@ export class TenantsService {
       })
 
       // Notify the user about tenant assignment
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { name: true },
-      })
+      const tenant = await this.tenantsRepository.findTenantById(tenantId)
       await this.notificationsService.notifyTenantAssigned(
         tenantId,
         result.user.id,
@@ -670,70 +574,40 @@ export class TenantsService {
     // Atomic: find-or-create user + create membership in a single transaction
     // SECURITY: Never overwrite an existing user's password hash
     try {
-      const result = await this.prisma.$transaction(async tx => {
-        const existing = await tx.user.findUnique({ where: { email: dto.email } })
+      // Pre-validate: check if user exists and their protection/membership state
+      const { user: existingUser, membership: existingMembership } =
+        await this.tenantsRepository.findUserWithTenantMembership(dto.email, tenantId)
 
-        let user: {
-          id: string
-          email: string
-          name: string
-          lastLoginAt: Date | null
-          mfaEnabled: boolean
-          isProtected: boolean
-        }
+      if (existingUser?.isProtected) {
+        throw new BusinessException(
+          403,
+          'Cannot add a protected user to another tenant',
+          'errors.tenants.userProtected'
+        )
+      }
 
-        if (existing) {
-          if (existing.isProtected) {
-            this.appLogger.warn('Add user failed: user is protected', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'addUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.DENIED,
-              metadata: { tenantId, userId: existing.id, email: dto.email },
-            })
-            throw new BusinessException(
-              403,
-              'Cannot add a protected user to another tenant',
-              'errors.tenants.userProtected'
-            )
-          }
-          if (dto.password) {
-            this.appLogger.warn('Add user failed: user already exists with password conflict', {
-              feature: AppLogFeature.TENANT_MEMBERS,
-              action: 'addUser',
-              className: 'TenantsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.FAILURE,
-              metadata: { tenantId, userId: existing.id, email: dto.email },
-            })
-            throw new BusinessException(
-              409,
-              'User already exists. Password cannot be changed via add user.',
-              'errors.tenants.userAlreadyExists'
-            )
-          }
-          user = existing
-        } else {
-          user = await tx.user.create({
-            data: {
-              email: dto.email,
-              name: dto.name,
-              passwordHash,
-            },
-          })
-        }
+      if (existingUser && dto.password) {
+        throw new BusinessException(
+          409,
+          'User already exists. Password cannot be changed via add user.',
+          'errors.tenants.userAlreadyExists'
+        )
+      }
 
-        const membership = await tx.tenantMembership.create({
-          data: {
-            userId: user.id,
-            tenantId,
-            role: dto.role as UserRole,
-          },
-        })
+      if (existingMembership) {
+        throw new BusinessException(
+          409,
+          'Email already exists in this tenant',
+          'errors.tenants.emailExists'
+        )
+      }
 
-        return { user, membership }
-      })
+      const result = await this.tenantsRepository.findOrCreateUserWithMembership(
+        tenantId,
+        dto.email,
+        dto.role as string,
+        existingUser ? undefined : { name: dto.name, passwordHash }
+      )
 
       this.appLogger.info('User added to tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -820,10 +694,7 @@ export class TenantsService {
       )
     }
 
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
       this.appLogger.warn('Update user failed: user not found in tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -894,10 +765,7 @@ export class TenantsService {
     // Update membership role
     const previousRole = membership.role
     if (dto.role !== undefined) {
-      await this.prisma.tenantMembership.update({
-        where: { userId_tenantId: { userId, tenantId } },
-        data: { role: dto.role as UserRole },
-      })
+      await this.tenantsRepository.updateMembershipRole(userId, tenantId, dto.role as UserRole)
     }
 
     // Update user-level fields
@@ -909,17 +777,11 @@ export class TenantsService {
       userUpdateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
     }
     if (Object.keys(userUpdateData).length > 0) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: userUpdateData,
-      })
+      await this.tenantsRepository.updateUser(userId, userUpdateData)
     }
 
     // Fetch updated state
-    const updated = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const updated = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
 
     if (!updated) {
       this.appLogger.warn('Update user failed: user not found after update', {
@@ -999,10 +861,7 @@ export class TenantsService {
       )
     }
 
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
       this.appLogger.warn('Remove user failed: user not found in tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -1052,10 +911,7 @@ export class TenantsService {
     }
 
     // Soft delete: set membership status to inactive
-    await this.prisma.tenantMembership.update({
-      where: { userId_tenantId: { userId, tenantId } },
-      data: { status: MembershipStatus.INACTIVE },
-    })
+    await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
 
     this.appLogger.info('User soft-deleted from tenant', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -1083,10 +939,7 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
       this.appLogger.warn('Restore user failed: user not found in tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -1131,11 +984,11 @@ export class TenantsService {
       )
     }
 
-    const updated = await this.prisma.tenantMembership.update({
-      where: { userId_tenantId: { userId, tenantId } },
-      data: { status: MembershipStatus.ACTIVE },
-      include: { user: true },
-    })
+    const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
+      userId,
+      tenantId,
+      MembershipStatus.ACTIVE
+    )
 
     this.appLogger.info('User restored in tenant', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -1188,10 +1041,7 @@ export class TenantsService {
       )
     }
 
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
       this.appLogger.warn('Block user failed: user not found in tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -1256,11 +1106,11 @@ export class TenantsService {
       )
     }
 
-    const updated = await this.prisma.tenantMembership.update({
-      where: { userId_tenantId: { userId, tenantId } },
-      data: { status: MembershipStatus.SUSPENDED },
-      include: { user: true },
-    })
+    const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
+      userId,
+      tenantId,
+      MembershipStatus.SUSPENDED
+    )
 
     this.appLogger.info('User blocked in tenant', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -1298,10 +1148,7 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
       this.appLogger.warn('Unblock user failed: user not found in tenant', {
         feature: AppLogFeature.TENANT_MEMBERS,
@@ -1346,11 +1193,11 @@ export class TenantsService {
       )
     }
 
-    const updated = await this.prisma.tenantMembership.update({
-      where: { userId_tenantId: { userId, tenantId } },
-      data: { status: MembershipStatus.ACTIVE },
-      include: { user: true },
-    })
+    const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
+      userId,
+      tenantId,
+      MembershipStatus.ACTIVE
+    )
 
     this.appLogger.info('User unblocked in tenant', {
       feature: AppLogFeature.TENANT_MEMBERS,
@@ -1424,10 +1271,7 @@ export class TenantsService {
     }
 
     // 3. Validate target tenant exists
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { id: true, slug: true },
-    })
+    const tenant = await this.tenantsRepository.findTenantById(tenantId)
     if (!tenant) {
       this.appLogger.warn('Impersonation failed: tenant not found', {
         feature: AppLogFeature.IMPERSONATION,
@@ -1441,10 +1285,7 @@ export class TenantsService {
     }
 
     // 4. Validate target user exists
-    const targetUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true, isProtected: true },
-    })
+    const targetUser = await this.tenantsRepository.findUserById(userId)
     if (!targetUser) {
       this.appLogger.warn('Impersonation failed: target user not found', {
         feature: AppLogFeature.IMPERSONATION,
@@ -1475,9 +1316,10 @@ export class TenantsService {
     }
 
     // 6. Validate target has active membership in this tenant
-    const targetMembership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId, tenantId } },
-    })
+    const targetMembership = await this.tenantsRepository.findMembershipByUserAndTenant(
+      userId,
+      tenantId
+    )
     if (targetMembership?.status !== MembershipStatus.ACTIVE) {
       this.appLogger.warn('Impersonation denied: target user not active in tenant', {
         feature: AppLogFeature.IMPERSONATION,

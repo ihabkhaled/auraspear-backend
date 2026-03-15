@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AlertsRepository } from './alerts.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { PrismaService } from '../../prisma/prisma.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { PaginatedAlerts, AlertRecord } from './alerts.types'
@@ -32,7 +32,7 @@ export class AlertsService {
   ])
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly alertsRepository: AlertsRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly wazuhService: WazuhService,
     private readonly appLogger: AppLoggerService
@@ -100,15 +100,12 @@ export class AlertsService {
     }
 
     try {
-      const [data, total] = await Promise.all([
-        this.prisma.alert.findMany({
-          where,
-          orderBy: this.buildAlertOrderBy(query.sortBy, query.sortOrder),
-          skip: (query.page - 1) * query.limit,
-          take: query.limit,
-        }),
-        this.prisma.alert.count({ where }),
-      ])
+      const [data, total] = await this.alertsRepository.findManyAndCount({
+        where,
+        orderBy: this.buildAlertOrderBy(query.sortBy, query.sortOrder),
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      })
 
       this.appLogger.info(
         `Searched alerts page=${query.page} limit=${query.limit} total=${total}`,
@@ -179,9 +176,7 @@ export class AlertsService {
   }
 
   async findById(tenantId: string, id: string): Promise<AlertRecord> {
-    const alert = await this.prisma.alert.findFirst({
-      where: { id, tenantId },
-    })
+    const alert = await this.alertsRepository.findFirstByIdAndTenant(id, tenantId)
 
     if (!alert) {
       this.appLogger.warn(`Alert not found id=${id}`, {
@@ -237,13 +232,10 @@ export class AlertsService {
       )
     }
 
-    const updated = await this.prisma.alert.update({
-      where: { id, tenantId },
-      data: {
-        status: 'acknowledged',
-        acknowledgedBy: email,
-        acknowledgedAt: new Date(),
-      },
+    const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
+      status: 'acknowledged',
+      acknowledgedBy: email,
+      acknowledgedAt: new Date(),
     })
 
     this.appLogger.info(`Acknowledged alert id=${id}`, {
@@ -285,9 +277,8 @@ export class AlertsService {
       )
     }
 
-    const updated = await this.prisma.alert.update({
-      where: { id, tenantId },
-      data: { status: 'in_progress' },
+    const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
+      status: 'in_progress',
     })
 
     this.appLogger.info(`Started investigation on alert id=${id}`, {
@@ -334,14 +325,11 @@ export class AlertsService {
       )
     }
 
-    const updated = await this.prisma.alert.update({
-      where: { id, tenantId },
-      data: {
-        status: 'closed',
-        resolution,
-        closedAt: new Date(),
-        closedBy: email,
-      },
+    const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
+      status: 'closed',
+      resolution,
+      closedAt: new Date(),
+      closedBy: email,
     })
 
     this.appLogger.info(`Closed alert id=${id} resolution="${resolution}"`, {
@@ -445,10 +433,10 @@ export class AlertsService {
         const batch = upsertOps.slice(index, index + BATCH_SIZE)
         const batchResults = await Promise.allSettled(
           batch.map(op =>
-            this.prisma.alert.upsert({
-              where: { tenantId_externalId: { tenantId, externalId: op.externalId } },
-              create: {
-                tenantId,
+            this.alertsRepository.upsertByTenantAndExternalId(
+              tenantId,
+              op.externalId,
+              {
                 externalId: op.externalId,
                 title: (op.rule?.description ??
                   op.source.rule_description ??
@@ -471,11 +459,12 @@ export class AlertsService {
                 mitreTechniques: op.mitreTechniques,
                 rawEvent: op.source as Prisma.InputJsonValue,
                 timestamp: op.timestamp,
+                tenant: { connect: { id: tenantId } },
               },
-              update: {
+              {
                 rawEvent: op.source as Prisma.InputJsonValue,
-              },
-            })
+              }
+            )
           )
         )
 
@@ -531,11 +520,7 @@ export class AlertsService {
    */
   async getCountsBySeverity(tenantId: string): Promise<Record<string, number>> {
     try {
-      const counts = await this.prisma.alert.groupBy({
-        by: ['severity'],
-        where: { tenantId },
-        _count: true,
-      })
+      const counts = await this.alertsRepository.groupBySeverity(tenantId)
 
       const result: Record<string, number> = {}
       for (const c of counts) {
@@ -579,13 +564,7 @@ export class AlertsService {
     since.setDate(since.getDate() - days)
 
     try {
-      const results = await this.prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
-        SELECT DATE(timestamp) as date, COUNT(*)::bigint as count
-        FROM alerts
-        WHERE tenant_id = ${tenantId}::uuid AND timestamp >= ${since}
-        GROUP BY DATE(timestamp)
-        ORDER BY date ASC
-      `
+      const results = await this.alertsRepository.queryTrend(tenantId, since)
 
       this.appLogger.info(`Retrieved alert trend for ${days} days`, {
         feature: AppLogFeature.ALERTS,
@@ -621,14 +600,7 @@ export class AlertsService {
     tenantId: string
   ): Promise<Array<{ technique: string; count: number }>> {
     try {
-      const results = await this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
-        SELECT unnest(mitre_techniques) as technique, COUNT(*)::bigint as count
-        FROM alerts
-        WHERE tenant_id = ${tenantId}::uuid
-        GROUP BY technique
-        ORDER BY count DESC
-        LIMIT 15
-      `
+      const results = await this.alertsRepository.queryMitreTechniqueCounts(tenantId)
 
       this.appLogger.info('Retrieved MITRE technique counts', {
         feature: AppLogFeature.ALERTS,
@@ -665,14 +637,7 @@ export class AlertsService {
     limit: number = 10
   ): Promise<Array<{ asset: string; count: number }>> {
     try {
-      const results = await this.prisma.$queryRaw<Array<{ asset: string; count: bigint }>>`
-        SELECT agent_name as asset, COUNT(*)::bigint as count
-        FROM alerts
-        WHERE tenant_id = ${tenantId}::uuid AND agent_name IS NOT NULL
-        GROUP BY agent_name
-        ORDER BY count DESC
-        LIMIT ${limit}
-      `
+      const results = await this.alertsRepository.queryTopTargetedAssets(tenantId, limit)
 
       this.appLogger.info('Retrieved top targeted assets', {
         feature: AppLogFeature.ALERTS,
@@ -709,7 +674,7 @@ export class AlertsService {
    *   severity:critical
    *   agent.name:"web-server-01"
    *   status:new_alert AND source:wazuh
-   *   free text (no field prefix → OR across text columns)
+   *   free text (no field prefix -> OR across text columns)
    */
   private applyKqlQuery(rawQuery: string, where: Prisma.AlertWhereInput): void {
     // Match field:value or field:"quoted value" tokens

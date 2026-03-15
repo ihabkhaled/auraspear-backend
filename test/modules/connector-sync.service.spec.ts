@@ -9,15 +9,11 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    connectorConfig: {
-      findMany: jest.fn(),
-      updateMany: jest.fn(),
-    },
-    alert: {
-      upsert: jest.fn(),
-    },
+    findSyncableConnectors: jest.fn(),
+    updateConnectorSyncTimestamp: jest.fn(),
+    upsertAlert: jest.fn(),
   }
 }
 
@@ -39,13 +35,13 @@ const mockGraylogService = {
 
 describe('ConnectorSyncService', () => {
   let service: ConnectorSyncService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     service = new ConnectorSyncService(
-      prisma as never,
+      repository as never,
       mockConnectorsService as never,
       mockAlertsService as never,
       mockIntelService as never,
@@ -66,7 +62,7 @@ describe('ConnectorSyncService', () => {
 
     it('should sync wazuh successfully', async () => {
       mockAlertsService.ingestFromWazuh.mockResolvedValue({ ingested: 10 })
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'wazuh')
 
@@ -93,19 +89,19 @@ describe('ConnectorSyncService', () => {
           },
         ],
       })
-      prisma.alert.upsert.mockResolvedValue({})
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.upsertAlert.mockResolvedValue({})
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'graylog')
 
       expect(result.success).toBe(true)
       expect(result.ingested).toBe(1)
-      expect(prisma.alert.upsert).toHaveBeenCalled()
+      expect(repository.upsertAlert).toHaveBeenCalled()
     })
 
     it('should return 0 when graylog has no config', async () => {
       mockConnectorsService.getDecryptedConfig.mockResolvedValue(null)
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'graylog')
 
@@ -116,7 +112,7 @@ describe('ConnectorSyncService', () => {
     it('should return 0 when graylog returns no events', async () => {
       mockConnectorsService.getDecryptedConfig.mockResolvedValue({ url: 'http://graylog' })
       mockGraylogService.searchEvents.mockResolvedValue({ events: [] })
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'graylog')
 
@@ -129,7 +125,7 @@ describe('ConnectorSyncService', () => {
         eventsUpserted: 5,
         iocsUpserted: 20,
       })
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'misp')
 
@@ -152,30 +148,29 @@ describe('ConnectorSyncService', () => {
 
   describe('handleSync', () => {
     it('should skip when sync is already running', async () => {
-      // Set running flag
       ;(service as unknown as { running: boolean }).running = true
 
       await service.handleSync()
 
-      expect(prisma.connectorConfig.findMany).not.toHaveBeenCalled()
+      expect(repository.findSyncableConnectors).not.toHaveBeenCalled()
     })
 
     it('should sync all eligible connectors', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findSyncableConnectors.mockResolvedValue([
         { tenantId: TENANT_ID, type: 'wazuh', lastSyncAt: null },
       ])
       mockAlertsService.ingestFromWazuh.mockResolvedValue({ ingested: 5 })
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       await service.handleSync()
 
-      expect(prisma.connectorConfig.findMany).toHaveBeenCalled()
+      expect(repository.findSyncableConnectors).toHaveBeenCalled()
       expect(mockAlertsService.ingestFromWazuh).toHaveBeenCalledWith(TENANT_ID)
     })
 
     it('should skip connectors synced too recently', async () => {
       const recentSync = new Date(Date.now() - 30_000) // 30 seconds ago (< 90s gap)
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findSyncableConnectors.mockResolvedValue([
         { tenantId: TENANT_ID, type: 'wazuh', lastSyncAt: recentSync },
       ])
 
@@ -186,11 +181,11 @@ describe('ConnectorSyncService', () => {
 
     it('should sync connectors that are past the gap threshold', async () => {
       const oldSync = new Date(Date.now() - 120_000) // 2 minutes ago (> 90s gap)
-      prisma.connectorConfig.findMany.mockResolvedValue([
+      repository.findSyncableConnectors.mockResolvedValue([
         { tenantId: TENANT_ID, type: 'wazuh', lastSyncAt: oldSync },
       ])
       mockAlertsService.ingestFromWazuh.mockResolvedValue({ ingested: 3 })
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       await service.handleSync()
 
@@ -198,16 +193,15 @@ describe('ConnectorSyncService', () => {
     })
 
     it('should not fail when no connectors are eligible', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([])
+      repository.findSyncableConnectors.mockResolvedValue([])
 
       await service.handleSync()
 
-      // Should complete without error
-      expect(prisma.connectorConfig.findMany).toHaveBeenCalled()
+      expect(repository.findSyncableConnectors).toHaveBeenCalled()
     })
 
     it('should handle errors in syncAllTenants gracefully', async () => {
-      prisma.connectorConfig.findMany.mockRejectedValue(new Error('DB connection lost'))
+      repository.findSyncableConnectors.mockRejectedValue(new Error('DB connection lost'))
 
       // Should not throw
       await service.handleSync()
@@ -217,7 +211,7 @@ describe('ConnectorSyncService', () => {
     })
 
     it('should reset running flag after completion', async () => {
-      prisma.connectorConfig.findMany.mockResolvedValue([])
+      repository.findSyncableConnectors.mockResolvedValue([])
 
       await service.handleSync()
 
@@ -255,16 +249,16 @@ describe('ConnectorSyncService', () => {
           },
         ],
       })
-      prisma.alert.upsert.mockResolvedValue({})
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.upsertAlert.mockResolvedValue({})
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'graylog')
 
       expect(result.ingested).toBe(5)
-      expect(prisma.alert.upsert).toHaveBeenCalledTimes(5)
+      expect(repository.upsertAlert).toHaveBeenCalledTimes(5)
 
       // Verify severity mapping in upsert calls
-      const { calls } = prisma.alert.upsert.mock
+      const { calls } = repository.upsertAlert.mock
       expect(calls[0][0].create.severity).toBe('critical')
       expect(calls[1][0].create.severity).toBe('high')
       expect(calls[2][0].create.severity).toBe('medium')
@@ -284,8 +278,8 @@ describe('ConnectorSyncService', () => {
           },
         ],
       })
-      prisma.alert.upsert.mockResolvedValue({})
-      prisma.connectorConfig.updateMany.mockResolvedValue({ count: 1 })
+      repository.upsertAlert.mockResolvedValue({})
+      repository.updateConnectorSyncTimestamp.mockResolvedValue({ count: 1 })
 
       const result = await service.syncConnector(TENANT_ID, 'graylog')
 

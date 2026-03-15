@@ -23,24 +23,18 @@ const mockGateway = {
   emitUnreadCount: jest.fn(),
 }
 
-function createMockPrisma() {
+function createMockRepository() {
   return {
-    notification: {
-      findMany: jest.fn().mockResolvedValue([]),
-      findFirst: jest.fn(),
-      count: jest.fn().mockResolvedValue(0),
-      create: jest.fn().mockResolvedValue({ id: 'notif-001' }),
-      createMany: jest.fn().mockResolvedValue({ count: 1 }),
-      update: jest.fn(),
-      updateMany: jest.fn(),
-    },
-    user: {
-      findMany: jest.fn().mockResolvedValue([]),
-      findUnique: jest.fn().mockResolvedValue({ name: ACTOR_NAME }),
-    },
-    case: {
-      findUnique: jest.fn().mockResolvedValue({ caseNumber: CASE_NUMBER }),
-    },
+    findManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    countUnread: jest.fn().mockResolvedValue(0),
+    findFirstByIdAndRecipient: jest.fn(),
+    markAsRead: jest.fn(),
+    markAllAsRead: jest.fn(),
+    findUserById: jest.fn().mockResolvedValue({ name: ACTOR_NAME }),
+    findUsersByIds: jest.fn().mockResolvedValue([]),
+    createNotification: jest.fn().mockResolvedValue({ id: 'notif-001' }),
+    createManyNotifications: jest.fn().mockResolvedValue({ count: 1 }),
+    findCaseById: jest.fn().mockResolvedValue({ caseNumber: CASE_NUMBER }),
   }
 }
 
@@ -54,13 +48,13 @@ const mockUser = {
 
 describe('NotificationsService', () => {
   let service: NotificationsService
-  let prisma: ReturnType<typeof createMockPrisma>
+  let repository: ReturnType<typeof createMockRepository>
 
   beforeEach(() => {
     jest.clearAllMocks()
-    prisma = createMockPrisma()
+    repository = createMockRepository()
     service = new NotificationsService(
-      prisma as never,
+      repository as never,
       mockAppLogger as never,
       mockGateway as never
     )
@@ -73,25 +67,27 @@ describe('NotificationsService', () => {
   describe('listNotifications', () => {
     it('should return paginated notifications with resolved actor names', async () => {
       const now = new Date()
-      prisma.notification.findMany.mockResolvedValue([
-        {
-          id: 'notif-1',
-          tenantId: TENANT_ID,
-          type: 'mention',
-          actorUserId: ACTOR_ID,
-          recipientUserId: RECIPIENT_ID,
-          title: 'mention_notification_title',
-          message: 'Admin mentioned you',
-          entityType: 'case_comment',
-          entityId: COMMENT_ID,
-          caseId: CASE_ID,
-          caseCommentId: COMMENT_ID,
-          readAt: null,
-          createdAt: now,
-        },
+      repository.findManyAndCount.mockResolvedValue([
+        [
+          {
+            id: 'notif-1',
+            tenantId: TENANT_ID,
+            type: 'mention',
+            actorUserId: ACTOR_ID,
+            recipientUserId: RECIPIENT_ID,
+            title: 'mention_notification_title',
+            message: 'Admin mentioned you',
+            entityType: 'case_comment',
+            entityId: COMMENT_ID,
+            caseId: CASE_ID,
+            caseCommentId: COMMENT_ID,
+            readAt: null,
+            createdAt: now,
+          },
+        ],
+        1,
       ])
-      prisma.notification.count.mockResolvedValue(1)
-      prisma.user.findMany.mockResolvedValue([
+      repository.findUsersByIds.mockResolvedValue([
         { id: ACTOR_ID, name: ACTOR_NAME, email: ACTOR_EMAIL },
       ])
 
@@ -109,24 +105,26 @@ describe('NotificationsService', () => {
     })
 
     it('should return "Unknown" for unresolvable actor', async () => {
-      prisma.notification.findMany.mockResolvedValue([
-        {
-          id: 'notif-1',
-          actorUserId: 'deleted-user',
-          recipientUserId: RECIPIENT_ID,
-          type: 'mention',
-          title: 'test',
-          message: 'test',
-          entityType: 'case_comment',
-          entityId: 'e-1',
-          caseId: null,
-          caseCommentId: null,
-          readAt: null,
-          createdAt: new Date(),
-        },
+      repository.findManyAndCount.mockResolvedValue([
+        [
+          {
+            id: 'notif-1',
+            actorUserId: 'deleted-user',
+            recipientUserId: RECIPIENT_ID,
+            type: 'mention',
+            title: 'test',
+            message: 'test',
+            entityType: 'case_comment',
+            entityId: 'e-1',
+            caseId: null,
+            caseCommentId: null,
+            readAt: null,
+            createdAt: new Date(),
+          },
+        ],
+        1,
       ])
-      prisma.notification.count.mockResolvedValue(1)
-      prisma.user.findMany.mockResolvedValue([])
+      repository.findUsersByIds.mockResolvedValue([])
 
       const result = await service.listNotifications(TENANT_ID, RECIPIENT_ID, 1, 10)
 
@@ -135,24 +133,26 @@ describe('NotificationsService', () => {
     })
 
     it('should mark notification as read when readAt is set', async () => {
-      prisma.notification.findMany.mockResolvedValue([
-        {
-          id: 'notif-1',
-          actorUserId: ACTOR_ID,
-          recipientUserId: RECIPIENT_ID,
-          type: 'mention',
-          title: 'test',
-          message: 'test',
-          entityType: 'case_comment',
-          entityId: 'e-1',
-          caseId: null,
-          caseCommentId: null,
-          readAt: new Date(),
-          createdAt: new Date(),
-        },
+      repository.findManyAndCount.mockResolvedValue([
+        [
+          {
+            id: 'notif-1',
+            actorUserId: ACTOR_ID,
+            recipientUserId: RECIPIENT_ID,
+            type: 'mention',
+            title: 'test',
+            message: 'test',
+            entityType: 'case_comment',
+            entityId: 'e-1',
+            caseId: null,
+            caseCommentId: null,
+            readAt: new Date(),
+            createdAt: new Date(),
+          },
+        ],
+        1,
       ])
-      prisma.notification.count.mockResolvedValue(1)
-      prisma.user.findMany.mockResolvedValue([{ id: ACTOR_ID, name: 'A', email: 'a@b.com' }])
+      repository.findUsersByIds.mockResolvedValue([{ id: ACTOR_ID, name: 'A', email: 'a@b.com' }])
 
       const result = await service.listNotifications(TENANT_ID, RECIPIENT_ID, 1, 10)
 
@@ -165,15 +165,13 @@ describe('NotificationsService', () => {
   /* ------------------------------------------------------------------ */
 
   describe('getUnreadCount', () => {
-    it('should return unread count from prisma', async () => {
-      prisma.notification.count.mockResolvedValue(5)
+    it('should return unread count from repository', async () => {
+      repository.countUnread.mockResolvedValue(5)
 
       const count = await service.getUnreadCount(TENANT_ID, RECIPIENT_ID)
 
       expect(count).toBe(5)
-      expect(prisma.notification.count).toHaveBeenCalledWith({
-        where: { tenantId: TENANT_ID, recipientUserId: RECIPIENT_ID, readAt: null },
-      })
+      expect(repository.countUnread).toHaveBeenCalledWith(TENANT_ID, RECIPIENT_ID)
     })
   })
 
@@ -183,21 +181,18 @@ describe('NotificationsService', () => {
 
   describe('markAsRead', () => {
     it('should mark notification as read', async () => {
-      prisma.notification.findFirst.mockResolvedValue({
+      repository.findFirstByIdAndRecipient.mockResolvedValue({
         id: 'notif-1',
         readAt: null,
       })
 
       await service.markAsRead('notif-1', mockUser)
 
-      expect(prisma.notification.update).toHaveBeenCalledWith({
-        where: { id: 'notif-1' },
-        data: { readAt: expect.any(Date) },
-      })
+      expect(repository.markAsRead).toHaveBeenCalledWith('notif-1', TENANT_ID)
     })
 
     it('should throw 404 if notification not found', async () => {
-      prisma.notification.findFirst.mockResolvedValue(null)
+      repository.findFirstByIdAndRecipient.mockResolvedValue(null)
 
       await expect(service.markAsRead('notif-999', mockUser)).rejects.toThrow(BusinessException)
       await expect(service.markAsRead('notif-999', mockUser)).rejects.toThrow(
@@ -206,14 +201,14 @@ describe('NotificationsService', () => {
     })
 
     it('should skip update if already read', async () => {
-      prisma.notification.findFirst.mockResolvedValue({
+      repository.findFirstByIdAndRecipient.mockResolvedValue({
         id: 'notif-1',
         readAt: new Date(),
       })
 
       await service.markAsRead('notif-1', mockUser)
 
-      expect(prisma.notification.update).not.toHaveBeenCalled()
+      expect(repository.markAsRead).not.toHaveBeenCalled()
     })
   })
 
@@ -225,10 +220,7 @@ describe('NotificationsService', () => {
     it('should update all unread notifications', async () => {
       await service.markAllAsRead(TENANT_ID, RECIPIENT_ID)
 
-      expect(prisma.notification.updateMany).toHaveBeenCalledWith({
-        where: { tenantId: TENANT_ID, recipientUserId: RECIPIENT_ID, readAt: null },
-        data: { readAt: expect.any(Date) },
-      })
+      expect(repository.markAllAsRead).toHaveBeenCalledWith(TENANT_ID, RECIPIENT_ID)
     })
   })
 
@@ -247,15 +239,15 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           tenantId: TENANT_ID,
           type: NotificationType.CASE_ASSIGNED,
           actorUserId: ACTOR_ID,
           recipientUserId: RECIPIENT_ID,
           caseId: CASE_ID,
-        }),
-      })
+        })
+      )
       expect(mockGateway.emitToUser).toHaveBeenCalledWith(
         TENANT_ID,
         RECIPIENT_ID,
@@ -274,12 +266,12 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
       expect(mockGateway.emitToUser).not.toHaveBeenCalled()
     })
 
     it('should include actor name in message', async () => {
-      prisma.user.findUnique.mockResolvedValue({ name: 'Jane Admin' })
+      repository.findUserById.mockResolvedValue({ name: 'Jane Admin' })
 
       await service.notifyCaseAssigned(
         TENANT_ID,
@@ -290,11 +282,11 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           message: `Jane Admin assigned you to case ${CASE_NUMBER}`,
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -313,12 +305,12 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.CASE_UNASSIGNED,
           recipientUserId: RECIPIENT_ID,
-        }),
-      })
+        })
+      )
       expect(mockGateway.emitToUser).toHaveBeenCalled()
     })
 
@@ -332,7 +324,7 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
     })
   })
 
@@ -353,15 +345,15 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.CASE_COMMENT_ADDED,
           recipientUserId: RECIPIENT_ID,
           entityType: NotificationEntityType.CASE,
           entityId: CASE_ID,
           caseId: CASE_ID,
-        }),
-      })
+        })
+      )
       expect(mockGateway.emitToUser).toHaveBeenCalled()
     })
 
@@ -377,7 +369,7 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
       expect(mockGateway.emitToUser).not.toHaveBeenCalled()
     })
 
@@ -393,7 +385,7 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
     })
 
     it('should handle all case activity types', async () => {
@@ -407,9 +399,12 @@ describe('NotificationsService', () => {
 
       for (const type of types) {
         jest.clearAllMocks()
-        prisma.notification.count.mockResolvedValue(0)
-        prisma.user.findUnique.mockResolvedValue({ name: ACTOR_NAME })
-        prisma.notification.create.mockResolvedValue({ id: 'n-1' })
+        repository = createMockRepository()
+        service = new NotificationsService(
+          repository as never,
+          mockAppLogger as never,
+          mockGateway as never
+        )
 
         await service.notifyCaseActivity(
           TENANT_ID,
@@ -422,9 +417,9 @@ describe('NotificationsService', () => {
           ACTOR_EMAIL
         )
 
-        expect(prisma.notification.create).toHaveBeenCalledWith({
-          data: expect.objectContaining({ type }),
-        })
+        expect(repository.createNotification).toHaveBeenCalledWith(
+          expect.objectContaining({ type })
+        )
       }
     })
   })
@@ -444,15 +439,15 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.TENANT_ASSIGNED,
           recipientUserId: RECIPIENT_ID,
           entityType: NotificationEntityType.TENANT,
           entityId: TENANT_ID,
           message: 'You have been added to tenant "AuraSpear" as SOC_ANALYST_L1',
-        }),
-      })
+        })
+      )
       expect(mockGateway.emitToUser).toHaveBeenCalled()
     })
 
@@ -466,7 +461,7 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
     })
   })
 
@@ -485,14 +480,14 @@ describe('NotificationsService', () => {
         ACTOR_EMAIL
       )
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.ROLE_CHANGED,
           recipientUserId: RECIPIENT_ID,
           entityType: NotificationEntityType.USER,
           message: 'Your role has been changed from SOC_ANALYST_L1 to TENANT_ADMIN',
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -504,13 +499,13 @@ describe('NotificationsService', () => {
     it('should create blocked notification', async () => {
       await service.notifyUserBlocked(TENANT_ID, RECIPIENT_ID, ACTOR_ID, ACTOR_EMAIL)
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.USER_BLOCKED,
           recipientUserId: RECIPIENT_ID,
           message: 'Your account has been suspended by an administrator',
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -522,12 +517,12 @@ describe('NotificationsService', () => {
     it('should create unblocked notification', async () => {
       await service.notifyUserUnblocked(TENANT_ID, RECIPIENT_ID, ACTOR_ID, ACTOR_EMAIL)
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.USER_UNBLOCKED,
           message: 'Your account has been reactivated by an administrator',
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -539,12 +534,12 @@ describe('NotificationsService', () => {
     it('should create removed notification', async () => {
       await service.notifyUserRemoved(TENANT_ID, RECIPIENT_ID, ACTOR_ID, ACTOR_EMAIL)
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.USER_REMOVED,
           message: 'Your account has been removed from this tenant',
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -556,12 +551,12 @@ describe('NotificationsService', () => {
     it('should create restored notification', async () => {
       await service.notifyUserRestored(TENANT_ID, RECIPIENT_ID, ACTOR_ID, ACTOR_EMAIL)
 
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
           type: NotificationType.USER_RESTORED,
           message: 'Your account has been restored by an administrator',
-        }),
-      })
+        })
+      )
     })
   })
 
@@ -571,7 +566,7 @@ describe('NotificationsService', () => {
 
   describe('createMentionNotifications', () => {
     it('should create notifications for mentioned users', async () => {
-      prisma.notification.count.mockResolvedValue(3)
+      repository.countUnread.mockResolvedValue(3)
 
       await service.createMentionNotifications(
         TENANT_ID,
@@ -581,8 +576,8 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(prisma.notification.createMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
+      expect(repository.createManyNotifications).toHaveBeenCalledWith(
+        expect.arrayContaining([
           expect.objectContaining({
             recipientUserId: RECIPIENT_ID,
             type: 'mention',
@@ -593,8 +588,8 @@ describe('NotificationsService', () => {
             recipientUserId: 'user-002',
           }),
         ]),
-        skipDuplicates: true,
-      })
+        true
+      )
       expect(mockGateway.emitToUser).toHaveBeenCalledTimes(2)
       expect(mockGateway.emitUnreadCount).toHaveBeenCalledTimes(2)
     })
@@ -602,19 +597,19 @@ describe('NotificationsService', () => {
     it('should filter out self-mentions', async () => {
       await service.createMentionNotifications(TENANT_ID, CASE_ID, COMMENT_ID, [ACTOR_ID], mockUser)
 
-      expect(prisma.notification.createMany).not.toHaveBeenCalled()
+      expect(repository.createManyNotifications).not.toHaveBeenCalled()
       expect(mockGateway.emitToUser).not.toHaveBeenCalled()
     })
 
     it('should skip when no recipients after filtering', async () => {
       await service.createMentionNotifications(TENANT_ID, CASE_ID, COMMENT_ID, [], mockUser)
 
-      expect(prisma.notification.createMany).not.toHaveBeenCalled()
+      expect(repository.createManyNotifications).not.toHaveBeenCalled()
     })
 
     it('should use actor email as fallback name', async () => {
-      prisma.user.findUnique.mockResolvedValue(null)
-      prisma.notification.count.mockResolvedValue(1)
+      repository.findUserById.mockResolvedValue(null)
+      repository.countUnread.mockResolvedValue(1)
 
       await service.createMentionNotifications(
         TENANT_ID,
@@ -624,19 +619,19 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(prisma.notification.createMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
+      expect(repository.createManyNotifications).toHaveBeenCalledWith(
+        expect.arrayContaining([
           expect.objectContaining({
             message: expect.stringContaining(ACTOR_EMAIL),
           }),
         ]),
-        skipDuplicates: true,
-      })
+        true
+      )
     })
 
     it('should use caseId as fallback when case not found', async () => {
-      prisma.case.findUnique.mockResolvedValue(null)
-      prisma.notification.count.mockResolvedValue(0)
+      repository.findCaseById.mockResolvedValue(null)
+      repository.countUnread.mockResolvedValue(0)
 
       await service.createMentionNotifications(
         TENANT_ID,
@@ -646,14 +641,14 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(prisma.notification.createMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
+      expect(repository.createManyNotifications).toHaveBeenCalledWith(
+        expect.arrayContaining([
           expect.objectContaining({
             message: expect.stringContaining(CASE_ID),
           }),
         ]),
-        skipDuplicates: true,
-      })
+        true
+      )
     })
   })
 })

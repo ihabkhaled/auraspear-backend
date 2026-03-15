@@ -1,0 +1,593 @@
+import { Injectable } from '@nestjs/common'
+import { PrismaService } from '../../prisma/prisma.service'
+import type { CaseSeverity, CaseStatus, Prisma, UserStatus } from '@prisma/client'
+
+@Injectable()
+export class CasesRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /* ---------------------------------------------------------------- */
+  /* USER LOOKUPS                                                      */
+  /* ---------------------------------------------------------------- */
+
+  async findUserById(userId: string) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true },
+    })
+  }
+
+  async findUserNameById(userId: string) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    })
+  }
+
+  async findUserByEmail(email: string) {
+    return this.prisma.user.findUnique({
+      where: { email },
+      select: { name: true },
+    })
+  }
+
+  async findUsersByEmails(emails: string[]) {
+    return this.prisma.user.findMany({
+      where: { email: { in: emails } },
+      select: { email: true, name: true },
+    })
+  }
+
+  async findUsersByIds(ids: string[]) {
+    return this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, email: true },
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* CASE QUERIES                                                      */
+  /* ---------------------------------------------------------------- */
+
+  async findCasesAndCount(params: {
+    where: Prisma.CaseWhereInput
+    orderBy: Prisma.CaseOrderByWithRelationInput
+    skip: number
+    take: number
+  }) {
+    return Promise.all([
+      this.prisma.case.findMany({
+        ...params,
+        include: { tenant: { select: { name: true } } },
+      }),
+      this.prisma.case.count({ where: params.where }),
+    ])
+  }
+
+  async findCaseByIdAndTenant(id: string, tenantId: string) {
+    return this.prisma.case.findFirst({
+      where: { id, tenantId },
+      include: {
+        notes: { orderBy: { createdAt: 'asc' } },
+        timeline: { orderBy: { timestamp: 'asc' } },
+        tasks: true,
+        artifacts: true,
+        tenant: { select: { name: true } },
+      },
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ALERT VALIDATION                                                  */
+  /* ---------------------------------------------------------------- */
+
+  async countAlertsByTenantAndIds(tenantId: string, alertIds: string[]) {
+    return this.prisma.alert.count({
+      where: { id: { in: alertIds }, tenantId },
+    })
+  }
+
+  async countAlertByTenantAndId(tenantId: string, alertId: string) {
+    return this.prisma.alert.count({
+      where: { id: alertId, tenantId },
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* MEMBERSHIP VALIDATION                                             */
+  /* ---------------------------------------------------------------- */
+
+  async findMembershipByUserAndTenant(userId: string, tenantId: string) {
+    return this.prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+      select: { status: true },
+    })
+  }
+
+  async countActiveMentionMemberships(userIds: string[], tenantId: string, status: UserStatus) {
+    return this.prisma.tenantMembership.count({
+      where: {
+        userId: { in: userIds },
+        tenantId,
+        status,
+      },
+    })
+  }
+
+  async searchMentionableMembers(
+    tenantId: string,
+    query: string,
+    status: UserStatus,
+    limit: number
+  ) {
+    return this.prisma.tenantMembership.findMany({
+      where: {
+        tenantId,
+        status,
+        user: {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } },
+          ],
+        },
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+      },
+      take: limit,
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* CREATE CASE TRANSACTION                                           */
+  /* ---------------------------------------------------------------- */
+
+  async createCaseTransaction(
+    params: {
+      tenantId: string
+      cycleId?: string | null
+      title: string
+      description: string
+      severity: CaseSeverity
+      status: CaseStatus
+      ownerUserId?: string | null
+      createdBy: string
+      linkedAlerts: string[]
+    },
+    timelineData: {
+      type: string
+      actor: string
+      description: string
+    },
+    linkedAlertTimelineData?: {
+      type: string
+      actor: string
+      description: string
+    }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      let resolvedCycleId: string | null = null
+      if (params.cycleId) {
+        const cycle = await tx.caseCycle.findFirst({
+          where: { id: params.cycleId, tenantId: params.tenantId },
+          select: { id: true },
+        })
+        if (!cycle) {
+          throw new Error('INVALID_CYCLE')
+        }
+        resolvedCycleId = params.cycleId
+      } else {
+        const activeCycle = await tx.caseCycle.findFirst({
+          where: { tenantId: params.tenantId, status: 'active' },
+          select: { id: true },
+        })
+        resolvedCycleId = activeCycle?.id ?? null
+      }
+
+      // Generate case number with advisory lock
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))::text`
+      const year = new Date().getFullYear()
+      const prefix = `SOC-${year}-`
+      const latestCase = await tx.case.findFirst({
+        where: { caseNumber: { startsWith: prefix } },
+        orderBy: { caseNumber: 'desc' },
+        select: { caseNumber: true },
+      })
+      let nextSequence = 1
+      if (latestCase) {
+        const parts = latestCase.caseNumber.split('-')
+        const lastPart = parts[2]
+        if (lastPart) {
+          nextSequence = Number.parseInt(lastPart, 10) + 1
+        }
+      }
+      const caseNumber = `${prefix}${String(nextSequence).padStart(3, '0')}`
+
+      const newCase = await tx.case.create({
+        data: {
+          tenantId: params.tenantId,
+          caseNumber,
+          title: params.title,
+          description: params.description,
+          severity: params.severity,
+          status: params.status,
+          ownerUserId: params.ownerUserId ?? null,
+          createdBy: params.createdBy,
+          cycleId: resolvedCycleId,
+          ...(params.linkedAlerts.length > 0 ? { linkedAlerts: params.linkedAlerts } : {}),
+        },
+      })
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId: newCase.id,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: `Case ${caseNumber} created: ${params.title}`,
+        },
+      })
+
+      if (linkedAlertTimelineData && params.linkedAlerts.length > 0) {
+        await tx.caseTimeline.create({
+          data: {
+            caseId: newCase.id,
+            type: linkedAlertTimelineData.type,
+            actor: linkedAlertTimelineData.actor,
+            description: linkedAlertTimelineData.description,
+          },
+        })
+      }
+
+      return tx.case.findUniqueOrThrow({
+        where: { id: newCase.id },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
+          tenant: { select: { name: true } },
+        },
+      })
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* UPDATE CASE TRANSACTION                                           */
+  /* ---------------------------------------------------------------- */
+
+  async updateCaseTransaction(
+    id: string,
+    tenantId: string,
+    updateData: Record<string, unknown>,
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.case.updateMany({
+        where: { id, tenantId },
+        data: updateData,
+      })
+
+      if (updated.count === 0) {
+        throw new Error('CASE_NOT_FOUND')
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId: id,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+
+      return tx.case.findUniqueOrThrow({
+        where: { id },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
+          tenant: { select: { name: true } },
+        },
+      })
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* DELETE CASE TRANSACTION                                           */
+  /* ---------------------------------------------------------------- */
+
+  async softDeleteCaseTransaction(
+    id: string,
+    tenantId: string,
+    status: CaseStatus,
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      await tx.case.updateMany({
+        where: { id, tenantId },
+        data: { status, closedAt: new Date() },
+      })
+      await tx.caseTimeline.create({
+        data: {
+          caseId: id,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* LINK ALERT TRANSACTION                                            */
+  /* ---------------------------------------------------------------- */
+
+  async linkAlertTransaction(
+    caseId: string,
+    tenantId: string,
+    linkedAlerts: string[],
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.case.updateMany({
+        where: { id: caseId, tenantId },
+        data: { linkedAlerts },
+      })
+
+      if (updated.count === 0) {
+        throw new Error('CASE_NOT_FOUND')
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+
+      return tx.case.findUniqueOrThrow({
+        where: { id: caseId },
+        include: {
+          notes: true,
+          timeline: { orderBy: { timestamp: 'asc' } },
+          tasks: true,
+          artifacts: true,
+          tenant: { select: { name: true } },
+        },
+      })
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* NOTES                                                             */
+  /* ---------------------------------------------------------------- */
+
+  async findCaseNotesAndCount(caseId: string, skip: number, take: number) {
+    const where = { caseId }
+    return Promise.all([
+      this.prisma.caseNote.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take,
+      }),
+      this.prisma.caseNote.count({ where }),
+    ])
+  }
+
+  async addNoteTransaction(
+    caseId: string,
+    author: string,
+    body: string,
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      const createdNote = await tx.caseNote.create({
+        data: { caseId, author, body },
+      })
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+      return createdNote
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* COMMENTS                                                          */
+  /* ---------------------------------------------------------------- */
+
+  async findCommentsAndCount(caseId: string, skip: number, take: number) {
+    const where = { caseId, isDeleted: false }
+    return Promise.all([
+      this.prisma.caseComment.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take,
+        include: { mentions: true },
+      }),
+      this.prisma.caseComment.count({ where }),
+    ])
+  }
+
+  async findCommentByIdAndCase(commentId: string, caseId: string) {
+    return this.prisma.caseComment.findFirst({
+      where: { id: commentId, caseId, isDeleted: false },
+    })
+  }
+
+  async addCommentTransaction(
+    caseId: string,
+    authorId: string,
+    body: string,
+    mentionUserIds: string[],
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      const createdComment = await tx.caseComment.create({
+        data: { caseId, authorId, body },
+      })
+
+      if (mentionUserIds.length > 0) {
+        await tx.caseCommentMention.createMany({
+          data: mentionUserIds.map(userId => ({
+            commentId: createdComment.id,
+            userId,
+          })),
+        })
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+
+      return tx.caseComment.findUniqueOrThrow({
+        where: { id: createdComment.id },
+        include: { mentions: true },
+      })
+    })
+  }
+
+  async updateCommentTransaction(
+    commentId: string,
+    caseId: string,
+    body: string,
+    mentionUserIds: string[],
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      await tx.caseComment.update({
+        where: { id: commentId },
+        data: { body, isEdited: true },
+      })
+
+      await tx.caseCommentMention.deleteMany({ where: { commentId } })
+      if (mentionUserIds.length > 0) {
+        await tx.caseCommentMention.createMany({
+          data: mentionUserIds.map(userId => ({
+            commentId,
+            userId,
+          })),
+        })
+      }
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+
+      return tx.caseComment.findUniqueOrThrow({
+        where: { id: commentId },
+        include: { mentions: true },
+      })
+    })
+  }
+
+  async softDeleteCommentTransaction(
+    commentId: string,
+    caseId: string,
+    timelineData: { type: string; actor: string; description: string }
+  ) {
+    return this.prisma.$transaction(async tx => {
+      await tx.caseComment.update({
+        where: { id: commentId },
+        data: { isDeleted: true },
+      })
+
+      await tx.caseTimeline.create({
+        data: {
+          caseId,
+          type: timelineData.type,
+          actor: timelineData.actor,
+          description: timelineData.description,
+        },
+      })
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* TASKS                                                             */
+  /* ---------------------------------------------------------------- */
+
+  async createTask(data: {
+    caseId: string
+    title: string
+    status: string
+    assignee: string | null
+  }) {
+    return this.prisma.caseTask.create({ data })
+  }
+
+  async findTaskByIdAndCase(taskId: string, caseId: string) {
+    return this.prisma.caseTask.findFirst({
+      where: { id: taskId, caseId },
+    })
+  }
+
+  async updateTask(taskId: string, data: Record<string, unknown>) {
+    return this.prisma.caseTask.update({
+      where: { id: taskId },
+      data,
+    })
+  }
+
+  async deleteTask(taskId: string) {
+    return this.prisma.caseTask.delete({ where: { id: taskId } })
+  }
+
+  async createTimeline(data: { caseId: string; type: string; actor: string; description: string }) {
+    return this.prisma.caseTimeline.create({ data })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ARTIFACTS                                                         */
+  /* ---------------------------------------------------------------- */
+
+  async findArtifactDuplicate(caseId: string, type: string, value: string) {
+    return this.prisma.caseArtifact.findFirst({
+      where: { caseId, type, value },
+    })
+  }
+
+  async createArtifact(data: { caseId: string; type: string; value: string; source: string }) {
+    return this.prisma.caseArtifact.create({ data })
+  }
+
+  async findArtifactByIdAndCase(artifactId: string, caseId: string) {
+    return this.prisma.caseArtifact.findFirst({
+      where: { id: artifactId, caseId },
+    })
+  }
+
+  async deleteArtifact(artifactId: string) {
+    return this.prisma.caseArtifact.delete({ where: { id: artifactId } })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* CASE CYCLE LOOKUP                                                 */
+  /* ---------------------------------------------------------------- */
+
+  async findCaseCycleById(cycleId: string) {
+    return this.prisma.caseCycle.findUnique({
+      where: { id: cycleId },
+      select: { name: true },
+    })
+  }
+}

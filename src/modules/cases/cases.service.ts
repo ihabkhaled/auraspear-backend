@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { CasesRepository } from './cases.repository'
 import {
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
-  CaseCycleStatus,
   CaseStatus,
   CaseTimelineType,
   NotificationType,
@@ -13,7 +13,6 @@ import { MembershipStatus, UserRole } from '../../common/interfaces/authenticate
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { hasRoleAtLeast } from '../../common/utils/role.util'
-import { PrismaService } from '../../prisma/prisma.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
   CaseCommentResponse,
@@ -40,7 +39,7 @@ export class CasesService {
   private readonly logger = new Logger(CasesService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly casesRepository: CasesRepository,
     private readonly appLogger: AppLoggerService,
     private readonly notificationsService: NotificationsService
   ) {}
@@ -51,10 +50,7 @@ export class CasesService {
     if (!ownerUserId) {
       return { ownerName: null, ownerEmail: null }
     }
-    const owner = await this.prisma.user.findUnique({
-      where: { id: ownerUserId },
-      select: { name: true, email: true },
-    })
+    const owner = await this.casesRepository.findUserById(ownerUserId)
     return {
       ownerName: owner?.name ?? null,
       ownerEmail: owner?.email ?? null,
@@ -63,20 +59,14 @@ export class CasesService {
 
   private async resolveCreatorName(email: string | null): Promise<string | null> {
     if (!email) return null
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-      select: { name: true },
-    })
+    const user = await this.casesRepository.findUserByEmail(email)
     return user?.name ?? null
   }
 
   private async resolveCreatorNamesBatch(emails: (string | null)[]): Promise<Map<string, string>> {
     const uniqueEmails = [...new Set(emails.filter((e): e is string => e !== null))]
     if (uniqueEmails.length === 0) return new Map()
-    const users = await this.prisma.user.findMany({
-      where: { email: { in: uniqueEmails } },
-      select: { email: true, name: true },
-    })
+    const users = await this.casesRepository.findUsersByEmails(uniqueEmails)
     const map = new Map<string, string>()
     for (const u of users) {
       map.set(u.email, u.name)
@@ -91,10 +81,7 @@ export class CasesService {
     if (ids.length === 0) {
       return new Map()
     }
-    const owners = await this.prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true, email: true },
-    })
+    const owners = await this.casesRepository.findUsersByIds(ids)
     const map = new Map<string, { name: string; email: string }>()
     for (const o of owners) {
       map.set(o.id, { name: o.name, email: o.email })
@@ -146,16 +133,12 @@ export class CasesService {
       ]
     }
 
-    const [cases, total] = await Promise.all([
-      this.prisma.case.findMany({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: this.buildCaseOrderBy(sortBy, sortOrder),
-        include: { tenant: { select: { name: true } } },
-      }),
-      this.prisma.case.count({ where }),
-    ])
+    const [cases, total] = await this.casesRepository.findCasesAndCount({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: this.buildCaseOrderBy(sortBy, sortOrder),
+    })
 
     const [ownersMap, creatorsMap] = await Promise.all([
       this.resolveOwnersBatch(cases.map(c => c.ownerUserId)),
@@ -215,9 +198,10 @@ export class CasesService {
 
     // M5: Validate linkedAlertIds belong to the same tenant
     if (linkedAlerts.length > 0) {
-      const validAlerts = await this.prisma.alert.count({
-        where: { id: { in: linkedAlerts }, tenantId: user.tenantId },
-      })
+      const validAlerts = await this.casesRepository.countAlertsByTenantAndIds(
+        user.tenantId,
+        linkedAlerts
+      )
       if (validAlerts !== linkedAlerts.length) {
         this.appLogger.warn('Invalid linked alerts: some do not belong to tenant', {
           feature: AppLogFeature.CASES,
@@ -237,78 +221,43 @@ export class CasesService {
       }
     }
 
-    const result = await this.prisma.$transaction(async tx => {
-      // Use provided cycleId, or auto-assign to active cycle if one exists
-      let resolvedCycleId: string | null = null
-      if (dto.cycleId) {
-        // Validate the provided cycle belongs to the tenant
-        const cycle = await tx.caseCycle.findFirst({
-          where: { id: dto.cycleId, tenantId: user.tenantId },
-          select: { id: true },
-        })
-        if (!cycle) {
-          throw new BusinessException(
-            400,
-            'The specified cycle does not belong to this tenant',
-            'errors.cases.invalidCycle'
-          )
-        }
-        resolvedCycleId = dto.cycleId
-      } else {
-        const activeCycle = await tx.caseCycle.findFirst({
-          where: { tenantId: user.tenantId, status: CaseCycleStatus.ACTIVE },
-          select: { id: true },
-        })
-        resolvedCycleId = activeCycle?.id ?? null
-      }
-
-      const caseNumber = await this.generateCaseNumber(tx)
-      const newCase = await tx.case.create({
-        data: {
+    let result: Awaited<ReturnType<CasesRepository['createCaseTransaction']>>
+    try {
+      result = await this.casesRepository.createCaseTransaction(
+        {
           tenantId: user.tenantId,
-          caseNumber,
+          cycleId: dto.cycleId,
           title: dto.title,
           description: dto.description,
           severity: dto.severity,
           status: CaseStatus.OPEN,
           ownerUserId: dto.ownerUserId ?? null,
           createdBy: user.email,
-          cycleId: resolvedCycleId,
-          ...(linkedAlerts.length > 0 ? { linkedAlerts } : {}),
+          linkedAlerts,
         },
-      })
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId: newCase.id,
+        {
           type: CaseTimelineType.CREATED,
           actor: user.email,
-          description: `Case ${caseNumber} created: ${dto.title}`,
+          description: '',
         },
-      })
-
-      if (linkedAlerts.length > 0) {
-        await tx.caseTimeline.create({
-          data: {
-            caseId: newCase.id,
-            type: CaseTimelineType.ALERT_LINKED,
-            actor: user.email,
-            description: `${linkedAlerts.length} alert(s) linked at creation`,
-          },
-        })
+        linkedAlerts.length > 0
+          ? {
+              type: CaseTimelineType.ALERT_LINKED,
+              actor: user.email,
+              description: `${linkedAlerts.length} alert(s) linked at creation`,
+            }
+          : undefined
+      )
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'INVALID_CYCLE') {
+        throw new BusinessException(
+          400,
+          'The specified cycle does not belong to this tenant',
+          'errors.cases.invalidCycle'
+        )
       }
-
-      return tx.case.findUniqueOrThrow({
-        where: { id: newCase.id },
-        include: {
-          notes: true,
-          timeline: { orderBy: { timestamp: 'asc' } },
-          tasks: true,
-          artifacts: true,
-          tenant: { select: { name: true } },
-        },
-      })
-    })
+      throw error
+    }
 
     this.appLogger.info('Case created', {
       feature: AppLogFeature.CASES,
@@ -337,16 +286,7 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   async getCaseById(id: string, tenantId: string): Promise<CaseRecord> {
-    const caseRecord = await this.prisma.case.findFirst({
-      where: { id, tenantId },
-      include: {
-        notes: { orderBy: { createdAt: 'asc' } },
-        timeline: { orderBy: { timestamp: 'asc' } },
-        tasks: true,
-        artifacts: true,
-        tenant: { select: { name: true } },
-      },
-    })
+    const caseRecord = await this.casesRepository.findCaseByIdAndTenant(id, tenantId)
 
     if (!caseRecord) {
       this.appLogger.warn('Case not found', {
@@ -430,10 +370,7 @@ export class CasesService {
     }
 
     // Resolve user name for actor
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.casesRepository.findUserNameById(user.sub)
     const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
     // Build timeline description with meaningful details
@@ -446,10 +383,7 @@ export class CasesService {
     } else if (dto.ownerUserId !== undefined) {
       // Resolve previous owner for "from X" in description
       const previousOwner = existing.ownerUserId
-        ? await this.prisma.user.findUnique({
-            where: { id: existing.ownerUserId },
-            select: { name: true, email: true },
-          })
+        ? await this.casesRepository.findUserById(existing.ownerUserId)
         : null
       const previousLabel = previousOwner ? `${previousOwner.name} (${previousOwner.email})` : null
 
@@ -458,10 +392,7 @@ export class CasesService {
           ? `Assignee removed (was ${previousLabel}) by ${actorLabel}`
           : `Assignee removed by ${actorLabel}`
       } else {
-        const newOwner = await this.prisma.user.findUnique({
-          where: { id: dto.ownerUserId },
-          select: { name: true, email: true },
-        })
+        const newOwner = await this.casesRepository.findUserById(dto.ownerUserId)
         const ownerLabel = newOwner ? `${newOwner.name} (${newOwner.email})` : dto.ownerUserId
         timelineDescription = previousLabel
           ? `Assigned to ${ownerLabel} from ${previousLabel} by ${actorLabel}`
@@ -485,31 +416,30 @@ export class CasesService {
     } else if (dto.cycleId === null) {
       timelineDescription = `Removed from cycle by ${actorLabel}`
     } else {
-      const cycle = await this.prisma.caseCycle.findUnique({
-        where: { id: dto.cycleId },
-        select: { name: true },
-      })
+      const cycle = await this.casesRepository.findCaseCycleById(dto.cycleId)
       timelineDescription = `Added to cycle "${cycle?.name ?? dto.cycleId}" by ${actorLabel}`
     }
 
-    const result = await this.prisma.$transaction(async tx => {
-      // Build update data — handle nullable fields explicitly
-      const updateData: Record<string, unknown> = {}
-      if (dto.title !== undefined) updateData['title'] = dto.title
-      if (dto.description !== undefined) updateData['description'] = dto.description
-      if (dto.severity !== undefined) updateData['severity'] = dto.severity
-      if (dto.status !== undefined) updateData['status'] = dto.status
-      if (dto.ownerUserId !== undefined) updateData['ownerUserId'] = dto.ownerUserId
-      if (dto.cycleId !== undefined) updateData['cycleId'] = dto.cycleId
-      if (dto.status === CaseStatus.CLOSED) updateData['closedAt'] = new Date()
-      if (isReopening) updateData['closedAt'] = null
+    // Build update data — handle nullable fields explicitly
+    const updateData: Record<string, unknown> = {}
+    if (dto.title !== undefined) updateData['title'] = dto.title
+    if (dto.description !== undefined) updateData['description'] = dto.description
+    if (dto.severity !== undefined) updateData['severity'] = dto.severity
+    if (dto.status !== undefined) updateData['status'] = dto.status
+    if (dto.ownerUserId !== undefined) updateData['ownerUserId'] = dto.ownerUserId
+    if (dto.cycleId !== undefined) updateData['cycleId'] = dto.cycleId
+    if (dto.status === CaseStatus.CLOSED) updateData['closedAt'] = new Date()
+    if (isReopening) updateData['closedAt'] = null
 
-      const updated = await tx.case.updateMany({
-        where: { id, tenantId: user.tenantId },
-        data: updateData,
+    let result: Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>
+    try {
+      result = await this.casesRepository.updateCaseTransaction(id, user.tenantId, updateData, {
+        type: timelineType,
+        actor: user.email,
+        description: timelineDescription,
       })
-
-      if (updated.count === 0) {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'CASE_NOT_FOUND') {
         this.appLogger.warn('Case not found during update transaction', {
           feature: AppLogFeature.CASES,
           action: 'updateCase',
@@ -521,27 +451,8 @@ export class CasesService {
         })
         throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
       }
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId: id,
-          type: timelineType,
-          actor: user.email,
-          description: timelineDescription,
-        },
-      })
-
-      return tx.case.findUniqueOrThrow({
-        where: { id },
-        include: {
-          notes: true,
-          timeline: { orderBy: { timestamp: 'asc' } },
-          tasks: true,
-          artifacts: true,
-          tenant: { select: { name: true } },
-        },
-      })
-    })
+      throw error
+    }
 
     this.appLogger.info('Case updated', {
       feature: AppLogFeature.CASES,
@@ -650,19 +561,10 @@ export class CasesService {
     const existing = await this.getCaseById(id, tenantId)
 
     // Soft-delete: close the case instead of destroying audit trail
-    await this.prisma.$transaction(async tx => {
-      await tx.case.updateMany({
-        where: { id, tenantId },
-        data: { status: CaseStatus.CLOSED, closedAt: new Date() },
-      })
-      await tx.caseTimeline.create({
-        data: {
-          caseId: id,
-          type: CaseTimelineType.DELETED,
-          actor,
-          description: `Case ${existing.caseNumber} soft-deleted`,
-        },
-      })
+    await this.casesRepository.softDeleteCaseTransaction(id, tenantId, CaseStatus.CLOSED, {
+      type: CaseTimelineType.DELETED,
+      actor,
+      description: `Case ${existing.caseNumber} soft-deleted`,
     })
 
     this.logger.log(`Case ${existing.caseNumber} soft-deleted by ${actor}`)
@@ -695,9 +597,10 @@ export class CasesService {
     }
 
     // Validate that the alert belongs to the caller's tenant
-    const alertExists = await this.prisma.alert.count({
-      where: { id: dto.alertId, tenantId: user.tenantId },
-    })
+    const alertExists = await this.casesRepository.countAlertByTenantAndId(
+      user.tenantId,
+      dto.alertId
+    )
     if (alertExists === 0) {
       this.appLogger.warn('Linked alert does not belong to tenant', {
         feature: AppLogFeature.CASES,
@@ -734,16 +637,20 @@ export class CasesService {
       )
     }
 
-    const result = await this.prisma.$transaction(async tx => {
-      const updated = await tx.case.updateMany({
-        where: { id: caseId, tenantId: user.tenantId },
-        data: {
-          // updateMany doesn't support { push }, so we set the full array
-          linkedAlerts: [...existing.linkedAlerts, dto.alertId],
-        },
-      })
-
-      if (updated.count === 0) {
+    let result: Awaited<ReturnType<CasesRepository['linkAlertTransaction']>>
+    try {
+      result = await this.casesRepository.linkAlertTransaction(
+        caseId,
+        user.tenantId,
+        [...existing.linkedAlerts, dto.alertId],
+        {
+          type: CaseTimelineType.ALERT_LINKED,
+          actor: user.email,
+          description: `Alert ${dto.alertId} linked from index ${dto.indexName}`,
+        }
+      )
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'CASE_NOT_FOUND') {
         this.appLogger.warn('Case not found during link alert transaction', {
           feature: AppLogFeature.CASES,
           action: 'linkAlert',
@@ -755,27 +662,8 @@ export class CasesService {
         })
         throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
       }
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.ALERT_LINKED,
-          actor: user.email,
-          description: `Alert ${dto.alertId} linked from index ${dto.indexName}`,
-        },
-      })
-
-      return tx.case.findUniqueOrThrow({
-        where: { id: caseId },
-        include: {
-          notes: true,
-          timeline: { orderBy: { timestamp: 'asc' } },
-          tasks: true,
-          artifacts: true,
-          tenant: { select: { name: true } },
-        },
-      })
-    })
+      throw error
+    }
 
     this.logger.log(`Alert ${dto.alertId} linked to case ${existing.caseNumber}`)
     const [{ ownerName, ownerEmail }, createdByName] = await Promise.all([
@@ -797,17 +685,11 @@ export class CasesService {
   ): Promise<PaginatedCaseNotes> {
     await this.getCaseById(caseId, tenantId)
 
-    const where = { caseId }
-
-    const [notes, total] = await Promise.all([
-      this.prisma.caseNote.findMany({
-        where,
-        orderBy: { createdAt: 'asc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.caseNote.count({ where }),
-    ])
+    const [notes, total] = await this.casesRepository.findCaseNotesAndCount(
+      caseId,
+      (page - 1) * limit,
+      limit
+    )
 
     return {
       data: notes,
@@ -838,25 +720,10 @@ export class CasesService {
 
     const truncatedBody = dto.body.length > 80 ? `${dto.body.slice(0, 80)}...` : dto.body
 
-    const note = await this.prisma.$transaction(async tx => {
-      const createdNote = await tx.caseNote.create({
-        data: {
-          caseId,
-          author: user.email,
-          body: dto.body,
-        },
-      })
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.NOTE_ADDED,
-          actor: user.email,
-          description: `Note added: ${truncatedBody}`,
-        },
-      })
-
-      return createdNote
+    const note = await this.casesRepository.addNoteTransaction(caseId, user.email, dto.body, {
+      type: CaseTimelineType.NOTE_ADDED,
+      actor: user.email,
+      description: `Note added: ${truncatedBody}`,
     })
 
     this.logger.log(`Note added to case ${existing.caseNumber} by ${user.email}`)
@@ -875,32 +742,17 @@ export class CasesService {
   ): Promise<PaginatedCaseComments> {
     await this.getCaseById(caseId, tenantId)
 
-    const where = { caseId, isDeleted: false }
-
-    const [comments, total] = await Promise.all([
-      this.prisma.caseComment.findMany({
-        where,
-        orderBy: { createdAt: 'asc' },
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          mentions: true,
-        },
-      }),
-      this.prisma.caseComment.count({ where }),
-    ])
+    const [comments, total] = await this.casesRepository.findCommentsAndCount(
+      caseId,
+      (page - 1) * limit,
+      limit
+    )
 
     const authorIds = [...new Set(comments.map(c => c.authorId))]
     const mentionUserIds = [...new Set(comments.flatMap(c => c.mentions.map(m => m.userId)))]
     const allUserIds = [...new Set([...authorIds, ...mentionUserIds])]
 
-    const users =
-      allUserIds.length > 0
-        ? await this.prisma.user.findMany({
-            where: { id: { in: allUserIds } },
-            select: { id: true, name: true, email: true },
-          })
-        : []
+    const users = allUserIds.length > 0 ? await this.casesRepository.findUsersByIds(allUserIds) : []
 
     const userMap = new Map(users.map(u => [u.id, u]))
 
@@ -973,13 +825,11 @@ export class CasesService {
 
     // Validate mentioned users belong to the same tenant
     if (uniqueMentionIds.length > 0) {
-      const validMentions = await this.prisma.tenantMembership.count({
-        where: {
-          userId: { in: uniqueMentionIds },
-          tenantId: user.tenantId,
-          status: MembershipStatus.ACTIVE,
-        },
-      })
+      const validMentions = await this.casesRepository.countActiveMentionMemberships(
+        uniqueMentionIds,
+        user.tenantId,
+        MembershipStatus.ACTIVE
+      )
       if (validMentions !== uniqueMentionIds.length) {
         throw new BusinessException(
           400,
@@ -991,38 +841,17 @@ export class CasesService {
 
     const truncatedBody = dto.body.length > 80 ? `${dto.body.slice(0, 80)}...` : dto.body
 
-    const comment = await this.prisma.$transaction(async tx => {
-      const createdComment = await tx.caseComment.create({
-        data: {
-          caseId,
-          authorId: user.sub,
-          body: dto.body,
-        },
-      })
-
-      if (uniqueMentionIds.length > 0) {
-        await tx.caseCommentMention.createMany({
-          data: uniqueMentionIds.map(userId => ({
-            commentId: createdComment.id,
-            userId,
-          })),
-        })
+    const comment = await this.casesRepository.addCommentTransaction(
+      caseId,
+      user.sub,
+      dto.body,
+      uniqueMentionIds,
+      {
+        type: CaseTimelineType.COMMENT_ADDED,
+        actor: user.email,
+        description: `Comment added: ${truncatedBody}`,
       }
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.COMMENT_ADDED,
-          actor: user.email,
-          description: `Comment added: ${truncatedBody}`,
-        },
-      })
-
-      return tx.caseComment.findUniqueOrThrow({
-        where: { id: createdComment.id },
-        include: { mentions: true },
-      })
-    })
+    )
 
     this.appLogger.info('Comment added', {
       feature: AppLogFeature.CASES,
@@ -1073,9 +902,7 @@ export class CasesService {
   ): Promise<CaseCommentResponse> {
     await this.getCaseById(caseId, user.tenantId)
 
-    const existing = await this.prisma.caseComment.findFirst({
-      where: { id: commentId, caseId, isDeleted: false },
-    })
+    const existing = await this.casesRepository.findCommentByIdAndCase(commentId, caseId)
     if (!existing) {
       throw new BusinessException(404, 'Comment not found', 'errors.cases.commentNotFound')
     }
@@ -1091,13 +918,11 @@ export class CasesService {
 
     const uniqueMentionIds = [...new Set(dto.mentionedUserIds)]
     if (uniqueMentionIds.length > 0) {
-      const validMentions = await this.prisma.tenantMembership.count({
-        where: {
-          userId: { in: uniqueMentionIds },
-          tenantId: user.tenantId,
-          status: MembershipStatus.ACTIVE,
-        },
-      })
+      const validMentions = await this.casesRepository.countActiveMentionMemberships(
+        uniqueMentionIds,
+        user.tenantId,
+        MembershipStatus.ACTIVE
+      )
       if (validMentions !== uniqueMentionIds.length) {
         throw new BusinessException(
           400,
@@ -1107,40 +932,17 @@ export class CasesService {
       }
     }
 
-    const comment = await this.prisma.$transaction(async tx => {
-      await tx.caseComment.update({
-        where: { id: commentId },
-        data: {
-          body: dto.body,
-          isEdited: true,
-        },
-      })
-
-      // Replace mentions
-      await tx.caseCommentMention.deleteMany({ where: { commentId } })
-      if (uniqueMentionIds.length > 0) {
-        await tx.caseCommentMention.createMany({
-          data: uniqueMentionIds.map(userId => ({
-            commentId,
-            userId,
-          })),
-        })
+    const comment = await this.casesRepository.updateCommentTransaction(
+      commentId,
+      caseId,
+      dto.body,
+      uniqueMentionIds,
+      {
+        type: CaseTimelineType.COMMENT_EDITED,
+        actor: user.email,
+        description: 'Comment edited',
       }
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.COMMENT_EDITED,
-          actor: user.email,
-          description: 'Comment edited',
-        },
-      })
-
-      return tx.caseComment.findUniqueOrThrow({
-        where: { id: commentId },
-        include: { mentions: true },
-      })
-    })
+    )
 
     this.appLogger.info('Comment updated', {
       feature: AppLogFeature.CASES,
@@ -1166,9 +968,7 @@ export class CasesService {
   ): Promise<{ deleted: boolean }> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
-    const existing = await this.prisma.caseComment.findFirst({
-      where: { id: commentId, caseId, isDeleted: false },
-    })
+    const existing = await this.casesRepository.findCommentByIdAndCase(commentId, caseId)
     if (!existing) {
       throw new BusinessException(404, 'Comment not found', 'errors.cases.commentNotFound')
     }
@@ -1182,21 +982,10 @@ export class CasesService {
       )
     }
 
-    await this.prisma.$transaction(async tx => {
-      // Soft delete
-      await tx.caseComment.update({
-        where: { id: commentId },
-        data: { isDeleted: true },
-      })
-
-      await tx.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.COMMENT_DELETED,
-          actor: user.email,
-          description: 'Comment deleted',
-        },
-      })
+    await this.casesRepository.softDeleteCommentTransaction(commentId, caseId, {
+      type: CaseTimelineType.COMMENT_DELETED,
+      actor: user.email,
+      description: 'Comment deleted',
     })
 
     this.appLogger.info('Comment deleted', {
@@ -1221,22 +1010,12 @@ export class CasesService {
     query: string,
     limit = 10
   ): Promise<MentionableUser[]> {
-    const memberships = await this.prisma.tenantMembership.findMany({
-      where: {
-        tenantId,
-        status: MembershipStatus.ACTIVE,
-        user: {
-          OR: [
-            { name: { contains: query, mode: 'insensitive' } },
-            { email: { contains: query, mode: 'insensitive' } },
-          ],
-        },
-      },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-      },
-      take: limit,
-    })
+    const memberships = await this.casesRepository.searchMentionableMembers(
+      tenantId,
+      query,
+      MembershipStatus.ACTIVE,
+      limit
+    )
 
     return memberships.map(m => ({
       id: m.user.id,
@@ -1260,10 +1039,7 @@ export class CasesService {
     _requestUserId: string
   ): Promise<CaseCommentResponse> {
     const allUserIds = [comment.authorId, ...comment.mentions.map(m => m.userId)]
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: [...new Set(allUserIds)] } },
-      select: { id: true, name: true, email: true },
-    })
+    const users = await this.casesRepository.findUsersByIds([...new Set(allUserIds)])
     const userMap = new Map(users.map(u => [u.id, u]))
     const author = userMap.get(comment.authorId)
 
@@ -1299,10 +1075,10 @@ export class CasesService {
    * H4/H5: Validate that ownerUserId has an active membership in the given tenant.
    */
   private async validateOwnerInTenant(ownerUserId: string, tenantId: string): Promise<void> {
-    const membership = await this.prisma.tenantMembership.findUnique({
-      where: { userId_tenantId: { userId: ownerUserId, tenantId } },
-      select: { status: true },
-    })
+    const membership = await this.casesRepository.findMembershipByUserAndTenant(
+      ownerUserId,
+      tenantId
+    )
 
     if (membership?.status !== MembershipStatus.ACTIVE) {
       this.appLogger.warn('Invalid case owner: not an active tenant member', {
@@ -1321,39 +1097,6 @@ export class CasesService {
     }
   }
 
-  /**
-   * Generate the next case number in format SOC-YYYY-NNN.
-   * Uses advisory lock to prevent race conditions across concurrent transactions.
-   */
-  private async generateCaseNumber(tx: Prisma.TransactionClient = this.prisma): Promise<string> {
-    // M3: Advisory lock to prevent concurrent case number collisions
-    // Cast to text to avoid Prisma void deserialization error
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))::text`
-
-    const year = new Date().getFullYear()
-    const prefix = `SOC-${year}-`
-
-    const latestCase = await tx.case.findFirst({
-      where: {
-        caseNumber: { startsWith: prefix },
-      },
-      orderBy: { caseNumber: 'desc' },
-      select: { caseNumber: true },
-    })
-
-    let nextSequence = 1
-
-    if (latestCase) {
-      const parts = latestCase.caseNumber.split('-')
-      const lastPart = parts[2]
-      if (lastPart) {
-        nextSequence = Number.parseInt(lastPart, 10) + 1
-      }
-    }
-
-    return `${prefix}${String(nextSequence).padStart(3, '0')}`
-  }
-
   /* ---------------------------------------------------------------- */
   /* TASKS                                                              */
   /* ---------------------------------------------------------------- */
@@ -1369,29 +1112,22 @@ export class CasesService {
       )
     }
 
-    const task = await this.prisma.caseTask.create({
-      data: {
-        caseId,
-        title: dto.title,
-        status: dto.status ?? 'pending',
-        assignee: dto.assignee ?? null,
-      },
+    const task = await this.casesRepository.createTask({
+      caseId,
+      title: dto.title,
+      status: dto.status ?? 'pending',
+      assignee: dto.assignee ?? null,
     })
 
     // Add timeline entry
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.casesRepository.findUserNameById(user.sub)
     const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
-    await this.prisma.caseTimeline.create({
-      data: {
-        caseId,
-        type: CaseTimelineType.UPDATED,
-        actor: user.email,
-        description: `Task "${dto.title}" added by ${actorLabel}`,
-      },
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: `Task "${dto.title}" added by ${actorLabel}`,
     })
 
     this.appLogger.info('Task created', {
@@ -1426,9 +1162,7 @@ export class CasesService {
   async updateTask(caseId: string, taskId: string, dto: UpdateTaskDto, user: JwtPayload) {
     await this.getCaseById(caseId, user.tenantId)
 
-    const existing = await this.prisma.caseTask.findFirst({
-      where: { id: taskId, caseId },
-    })
+    const existing = await this.casesRepository.findTaskByIdAndCase(taskId, caseId)
     if (!existing) {
       throw new BusinessException(404, 'Task not found', 'errors.cases.taskNotFound')
     }
@@ -1438,26 +1172,18 @@ export class CasesService {
     if (dto.status !== undefined) updateData['status'] = dto.status
     if (dto.assignee !== undefined) updateData['assignee'] = dto.assignee
 
-    const task = await this.prisma.caseTask.update({
-      where: { id: taskId },
-      data: updateData,
-    })
+    const task = await this.casesRepository.updateTask(taskId, updateData)
 
     // Add timeline entry for status changes
     if (dto.status !== undefined && dto.status !== existing.status) {
-      const actorUser = await this.prisma.user.findUnique({
-        where: { id: user.sub },
-        select: { name: true },
-      })
+      const actorUser = await this.casesRepository.findUserNameById(user.sub)
       const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
-      await this.prisma.caseTimeline.create({
-        data: {
-          caseId,
-          type: CaseTimelineType.UPDATED,
-          actor: user.email,
-          description: `Task "${existing.title}" ${dto.status === 'completed' ? 'completed' : `changed to ${dto.status}`} by ${actorLabel}`,
-        },
+      await this.casesRepository.createTimeline({
+        caseId,
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: `Task "${existing.title}" ${dto.status === 'completed' ? 'completed' : `changed to ${dto.status}`} by ${actorLabel}`,
       })
     }
 
@@ -1467,28 +1193,21 @@ export class CasesService {
   async deleteTask(caseId: string, taskId: string, user: JwtPayload) {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
-    const existing = await this.prisma.caseTask.findFirst({
-      where: { id: taskId, caseId },
-    })
+    const existing = await this.casesRepository.findTaskByIdAndCase(taskId, caseId)
     if (!existing) {
       throw new BusinessException(404, 'Task not found', 'errors.cases.taskNotFound')
     }
 
-    await this.prisma.caseTask.delete({ where: { id: taskId } })
+    await this.casesRepository.deleteTask(taskId)
 
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.casesRepository.findUserNameById(user.sub)
     const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
-    await this.prisma.caseTimeline.create({
-      data: {
-        caseId,
-        type: CaseTimelineType.UPDATED,
-        actor: user.email,
-        description: `Task "${existing.title}" removed by ${actorLabel}`,
-      },
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: `Task "${existing.title}" removed by ${actorLabel}`,
     })
 
     this.appLogger.info('Task deleted', {
@@ -1524,35 +1243,26 @@ export class CasesService {
     }
 
     // Check for duplicate artifact (same type + value on same case)
-    const duplicate = await this.prisma.caseArtifact.findFirst({
-      where: { caseId, type: dto.type, value: dto.value },
-    })
+    const duplicate = await this.casesRepository.findArtifactDuplicate(caseId, dto.type, dto.value)
     if (duplicate) {
       throw new BusinessException(409, 'Duplicate artifact', 'errors.cases.duplicateArtifact')
     }
 
-    const artifact = await this.prisma.caseArtifact.create({
-      data: {
-        caseId,
-        type: dto.type,
-        value: dto.value,
-        source: dto.source ?? 'manual',
-      },
+    const artifact = await this.casesRepository.createArtifact({
+      caseId,
+      type: dto.type,
+      value: dto.value,
+      source: dto.source ?? 'manual',
     })
 
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.casesRepository.findUserNameById(user.sub)
     const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
-    await this.prisma.caseTimeline.create({
-      data: {
-        caseId,
-        type: CaseTimelineType.UPDATED,
-        actor: user.email,
-        description: `Artifact ${dto.type}:${dto.value} added by ${actorLabel}`,
-      },
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: `Artifact ${dto.type}:${dto.value} added by ${actorLabel}`,
     })
 
     this.appLogger.info('Artifact created', {
@@ -1587,28 +1297,21 @@ export class CasesService {
   async deleteArtifact(caseId: string, artifactId: string, user: JwtPayload) {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
-    const existing = await this.prisma.caseArtifact.findFirst({
-      where: { id: artifactId, caseId },
-    })
+    const existing = await this.casesRepository.findArtifactByIdAndCase(artifactId, caseId)
     if (!existing) {
       throw new BusinessException(404, 'Artifact not found', 'errors.cases.artifactNotFound')
     }
 
-    await this.prisma.caseArtifact.delete({ where: { id: artifactId } })
+    await this.casesRepository.deleteArtifact(artifactId)
 
-    const actorUser = await this.prisma.user.findUnique({
-      where: { id: user.sub },
-      select: { name: true },
-    })
+    const actorUser = await this.casesRepository.findUserNameById(user.sub)
     const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
 
-    await this.prisma.caseTimeline.create({
-      data: {
-        caseId,
-        type: CaseTimelineType.UPDATED,
-        actor: user.email,
-        description: `Artifact ${existing.type}:${existing.value} removed by ${actorLabel}`,
-      },
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: `Artifact ${existing.type}:${existing.value} removed by ${actorLabel}`,
     })
 
     this.appLogger.info('Artifact deleted', {
