@@ -259,12 +259,16 @@ export class IncidentsRepository {
 
     if (latestIncident) {
       const parts = latestIncident.incidentNumber.split('-')
-      const lastPart = parts[1]
-      if (lastPart) {
-        nextSequence = Number.parseInt(lastPart, 10) + 1
+      const lastSegment = parts[parts.length - 1]
+      if (lastSegment) {
+        const parsed = Number.parseInt(lastSegment, 10)
+        if (!Number.isNaN(parsed)) {
+          nextSequence = parsed + 1
+        }
       }
     }
 
-    return `${prefix}${String(nextSequence).padStart(3, '0')}`
+    const year = new Date().getFullYear()
+    return `INC-${year}-${String(nextSequence).padStart(4, '0')}`
   }
 }

@@ -1,4 +1,5 @@
 import type { ReportRecord, ReportStats } from './reports.types'
+import type { UpdateReportDto } from './dto/update-report.dto'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -50,6 +51,23 @@ export function buildReportOrderBy(
     default:
       return { createdAt: 'desc' }
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* UPDATE DATA BUILDING                                              */
+/* ---------------------------------------------------------------- */
+
+export function buildReportUpdateData(dto: UpdateReportDto): Record<string, unknown> {
+  const data: Record<string, unknown> = {}
+
+  if (dto.name !== undefined) data['name'] = dto.name
+  if (dto.description !== undefined) data['description'] = dto.description
+  if (dto.type !== undefined) data['type'] = dto.type
+  if (dto.format !== undefined) data['format'] = dto.format
+  if (dto.status !== undefined) data['status'] = dto.status
+  if (dto.parameters !== undefined) data['parameters'] = dto.parameters
+
+  return data
 }
 
 /* ---------------------------------------------------------------- */

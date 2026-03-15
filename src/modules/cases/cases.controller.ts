@@ -24,6 +24,7 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   CaseCommentResponse,
   CaseRecord,
+  CaseStats,
   MentionableUser,
   PaginatedCaseComments,
   PaginatedCaseNotes,
@@ -65,6 +66,11 @@ export class CasesController {
     @CurrentUser() user: JwtPayload
   ): Promise<CaseRecord> {
     return this.casesService.createCase(dto, user)
+  }
+
+  @Get('stats')
+  async getCaseStats(@TenantId() tenantId: string): Promise<CaseStats> {
+    return this.casesService.getCaseStats(tenantId)
   }
 
   @Get(':id')

@@ -581,6 +581,48 @@ export class CasesRepository {
   }
 
   /* ---------------------------------------------------------------- */
+  /* STATS QUERIES                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async countByStatus(tenantId: string, status: string) {
+    return this.prisma.case.count({
+      where: { tenantId, status: status as CaseStatus },
+    })
+  }
+
+  async countBySeverity(tenantId: string, severity: string) {
+    return this.prisma.case.count({
+      where: { tenantId, severity: severity as CaseSeverity },
+    })
+  }
+
+  async countTotal(tenantId: string) {
+    return this.prisma.case.count({
+      where: { tenantId },
+    })
+  }
+
+  async countClosedSince(tenantId: string, since: Date) {
+    return this.prisma.case.count({
+      where: {
+        tenantId,
+        status: 'closed',
+        closedAt: { gte: since },
+      },
+    })
+  }
+
+  async findClosedCasesWithTiming(tenantId: string) {
+    return this.prisma.case.findMany({
+      where: {
+        tenantId,
+        closedAt: { not: null },
+      },
+      select: { createdAt: true, closedAt: true },
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
   /* CASE CYCLE LOOKUP                                                 */
   /* ---------------------------------------------------------------- */
 

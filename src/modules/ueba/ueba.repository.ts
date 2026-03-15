@@ -33,6 +33,27 @@ export class UebaRepository {
     })
   }
 
+  async createEntity(data: Prisma.UebaEntityCreateInput) {
+    return this.prisma.uebaEntity.create({
+      data,
+      include: { _count: { select: { anomalies: true } } },
+    })
+  }
+
+  async updateEntity(params: {
+    where: Prisma.UebaEntityWhereUniqueInput
+    data: Prisma.UebaEntityUpdateInput
+  }) {
+    return this.prisma.uebaEntity.update({
+      ...params,
+      include: { _count: { select: { anomalies: true } } },
+    })
+  }
+
+  async deleteEntity(where: Prisma.UebaEntityWhereUniqueInput) {
+    return this.prisma.uebaEntity.delete({ where })
+  }
+
   /* ---------------------------------------------------------------- */
   /* UEBA ANOMALY QUERIES                                               */
   /* ---------------------------------------------------------------- */
@@ -51,6 +72,23 @@ export class UebaRepository {
 
   async countAnomalies(where: Prisma.UebaAnomalyWhereInput) {
     return this.prisma.uebaAnomaly.count({ where })
+  }
+
+  async findFirstAnomaly(params: { where: Prisma.UebaAnomalyWhereInput }) {
+    return this.prisma.uebaAnomaly.findFirst({
+      ...params,
+      include: { entity: { select: { entityName: true, entityType: true } } },
+    })
+  }
+
+  async updateAnomaly(params: {
+    where: Prisma.UebaAnomalyWhereUniqueInput
+    data: Prisma.UebaAnomalyUpdateInput
+  }) {
+    return this.prisma.uebaAnomaly.update({
+      ...params,
+      include: { entity: { select: { entityName: true, entityType: true } } },
+    })
   }
 
   /* ---------------------------------------------------------------- */

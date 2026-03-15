@@ -125,15 +125,16 @@ export class AttackPathsRepository {
 
     if (lastPath?.pathNumber) {
       const parts = lastPath.pathNumber.split('-')
-      const numberPart = parts[1]
-      if (numberPart) {
-        const parsed = Number.parseInt(numberPart, 10)
+      const lastSegment = parts[parts.length - 1]
+      if (lastSegment) {
+        const parsed = Number.parseInt(lastSegment, 10)
         if (!Number.isNaN(parsed)) {
           nextNumber = parsed + 1
         }
       }
     }
 
-    return `${prefix}${String(nextNumber).padStart(4, '0')}`
+    const year = new Date().getFullYear()
+    return `AP-${year}-${String(nextNumber).padStart(4, '0')}`
   }
 }

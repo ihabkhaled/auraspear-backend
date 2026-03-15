@@ -104,6 +104,21 @@ export class NormalizationService {
     dto: CreatePipelineDto,
     user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
+    const duplicates = await this.repository.findManyPipelines({
+      where: { tenantId: user.tenantId, name: dto.name },
+      skip: 0,
+      take: 1,
+      orderBy: { createdAt: 'desc' },
+    })
+
+    if (duplicates.length > 0) {
+      throw new BusinessException(
+        409,
+        `Pipeline with name "${dto.name}" already exists`,
+        'errors.normalization.pipelineAlreadyExists'
+      )
+    }
+
     const pipeline = await this.repository.createPipeline({
       tenantId: user.tenantId,
       name: dto.name,

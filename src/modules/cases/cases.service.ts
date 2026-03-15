@@ -21,6 +21,7 @@ import type {
   PaginatedCaseComments,
   PaginatedCaseNotes,
   PaginatedCases,
+  CaseStats,
 } from './cases.types'
 import type { CreateArtifactDto } from './dto/create-artifact.dto'
 import type { CreateCaseDto } from './dto/create-case.dto'
@@ -159,6 +160,54 @@ export class CasesService {
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* STATS                                                             */
+  /* ---------------------------------------------------------------- */
+
+  async getCaseStats(tenantId: string): Promise<CaseStats> {
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+    const [total, open, inProgress, closed, critical, high, medium, low, closedLast30d, closedCases] =
+      await Promise.all([
+        this.casesRepository.countTotal(tenantId),
+        this.casesRepository.countByStatus(tenantId, CaseStatus.OPEN),
+        this.casesRepository.countByStatus(tenantId, CaseStatus.IN_PROGRESS),
+        this.casesRepository.countByStatus(tenantId, CaseStatus.CLOSED),
+        this.casesRepository.countBySeverity(tenantId, 'critical' as CaseSeverity),
+        this.casesRepository.countBySeverity(tenantId, 'high' as CaseSeverity),
+        this.casesRepository.countBySeverity(tenantId, 'medium' as CaseSeverity),
+        this.casesRepository.countBySeverity(tenantId, 'low' as CaseSeverity),
+        this.casesRepository.countClosedSince(tenantId, thirtyDaysAgo),
+        this.casesRepository.findClosedCasesWithTiming(tenantId),
+      ])
+
+    let avgResolutionHours: number | null = null
+    if (closedCases.length > 0) {
+      let totalHours = 0
+      let count = 0
+      for (const c of closedCases) {
+        if (c.closedAt) {
+          totalHours += (c.closedAt.getTime() - c.createdAt.getTime()) / (1000 * 60 * 60)
+          count++
+        }
+      }
+      if (count > 0) {
+        avgResolutionHours = Math.round((totalHours / count) * 10) / 10
+      }
+    }
+
+    return {
+      total,
+      open,
+      inProgress,
+      closed,
+      bySeverity: { critical, high, medium, low },
+      closedLast30d,
+      avgResolutionHours,
     }
   }
 

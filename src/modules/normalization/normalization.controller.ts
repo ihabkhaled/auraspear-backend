@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { type CreatePipelineDto, CreatePipelineSchema } from './dto/create-pipeline.dto'
 import { ListPipelinesQuerySchema } from './dto/list-pipelines-query.dto'
 import { type UpdatePipelineDto, UpdatePipelineSchema } from './dto/update-pipeline.dto'
@@ -22,6 +22,16 @@ import type {
 export class NormalizationController {
   constructor(private readonly normalizationService: NormalizationService) {}
 
+  @Get()
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L2)
+  async listPipelinesRoot(
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<PaginatedPipelines> {
+    return this.listPipelines(tenantId, rawQuery)
+  }
+
   @Get('pipelines')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
@@ -43,6 +53,13 @@ export class NormalizationController {
     )
   }
 
+  @Get('stats')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L2)
+  async getNormalizationStatsRoot(@TenantId() tenantId: string): Promise<NormalizationStats> {
+    return this.normalizationService.getNormalizationStats(tenantId)
+  }
+
   @Get('pipelines/stats')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
@@ -54,7 +71,7 @@ export class NormalizationController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async getPipelineById(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
   ): Promise<NormalizationPipelineRecord> {
     return this.normalizationService.getPipelineById(id, tenantId)
@@ -74,7 +91,7 @@ export class NormalizationController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async updatePipeline(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdatePipelineSchema)) dto: UpdatePipelineDto,
     @CurrentUser() user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
@@ -85,7 +102,7 @@ export class NormalizationController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async deletePipeline(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {

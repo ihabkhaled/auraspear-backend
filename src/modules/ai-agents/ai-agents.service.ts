@@ -58,6 +58,7 @@ export class AiAgentsService {
       const { _count, ...rest } = agent
       return {
         ...rest,
+        totalTokens: Number(agent.totalTokens),
         toolsCount: _count.tools,
         sessionsCount: _count.sessions,
       }

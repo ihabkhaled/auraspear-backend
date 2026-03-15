@@ -36,6 +36,13 @@ export class ReportsRepository {
     return this.prisma.report.create(params) as unknown as Promise<ReportWithTenant>
   }
 
+  async updateManyReports(params: {
+    where: Prisma.ReportWhereInput
+    data: Prisma.ReportUpdateManyMutationInput | Record<string, unknown>
+  }): Promise<Prisma.BatchPayload> {
+    return this.prisma.report.updateMany(params)
+  }
+
   async deleteManyReports(params: {
     where: Prisma.ReportWhereInput
   }): Promise<Prisma.BatchPayload> {

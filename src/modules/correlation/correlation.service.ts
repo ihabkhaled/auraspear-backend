@@ -51,10 +51,10 @@ export class CorrelationService {
       this.repository.count(where),
     ])
 
-    // Collect unique createdBy values to look up user names
-    const creatorIds = [...new Set(rules.map(r => r.createdBy))]
-    const creators = await this.repository.findUsersByIds(creatorIds)
-    const creatorMap = new Map(creators.map(c => [c.id, c.name]))
+    // Collect unique createdBy emails to look up user names
+    const creatorEmails = [...new Set(rules.map(r => r.createdBy))]
+    const creators = await this.repository.findUsersByEmails(creatorEmails)
+    const creatorMap = new Map(creators.map(c => [c.email, c.name]))
 
     const data: RuleRecord[] = rules.map(rule => {
       const { tenant, ...rest } = rule
@@ -104,7 +104,7 @@ export class CorrelationService {
       throw new BusinessException(404, 'Rule not found', 'errors.correlation.notFound')
     }
 
-    const creator = await this.repository.findUserNameById(rule.createdBy)
+    const creator = await this.repository.findUserNameByEmail(rule.createdBy)
 
     this.appLogger.info('Retrieved correlation rule', {
       feature: AppLogFeature.CORRELATION,
@@ -144,10 +144,10 @@ export class CorrelationService {
       yamlContent: dto.yamlContent,
       mitreTactics: dto.mitreTactics ?? [],
       mitreTechniques: dto.mitreTechniques ?? [],
-      createdBy: user.sub,
+      createdBy: user.email,
     })
 
-    const creator = await this.repository.findUserNameById(user.sub)
+    const creator = await this.repository.findUserNameByEmail(user.email)
 
     this.logger.log(
       `User ${user.email} created correlation rule ${ruleNumber} for tenant ${user.tenantId}`
@@ -204,7 +204,7 @@ export class CorrelationService {
       data: buildRuleUpdateData(dto),
     })
 
-    const creator = await this.repository.findUserNameById(rule.createdBy)
+    const creator = await this.repository.findUserNameByEmail(rule.createdBy)
 
     this.logger.log(`User ${user.email} updated correlation rule ${id}`)
     this.appLogger.info('Correlation rule updated', {
@@ -323,15 +323,16 @@ export class CorrelationService {
     let nextNumber = 1
     if (lastRule?.ruleNumber) {
       const parts = lastRule.ruleNumber.split('-')
-      const numberPart = parts[1]
-      if (numberPart) {
-        const parsed = Number.parseInt(numberPart, 10)
+      const lastSegment = parts[parts.length - 1]
+      if (lastSegment) {
+        const parsed = Number.parseInt(lastSegment, 10)
         if (!Number.isNaN(parsed)) {
           nextNumber = parsed + 1
         }
       }
     }
 
-    return `${prefix}-${String(nextNumber).padStart(4, '0')}`
+    const year = new Date().getFullYear()
+    return `${prefix}-${year}-${String(nextNumber).padStart(4, '0')}`
   }
 }

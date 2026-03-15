@@ -319,7 +319,8 @@ describe('CorrelationService', () => {
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      expect(callArguments.ruleNumber).toBe('COR-0001')
+      const year = new Date().getFullYear()
+      expect(callArguments.ruleNumber).toBe(`COR-${year}-0001`)
     })
 
     it('should generate SIG- prefix for sigma rules', async () => {
@@ -332,7 +333,8 @@ describe('CorrelationService', () => {
       await service.createRule(sigmaDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      expect(callArguments.ruleNumber).toBe('SIG-0001')
+      const year = new Date().getFullYear()
+      expect(callArguments.ruleNumber).toBe(`SIG-${year}-0001`)
     })
 
     it('should increment rule number when previous rules exist', async () => {
@@ -344,7 +346,8 @@ describe('CorrelationService', () => {
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      expect(callArguments.ruleNumber).toBe('COR-0006')
+      const year = new Date().getFullYear()
+      expect(callArguments.ruleNumber).toBe(`COR-${year}-0006`)
     })
 
     it('should use tenantId from JWT payload', async () => {

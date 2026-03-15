@@ -680,7 +680,7 @@ ${techniques.length > 0 ? `**MITRE ATT&CK Coverage:** ${techniques.join(', ')}` 
       avgWeight * 12 +
         Math.min(uniqueIpCount, 10) * 2 +
         Math.min(mitreTechCount, 5) * 4 +
-        (events.length >= 100 ? 10 : events.length >= 10 ? 5 : 0) +
+        (events.length >= 100 ? 10 : (events.length >= 10 ? 5 : 0)) +
         (hasCritical ? 15 : 0)
     )
 

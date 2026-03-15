@@ -23,9 +23,13 @@ import type {
   PaginatedDetectionRules,
 } from './detection-rules.types'
 
-@Controller('detection-rules')
+/**
+ * Alias controller that registers /rules-engine routes,
+ * delegating to the same DetectionRulesService.
+ */
+@Controller('rules-engine')
 @UseGuards(AuthGuard, TenantGuard)
-export class DetectionRulesController {
+export class RulesEngineController {
   constructor(private readonly detectionRulesService: DetectionRulesService) {}
 
   @Get()

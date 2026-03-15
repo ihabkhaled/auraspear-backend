@@ -66,3 +66,18 @@ export interface MentionableUser {
   name: string
   email: string
 }
+
+export interface CaseStats {
+  total: number
+  open: number
+  inProgress: number
+  closed: number
+  bySeverity: {
+    critical: number
+    high: number
+    medium: number
+    low: number
+  }
+  closedLast30d: number
+  avgResolutionHours: number | null
+}

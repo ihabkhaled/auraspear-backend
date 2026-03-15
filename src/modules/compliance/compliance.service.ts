@@ -149,6 +149,20 @@ export class ComplianceService {
     dto: CreateFrameworkDto,
     user: JwtPayload
   ): Promise<ComplianceFrameworkRecord> {
+    const existing = await this.repository.findFirstFramework({
+      tenantId: user.tenantId,
+      standard: dto.standard,
+      version: dto.version,
+    })
+
+    if (existing) {
+      throw new BusinessException(
+        409,
+        `Framework with standard ${dto.standard} version ${dto.version} already exists`,
+        'errors.compliance.frameworkAlreadyExists'
+      )
+    }
+
     const framework = await this.repository.createFramework({
       tenantId: user.tenantId,
       name: dto.name,

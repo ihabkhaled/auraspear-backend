@@ -105,16 +105,16 @@ export class CorrelationRepository {
   /* USER LOOKUPS                                                       */
   /* ---------------------------------------------------------------- */
 
-  async findUsersByIds(ids: string[]) {
+  async findUsersByEmails(emails: string[]) {
     return this.prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true },
+      where: { email: { in: emails } },
+      select: { email: true, name: true },
     })
   }
 
-  async findUserNameById(userId: string) {
+  async findUserNameByEmail(email: string) {
     return this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { email },
       select: { name: true },
     })
   }

@@ -21,6 +21,7 @@ export function buildAgentRecord(agent: AgentWithRelations): AiAgentRecord {
   const { _count, sessions, tools, ...rest } = agent
   return {
     ...rest,
+    totalTokens: Number(agent['totalTokens'] ?? 0),
     toolsCount: _count.tools,
     sessionsCount: _count.sessions,
     tools,

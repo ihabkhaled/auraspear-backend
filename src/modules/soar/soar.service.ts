@@ -127,6 +127,19 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async createPlaybook(dto: CreatePlaybookDto, user: JwtPayload): Promise<SoarPlaybookRecord> {
+    const existing = await this.repository.findFirstPlaybookWithTenant({
+      tenantId: user.tenantId,
+      name: dto.name,
+    })
+
+    if (existing) {
+      throw new BusinessException(
+        409,
+        `Playbook with name "${dto.name}" already exists`,
+        'errors.soar.playbookAlreadyExists'
+      )
+    }
+
     const playbook = await this.repository.createPlaybookWithTenant({
       tenantId: user.tenantId,
       name: dto.name,

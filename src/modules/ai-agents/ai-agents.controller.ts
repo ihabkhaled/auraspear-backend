@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { AiAgentsService } from './ai-agents.service'
 import { type CreateAgentDto, CreateAgentSchema } from './dto/create-agent.dto'
 import { ListAgentsQuerySchema } from './dto/list-agents-query.dto'
@@ -53,7 +53,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async getAgentById(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
   ): Promise<AiAgentRecord> {
     return this.aiAgentsService.getAgentById(id, tenantId)
@@ -73,7 +73,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async updateAgent(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateAgentSchema)) dto: UpdateAgentDto,
     @CurrentUser() user: JwtPayload
   ): Promise<AiAgentRecord> {
@@ -84,7 +84,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async deleteAgent(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
@@ -95,7 +95,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async updateSoul(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateSoulSchema)) dto: UpdateSoulDto,
     @CurrentUser() user: JwtPayload
   ): Promise<AiAgentRecord> {
@@ -106,7 +106,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async stopAgent(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiAgentRecord> {
@@ -117,7 +117,7 @@ export class AiAgentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async getAgentSessions(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedResponse<AiAgentSession>> {

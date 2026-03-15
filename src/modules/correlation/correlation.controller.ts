@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { CorrelationService } from './correlation.service'
 import { type CreateRuleDto, CreateRuleSchema } from './dto/create-rule.dto'
 import { ListRulesQuerySchema } from './dto/list-rules-query.dto'
@@ -44,7 +44,7 @@ export class CorrelationController {
   }
 
   @Get(':id')
-  async getRuleById(@Param('id') id: string, @TenantId() tenantId: string): Promise<RuleRecord> {
+  async getRuleById(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string): Promise<RuleRecord> {
     return this.correlationService.getRuleById(id, tenantId)
   }
 
@@ -62,7 +62,7 @@ export class CorrelationController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async updateRule(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateRuleSchema)) dto: UpdateRuleDto,
     @CurrentUser() user: JwtPayload
   ): Promise<RuleRecord> {
@@ -73,7 +73,7 @@ export class CorrelationController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async deleteRule(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {

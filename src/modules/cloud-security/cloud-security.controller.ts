@@ -24,6 +24,13 @@ import type {
 export class CloudSecurityController {
   constructor(private readonly cloudSecurityService: CloudSecurityService) {}
 
+  @Get('stats')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L2)
+  async getStats(@TenantId() tenantId: string): Promise<CloudSecurityStats> {
+    return this.cloudSecurityService.getCloudSecurityStats(tenantId)
+  }
+
   @Get('accounts')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)

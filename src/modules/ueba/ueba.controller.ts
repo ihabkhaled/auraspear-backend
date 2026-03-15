@@ -1,7 +1,9 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { type CreateEntityDto, CreateEntitySchema } from './dto/create-entity.dto'
 import { ListAnomaliesQuerySchema } from './dto/list-anomalies-query.dto'
 import { ListEntitiesQuerySchema } from './dto/list-entities-query.dto'
 import { ListModelsQuerySchema } from './dto/list-models-query.dto'
+import { type UpdateEntityDto, UpdateEntitySchema } from './dto/update-entity.dto'
 import { UebaService } from './ueba.service'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
@@ -9,8 +11,10 @@ import { AuthGuard } from '../../common/guards/auth.guard'
 import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   UebaEntityRecord,
+  UebaAnomalyRecord,
   PaginatedEntities,
   PaginatedAnomalies,
   PaginatedModels,
@@ -82,5 +86,38 @@ export class UebaController {
     @TenantId() tenantId: string
   ): Promise<UebaEntityRecord> {
     return this.uebaService.getEntityById(id, tenantId)
+  }
+
+  @Post('entities')
+  async createEntity(
+    @Body(new ZodValidationPipe(CreateEntitySchema)) dto: CreateEntityDto,
+    @TenantId() tenantId: string
+  ): Promise<UebaEntityRecord> {
+    return this.uebaService.createEntity(tenantId, dto)
+  }
+
+  @Patch('entities/:id')
+  async updateEntity(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateEntitySchema)) dto: UpdateEntityDto,
+    @TenantId() tenantId: string
+  ): Promise<UebaEntityRecord> {
+    return this.uebaService.updateEntity(id, tenantId, dto)
+  }
+
+  @Delete('entities/:id')
+  async deleteEntity(
+    @Param('id') id: string,
+    @TenantId() tenantId: string
+  ): Promise<{ deleted: boolean }> {
+    return this.uebaService.deleteEntity(id, tenantId)
+  }
+
+  @Patch('anomalies/:id/resolve')
+  async resolveAnomaly(
+    @Param('id') id: string,
+    @TenantId() tenantId: string
+  ): Promise<UebaAnomalyRecord> {
+    return this.uebaService.resolveAnomaly(id, tenantId)
   }
 }

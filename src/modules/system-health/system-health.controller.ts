@@ -21,6 +21,11 @@ import type {
 export class SystemHealthController {
   constructor(private readonly systemHealthService: SystemHealthService) {}
 
+  @Get()
+  async getSystemHealthOverview(@TenantId() tenantId: string): Promise<SystemHealthStats> {
+    return this.systemHealthService.getSystemHealthStats(tenantId)
+  }
+
   @Get('checks')
   async listHealthChecks(
     @TenantId() tenantId: string,

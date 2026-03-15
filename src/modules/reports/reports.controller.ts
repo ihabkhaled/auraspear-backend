@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { type CreateReportDto, CreateReportSchema } from './dto/create-report.dto'
 import { ListReportsQuerySchema } from './dto/list-reports-query.dto'
+import { type UpdateReportDto, UpdateReportSchema } from './dto/update-report.dto'
 import { ReportsService } from './reports.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
@@ -49,7 +50,7 @@ export class ReportsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L2)
   async getReportById(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
   ): Promise<ReportRecord> {
     return this.reportsService.getReportById(id, tenantId)
@@ -65,11 +66,22 @@ export class ReportsController {
     return this.reportsService.createReport(dto, user)
   }
 
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.TENANT_ADMIN)
+  async updateReport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(UpdateReportSchema)) dto: UpdateReportDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<ReportRecord> {
+    return this.reportsService.updateReport(id, dto, user)
+  }
+
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
   async deleteReport(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {

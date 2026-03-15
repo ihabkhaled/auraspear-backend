@@ -18,6 +18,8 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import type { CreateEntityDto } from './dto/create-entity.dto'
+import type { UpdateEntityDto } from './dto/update-entity.dto'
 import type {
   UebaEntityRecord,
   PaginatedEntities,
@@ -101,6 +103,148 @@ export class UebaService {
     return {
       ...rest,
       anomalyCount: _count.anomalies,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* CREATE ENTITY                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async createEntity(tenantId: string, dto: CreateEntityDto): Promise<UebaEntityRecord> {
+    const existing = await this.repository.findFirstEntityWithCount({
+      where: { tenantId, entityName: dto.entityName, entityType: dto.entityType },
+    })
+
+    if (existing) {
+      throw new BusinessException(
+        409,
+        `Entity "${dto.entityName}" of type "${dto.entityType}" already exists`,
+        'errors.ueba.entityAlreadyExists'
+      )
+    }
+
+    const entity = await this.repository.createEntity({
+      tenant: { connect: { id: tenantId } },
+      entityName: dto.entityName,
+      entityType: dto.entityType,
+      riskScore: dto.riskScore,
+      riskLevel: dto.riskLevel,
+      topAnomaly: dto.topAnomaly,
+    })
+
+    this.appLogger.info('UEBA entity created', {
+      feature: AppLogFeature.UEBA,
+      action: 'createEntity',
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { entityId: entity.id, tenantId },
+    })
+
+    const { _count, ...rest } = entity
+    return {
+      ...rest,
+      anomalyCount: _count.anomalies,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* UPDATE ENTITY                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async updateEntity(id: string, tenantId: string, dto: UpdateEntityDto): Promise<UebaEntityRecord> {
+    const existing = await this.repository.findFirstEntityWithCount({
+      where: { id, tenantId },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
+    }
+
+    const updated = await this.repository.updateEntity({
+      where: { id },
+      data: dto,
+    })
+
+    this.appLogger.info('UEBA entity updated', {
+      feature: AppLogFeature.UEBA,
+      action: 'updateEntity',
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { entityId: id, tenantId },
+    })
+
+    const { _count, ...rest } = updated
+    return {
+      ...rest,
+      anomalyCount: _count.anomalies,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* DELETE ENTITY                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async deleteEntity(id: string, tenantId: string): Promise<{ deleted: boolean }> {
+    const existing = await this.repository.findFirstEntityWithCount({
+      where: { id, tenantId },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
+    }
+
+    await this.repository.deleteEntity({ id })
+
+    this.appLogger.info('UEBA entity deleted', {
+      feature: AppLogFeature.UEBA,
+      action: 'deleteEntity',
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { entityId: id, tenantId },
+    })
+
+    return { deleted: true }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* RESOLVE ANOMALY                                                   */
+  /* ---------------------------------------------------------------- */
+
+  async resolveAnomaly(id: string, tenantId: string): Promise<UebaAnomalyRecord> {
+    const existing = await this.repository.findFirstAnomaly({
+      where: { id, tenantId },
+    })
+
+    if (!existing) {
+      throw new BusinessException(
+        404,
+        `UEBA anomaly ${id} not found`,
+        'errors.ueba.anomalyNotFound'
+      )
+    }
+
+    const updated = await this.repository.updateAnomaly({
+      where: { id },
+      data: { resolved: true },
+    })
+
+    this.appLogger.info('UEBA anomaly resolved', {
+      feature: AppLogFeature.UEBA,
+      action: 'resolveAnomaly',
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { anomalyId: id, tenantId },
+    })
+
+    const { entity, ...rest } = updated
+    return {
+      ...rest,
+      entityName: entity.entityName,
+      entityType: entity.entityType,
     }
   }
 

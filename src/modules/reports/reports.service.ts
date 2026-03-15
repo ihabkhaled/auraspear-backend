@@ -5,6 +5,7 @@ import {
   buildReportListWhere,
   buildReportOrderBy,
   buildReportRecord,
+  buildReportUpdateData,
   buildReportStats,
 } from './reports.utils'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, ReportStatus } from '../../common/enums'
@@ -12,6 +13,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { CreateReportDto } from './dto/create-report.dto'
+import type { UpdateReportDto } from './dto/update-report.dto'
 import type { ReportRecord, PaginatedReports, ReportStats } from './reports.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -150,6 +152,48 @@ export class ReportsService {
     const generatedByName = await this.resolveGeneratorName(report.generatedBy)
 
     return buildReportRecord(report, generatedByName)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* UPDATE REPORT                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async updateReport(
+    id: string,
+    dto: UpdateReportDto,
+    user: JwtPayload
+  ): Promise<ReportRecord> {
+    await this.getReportById(id, user.tenantId)
+
+    const updated = await this.repository.updateManyReports({
+      where: { id, tenantId: user.tenantId },
+      data: buildReportUpdateData(dto),
+    })
+
+    if (updated.count === 0) {
+      throw new BusinessException(
+        404,
+        `Report ${id} not found`,
+        'errors.reports.notFound'
+      )
+    }
+
+    this.appLogger.info('Report updated', {
+      feature: AppLogFeature.REPORTS,
+      action: 'updateReport',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'Report',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ReportsService',
+      functionName: 'updateReport',
+      metadata: { updatedFields: Object.keys(dto) },
+    })
+
+    return this.getReportById(id, user.tenantId)
   }
 
   /* ---------------------------------------------------------------- */

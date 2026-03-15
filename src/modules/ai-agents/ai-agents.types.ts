@@ -1,7 +1,8 @@
 import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
 import type { AiAgent, AiAgentSession, AiAgentTool } from '@prisma/client'
 
-export type AiAgentRecord = AiAgent & {
+export type AiAgentRecord = Omit<AiAgent, 'totalTokens'> & {
+  totalTokens: number
   toolsCount: number
   sessionsCount: number
   tools?: AiAgentTool[]
@@ -9,7 +10,8 @@ export type AiAgentRecord = AiAgent & {
 }
 
 export type PaginatedAgents = PaginatedResponse<
-  AiAgent & {
+  Omit<AiAgent, 'totalTokens'> & {
+    totalTokens: number
     toolsCount: number
     sessionsCount: number
   }
