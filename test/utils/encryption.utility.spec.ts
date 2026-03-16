@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { encrypt, decrypt } from '../../src/common/utils/encryption.util'
+import { encrypt, decrypt } from '../../src/common/utils/encryption.utility'
 
 describe('Encryption Utility', () => {
   const key = randomBytes(32).toString('hex')

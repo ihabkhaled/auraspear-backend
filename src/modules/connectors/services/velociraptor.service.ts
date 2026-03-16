@@ -5,7 +5,7 @@ import {
   basicAuth,
   connectorFetch,
   type ConnectorHttpOptions,
-} from '../../../common/utils/connector-http.util'
+} from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
 
 /**

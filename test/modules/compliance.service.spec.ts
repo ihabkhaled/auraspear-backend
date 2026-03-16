@@ -59,6 +59,7 @@ function createMockRepository() {
   return {
     findManyFrameworksWithTenant: jest.fn(),
     countFrameworks: jest.fn(),
+    findFirstFramework: jest.fn(),
     findFirstFrameworkWithTenant: jest.fn(),
     createFramework: jest.fn(),
     updateManyFrameworks: jest.fn(),
@@ -217,6 +218,7 @@ describe('ComplianceService', () => {
   // ---------------------------------------------------------------------------
   describe('createFramework', () => {
     it('should create a framework with zero controls', async () => {
+      repository.findFirstFramework.mockResolvedValue(null)
       const created = buildMockFramework()
       repository.createFramework.mockResolvedValue(created)
 
@@ -235,6 +237,7 @@ describe('ComplianceService', () => {
     })
 
     it('should use user tenantId', async () => {
+      repository.findFirstFramework.mockResolvedValue(null)
       repository.createFramework.mockResolvedValue(buildMockFramework())
 
       const dto = { name: 'Test', standard: 'NIST', version: '1.0' }

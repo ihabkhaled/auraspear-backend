@@ -5,13 +5,13 @@ import {
   buildAgentListWhere,
   buildAgentOrderBy,
   buildAgentUpdateData,
-} from './ai-agents.utils'
+} from './ai-agents.utilities'
 import { AiAgentStatus, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { AiAgentRecord, AiAgentStats, PaginatedAgents } from './ai-agents.types'
-import type { AgentWithRelations } from './ai-agents.utils'
+import type { AgentWithRelations } from './ai-agents.utilities'
 import type { CreateAgentDto } from './dto/create-agent.dto'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
 import type { UpdateSoulDto } from './dto/update-soul.dto'

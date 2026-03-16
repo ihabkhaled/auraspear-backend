@@ -6,7 +6,7 @@ import {
   buildPipelineUpdateData,
   buildPipelineRecord,
   buildNormalizationStats,
-} from './normalization.utils'
+} from './normalization.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,

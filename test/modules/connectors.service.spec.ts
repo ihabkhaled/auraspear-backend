@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
-import { encrypt } from '../../src/common/utils/encryption.util'
-import { REDACTED_PLACEHOLDER } from '../../src/common/utils/mask.util'
+import { encrypt } from '../../src/common/utils/encryption.utility'
+import { REDACTED_PLACEHOLDER } from '../../src/common/utils/mask.utility'
 import { ConnectorsService } from '../../src/modules/connectors/connectors.service'
 
 const ENCRYPTION_KEY = randomBytes(32).toString('hex')

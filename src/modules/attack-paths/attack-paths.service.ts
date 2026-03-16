@@ -4,7 +4,7 @@ import {
   buildAttackPathListWhere,
   buildAttackPathOrderBy,
   buildAttackPathUpdateData,
-} from './attack-paths.utils'
+} from './attack-paths.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,

@@ -46,6 +46,27 @@ export interface TenantMember {
   email: string
 }
 
+export interface FindOrCreateUserFields {
+  id: string
+  email: string
+  name: string
+  lastLoginAt: Date | null
+  mfaEnabled: boolean
+  isProtected: boolean
+}
+
+export interface FindOrCreateMembershipFields {
+  role: string
+  status: string
+  createdAt: Date
+}
+
+export interface FindOrCreateUserResult {
+  user: FindOrCreateUserFields
+  membership: FindOrCreateMembershipFields
+  isExisting: boolean
+}
+
 /** Response returned by the impersonate-user endpoint. */
 export interface ImpersonateUserResponse {
   accessToken: string

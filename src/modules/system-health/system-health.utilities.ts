@@ -148,19 +148,24 @@ export function buildSystemHealthStats(latestChecks: HealthCheckRecord[]): Syste
     .map(hc => hc.responseTimeMs)
     .filter((ms): ms is number => ms !== null)
 
-  const avgResponseTimeMs =
-    responseTimes.length > 0
-      ? Math.round((responseTimes.reduce((sum, ms) => sum + ms, 0) / responseTimes.length) * 100) /
-        100
-      : null
+  let avgResponseTimeMs: number | null = null
+  if (responseTimes.length > 0) {
+    let totalResponseMs = 0
+    for (const ms of responseTimes) {
+      totalResponseMs += ms
+    }
+    avgResponseTimeMs = Math.round((totalResponseMs / responseTimes.length) * 100) / 100
+  }
 
-  const lastCheckedAt =
-    latestChecks.length > 0
-      ? latestChecks.reduce(
-          (latest, hc) => (hc.checkedAt > latest ? hc.checkedAt : latest),
-          latestChecks[0]?.checkedAt ?? new Date()
-        )
-      : null
+  let lastCheckedAt: Date | null = null
+  if (latestChecks.length > 0) {
+    lastCheckedAt = latestChecks[0]?.checkedAt ?? new Date()
+    for (const hc of latestChecks) {
+      if (hc.checkedAt > lastCheckedAt) {
+        lastCheckedAt = hc.checkedAt
+      }
+    }
+  }
 
   return {
     totalServices,

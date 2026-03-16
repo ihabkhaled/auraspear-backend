@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { AuditLog, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AuditLogsRepository {
@@ -11,11 +11,11 @@ export class AuditLogsRepository {
     orderBy: Prisma.AuditLogOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<AuditLog[]> {
     return this.prisma.auditLog.findMany(params)
   }
 
-  async count(where: Prisma.AuditLogWhereInput) {
+  async count(where: Prisma.AuditLogWhereInput): Promise<number> {
     return this.prisma.auditLog.count({ where })
   }
 
@@ -24,14 +24,14 @@ export class AuditLogsRepository {
     orderBy: Prisma.AuditLogOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<[AuditLog[], number]> {
     return Promise.all([
       this.prisma.auditLog.findMany(params),
       this.prisma.auditLog.count({ where: params.where }),
     ])
   }
 
-  async create(data: Prisma.AuditLogUncheckedCreateInput) {
+  async create(data: Prisma.AuditLogUncheckedCreateInput): Promise<AuditLog> {
     return this.prisma.auditLog.create({ data })
   }
 }

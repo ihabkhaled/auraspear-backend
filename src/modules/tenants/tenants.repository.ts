@@ -1,28 +1,12 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import type {
+  FindOrCreateUserResult,
+  FindOrCreateUserFields,
+  FindOrCreateMembershipFields,
+} from './tenants.types'
 import type { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
-import type { Prisma, UserRole, UserStatus } from '@prisma/client'
-
-interface UserFields {
-  id: string
-  email: string
-  name: string
-  lastLoginAt: Date | null
-  mfaEnabled: boolean
-  isProtected: boolean
-}
-
-interface MembershipFields {
-  role: string
-  status: string
-  createdAt: Date
-}
-
-export interface FindOrCreateUserResult {
-  user: UserFields
-  membership: MembershipFields
-  isExisting: boolean
-}
+import type { Prisma, UserRole, UserStatus, TenantMembership, User } from '@prisma/client'
 
 @Injectable()
 export class TenantsRepository {
@@ -114,7 +98,7 @@ export class TenantsRepository {
     orderBy: Prisma.TenantMembershipOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<[Array<TenantMembership & { user: User }>, number]> {
     return this.prisma.$transaction([
       this.prisma.tenantMembership.findMany({
         ...params,
@@ -172,7 +156,7 @@ export class TenantsRepository {
 
       const isExisting = Boolean(existing)
 
-      const user: UserFields =
+      const user: FindOrCreateUserFields =
         existing ??
         (await tx.user.create({
           data: {
@@ -198,8 +182,8 @@ export class TenantsRepository {
     email: string,
     tenantId: string
   ): Promise<{
-    user: UserFields | null
-    membership: MembershipFields | null
+    user: FindOrCreateUserFields | null
+    membership: FindOrCreateMembershipFields | null
   }> {
     return this.prisma.$transaction(async tx => {
       const user = await tx.user.findUnique({ where: { email } })
@@ -216,21 +200,28 @@ export class TenantsRepository {
     })
   }
 
-  async findMembershipWithUser(userId: string, tenantId: string) {
+  async findMembershipWithUser(
+    userId: string,
+    tenantId: string
+  ): Promise<(TenantMembership & { user: User }) | null> {
     return this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
       include: { user: true },
     })
   }
 
-  async updateMembershipRole(userId: string, tenantId: string, role: string) {
+  async updateMembershipRole(
+    userId: string,
+    tenantId: string,
+    role: string
+  ): Promise<TenantMembership> {
     return this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
       data: { role: role as UserRole },
     })
   }
 
-  async updateUser(userId: string, data: Record<string, unknown>) {
+  async updateUser(userId: string, data: Record<string, unknown>): Promise<User> {
     return this.prisma.user.update({
       where: { id: userId },
       data,
@@ -241,7 +232,7 @@ export class TenantsRepository {
     userId: string,
     tenantId: string,
     status: MembershipStatus | UserStatus
-  ) {
+  ): Promise<TenantMembership> {
     return this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
       data: { status: status as UserStatus },
@@ -252,7 +243,7 @@ export class TenantsRepository {
     userId: string,
     tenantId: string,
     status: MembershipStatus | UserStatus
-  ) {
+  ): Promise<TenantMembership & { user: User }> {
     return this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
       data: { status: status as UserStatus },

@@ -8,7 +8,7 @@ import {
   buildAccountUpdateData,
   buildAccountRecord,
   buildFindingRecord,
-} from './cloud-security.utils'
+} from './cloud-security.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,

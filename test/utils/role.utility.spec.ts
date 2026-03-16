@@ -1,5 +1,5 @@
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
-import { hasRoleAtLeast } from '../../src/common/utils/role.util'
+import { hasRoleAtLeast } from '../../src/common/utils/role.utility'
 
 describe('role.util — hasRoleAtLeast', () => {
   /* ------------------------------------------------------------------ */

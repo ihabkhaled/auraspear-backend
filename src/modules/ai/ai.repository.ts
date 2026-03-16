@@ -1,24 +1,16 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Alert, Prisma } from '@prisma/client'
-
-export interface CreateAiAuditLogData {
-  tenantId: string
-  actor: string
-  action: string
-  model: string
-  inputTokens: number
-  outputTokens: number
-  durationMs: number
-  prompt?: string
-  response?: string
-}
+import type { CreateAiAuditLogData } from './ai.types'
+import type { Alert, ConnectorConfig, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AiRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findEnabledConnectorByType(tenantId: string, type: string) {
+  async findEnabledConnectorByType(
+    tenantId: string,
+    type: string
+  ): Promise<ConnectorConfig | null> {
     return this.prisma.connectorConfig.findFirst({
       where: {
         tenantId,

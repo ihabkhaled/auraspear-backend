@@ -2,9 +2,9 @@ import { z } from 'zod'
 import { ConnectorType } from '../../../common/enums'
 
 /** Valid connector types — matches Prisma ConnectorType enum */
-const ConnectorTypeParam = z.nativeEnum(ConnectorType)
+const ConnectorTypeParameter = z.nativeEnum(ConnectorType)
 
-export type ConnectorTypeParam = z.infer<typeof ConnectorTypeParam>
+export type ConnectorTypeParameter = z.infer<typeof ConnectorTypeParameter>
 
 /** Pagination query params shared across list endpoints */
 export const PaginationQuerySchema = z.object({
@@ -57,4 +57,4 @@ export const ActionNameSchema = z
   .max(50)
   .regex(/^[\da-z-]+$/, 'Action name must be lowercase alphanumeric with hyphens')
 
-export { ConnectorTypeParam as ConnectorTypeParamSchema }
+export { ConnectorTypeParameter as ConnectorTypeParameterSchema }

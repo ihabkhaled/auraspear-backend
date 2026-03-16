@@ -1,5 +1,5 @@
-import type { ReportRecord, ReportStats } from './reports.types'
 import type { UpdateReportDto } from './dto/update-report.dto'
+import type { ReportRecord, ReportStats } from './reports.types'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */

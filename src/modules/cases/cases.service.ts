@@ -12,7 +12,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { hasRoleAtLeast } from '../../common/utils/role.util'
+import { hasRoleAtLeast } from '../../common/utils/role.utility'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
   CaseCommentResponse,
@@ -33,7 +33,7 @@ import type { UpdateCaseDto } from './dto/update-case.dto'
 import type { UpdateCommentDto } from './dto/update-comment.dto'
 import type { UpdateTaskDto } from './dto/update-task.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { CaseNote, CaseSeverity, Prisma } from '@prisma/client'
+import type { CaseArtifact, CaseNote, CaseSeverity, CaseTask, Prisma } from '@prisma/client'
 
 @Injectable()
 export class CasesService {
@@ -171,19 +171,29 @@ export class CasesService {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-    const [total, open, inProgress, closed, critical, high, medium, low, closedLast30d, closedCases] =
-      await Promise.all([
-        this.casesRepository.countTotal(tenantId),
-        this.casesRepository.countByStatus(tenantId, CaseStatus.OPEN),
-        this.casesRepository.countByStatus(tenantId, CaseStatus.IN_PROGRESS),
-        this.casesRepository.countByStatus(tenantId, CaseStatus.CLOSED),
-        this.casesRepository.countBySeverity(tenantId, 'critical' as CaseSeverity),
-        this.casesRepository.countBySeverity(tenantId, 'high' as CaseSeverity),
-        this.casesRepository.countBySeverity(tenantId, 'medium' as CaseSeverity),
-        this.casesRepository.countBySeverity(tenantId, 'low' as CaseSeverity),
-        this.casesRepository.countClosedSince(tenantId, thirtyDaysAgo),
-        this.casesRepository.findClosedCasesWithTiming(tenantId),
-      ])
+    const [
+      total,
+      open,
+      inProgress,
+      closed,
+      critical,
+      high,
+      medium,
+      low,
+      closedLast30d,
+      closedCases,
+    ] = await Promise.all([
+      this.casesRepository.countTotal(tenantId),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.OPEN),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.IN_PROGRESS),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.CLOSED),
+      this.casesRepository.countBySeverity(tenantId, 'critical' as CaseSeverity),
+      this.casesRepository.countBySeverity(tenantId, 'high' as CaseSeverity),
+      this.casesRepository.countBySeverity(tenantId, 'medium' as CaseSeverity),
+      this.casesRepository.countBySeverity(tenantId, 'low' as CaseSeverity),
+      this.casesRepository.countClosedSince(tenantId, thirtyDaysAgo),
+      this.casesRepository.findClosedCasesWithTiming(tenantId),
+    ])
 
     let avgResolutionHours: number | null = null
     if (closedCases.length > 0) {
@@ -1150,7 +1160,7 @@ export class CasesService {
   /* TASKS                                                              */
   /* ---------------------------------------------------------------- */
 
-  async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload) {
+  async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload): Promise<CaseTask> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
     if (caseRecord.status === CaseStatus.CLOSED) {
@@ -1208,7 +1218,12 @@ export class CasesService {
     return task
   }
 
-  async updateTask(caseId: string, taskId: string, dto: UpdateTaskDto, user: JwtPayload) {
+  async updateTask(
+    caseId: string,
+    taskId: string,
+    dto: UpdateTaskDto,
+    user: JwtPayload
+  ): Promise<CaseTask> {
     await this.getCaseById(caseId, user.tenantId)
 
     const existing = await this.casesRepository.findTaskByIdAndCase(taskId, caseId)
@@ -1239,7 +1254,11 @@ export class CasesService {
     return task
   }
 
-  async deleteTask(caseId: string, taskId: string, user: JwtPayload) {
+  async deleteTask(
+    caseId: string,
+    taskId: string,
+    user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
     const existing = await this.casesRepository.findTaskByIdAndCase(taskId, caseId)
@@ -1280,7 +1299,11 @@ export class CasesService {
   /* ARTIFACTS                                                          */
   /* ---------------------------------------------------------------- */
 
-  async createArtifact(caseId: string, dto: CreateArtifactDto, user: JwtPayload) {
+  async createArtifact(
+    caseId: string,
+    dto: CreateArtifactDto,
+    user: JwtPayload
+  ): Promise<CaseArtifact> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
     if (caseRecord.status === CaseStatus.CLOSED) {
@@ -1343,7 +1366,11 @@ export class CasesService {
     return artifact
   }
 
-  async deleteArtifact(caseId: string, artifactId: string, user: JwtPayload) {
+  async deleteArtifact(
+    caseId: string,
+    artifactId: string,
+    user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
 
     const existing = await this.casesRepository.findArtifactByIdAndCase(artifactId, caseId)

@@ -1,8 +1,8 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.util'
+import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { GrafanaService } from '../../src/modules/connectors/services/grafana.service'
-import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.util'
+import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.utility'
 
-jest.mock('../../src/common/utils/connector-http.util')
+jest.mock('../../src/common/utils/connector-http.utility')
 
 const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
 const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>

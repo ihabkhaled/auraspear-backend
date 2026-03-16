@@ -104,7 +104,7 @@ interface FrameworkWithTenant {
 
 export function buildFrameworkRecord(
   framework: FrameworkWithTenant,
-  controlStats: { total: number; passed: number; failed: number } | undefined
+  controlStats?: { total: number; passed: number; failed: number }
 ): ComplianceFrameworkRecord {
   const totalControls = controlStats?.total ?? 0
   const passedControls = controlStats?.passed ?? 0

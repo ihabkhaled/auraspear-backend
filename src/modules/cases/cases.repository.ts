@@ -1,6 +1,35 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { CaseSeverity, CaseStatus, Prisma, UserStatus } from '@prisma/client'
+import type {
+  Case,
+  CaseArtifact,
+  CaseComment,
+  CaseCommentMention,
+  CaseNote,
+  CaseSeverity,
+  CaseStatus,
+  CaseTask,
+  CaseTimeline,
+  Prisma,
+  TenantMembership,
+  UserStatus,
+} from '@prisma/client'
+
+type CaseWithRelations = Case & {
+  notes: CaseNote[]
+  timeline: CaseTimeline[]
+  tasks: CaseTask[]
+  artifacts: CaseArtifact[]
+  tenant: { name: string }
+}
+
+type CaseWithTenant = Case & { tenant: { name: string } }
+
+type CaseCommentWithMentions = CaseComment & { mentions: CaseCommentMention[] }
+
+type MembershipWithUser = TenantMembership & {
+  user: { id: string; name: string; email: string }
+}
 
 @Injectable()
 export class CasesRepository {
@@ -10,35 +39,35 @@ export class CasesRepository {
   /* USER LOOKUPS                                                      */
   /* ---------------------------------------------------------------- */
 
-  async findUserById(userId: string) {
+  async findUserById(userId: string): Promise<{ id: string; name: string; email: string } | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, email: true },
     })
   }
 
-  async findUserNameById(userId: string) {
+  async findUserNameById(userId: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: { name: true },
     })
   }
 
-  async findUserByEmail(email: string) {
+  async findUserByEmail(email: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { email },
       select: { name: true },
     })
   }
 
-  async findUsersByEmails(emails: string[]) {
+  async findUsersByEmails(emails: string[]): Promise<{ email: string; name: string }[]> {
     return this.prisma.user.findMany({
       where: { email: { in: emails } },
       select: { email: true, name: true },
     })
   }
 
-  async findUsersByIds(ids: string[]) {
+  async findUsersByIds(ids: string[]): Promise<{ id: string; name: string; email: string }[]> {
     return this.prisma.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, name: true, email: true },
@@ -54,7 +83,7 @@ export class CasesRepository {
     orderBy: Prisma.CaseOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<[CaseWithTenant[], number]> {
     return Promise.all([
       this.prisma.case.findMany({
         ...params,
@@ -64,7 +93,7 @@ export class CasesRepository {
     ])
   }
 
-  async findCaseByIdAndTenant(id: string, tenantId: string) {
+  async findCaseByIdAndTenant(id: string, tenantId: string): Promise<CaseWithRelations | null> {
     return this.prisma.case.findFirst({
       where: { id, tenantId },
       include: {
@@ -81,13 +110,13 @@ export class CasesRepository {
   /* ALERT VALIDATION                                                  */
   /* ---------------------------------------------------------------- */
 
-  async countAlertsByTenantAndIds(tenantId: string, alertIds: string[]) {
+  async countAlertsByTenantAndIds(tenantId: string, alertIds: string[]): Promise<number> {
     return this.prisma.alert.count({
       where: { id: { in: alertIds }, tenantId },
     })
   }
 
-  async countAlertByTenantAndId(tenantId: string, alertId: string) {
+  async countAlertByTenantAndId(tenantId: string, alertId: string): Promise<number> {
     return this.prisma.alert.count({
       where: { id: alertId, tenantId },
     })
@@ -97,14 +126,21 @@ export class CasesRepository {
   /* MEMBERSHIP VALIDATION                                             */
   /* ---------------------------------------------------------------- */
 
-  async findMembershipByUserAndTenant(userId: string, tenantId: string) {
+  async findMembershipByUserAndTenant(
+    userId: string,
+    tenantId: string
+  ): Promise<{ status: UserStatus } | null> {
     return this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
       select: { status: true },
     })
   }
 
-  async countActiveMentionMemberships(userIds: string[], tenantId: string, status: UserStatus) {
+  async countActiveMentionMemberships(
+    userIds: string[],
+    tenantId: string,
+    status: UserStatus
+  ): Promise<number> {
     return this.prisma.tenantMembership.count({
       where: {
         userId: { in: userIds },
@@ -119,7 +155,7 @@ export class CasesRepository {
     query: string,
     status: UserStatus,
     limit: number
-  ) {
+  ): Promise<MembershipWithUser[]> {
     return this.prisma.tenantMembership.findMany({
       where: {
         tenantId,
@@ -164,7 +200,7 @@ export class CasesRepository {
       actor: string
       description: string
     }
-  ) {
+  ): Promise<CaseWithRelations> {
     return this.prisma.$transaction(async tx => {
       let resolvedCycleId: string | null = null
       if (params.cycleId) {
@@ -260,7 +296,7 @@ export class CasesRepository {
     tenantId: string,
     updateData: Record<string, unknown>,
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<CaseWithRelations> {
     return this.prisma.$transaction(async tx => {
       const updated = await tx.case.updateMany({
         where: { id, tenantId },
@@ -302,7 +338,7 @@ export class CasesRepository {
     tenantId: string,
     status: CaseStatus,
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<void> {
     return this.prisma.$transaction(async tx => {
       await tx.case.updateMany({
         where: { id, tenantId },
@@ -328,7 +364,7 @@ export class CasesRepository {
     tenantId: string,
     linkedAlerts: string[],
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<CaseWithRelations> {
     return this.prisma.$transaction(async tx => {
       const updated = await tx.case.updateMany({
         where: { id: caseId, tenantId },
@@ -365,7 +401,11 @@ export class CasesRepository {
   /* NOTES                                                             */
   /* ---------------------------------------------------------------- */
 
-  async findCaseNotesAndCount(caseId: string, skip: number, take: number) {
+  async findCaseNotesAndCount(
+    caseId: string,
+    skip: number,
+    take: number
+  ): Promise<[CaseNote[], number]> {
     const where = { caseId }
     return Promise.all([
       this.prisma.caseNote.findMany({
@@ -383,7 +423,7 @@ export class CasesRepository {
     author: string,
     body: string,
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<CaseNote> {
     return this.prisma.$transaction(async tx => {
       const createdNote = await tx.caseNote.create({
         data: { caseId, author, body },
@@ -404,7 +444,11 @@ export class CasesRepository {
   /* COMMENTS                                                          */
   /* ---------------------------------------------------------------- */
 
-  async findCommentsAndCount(caseId: string, skip: number, take: number) {
+  async findCommentsAndCount(
+    caseId: string,
+    skip: number,
+    take: number
+  ): Promise<[CaseCommentWithMentions[], number]> {
     const where = { caseId, isDeleted: false }
     return Promise.all([
       this.prisma.caseComment.findMany({
@@ -418,7 +462,7 @@ export class CasesRepository {
     ])
   }
 
-  async findCommentByIdAndCase(commentId: string, caseId: string) {
+  async findCommentByIdAndCase(commentId: string, caseId: string): Promise<CaseComment | null> {
     return this.prisma.caseComment.findFirst({
       where: { id: commentId, caseId, isDeleted: false },
     })
@@ -430,7 +474,7 @@ export class CasesRepository {
     body: string,
     mentionUserIds: string[],
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<CaseCommentWithMentions> {
     return this.prisma.$transaction(async tx => {
       const createdComment = await tx.caseComment.create({
         data: { caseId, authorId, body },
@@ -467,7 +511,7 @@ export class CasesRepository {
     body: string,
     mentionUserIds: string[],
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<CaseCommentWithMentions> {
     return this.prisma.$transaction(async tx => {
       await tx.caseComment.update({
         where: { id: commentId },
@@ -504,7 +548,7 @@ export class CasesRepository {
     commentId: string,
     caseId: string,
     timelineData: { type: string; actor: string; description: string }
-  ) {
+  ): Promise<void> {
     return this.prisma.$transaction(async tx => {
       await tx.caseComment.update({
         where: { id: commentId },
@@ -531,28 +575,33 @@ export class CasesRepository {
     title: string
     status: string
     assignee: string | null
-  }) {
+  }): Promise<CaseTask> {
     return this.prisma.caseTask.create({ data })
   }
 
-  async findTaskByIdAndCase(taskId: string, caseId: string) {
+  async findTaskByIdAndCase(taskId: string, caseId: string): Promise<CaseTask | null> {
     return this.prisma.caseTask.findFirst({
       where: { id: taskId, caseId },
     })
   }
 
-  async updateTask(taskId: string, data: Record<string, unknown>) {
+  async updateTask(taskId: string, data: Record<string, unknown>): Promise<CaseTask> {
     return this.prisma.caseTask.update({
       where: { id: taskId },
       data,
     })
   }
 
-  async deleteTask(taskId: string) {
+  async deleteTask(taskId: string): Promise<CaseTask> {
     return this.prisma.caseTask.delete({ where: { id: taskId } })
   }
 
-  async createTimeline(data: { caseId: string; type: string; actor: string; description: string }) {
+  async createTimeline(data: {
+    caseId: string
+    type: string
+    actor: string
+    description: string
+  }): Promise<CaseTimeline> {
     return this.prisma.caseTimeline.create({ data })
   }
 
@@ -560,23 +609,32 @@ export class CasesRepository {
   /* ARTIFACTS                                                         */
   /* ---------------------------------------------------------------- */
 
-  async findArtifactDuplicate(caseId: string, type: string, value: string) {
+  async findArtifactDuplicate(
+    caseId: string,
+    type: string,
+    value: string
+  ): Promise<CaseArtifact | null> {
     return this.prisma.caseArtifact.findFirst({
       where: { caseId, type, value },
     })
   }
 
-  async createArtifact(data: { caseId: string; type: string; value: string; source: string }) {
+  async createArtifact(data: {
+    caseId: string
+    type: string
+    value: string
+    source: string
+  }): Promise<CaseArtifact> {
     return this.prisma.caseArtifact.create({ data })
   }
 
-  async findArtifactByIdAndCase(artifactId: string, caseId: string) {
+  async findArtifactByIdAndCase(artifactId: string, caseId: string): Promise<CaseArtifact | null> {
     return this.prisma.caseArtifact.findFirst({
       where: { id: artifactId, caseId },
     })
   }
 
-  async deleteArtifact(artifactId: string) {
+  async deleteArtifact(artifactId: string): Promise<CaseArtifact> {
     return this.prisma.caseArtifact.delete({ where: { id: artifactId } })
   }
 
@@ -584,25 +642,25 @@ export class CasesRepository {
   /* STATS QUERIES                                                     */
   /* ---------------------------------------------------------------- */
 
-  async countByStatus(tenantId: string, status: string) {
+  async countByStatus(tenantId: string, status: string): Promise<number> {
     return this.prisma.case.count({
       where: { tenantId, status: status as CaseStatus },
     })
   }
 
-  async countBySeverity(tenantId: string, severity: string) {
+  async countBySeverity(tenantId: string, severity: string): Promise<number> {
     return this.prisma.case.count({
       where: { tenantId, severity: severity as CaseSeverity },
     })
   }
 
-  async countTotal(tenantId: string) {
+  async countTotal(tenantId: string): Promise<number> {
     return this.prisma.case.count({
       where: { tenantId },
     })
   }
 
-  async countClosedSince(tenantId: string, since: Date) {
+  async countClosedSince(tenantId: string, since: Date): Promise<number> {
     return this.prisma.case.count({
       where: {
         tenantId,
@@ -612,7 +670,9 @@ export class CasesRepository {
     })
   }
 
-  async findClosedCasesWithTiming(tenantId: string) {
+  async findClosedCasesWithTiming(
+    tenantId: string
+  ): Promise<{ createdAt: Date; closedAt: Date | null }[]> {
     return this.prisma.case.findMany({
       where: {
         tenantId,
@@ -626,7 +686,7 @@ export class CasesRepository {
   /* CASE CYCLE LOOKUP                                                 */
   /* ---------------------------------------------------------------- */
 
-  async findCaseCycleById(cycleId: string) {
+  async findCaseCycleById(cycleId: string): Promise<{ name: string } | null> {
     return this.prisma.caseCycle.findUnique({
       where: { id: cycleId },
       select: { name: true },

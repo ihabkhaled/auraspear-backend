@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import { redactSensitiveFields } from '../utils/redaction.util'
+import { redactSensitiveFields } from '../utils/redaction.utility'
 import type { Prisma } from '@prisma/client'
 
 export interface AppLogContext {

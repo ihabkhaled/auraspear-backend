@@ -20,7 +20,12 @@ export class GraylogWorkspaceStrategy implements ConnectorWorkspaceStrategy {
 
   constructor(private readonly graylogService: GraylogService) {}
 
-  async getOverview(config: Record<string, unknown>) {
+  async getOverview(config: Record<string, unknown>): Promise<{
+    summaryCards: WorkspaceSummaryCard[]
+    recentItems: WorkspaceRecentItem[]
+    entitiesPreview: WorkspaceEntity[]
+    quickActions: WorkspaceQuickAction[]
+  }> {
     const summaryCards: WorkspaceSummaryCard[] = []
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []
@@ -79,8 +84,8 @@ export class GraylogWorkspaceStrategy implements ConnectorWorkspaceStrategy {
         variant: CardVariant.DEFAULT,
       })
 
-      for (const def of definitions.slice(0, 5)) {
-        const d = def as Record<string, unknown>
+      for (const definition of definitions.slice(0, 5)) {
+        const d = definition as Record<string, unknown>
         entitiesPreview.push({
           id: (d.id ?? '') as string,
           name: (d.title ?? 'Untitled') as string,
@@ -137,8 +142,8 @@ export class GraylogWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const start = (page - 1) * pageSize
     const sliced = definitions.slice(start, start + pageSize)
 
-    const entities: WorkspaceEntity[] = sliced.map(def => {
-      const d = def as Record<string, unknown>
+    const entities: WorkspaceEntity[] = sliced.map(definition => {
+      const d = definition as Record<string, unknown>
       return {
         id: (d.id ?? '') as string,
         name: (d.title ?? 'Untitled') as string,

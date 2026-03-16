@@ -6,6 +6,7 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type {
   ConnectorWorkspaceOverview,
+  ConnectorWorkspaceStrategy,
   WorkspaceRecentActivityResponse,
   WorkspaceEntitiesResponse,
   WorkspaceSearchRequest,
@@ -220,7 +221,7 @@ export class ConnectorWorkspacesService {
     return { config: decryptedConfig, connectorInfo }
   }
 
-  private getStrategyOrThrow(type: string) {
+  private getStrategyOrThrow(type: string): ConnectorWorkspaceStrategy {
     const strategy = this.factory.getStrategy(type)
     if (!strategy) {
       this.appLogger.warn('No workspace strategy found for connector type', {

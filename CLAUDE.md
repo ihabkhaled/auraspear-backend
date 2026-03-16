@@ -13,9 +13,9 @@
 9. **NEVER use string concatenation** — Use template literals (`prefer-template: warn`).
 10. **NEVER use `Buffer()` constructor** — Use `Buffer.alloc()` or `Buffer.from()`.
 11. **NEVER import without `node:` prefix** — Use `node:crypto`, `node:fs`, `node:path` etc. (`unicorn/prefer-node-protocol`).
-12. **NEVER use plain text string literals for comparisons/assignments** — Always use enums. Enums live in `src/common/interfaces/` or module-level `*.types.ts`. Export and import them.
-13. **NEVER define interfaces/types inline in service or controller files** — Move them to `<module>.types.ts` or `src/common/interfaces/`. Exception: DTOs in `dto/` files are fine.
-14. **NEVER define constants inline in service/controller files** — Move shared constants to `src/common/constants/` or module-level constants files.
+12. **NEVER use plain text string literals for comparisons/assignments** — Always use enums. Enums live in `src/common/enums/` or module-level `<module>.enums.ts`. Export and import them.
+13. **NEVER define interfaces/types inline in ANY file** — Move ALL interfaces, types, and type aliases to `<module>.types.ts` or `src/common/interfaces/`. This applies to services, controllers, repositories, and utility files. Exception: DTOs in `dto/` files are fine. Even small interfaces like data-transfer shapes must go in the types file.
+14. **NEVER define constants or enums inline** — Move constants to `<module>.constants.ts` or `src/common/constants/`. Move enums to `<module>.enums.ts` or `src/common/enums/`. Never define them inside service, controller, repository, or utility files.
 15. **Seeders MUST be idempotent** — Use `upsert` or `createMany({ skipDuplicates: true })`. Seeders must be safe for `npm run start:prod` and never crash on duplicate data.
 16. **NEVER use `@UsePipes()` at method level when `@Param()` is present** — It runs the pipe on ALL parameters including path params, causing validation to fail. Apply the pipe directly on `@Body()`: `@Body(new ZodValidationPipe(Schema)) dto: Dto`.
 17. **EVERY exception MUST use `BusinessException` with a specific `messageKey`** — Never throw raw `UnauthorizedException`, `NotFoundException`, `ForbiddenException`, etc. Always use `throw new BusinessException(status, message, 'errors.module.specificKey')` so the frontend can show localized error messages via `t(messageKey)`.
@@ -67,6 +67,13 @@
 63. **OIDC environment variables MUST be group-validated** — `OIDC_AUTHORITY`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI`, `OIDC_JWKS_URI` must all be present or all absent. Partial configuration causes runtime failures. Use a Zod `.refine()` to enforce all-or-nothing.
 64. **Docker production compose MUST NOT expose internal service ports** — PostgreSQL (5432), Redis (6379), and pgAdmin (5050) must NOT have `ports:` bindings in production docker-compose. Only the backend API port (4000) should be exposed. Internal services communicate via Docker networks only.
 65. **Audit interceptor sensitive keys MUST cover all credential patterns** — The sanitization list must include: `password`, `apiKey`, `token`, `secret`, `bearerToken`, `accessKey`, `clientSecret`, `refreshToken`, `accessToken`, `encryptedConfig`, `authorization`. Missing any pattern leaks credentials to audit logs.
+66. **EVERY function MUST have an explicit return type** — All methods in repositories, services, controllers, and utility files must declare their return type (e.g., `async foo(): Promise<Bar>`). The `@typescript-eslint/explicit-function-return-type` rule is enforced as a warning.
+67. **NEVER use `Array#reduce()`** — Use `for...of` loops instead for readability (`unicorn/no-array-reduce`).
+68. **NEVER use abbreviated file or variable names** — `unicorn/prevent-abbreviations` is enforced. Use full words: `utility` not `util`, `utilities` not `utils`, `parameter` not `param`, `definition` not `def`, `error` not `err` (except in allowed list: `req`, `res`, `env`, `db`, `fn`, `args`, `params`, `props`, `ctx`, `dto`, `e`, `err`).
+69. **NEVER nest ternary expressions** — Extract into variables or use `if/else` blocks. Both `no-nested-ternary` and `unicorn/no-nested-ternary` are enforced.
+70. **NEVER use `await` inside loops when operations are independent** — Use `Promise.all()` or batch patterns instead (`no-await-in-loop`). Exception: sequential-dependent operations like pagination scroll APIs where each iteration depends on the previous result.
+71. **NEVER pass useless `undefined` arguments** — Don't pass `undefined` as a function argument when it matches the default. Use optional parameters instead (`unicorn/no-useless-undefined`).
+72. **Prefer `??` over ternary for nullish values** — Use `??` (nullish coalescing) instead of `value ? value : default` or `value !== null ? value : default` (`@typescript-eslint/prefer-nullish-coalescing`). Use `??=` for nullish assignment.
 
 ---
 
@@ -115,13 +122,13 @@
 ```
 Controller → Service → Repository → Prisma
               ↓
-            Utils
+          Utilities
 ```
 
 - **Controllers**: HTTP routing, parameter extraction, validation delegation, response return. No business logic. Call ONE service method and return. Always have `@Roles()` + `RolesGuard` on mutations.
-- **Services**: Thin orchestrators. Call repository methods and util functions. NEVER import `PrismaService`. NEVER have long procedural blocks. Every 3-5 lines of cohesive logic must be extracted to a util function.
+- **Services**: Thin orchestrators. Call repository methods and utility functions. NEVER import `PrismaService`. NEVER have long procedural blocks. Every 3-5 lines of cohesive logic must be extracted to a utility function.
 - **Repositories**: Pure data access. Accept fully-built query params, return raw Prisma results. EVERY method takes `tenantId`. No business logic, no conditionals, no transforms, no `BusinessException`.
-- **Utils**: All business logic lives here. Mappers, transformers, filter builders, calculators, validators, formatters — all exported named functions in `<module>.utils.ts`.
+- **Utilities**: All business logic lives here. Mappers, transformers, filter builders, calculators, validators, formatters — all exported named functions in `<module>.utilities.ts`.
 - **Types**: All interfaces/types in `<module>.types.ts` or `src/common/interfaces/`. Never inline in services/controllers.
 - **Constants**: All shared constants in `<module>.constants.ts` or `src/common/constants/`. Never inline.
 - **Enums**: Every string literal must be an enum. Enums in `<module>.enums.ts` or `src/common/interfaces/`.
@@ -132,8 +139,8 @@ Controller → Service → Repository → Prisma
 - **NEVER call Prisma directly from service files** — All data access through repository.
 - **NEVER put business logic in controllers** — Controllers only route and delegate.
 - **NEVER put logic in repositories** — Pure data access only, no conditionals or transforms.
-- **NEVER inline logic in service methods** — Extract to utils every 3-5 lines of cohesive logic.
-- **NEVER duplicate logic across services** — Extract to shared utils or services.
+- **NEVER inline logic in service methods** — Extract to utilities every 3-5 lines of cohesive logic.
+- **NEVER duplicate logic across services** — Extract to shared utilities or services.
 
 ### File Structure Per Module
 
@@ -143,7 +150,7 @@ src/modules/<module>/
 ├── <module>.controller.ts
 ├── <module>.service.ts
 ├── <module>.repository.ts
-├── <module>.utils.ts
+├── <module>.utilities.ts
 ├── <module>.types.ts
 ├── <module>.enums.ts
 ├── <module>.constants.ts
@@ -363,8 +370,8 @@ Configuration:
 1. **Multi-tenant isolation**: Every query MUST be scoped by `tenantId`. Never return data from another tenant.
 2. **RBAC enforcement**: Use `@Roles()` decorator on every mutation endpoint. Guard chain: `AuthGuard` (JWT verify + DB active check + GLOBAL_ADMIN tenant switch) → `TenantGuard` → `RolesGuard`.
 3. **Zod for validation**: All DTOs use Zod schemas via `ZodValidationPipe`. No class-validator.
-4. **Secrets encrypted at rest**: Connector configs stored via AES-256-GCM encryption (`src/common/utils/encryption.util.ts`).
-5. **SSRF protection**: All user-supplied URLs validated against allowlist before any outbound request (`src/common/utils/ssrf.util.ts`).
+4. **Secrets encrypted at rest**: Connector configs stored via AES-256-GCM encryption (`src/common/utils/encryption.utility.ts`).
+5. **SSRF protection**: All user-supplied URLs validated against allowlist before any outbound request (`src/common/utils/ssrf.utility.ts`).
 6. **Audit logging**: All mutations automatically logged via `AuditInterceptor`.
 7. **Auth guard validates user on every request**: After JWT verification, the guard calls `validateUserActive(userId)` which checks the user still exists and has `status: 'active'`. Blocked/deleted users get 401.
 8. **GLOBAL_ADMIN tenant switching**: The auth guard reads the `X-Tenant-Id` header. If the user is `GLOBAL_ADMIN` and the header contains a valid tenant ID different from the JWT's, `request.user.tenantId` is overridden. This makes `@TenantId()` return the switched tenant automatically. Non-GLOBAL_ADMIN users cannot switch tenants.
@@ -428,7 +435,7 @@ src/
 |   +-- interceptors/       # AuditInterceptor
 |   +-- interfaces/         # Shared interfaces (AuthenticatedRequest, JwtPayload)
 |   +-- pipes/              # ZodValidationPipe
-|   +-- utils/              # encryption.util.ts, mask.util.ts, ssrf.util.ts
+|   +-- utils/              # encryption.utility.ts, mask.utility.ts, ssrf.utility.ts
 +-- config/                 # env.validation.ts (Zod env schema)
 +-- modules/
 |   +-- ai/                 # AI-powered analysis endpoints
@@ -612,10 +619,11 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 
 ## File Naming
 
-- All files use **kebab-case**: `auth.guard.ts`, `create-case.dto.ts`, `ssrf.util.ts`
+- All files use **kebab-case**: `auth.guard.ts`, `create-case.dto.ts`, `ssrf.utility.ts`
 - Modules follow NestJS conventions: `*.module.ts`, `*.controller.ts`, `*.service.ts`
 - Repositories: `<module>.repository.ts` — pure data access layer
-- Utils: `<module>.utils.ts` — business logic functions (mappers, transformers, validators)
+- Utilities: `<module>.utilities.ts` — business logic functions (mappers, transformers, validators). **NEVER use `.utils.ts`** — `unicorn/prevent-abbreviations` requires the full word `utilities`.
+- Common utilities: `src/common/utils/<name>.utility.ts` — **NEVER use `.util.ts`** — use `.utility.ts` (same ESLint rule).
 - DTOs in `dto/` subdirectory per module
 - Type/interface files: `<module>.types.ts` at the module root (e.g. `alerts.types.ts`)
 - Enum files: `<module>.enums.ts` — module-specific enums
@@ -629,7 +637,7 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 ## Testing
 
 - Unit tests: `test/` directory, `*.spec.ts` pattern
-- Test guards, utils, and pipes — services tested via e2e
+- Test guards, utilities, and pipes — services tested via e2e
 - Test files have relaxed ESLint rules (no `any` enforcement, no return type requirements)
 - Run tests before committing: `npm test`
 
@@ -637,7 +645,7 @@ export type CreateAlertDto = z.infer<typeof CreateAlertSchema>
 
 For every module, the following test coverage is required:
 
-- Unit tests for services and utils
+- Unit tests for services and utilities
 - Integration/e2e tests for all endpoints
 - Validation tests (invalid inputs, boundary values)
 - RBAC tests (unauthorized access denied)
@@ -675,7 +683,12 @@ Before committing any module:
 - [ ] No Prisma in services (all in repository)
 - [ ] No business logic in controllers
 - [ ] No logic in repositories
-- [ ] All service methods are short (logic in utils)
+- [ ] All service methods are short (logic in utilities)
+- [ ] All functions have explicit return types
+- [ ] No `Array#reduce()` — use `for...of` loops
+- [ ] No nested ternaries
+- [ ] No `await` in loops (use `Promise.all()` for independent operations)
+- [ ] No abbreviated names (`.utility.ts` not `.util.ts`, `definition` not `def`)
 - [ ] All queries tenant-scoped
 - [ ] All mutations have RBAC guards
 - [ ] All DTOs have Zod with `.max()`

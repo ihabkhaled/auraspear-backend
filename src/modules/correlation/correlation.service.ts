@@ -5,7 +5,7 @@ import {
   buildRuleOrderBy,
   buildRuleUpdateData,
   buildCorrelationStats,
-} from './correlation.utils'
+} from './correlation.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, RuleSource } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'

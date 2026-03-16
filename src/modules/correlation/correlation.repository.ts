@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { Prisma, CorrelationRule } from '@prisma/client'
 
 @Injectable()
 export class CorrelationRepository {
@@ -15,7 +15,7 @@ export class CorrelationRepository {
     orderBy: Prisma.CorrelationRuleOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<CorrelationRule[]> {
     return this.prisma.correlationRule.findMany(params)
   }
 
@@ -24,18 +24,20 @@ export class CorrelationRepository {
     orderBy: Prisma.CorrelationRuleOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<Array<CorrelationRule & { tenant: { name: string } }>> {
     return this.prisma.correlationRule.findMany({
       ...params,
       include: { tenant: { select: { name: true } } },
     })
   }
 
-  async count(where: Prisma.CorrelationRuleWhereInput) {
+  async count(where: Prisma.CorrelationRuleWhereInput): Promise<number> {
     return this.prisma.correlationRule.count({ where })
   }
 
-  async findFirstWithTenant(where: Prisma.CorrelationRuleWhereInput) {
+  async findFirstWithTenant(
+    where: Prisma.CorrelationRuleWhereInput
+  ): Promise<(CorrelationRule & { tenant: { name: string } }) | null> {
     return this.prisma.correlationRule.findFirst({
       where,
       include: { tenant: { select: { name: true } } },
@@ -45,15 +47,17 @@ export class CorrelationRepository {
   async findFirstSelect(
     where: Prisma.CorrelationRuleWhereInput,
     select: Prisma.CorrelationRuleSelect
-  ) {
+  ): Promise<Partial<CorrelationRule> | null> {
     return this.prisma.correlationRule.findFirst({ where, select })
   }
 
-  async create(data: Prisma.CorrelationRuleUncheckedCreateInput) {
+  async create(data: Prisma.CorrelationRuleUncheckedCreateInput): Promise<CorrelationRule> {
     return this.prisma.correlationRule.create({ data })
   }
 
-  async createWithTenant(data: Prisma.CorrelationRuleUncheckedCreateInput) {
+  async createWithTenant(
+    data: Prisma.CorrelationRuleUncheckedCreateInput
+  ): Promise<CorrelationRule & { tenant: { name: string } }> {
     return this.prisma.correlationRule.create({
       data,
       include: { tenant: { select: { name: true } } },
@@ -63,7 +67,7 @@ export class CorrelationRepository {
   async update(params: {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
-  }) {
+  }): Promise<CorrelationRule> {
     return this.prisma.correlationRule.update({
       where: { id: params.where.id, tenantId: params.where.tenantId },
       data: params.data,
@@ -73,7 +77,7 @@ export class CorrelationRepository {
   async updateWithTenant(params: {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
-  }) {
+  }): Promise<CorrelationRule & { tenant: { name: string } }> {
     return this.prisma.correlationRule.update({
       where: { id: params.where.id, tenantId: params.where.tenantId },
       data: params.data,
@@ -81,7 +85,7 @@ export class CorrelationRepository {
     })
   }
 
-  async deleteByIdAndTenantId(id: string, tenantId: string) {
+  async deleteByIdAndTenantId(id: string, tenantId: string): Promise<CorrelationRule> {
     return this.prisma.correlationRule.delete({
       where: { id, tenantId },
     })
@@ -91,28 +95,24 @@ export class CorrelationRepository {
   /* AGGREGATION QUERIES                                                */
   /* ---------------------------------------------------------------- */
 
-  async aggregate(params: {
-    where: Prisma.CorrelationRuleWhereInput
-    _sum?: Prisma.CorrelationRuleAggregateArgs['_sum']
-  }) {
-    return this.prisma.correlationRule.aggregate({
-      where: params.where,
-      _sum: params._sum,
-    })
+  async aggregate<T extends Prisma.CorrelationRuleAggregateArgs>(
+    params: T
+  ): Promise<Prisma.GetCorrelationRuleAggregateType<T>> {
+    return this.prisma.correlationRule.aggregate(params)
   }
 
   /* ---------------------------------------------------------------- */
   /* USER LOOKUPS                                                       */
   /* ---------------------------------------------------------------- */
 
-  async findUsersByEmails(emails: string[]) {
+  async findUsersByEmails(emails: string[]): Promise<Array<{ email: string; name: string }>> {
     return this.prisma.user.findMany({
       where: { email: { in: emails } },
       select: { email: true, name: true },
     })
   }
 
-  async findUserNameByEmail(email: string) {
+  async findUserNameByEmail(email: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { email },
       select: { name: true },
@@ -123,7 +123,10 @@ export class CorrelationRepository {
   /* NUMBER GENERATION                                                  */
   /* ---------------------------------------------------------------- */
 
-  async findLastRuleByPrefix(tenantId: string, prefix: string) {
+  async findLastRuleByPrefix(
+    tenantId: string,
+    prefix: string
+  ): Promise<{ ruleNumber: string } | null> {
     return this.prisma.correlationRule.findFirst({
       where: {
         tenantId,

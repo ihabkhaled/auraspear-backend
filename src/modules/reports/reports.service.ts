@@ -7,7 +7,7 @@ import {
   buildReportRecord,
   buildReportUpdateData,
   buildReportStats,
-} from './reports.utils'
+} from './reports.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, ReportStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -158,11 +158,7 @@ export class ReportsService {
   /* UPDATE REPORT                                                     */
   /* ---------------------------------------------------------------- */
 
-  async updateReport(
-    id: string,
-    dto: UpdateReportDto,
-    user: JwtPayload
-  ): Promise<ReportRecord> {
+  async updateReport(id: string, dto: UpdateReportDto, user: JwtPayload): Promise<ReportRecord> {
     await this.getReportById(id, user.tenantId)
 
     const updated = await this.repository.updateManyReports({
@@ -171,11 +167,7 @@ export class ReportsService {
     })
 
     if (updated.count === 0) {
-      throw new BusinessException(
-        404,
-        `Report ${id} not found`,
-        'errors.reports.notFound'
-      )
+      throw new BusinessException(404, `Report ${id} not found`, 'errors.reports.notFound')
     }
 
     this.appLogger.info('Report updated', {

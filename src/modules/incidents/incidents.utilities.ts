@@ -153,11 +153,13 @@ export function calculateAvgResolveHours(
 ): number | null {
   if (resolvedIncidents.length === 0) return null
 
-  const totalHours = resolvedIncidents.reduce((sum, index) => {
-    if (!index.resolvedAt) return sum
-    const diffMs = index.resolvedAt.getTime() - index.createdAt.getTime()
-    return sum + diffMs / (1000 * 60 * 60)
-  }, 0)
+  let totalHours = 0
+  for (const incident of resolvedIncidents) {
+    if (incident.resolvedAt) {
+      const diffMs = incident.resolvedAt.getTime() - incident.createdAt.getTime()
+      totalHours += diffMs / (1000 * 60 * 60)
+    }
+  }
 
   return Math.round((totalHours / resolvedIncidents.length) * 100) / 100
 }

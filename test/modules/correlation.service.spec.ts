@@ -36,8 +36,10 @@ function createMockRepository() {
     updateWithTenant: jest.fn(),
     deleteByIdAndTenantId: jest.fn(),
     aggregate: jest.fn(),
-    findUsersByIds: jest.fn(),
-    findUserNameById: jest.fn(),
+    findUsersByEmails: jest.fn(),
+    findUserNameByEmail: jest.fn(),
+    findUserNameByEmail: jest.fn(),
+    findUsersByEmails: jest.fn(),
     findLastRuleByPrefix: jest.fn(),
   }
 }
@@ -58,7 +60,7 @@ function buildMockRule(overrides: Record<string, unknown> = {}) {
     hitCount: 0,
     linkedIncidents: 0,
     lastFiredAt: null,
-    createdBy: USER_ID,
+    createdBy: USER_EMAIL,
     createdAt: new Date('2025-06-01T12:00:00Z'),
     updatedAt: new Date('2025-06-01T12:00:00Z'),
     tenant: { name: 'Test Tenant' },
@@ -85,7 +87,7 @@ describe('CorrelationService', () => {
       const rules = [buildMockRule(), buildMockRule({ id: 'rule-002', ruleNumber: 'COR-0002' })]
       repository.findManyWithTenant.mockResolvedValue(rules)
       repository.count.mockResolvedValue(2)
-      repository.findUsersByIds.mockResolvedValue([{ id: USER_ID, name: 'Test Analyst' }])
+      repository.findUsersByEmails.mockResolvedValue([{ email: USER_EMAIL, name: 'Test Analyst' }])
 
       const result = await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc')
 
@@ -105,7 +107,7 @@ describe('CorrelationService', () => {
     it('should always include tenantId in where clause', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc')
 
@@ -116,7 +118,7 @@ describe('CorrelationService', () => {
     it('should filter by comma-separated sources', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc', 'sigma,custom')
 
@@ -127,7 +129,7 @@ describe('CorrelationService', () => {
     it('should filter by comma-separated severities', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc', undefined, 'critical,high')
 
@@ -138,7 +140,7 @@ describe('CorrelationService', () => {
     it('should filter by comma-separated statuses', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(
         TENANT_ID,
@@ -158,7 +160,7 @@ describe('CorrelationService', () => {
     it('should apply free text search across title, description, ruleNumber', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(
         TENANT_ID,
@@ -192,7 +194,7 @@ describe('CorrelationService', () => {
     it('should apply correct pagination skip and take', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(100)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       await service.listRules(TENANT_ID, 3, 10, 'createdAt', 'desc')
 
@@ -204,7 +206,7 @@ describe('CorrelationService', () => {
     it('should handle empty results', async () => {
       repository.findManyWithTenant.mockResolvedValue([])
       repository.count.mockResolvedValue(0)
-      repository.findUsersByIds.mockResolvedValue([])
+      repository.findUsersByEmails.mockResolvedValue([])
 
       const result = await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc')
 
@@ -217,7 +219,7 @@ describe('CorrelationService', () => {
       const rules = [buildMockRule()]
       repository.findManyWithTenant.mockResolvedValue(rules)
       repository.count.mockResolvedValue(1)
-      repository.findUsersByIds.mockResolvedValue([{ id: USER_ID, name: 'Test Analyst' }])
+      repository.findUsersByEmails.mockResolvedValue([{ email: USER_EMAIL, name: 'Test Analyst' }])
 
       const result = await service.listRules(TENANT_ID, 1, 20, 'createdAt', 'desc')
 
@@ -233,7 +235,7 @@ describe('CorrelationService', () => {
     it('should return rule with resolved creator name when found', async () => {
       const rule = buildMockRule()
       repository.findFirstWithTenant.mockResolvedValue(rule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       const result = await service.getRuleById(RULE_ID, TENANT_ID)
 
@@ -276,7 +278,7 @@ describe('CorrelationService', () => {
     it('should handle null creator name gracefully', async () => {
       const rule = buildMockRule()
       repository.findFirstWithTenant.mockResolvedValue(rule)
-      repository.findUserNameById.mockResolvedValue(null)
+      repository.findUserNameByEmail.mockResolvedValue(null)
 
       const result = await service.getRuleById(RULE_ID, TENANT_ID)
 
@@ -300,7 +302,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule({ title: 'New Rule', ruleNumber: 'COR-0001' })
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       const result = await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -314,7 +316,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule({ ruleNumber: 'COR-0001' })
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -328,7 +330,7 @@ describe('CorrelationService', () => {
       const sigmaDto = { ...baseDto, source: 'sigma' as const }
       const createdRule = buildMockRule({ ruleNumber: 'SIG-0001', source: 'sigma' })
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(sigmaDto, buildMockJwtPayload() as never)
 
@@ -341,7 +343,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue({ ruleNumber: 'COR-0005' })
       const createdRule = buildMockRule({ ruleNumber: 'COR-0006' })
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -354,7 +356,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule()
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -366,7 +368,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule()
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -378,19 +380,19 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule()
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      expect(callArguments.createdBy).toBe(USER_ID)
+      expect(callArguments.createdBy).toBe(USER_EMAIL)
     })
 
     it('should pass mitreTactics and mitreTechniques when provided', async () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule()
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       const dto = {
         ...baseDto,
@@ -408,7 +410,7 @@ describe('CorrelationService', () => {
       repository.findLastRuleByPrefix.mockResolvedValue(null)
       const createdRule = buildMockRule()
       repository.createWithTenant.mockResolvedValue(createdRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
@@ -426,7 +428,7 @@ describe('CorrelationService', () => {
       repository.findFirstSelect.mockResolvedValue({ id: RULE_ID })
       const updatedRule = buildMockRule({ title: 'Updated Rule' })
       repository.updateWithTenant.mockResolvedValue(updatedRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       const result = await service.updateRule(
         RULE_ID,
@@ -470,7 +472,7 @@ describe('CorrelationService', () => {
       repository.findFirstSelect.mockResolvedValue({ id: RULE_ID })
       const updatedRule = buildMockRule()
       repository.updateWithTenant.mockResolvedValue(updatedRule)
-      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameByEmail.mockResolvedValue({ name: 'Test Analyst' })
 
       const updateDto = {
         title: 'Updated',

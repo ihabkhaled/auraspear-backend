@@ -194,7 +194,7 @@ export class CaseCyclesService {
       .filter((ownerId): ownerId is string => ownerId !== null)
     const uniqueOwnerIds = [...new Set(ownerIds)]
 
-    const ownerMap = new Map<string, { name: string; email: string }>()
+    const ownerMap = new Map<string, { name: string | null; email: string }>()
     if (uniqueOwnerIds.length > 0) {
       const owners = await this.caseCyclesRepository.findUsersByIds(uniqueOwnerIds)
       for (const o of owners) {
@@ -313,7 +313,7 @@ export class CaseCyclesService {
     }
 
     const startDate = dto.startDate ?? existing.startDate
-    const endDate = dto.endDate === undefined ? existing.endDate : dto.endDate
+    const endDate = dto.endDate ?? existing.endDate
 
     // Validate start < end
     if (endDate && startDate >= endDate) {
@@ -475,12 +475,9 @@ export class CaseCyclesService {
       )
     }
 
-    if (existing._count.cases > 0) {
-      // Unlink cases from this cycle (set cycleId to null) then delete
-      await this.caseCyclesRepository.deleteCycleWithCasesTransaction(id, user.tenantId)
-    } else {
-      await this.caseCyclesRepository.deleteCycle(id)
-    }
+    await (existing._count.cases > 0
+      ? this.caseCyclesRepository.deleteCycleWithCasesTransaction(id, user.tenantId)
+      : this.caseCyclesRepository.deleteCycle(id))
 
     this.appLogger.info(`Deleted case cycle "${existing.name}"`, {
       feature: AppLogFeature.CASE_CYCLES,

@@ -1,4 +1,4 @@
-import { redactSensitiveFields, SENSITIVE_KEYS } from '../../src/common/utils/redaction.util'
+import { redactSensitiveFields, SENSITIVE_KEYS } from '../../src/common/utils/redaction.utility'
 
 describe('redaction.util — redactSensitiveFields', () => {
   /* ------------------------------------------------------------------ */

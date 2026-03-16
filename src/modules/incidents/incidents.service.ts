@@ -9,7 +9,7 @@ import {
   buildAssigneesMap,
   buildCreatorsMap,
   mapIncidentListItem,
-} from './incidents.utils'
+} from './incidents.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, IncidentStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'

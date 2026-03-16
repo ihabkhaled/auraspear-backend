@@ -1,5 +1,5 @@
 import * as http from 'node:http'
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.util'
+import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 
 describe('Connector HTTP Utility', () => {
   const originalEnvironment = process.env.NODE_ENV

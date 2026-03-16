@@ -39,7 +39,7 @@ export class IncidentsRepository {
     })
   }
 
-  async deleteMany(where: Prisma.IncidentWhereInput) {
+  async deleteMany(where: Prisma.IncidentWhereInput): Promise<Prisma.BatchPayload> {
     return this.prisma.incident.deleteMany({ where })
   }
 
@@ -64,35 +64,35 @@ export class IncidentsRepository {
   /* USER LOOKUPS                                                       */
   /* ---------------------------------------------------------------- */
 
-  async findUserById(userId: string) {
+  async findUserById(userId: string): Promise<{ name: string; email: string } | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: { name: true, email: true },
     })
   }
 
-  async findUserByEmail(email: string) {
+  async findUserByEmail(email: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { email },
       select: { name: true },
     })
   }
 
-  async findUsersByIds(ids: string[]) {
+  async findUsersByIds(ids: string[]): Promise<{ id: string; name: string; email: string }[]> {
     return this.prisma.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, name: true, email: true },
     })
   }
 
-  async findUsersByEmails(emails: string[]) {
+  async findUsersByEmails(emails: string[]): Promise<{ email: string; name: string }[]> {
     return this.prisma.user.findMany({
       where: { email: { in: emails } },
       select: { email: true, name: true },
     })
   }
 
-  async findUserNameById(userId: string) {
+  async findUserNameById(userId: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },
       select: { name: true },
@@ -103,19 +103,22 @@ export class IncidentsRepository {
   /* VALIDATION QUERIES                                                 */
   /* ---------------------------------------------------------------- */
 
-  async countAlertsByIdsAndTenant(alertIds: string[], tenantId: string) {
+  async countAlertsByIdsAndTenant(alertIds: string[], tenantId: string): Promise<number> {
     return this.prisma.alert.count({
       where: { id: { in: alertIds }, tenantId },
     })
   }
 
-  async countCasesByIdAndTenant(caseId: string, tenantId: string) {
+  async countCasesByIdAndTenant(caseId: string, tenantId: string): Promise<number> {
     return this.prisma.case.count({
       where: { id: caseId, tenantId },
     })
   }
 
-  async findActiveTenantMembership(userId: string, tenantId: string) {
+  async findActiveTenantMembership(
+    userId: string,
+    tenantId: string
+  ): Promise<{ id: string } | null> {
     return this.prisma.tenantMembership.findFirst({
       where: {
         userId,
@@ -208,13 +211,13 @@ export class IncidentsRepository {
   /* STATS QUERIES                                                      */
   /* ---------------------------------------------------------------- */
 
-  async countByStatus(tenantId: string, status: string) {
+  async countByStatus(tenantId: string, status: string): Promise<number> {
     return this.prisma.incident.count({
       where: { tenantId, status: status as Prisma.IncidentWhereInput['status'] },
     })
   }
 
-  async countResolvedSince(tenantId: string, statuses: string[], since: Date) {
+  async countResolvedSince(tenantId: string, statuses: string[], since: Date): Promise<number> {
     return this.prisma.incident.count({
       where: {
         tenantId,
@@ -224,7 +227,9 @@ export class IncidentsRepository {
     })
   }
 
-  async findResolvedIncidents(tenantId: string) {
+  async findResolvedIncidents(
+    tenantId: string
+  ): Promise<{ createdAt: Date; resolvedAt: Date | null }[]> {
     return this.prisma.incident.findMany({
       where: {
         tenantId,

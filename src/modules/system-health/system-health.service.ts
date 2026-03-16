@@ -8,7 +8,7 @@ import {
   buildHealthCheckRecord,
   buildMetricRecord,
   buildSystemHealthStats,
-} from './system-health.utils'
+} from './system-health.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'

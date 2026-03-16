@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { AiAgent, AiAgentSession, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AiAgentsRepository {
@@ -15,7 +15,7 @@ export class AiAgentsRepository {
     orderBy: Prisma.AiAgentOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<AiAgent[]> {
     return this.prisma.aiAgent.findMany(params)
   }
 
@@ -24,7 +24,7 @@ export class AiAgentsRepository {
     orderBy: Prisma.AiAgentOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<(AiAgent & { _count: { tools: number; sessions: number } })[]> {
     return this.prisma.aiAgent.findMany({
       ...params,
       include: {
@@ -38,15 +38,21 @@ export class AiAgentsRepository {
     })
   }
 
-  async count(where: Prisma.AiAgentWhereInput) {
+  async count(where: Prisma.AiAgentWhereInput): Promise<number> {
     return this.prisma.aiAgent.count({ where })
   }
 
-  async findFirst(where: Prisma.AiAgentWhereInput) {
+  async findFirst(where: Prisma.AiAgentWhereInput): Promise<AiAgent | null> {
     return this.prisma.aiAgent.findFirst({ where })
   }
 
-  async findFirstWithDetails(where: Prisma.AiAgentWhereInput) {
+  async findFirstWithDetails(where: Prisma.AiAgentWhereInput): Promise<Prisma.AiAgentGetPayload<{
+    include: {
+      tools: true
+      sessions: true
+      _count: { select: { tools: true; sessions: true } }
+    }
+  }> | null> {
     return this.prisma.aiAgent.findFirst({
       where,
       include: {
@@ -65,15 +71,26 @@ export class AiAgentsRepository {
     })
   }
 
-  async findFirstSelect(where: Prisma.AiAgentWhereInput, select: Prisma.AiAgentSelect) {
+  async findFirstSelect(
+    where: Prisma.AiAgentWhereInput,
+    select: Prisma.AiAgentSelect
+  ): Promise<Partial<AiAgent> | null> {
     return this.prisma.aiAgent.findFirst({ where, select })
   }
 
-  async create(data: Prisma.AiAgentUncheckedCreateInput) {
+  async create(data: Prisma.AiAgentUncheckedCreateInput): Promise<AiAgent> {
     return this.prisma.aiAgent.create({ data })
   }
 
-  async createWithDetails(data: Prisma.AiAgentUncheckedCreateInput) {
+  async createWithDetails(data: Prisma.AiAgentUncheckedCreateInput): Promise<
+    Prisma.AiAgentGetPayload<{
+      include: {
+        tools: true
+        sessions: true
+        _count: { select: { tools: true; sessions: true } }
+      }
+    }>
+  > {
     return this.prisma.aiAgent.create({
       data,
       include: {
@@ -95,14 +112,22 @@ export class AiAgentsRepository {
   async update(params: {
     where: Prisma.AiAgentWhereUniqueInput
     data: Prisma.AiAgentUpdateInput | Record<string, unknown>
-  }) {
+  }): Promise<AiAgent> {
     return this.prisma.aiAgent.update(params)
   }
 
   async updateWithDetails(params: {
     where: Prisma.AiAgentWhereUniqueInput
     data: Prisma.AiAgentUpdateInput | Record<string, unknown>
-  }) {
+  }): Promise<
+    Prisma.AiAgentGetPayload<{
+      include: {
+        tools: true
+        sessions: true
+        _count: { select: { tools: true; sessions: true } }
+      }
+    }>
+  > {
     return this.prisma.aiAgent.update({
       ...params,
       include: {
@@ -121,7 +146,7 @@ export class AiAgentsRepository {
     })
   }
 
-  async deleteMany(where: Prisma.AiAgentWhereInput) {
+  async deleteMany(where: Prisma.AiAgentWhereInput): Promise<Prisma.BatchPayload> {
     return this.prisma.aiAgent.deleteMany({ where })
   }
 
@@ -132,7 +157,12 @@ export class AiAgentsRepository {
   async aggregate(params: {
     where: Prisma.AiAgentWhereInput
     _sum?: Prisma.AiAgentAggregateArgs['_sum']
-  }) {
+  }): Promise<
+    Prisma.GetAiAgentAggregateType<{
+      where: Prisma.AiAgentWhereInput
+      _sum: Prisma.AiAgentAggregateArgs['_sum']
+    }>
+  > {
     return this.prisma.aiAgent.aggregate({
       where: params.where,
       _sum: params._sum,
@@ -148,11 +178,11 @@ export class AiAgentsRepository {
     skip: number
     take: number
     orderBy: Prisma.AiAgentSessionOrderByWithRelationInput
-  }) {
+  }): Promise<AiAgentSession[]> {
     return this.prisma.aiAgentSession.findMany(params)
   }
 
-  async countSessions(where: Prisma.AiAgentSessionWhereInput) {
+  async countSessions(where: Prisma.AiAgentSessionWhereInput): Promise<number> {
     return this.prisma.aiAgentSession.count({ where })
   }
 }

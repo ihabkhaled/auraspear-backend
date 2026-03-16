@@ -5,7 +5,7 @@ import {
   buildVulnerabilityOrderBy,
   buildVulnerabilityUpdateData,
   buildVulnerabilityStats,
-} from './vulnerabilities.utils'
+} from './vulnerabilities.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'

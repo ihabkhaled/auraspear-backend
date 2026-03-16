@@ -218,6 +218,7 @@ describe('NormalizationService', () => {
   // ---------------------------------------------------------------------------
   describe('createPipeline', () => {
     it('should create a pipeline with INACTIVE status', async () => {
+      repository.findManyPipelines.mockResolvedValue([])
       const created = buildMockPipeline({ status: NormalizationPipelineStatus.INACTIVE })
       repository.createPipeline.mockResolvedValue(created)
 
@@ -235,6 +236,7 @@ describe('NormalizationService', () => {
     })
 
     it('should use user tenantId', async () => {
+      repository.findManyPipelines.mockResolvedValue([])
       repository.createPipeline.mockResolvedValue(buildMockPipeline())
 
       const dto = {

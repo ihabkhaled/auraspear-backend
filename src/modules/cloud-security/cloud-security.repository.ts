@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
+  CloudAccount,
+  CloudFinding,
   Prisma,
   CloudAccountStatus as PrismaCloudAccountStatus,
   CloudFindingStatus as PrismaCloudFindingStatus,
@@ -20,7 +22,7 @@ export class CloudSecurityRepository {
     skip: number
     take: number
     orderBy: Record<string, string>
-  }) {
+  }): Promise<CloudAccount[]> {
     return this.prisma.cloudAccount.findMany(params)
   }
 
@@ -28,22 +30,22 @@ export class CloudSecurityRepository {
     return this.prisma.cloudAccount.count({ where })
   }
 
-  async findFirstAccount(where: { id: string; tenantId: string }) {
+  async findFirstAccount(where: { id: string; tenantId: string }): Promise<CloudAccount | null> {
     return this.prisma.cloudAccount.findFirst({ where })
   }
 
-  async createAccount(data: Prisma.CloudAccountUncheckedCreateInput) {
+  async createAccount(data: Prisma.CloudAccountUncheckedCreateInput): Promise<CloudAccount> {
     return this.prisma.cloudAccount.create({ data })
   }
 
   async updateManyAccounts(params: {
     where: { id: string; tenantId: string }
     data: Record<string, unknown>
-  }) {
+  }): Promise<Prisma.BatchPayload> {
     return this.prisma.cloudAccount.updateMany(params)
   }
 
-  async deleteManyAccounts(where: { id: string; tenantId: string }) {
+  async deleteManyAccounts(where: { id: string; tenantId: string }): Promise<Prisma.BatchPayload> {
     return this.prisma.cloudAccount.deleteMany({ where })
   }
 
@@ -62,7 +64,7 @@ export class CloudSecurityRepository {
     skip: number
     take: number
     orderBy: Record<string, string>
-  }) {
+  }): Promise<CloudFinding[]> {
     return this.prisma.cloudFinding.findMany(params)
   }
 

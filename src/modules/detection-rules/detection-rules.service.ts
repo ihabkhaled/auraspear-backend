@@ -6,7 +6,7 @@ import {
   buildRuleOrderBy,
   buildRuleUpdateData,
   buildDetectionRuleStats,
-} from './detection-rules.utils'
+} from './detection-rules.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { ConnectorType, Prisma } from '@prisma/client'
+import type { Alert, ConnectorType, Prisma } from '@prisma/client'
 
 @Injectable()
 export class ConnectorSyncRepository {
@@ -10,7 +10,7 @@ export class ConnectorSyncRepository {
     enabled: boolean
     syncEnabled: boolean
     types: ConnectorType[]
-  }) {
+  }): Promise<Array<{ tenantId: string; type: ConnectorType; lastSyncAt: Date | null }>> {
     return this.prisma.connectorConfig.findMany({
       where: {
         enabled: params.enabled,
@@ -25,7 +25,10 @@ export class ConnectorSyncRepository {
     })
   }
 
-  async updateConnectorSyncTimestamp(tenantId: string, type: ConnectorType) {
+  async updateConnectorSyncTimestamp(
+    tenantId: string,
+    type: ConnectorType
+  ): Promise<Prisma.BatchPayload> {
     return this.prisma.connectorConfig.updateMany({
       where: { tenantId, type },
       data: { lastSyncAt: new Date() },
@@ -36,7 +39,7 @@ export class ConnectorSyncRepository {
     where: { tenantId_externalId: { tenantId: string; externalId: string } }
     create: Prisma.AlertUncheckedCreateInput
     update: Prisma.AlertUncheckedUpdateInput
-  }) {
+  }): Promise<Alert> {
     return this.prisma.alert.upsert(params)
   }
 }

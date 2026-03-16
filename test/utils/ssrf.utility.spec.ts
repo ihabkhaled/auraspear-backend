@@ -1,5 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
-import { validateUrl, isPrivateHost } from '../../src/common/utils/ssrf.util'
+import { validateUrl, isPrivateHost } from '../../src/common/utils/ssrf.utility'
 
 describe('SSRF Protection', () => {
   const originalEnvironment = process.env.NODE_ENV

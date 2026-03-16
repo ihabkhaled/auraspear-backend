@@ -20,6 +20,16 @@ import { MispService } from '../connectors/services/misp.service'
 import { ShuffleService } from '../connectors/services/shuffle.service'
 import { VelociraptorService } from '../connectors/services/velociraptor.service'
 import type {
+  ExplorerOverview,
+  PaginatedGrafanaDashboards,
+  PaginatedLogstashLogs,
+  PaginatedShuffleWorkflows,
+  PaginatedSyncJobs,
+  PaginatedUnknownResult,
+  PaginatedVelociraptorEndpoints,
+  PaginatedVelociraptorHunts,
+} from './data-explorer.types'
+import type {
   GraylogSearchDto,
   GrafanaDashboardQueryDto,
   InfluxDBQueryDto,
@@ -30,6 +40,7 @@ import type {
   LogstashLogQueryDto,
   SyncJobQueryDto,
 } from './dto/explorer-query.dto'
+import type { ConnectorSyncJob } from '@prisma/client'
 
 const CLASS_NAME = 'DataExplorerService'
 
@@ -52,19 +63,7 @@ export class DataExplorerService {
 
   // ── Overview ───────────────────────────────────────────────────────
 
-  async getOverview(tenantId: string): Promise<{
-    connectors: Array<{
-      type: string
-      enabled: boolean
-      configured: boolean
-      lastSyncAt: string | null
-    }>
-    syncJobsSummary: {
-      running: { count: number; connectors: string[] }
-      completed: { count: number; connectors: string[] }
-      failed: { count: number; connectors: string[] }
-    }
-  }> {
+  async getOverview(tenantId: string): Promise<ExplorerOverview> {
     const [connectors, syncSummary] = await Promise.all([
       this.repository.findConnectorConfigs(tenantId),
       this.repository.groupBySyncJobStatus(tenantId),
@@ -108,7 +107,10 @@ export class DataExplorerService {
 
   // ── Graylog (Live Fetch) ───────────────────────────────────────────
 
-  async searchGraylogLogs(tenantId: string, dto: GraylogSearchDto) {
+  async searchGraylogLogs(
+    tenantId: string,
+    dto: GraylogSearchDto
+  ): Promise<PaginatedUnknownResult> {
     const config = await this.getConfig(tenantId, ConnectorType.GRAYLOG)
 
     let result: { events: unknown[]; total: number }
@@ -155,7 +157,10 @@ export class DataExplorerService {
 
   // ── Grafana (Metadata Sync + Live Drilldown) ──────────────────────
 
-  async getGrafanaDashboards(tenantId: string, dto: GrafanaDashboardQueryDto) {
+  async getGrafanaDashboards(
+    tenantId: string,
+    dto: GrafanaDashboardQueryDto
+  ): Promise<PaginatedGrafanaDashboards> {
     // Read from synced metadata in DB
     const where: Record<string, unknown> = { tenantId }
     if (dto.search) {
@@ -207,40 +212,46 @@ export class DataExplorerService {
     let recordsFailed = 0
 
     try {
-      for (const dashboard of dashboards) {
-        try {
-          const uid = String(dashboard['uid'] ?? '')
-          if (!uid) {
-            recordsFailed++
-            continue
-          }
-
-          await this.repository.upsertGrafanaDashboard({
-            where: { tenantId_uid: { tenantId, uid } },
-            create: {
-              tenantId,
-              uid,
-              title: String(dashboard['title'] ?? 'Untitled'),
-              folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
-              url: String(dashboard['url'] ?? ''),
-              tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
-              type: String(dashboard['type'] ?? 'dash-db'),
-              isStarred: Boolean(dashboard['isStarred']),
-              syncedAt: new Date(),
-            },
-            update: {
-              title: String(dashboard['title'] ?? 'Untitled'),
-              folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
-              url: String(dashboard['url'] ?? ''),
-              tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
-              type: String(dashboard['type'] ?? 'dash-db'),
-              isStarred: Boolean(dashboard['isStarred']),
-              syncedAt: new Date(),
-            },
+      const BATCH_SIZE = 50
+      for (let batchStart = 0; batchStart < dashboards.length; batchStart += BATCH_SIZE) {
+        const batch = dashboards.slice(batchStart, batchStart + BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(dashboard => {
+            const uid = String(dashboard['uid'] ?? '')
+            if (!uid) {
+              return Promise.reject(new Error('Missing uid'))
+            }
+            return this.repository.upsertGrafanaDashboard({
+              where: { tenantId_uid: { tenantId, uid } },
+              create: {
+                tenantId,
+                uid,
+                title: String(dashboard['title'] ?? 'Untitled'),
+                folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
+                url: String(dashboard['url'] ?? ''),
+                tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
+                type: String(dashboard['type'] ?? 'dash-db'),
+                isStarred: Boolean(dashboard['isStarred']),
+                syncedAt: new Date(),
+              },
+              update: {
+                title: String(dashboard['title'] ?? 'Untitled'),
+                folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
+                url: String(dashboard['url'] ?? ''),
+                tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
+                type: String(dashboard['type'] ?? 'dash-db'),
+                isStarred: Boolean(dashboard['isStarred']),
+                syncedAt: new Date(),
+              },
+            })
           })
-          synced++
-        } catch {
-          recordsFailed++
+        )
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            synced++
+          } else {
+            recordsFailed++
+          }
         }
       }
 
@@ -309,7 +320,10 @@ export class DataExplorerService {
 
   // ── MISP (Full Metadata Sync) ──────────────────────────────────────
 
-  async searchMispEvents(tenantId: string, dto: MispEventQueryDto) {
+  async searchMispEvents(
+    tenantId: string,
+    dto: MispEventQueryDto
+  ): Promise<PaginatedUnknownResult> {
     const config = await this.getConfig(tenantId, ConnectorType.MISP)
 
     // Build search params for MISP API
@@ -366,7 +380,10 @@ export class DataExplorerService {
 
   // ── Velociraptor (Metadata Sync + Live Drilldown) ──────────────────
 
-  async getVelociraptorEndpoints(tenantId: string, dto: VelociraptorEndpointQueryDto) {
+  async getVelociraptorEndpoints(
+    tenantId: string,
+    dto: VelociraptorEndpointQueryDto
+  ): Promise<PaginatedVelociraptorEndpoints> {
     const where: Record<string, unknown> = { tenantId }
     if (dto.search) {
       where['hostname'] = { contains: dto.search, mode: 'insensitive' }
@@ -392,7 +409,10 @@ export class DataExplorerService {
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
 
-  async getVelociraptorHunts(tenantId: string, dto: VelociraptorHuntQueryDto) {
+  async getVelociraptorHunts(
+    tenantId: string,
+    dto: VelociraptorHuntQueryDto
+  ): Promise<PaginatedVelociraptorHunts> {
     const where: Record<string, unknown> = { tenantId }
     if (dto.search) {
       where['description'] = { contains: dto.search, mode: 'insensitive' }
@@ -452,99 +472,117 @@ export class DataExplorerService {
       const clients = (await this.velociraptorService.getClients(config)) as Array<
         Record<string, unknown>
       >
-      for (const client of clients) {
-        try {
-          const clientId = String(client['client_id'] ?? '')
-          if (!clientId) {
-            recordsFailed++
-            continue
-          }
-
-          await this.repository.upsertVelociraptorEndpoint({
-            where: { tenantId_clientId: { tenantId, clientId } },
-            create: {
-              tenantId,
-              clientId,
-              hostname: String(
-                (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
-                  client['client_id'] ??
-                  'unknown'
-              ),
-              os: String(
-                (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ?? 'unknown'
-              ),
-              labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
-              ipAddress: String(client['last_ip'] ?? ''),
-              lastSeenAt: client['last_seen_at']
-                ? new Date(Number(client['last_seen_at']) / 1000)
-                : new Date(),
-              syncedAt: new Date(),
-            },
-            update: {
-              hostname: String(
-                (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
-                  client['client_id'] ??
-                  'unknown'
-              ),
-              os: String(
-                (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ?? 'unknown'
-              ),
-              labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
-              ipAddress: String(client['last_ip'] ?? ''),
-              lastSeenAt: client['last_seen_at']
-                ? new Date(Number(client['last_seen_at']) / 1000)
-                : new Date(),
-              syncedAt: new Date(),
-            },
+      const ENDPOINT_BATCH_SIZE = 50
+      for (let batchStart = 0; batchStart < clients.length; batchStart += ENDPOINT_BATCH_SIZE) {
+        const batch = clients.slice(batchStart, batchStart + ENDPOINT_BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(client => {
+            const clientId = String(client['client_id'] ?? '')
+            if (!clientId) {
+              return Promise.reject(new Error('Missing client_id'))
+            }
+            return this.repository.upsertVelociraptorEndpoint({
+              where: { tenantId_clientId: { tenantId, clientId } },
+              create: {
+                tenantId,
+                clientId,
+                hostname: String(
+                  (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
+                    client['client_id'] ??
+                    'unknown'
+                ),
+                os: String(
+                  (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ??
+                    'unknown'
+                ),
+                labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
+                ipAddress: String(client['last_ip'] ?? ''),
+                lastSeenAt: client['last_seen_at']
+                  ? new Date(Number(client['last_seen_at']) / 1000)
+                  : new Date(),
+                syncedAt: new Date(),
+              },
+              update: {
+                hostname: String(
+                  (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
+                    client['client_id'] ??
+                    'unknown'
+                ),
+                os: String(
+                  (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ??
+                    'unknown'
+                ),
+                labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
+                ipAddress: String(client['last_ip'] ?? ''),
+                lastSeenAt: client['last_seen_at']
+                  ? new Date(Number(client['last_seen_at']) / 1000)
+                  : new Date(),
+                syncedAt: new Date(),
+              },
+            })
           })
-          endpointsSynced++
-        } catch {
-          recordsFailed++
+        )
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            endpointsSynced++
+          } else {
+            recordsFailed++
+          }
         }
       }
 
       // Sync hunts via VQL
-      const huntResult = await this.velociraptorService.runVQL(
+      const huntResult_ult = await this.velociraptorService.runVQL(
         config,
         'SELECT hunt_id, hunt_description, state, artifacts, stats, create_time FROM hunts()'
       )
-      for (const row of huntResult.rows) {
-        try {
-          const hunt = row as Record<string, unknown>
-          const huntId = String(hunt['hunt_id'] ?? '')
-          if (!huntId) {
-            recordsFailed++
-            continue
-          }
-
-          const stats = (hunt['stats'] ?? {}) as Record<string, unknown>
-          await this.repository.upsertVelociraptorHunt({
-            where: { tenantId_huntId: { tenantId, huntId } },
-            create: {
-              tenantId,
-              huntId,
-              description: String(hunt['hunt_description'] ?? ''),
-              state: String(hunt['state'] ?? 'PAUSED'),
-              artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
-              totalClients: Number(stats['total_clients_scheduled'] ?? 0),
-              finishedClients: Number(stats['total_clients_with_results'] ?? 0),
-              createdAt: hunt['create_time']
-                ? new Date(Number(hunt['create_time']) / 1000)
-                : new Date(),
-              syncedAt: new Date(),
-            },
-            update: {
-              description: String(hunt['hunt_description'] ?? ''),
-              state: String(hunt['state'] ?? 'PAUSED'),
-              artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
-              totalClients: Number(stats['total_clients_scheduled'] ?? 0),
-              finishedClients: Number(stats['total_clients_with_results'] ?? 0),
-              syncedAt: new Date(),
-            },
+      const HUNT_BATCH_SIZE = 50
+      for (
+        let batchStart = 0;
+        batchStart < huntResult_ult.rows.length;
+        batchStart += HUNT_BATCH_SIZE
+      ) {
+        const huntBatch = huntResult_ult.rows.slice(batchStart, batchStart + HUNT_BATCH_SIZE)
+        const huntResult_ults = await Promise.allSettled(
+          huntBatch.map(row => {
+            const hunt = row as Record<string, unknown>
+            const huntId = String(hunt['hunt_id'] ?? '')
+            if (!huntId) {
+              return Promise.reject(new Error('Missing hunt_id'))
+            }
+            const stats = (hunt['stats'] ?? {}) as Record<string, unknown>
+            return this.repository.upsertVelociraptorHunt({
+              where: { tenantId_huntId: { tenantId, huntId } },
+              create: {
+                tenantId,
+                huntId,
+                description: String(hunt['hunt_description'] ?? ''),
+                state: String(hunt['state'] ?? 'PAUSED'),
+                artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
+                totalClients: Number(stats['total_clients_scheduled'] ?? 0),
+                finishedClients: Number(stats['total_clients_with_results'] ?? 0),
+                createdAt: hunt['create_time']
+                  ? new Date(Number(hunt['create_time']) / 1000)
+                  : new Date(),
+                syncedAt: new Date(),
+              },
+              update: {
+                description: String(hunt['hunt_description'] ?? ''),
+                state: String(hunt['state'] ?? 'PAUSED'),
+                artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
+                totalClients: Number(stats['total_clients_scheduled'] ?? 0),
+                finishedClients: Number(stats['total_clients_with_results'] ?? 0),
+                syncedAt: new Date(),
+              },
+            })
           })
-          huntsSynced++
-        } catch {
-          recordsFailed++
+        )
+        for (const huntResult_ of huntResult_ults) {
+          if (huntResult_.status === 'fulfilled') {
+            huntsSynced++
+          } else {
+            recordsFailed++
+          }
         }
       }
 
@@ -564,7 +602,10 @@ export class DataExplorerService {
 
   // ── Logstash (Pipeline Logs — DB Sync) ─────────────────────────────
 
-  async getLogstashLogs(tenantId: string, dto: LogstashLogQueryDto) {
+  async getLogstashLogs(
+    tenantId: string,
+    dto: LogstashLogQueryDto
+  ): Promise<PaginatedLogstashLogs> {
     const where: Record<string, unknown> = { tenantId }
     if (dto.search) {
       where['message'] = { contains: dto.search, mode: 'insensitive' }
@@ -609,28 +650,40 @@ export class DataExplorerService {
     let recordsFailed = 0
 
     try {
-      for (const [pipelineId, stats] of Object.entries(pipelineStats.pipelines)) {
-        try {
-          const pipelineStat = stats as Record<string, unknown>
-          const events = (pipelineStat['events'] ?? {}) as Record<string, unknown>
-
-          await this.repository.createLogstashLog({
-            tenantId,
-            pipelineId,
-            timestamp: new Date(),
-            level: LogLevel.INFO,
-            message: `Pipeline ${pipelineId} stats snapshot`,
-            source: pipelineId,
-            eventsIn: Number(events['in'] ?? 0),
-            eventsOut: Number(events['out'] ?? 0),
-            eventsFiltered: Number(events['filtered'] ?? 0),
-            durationMs: Number(events['duration_in_millis'] ?? 0),
-            metadata: JSON.parse(JSON.stringify(pipelineStat)),
-            syncedAt: new Date(),
+      const pipelineEntries = Object.entries(pipelineStats.pipelines)
+      const PIPELINE_BATCH_SIZE = 50
+      for (
+        let batchStart = 0;
+        batchStart < pipelineEntries.length;
+        batchStart += PIPELINE_BATCH_SIZE
+      ) {
+        const batch = pipelineEntries.slice(batchStart, batchStart + PIPELINE_BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(([pipelineId, stats]) => {
+            const pipelineStat = stats as Record<string, unknown>
+            const events = (pipelineStat['events'] ?? {}) as Record<string, unknown>
+            return this.repository.createLogstashLog({
+              tenantId,
+              pipelineId,
+              timestamp: new Date(),
+              level: LogLevel.INFO,
+              message: `Pipeline ${pipelineId} stats snapshot`,
+              source: pipelineId,
+              eventsIn: Number(events['in'] ?? 0),
+              eventsOut: Number(events['out'] ?? 0),
+              eventsFiltered: Number(events['filtered'] ?? 0),
+              durationMs: Number(events['duration_in_millis'] ?? 0),
+              metadata: JSON.parse(JSON.stringify(pipelineStat)),
+              syncedAt: new Date(),
+            })
           })
-          synced++
-        } catch {
-          recordsFailed++
+        )
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            synced++
+          } else {
+            recordsFailed++
+          }
         }
       }
 
@@ -646,7 +699,10 @@ export class DataExplorerService {
 
   // ── Shuffle (Metadata Sync + Live Status) ──────────────────────────
 
-  async getShuffleWorkflows(tenantId: string, dto: ShuffleWorkflowQueryDto) {
+  async getShuffleWorkflows(
+    tenantId: string,
+    dto: ShuffleWorkflowQueryDto
+  ): Promise<PaginatedShuffleWorkflows> {
     const where: Record<string, unknown> = { tenantId }
     if (dto.search) {
       where['name'] = { contains: dto.search, mode: 'insensitive' }
@@ -690,38 +746,44 @@ export class DataExplorerService {
     let recordsFailed = 0
 
     try {
-      for (const workflow of workflows) {
-        try {
-          const workflowId = String(workflow['id'] ?? '')
-          if (!workflowId) {
-            recordsFailed++
-            continue
-          }
-
-          await this.repository.upsertShuffleWorkflow({
-            where: { tenantId_workflowId: { tenantId, workflowId } },
-            create: {
-              tenantId,
-              workflowId,
-              name: String(workflow['name'] ?? 'Unnamed'),
-              description: workflow['description'] ? String(workflow['description']) : null,
-              isValid: Boolean(workflow['is_valid']),
-              triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
-              tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
-              syncedAt: new Date(),
-            },
-            update: {
-              name: String(workflow['name'] ?? 'Unnamed'),
-              description: workflow['description'] ? String(workflow['description']) : null,
-              isValid: Boolean(workflow['is_valid']),
-              triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
-              tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
-              syncedAt: new Date(),
-            },
+      const WORKFLOW_BATCH_SIZE = 50
+      for (let batchStart = 0; batchStart < workflows.length; batchStart += WORKFLOW_BATCH_SIZE) {
+        const batch = workflows.slice(batchStart, batchStart + WORKFLOW_BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(workflow => {
+            const workflowId = String(workflow['id'] ?? '')
+            if (!workflowId) {
+              return Promise.reject(new Error('Missing workflow id'))
+            }
+            return this.repository.upsertShuffleWorkflow({
+              where: { tenantId_workflowId: { tenantId, workflowId } },
+              create: {
+                tenantId,
+                workflowId,
+                name: String(workflow['name'] ?? 'Unnamed'),
+                description: workflow['description'] ? String(workflow['description']) : null,
+                isValid: Boolean(workflow['is_valid']),
+                triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
+                tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
+                syncedAt: new Date(),
+              },
+              update: {
+                name: String(workflow['name'] ?? 'Unnamed'),
+                description: workflow['description'] ? String(workflow['description']) : null,
+                isValid: Boolean(workflow['is_valid']),
+                triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
+                tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
+                syncedAt: new Date(),
+              },
+            })
           })
-          synced++
-        } catch {
-          recordsFailed++
+        )
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            synced++
+          } else {
+            recordsFailed++
+          }
         }
       }
 
@@ -737,7 +799,7 @@ export class DataExplorerService {
 
   // ── Sync Jobs ──────────────────────────────────────────────────────
 
-  async getSyncJobs(tenantId: string, dto: SyncJobQueryDto) {
+  async getSyncJobs(tenantId: string, dto: SyncJobQueryDto): Promise<PaginatedSyncJobs> {
     const where: Record<string, unknown> = { tenantId }
     if (dto.connectorType) {
       where['connectorType'] = dto.connectorType
@@ -798,7 +860,7 @@ export class DataExplorerService {
     tenantId: string,
     connectorType: ConnectorType,
     initiatedBy = 'system'
-  ) {
+  ): Promise<ConnectorSyncJob> {
     return this.repository.createSyncJob({
       tenantId,
       connectorType,

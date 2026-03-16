@@ -1,6 +1,6 @@
 import * as http from 'node:http'
 import * as https from 'node:https'
-import { isPrivateHost } from './ssrf.util'
+import { isPrivateHost } from './ssrf.utility'
 
 export interface ConnectorHttpOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'

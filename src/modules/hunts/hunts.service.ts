@@ -675,12 +675,19 @@ ${techniques.length > 0 ? `**MITRE ATT&CK Coverage:** ${techniques.join(', ')}` 
       }
     }
 
+    let volumeBonus = 0
+    if (events.length >= 100) {
+      volumeBonus = 10
+    } else if (events.length >= 10) {
+      volumeBonus = 5
+    }
+
     const avgWeight = totalWeight / events.length
     const score = Math.floor(
       avgWeight * 12 +
         Math.min(uniqueIpCount, 10) * 2 +
         Math.min(mitreTechCount, 5) * 4 +
-        (events.length >= 100 ? 10 : (events.length >= 10 ? 5 : 0)) +
+        volumeBonus +
         (hasCritical ? 15 : 0)
     )
 

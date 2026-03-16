@@ -9,7 +9,7 @@ import {
   buildControlRecord,
   buildComplianceStats,
   buildControlStatsBatchMap,
-} from './compliance.utils'
+} from './compliance.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -186,7 +186,7 @@ export class ComplianceService {
       metadata: { name: framework.name, standard: framework.standard },
     })
 
-    return buildFrameworkRecord(framework, undefined)
+    return buildFrameworkRecord(framework)
   }
 
   /* ---------------------------------------------------------------- */

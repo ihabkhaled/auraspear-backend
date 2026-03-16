@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { AttackPath, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AttackPathsRepository {
@@ -15,7 +15,7 @@ export class AttackPathsRepository {
     orderBy: Prisma.AttackPathOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<AttackPath[]> {
     return this.prisma.attackPath.findMany(params)
   }
 
@@ -24,33 +24,38 @@ export class AttackPathsRepository {
     orderBy: Prisma.AttackPathOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<(AttackPath & { tenant: { name: string } })[]> {
     return this.prisma.attackPath.findMany({
       ...params,
       include: { tenant: { select: { name: true } } },
     })
   }
 
-  async count(where: Prisma.AttackPathWhereInput) {
+  async count(where: Prisma.AttackPathWhereInput): Promise<number> {
     return this.prisma.attackPath.count({ where })
   }
 
-  async findFirst(where: Prisma.AttackPathWhereInput) {
+  async findFirst(where: Prisma.AttackPathWhereInput): Promise<AttackPath | null> {
     return this.prisma.attackPath.findFirst({ where })
   }
 
-  async findFirstWithTenant(where: Prisma.AttackPathWhereInput) {
+  async findFirstWithTenant(
+    where: Prisma.AttackPathWhereInput
+  ): Promise<(AttackPath & { tenant: { name: string } }) | null> {
     return this.prisma.attackPath.findFirst({
       where,
       include: { tenant: { select: { name: true } } },
     })
   }
 
-  async updateMany(params: { where: Prisma.AttackPathWhereInput; data: Record<string, unknown> }) {
+  async updateMany(params: {
+    where: Prisma.AttackPathWhereInput
+    data: Record<string, unknown>
+  }): Promise<Prisma.BatchPayload> {
     return this.prisma.attackPath.updateMany(params)
   }
 
-  async deleteMany(where: Prisma.AttackPathWhereInput) {
+  async deleteMany(where: Prisma.AttackPathWhereInput): Promise<Prisma.BatchPayload> {
     return this.prisma.attackPath.deleteMany({ where })
   }
 
@@ -61,7 +66,12 @@ export class AttackPathsRepository {
   async aggregateSum(
     where: Prisma.AttackPathWhereInput,
     sumFields: Prisma.AttackPathAggregateArgs['_sum']
-  ) {
+  ): Promise<
+    Prisma.GetAttackPathAggregateType<{
+      where: Prisma.AttackPathWhereInput
+      _sum: Prisma.AttackPathAggregateArgs['_sum']
+    }>
+  > {
     return this.prisma.attackPath.aggregate({
       where,
       _sum: sumFields,
@@ -71,7 +81,12 @@ export class AttackPathsRepository {
   async aggregateAvg(
     where: Prisma.AttackPathWhereInput,
     avgFields: Prisma.AttackPathAggregateArgs['_avg']
-  ) {
+  ): Promise<
+    Prisma.GetAttackPathAggregateType<{
+      where: Prisma.AttackPathWhereInput
+      _avg: Prisma.AttackPathAggregateArgs['_avg']
+    }>
+  > {
     return this.prisma.attackPath.aggregate({
       where,
       _avg: avgFields,
@@ -85,7 +100,7 @@ export class AttackPathsRepository {
   async createWithNumber(params: {
     tenantId: string
     data: Omit<Prisma.AttackPathUncheckedCreateInput, 'pathNumber' | 'tenantId'>
-  }) {
+  }): Promise<AttackPath & { tenant: { name: string } }> {
     return this.prisma.$transaction(async tx => {
       const pathNumber = await this.generatePathNumber(tx, params.tenantId)
 

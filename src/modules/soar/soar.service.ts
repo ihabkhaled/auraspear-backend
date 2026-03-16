@@ -8,7 +8,7 @@ import {
   buildPlaybookRecord,
   buildExecutionRecord,
   buildSoarStats,
-} from './soar.utils'
+} from './soar.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,

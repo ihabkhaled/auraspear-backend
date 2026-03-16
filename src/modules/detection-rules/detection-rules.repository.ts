@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   Prisma,
+  DetectionRule,
   DetectionRuleStatus as PrismaDetectionRuleStatus,
   DetectionRuleType as PrismaDetectionRuleType,
   DetectionRuleSeverity as PrismaDetectionRuleSeverity,
@@ -20,11 +21,13 @@ export class DetectionRulesRepository {
     skip: number
     take: number
     orderBy: Prisma.DetectionRuleOrderByWithRelationInput
-  }) {
+  }): Promise<DetectionRule[]> {
     return this.prisma.detectionRule.findMany(params)
   }
 
-  async findFirst(params: { where: Prisma.DetectionRuleWhereInput }) {
+  async findFirst(params: {
+    where: Prisma.DetectionRuleWhereInput
+  }): Promise<DetectionRule | null> {
     return this.prisma.detectionRule.findFirst(params)
   }
 
@@ -42,7 +45,7 @@ export class DetectionRulesRepository {
     })
   }
 
-  async aggregateHitCount(tenantId: string) {
+  async aggregateHitCount(tenantId: string): Promise<{ _sum: { hitCount: number | null } }> {
     return this.prisma.detectionRule.aggregate({
       where: { tenantId },
       _sum: { hitCount: true },
@@ -63,7 +66,7 @@ export class DetectionRulesRepository {
     conditions: Prisma.InputJsonValue
     actions: Prisma.InputJsonValue
     createdBy: string
-  }) {
+  }): Promise<DetectionRule> {
     return this.prisma.$transaction(async tx => {
       const ruleNumber = await this.generateRuleNumber(tx, data.tenantId)
 
@@ -91,7 +94,7 @@ export class DetectionRulesRepository {
   async updateMany(params: {
     where: Prisma.DetectionRuleWhereInput
     data: Prisma.DetectionRuleUncheckedUpdateManyInput
-  }) {
+  }): Promise<Prisma.BatchPayload> {
     return this.prisma.detectionRule.updateMany(params)
   }
 
@@ -99,7 +102,7 @@ export class DetectionRulesRepository {
   /* DELETE                                                            */
   /* ---------------------------------------------------------------- */
 
-  async deleteMany(where: Prisma.DetectionRuleWhereInput) {
+  async deleteMany(where: Prisma.DetectionRuleWhereInput): Promise<Prisma.BatchPayload> {
     return this.prisma.detectionRule.deleteMany({ where })
   }
 

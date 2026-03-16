@@ -1,4 +1,4 @@
-import { maskSecrets } from '../../src/common/utils/mask.util'
+import { maskSecrets } from '../../src/common/utils/mask.utility'
 
 describe('maskSecrets', () => {
   it('should mask known sensitive keys', () => {

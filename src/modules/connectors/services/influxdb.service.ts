@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch } from '../../../common/utils/connector-http.util'
+import { connectorFetch } from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()

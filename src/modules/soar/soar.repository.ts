@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { SoarExecutionStatus } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import type { SoarPlaybook, SoarExecution } from '@prisma/client'
+
+type PlaybookWithTenant = SoarPlaybook & { tenant: { name: string } }
+type ExecutionWithPlaybook = SoarExecution & { playbook: { name: string } }
 
 @Injectable()
 export class SoarRepository {
@@ -20,7 +24,7 @@ export class SoarRepository {
     skip: number
     take: number
     orderBy: Prisma.SoarPlaybookOrderByWithRelationInput
-  }) {
+  }): Promise<PlaybookWithTenant[]> {
     return this.prisma.soarPlaybook.findMany({
       ...params,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
@@ -31,14 +35,18 @@ export class SoarRepository {
     return this.prisma.soarPlaybook.count({ where })
   }
 
-  async findFirstPlaybookWithTenant(where: Prisma.SoarPlaybookWhereInput) {
+  async findFirstPlaybookWithTenant(
+    where: Prisma.SoarPlaybookWhereInput
+  ): Promise<PlaybookWithTenant | null> {
     return this.prisma.soarPlaybook.findFirst({
       where,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
     })
   }
 
-  async createPlaybookWithTenant(data: Prisma.SoarPlaybookUncheckedCreateInput) {
+  async createPlaybookWithTenant(
+    data: Prisma.SoarPlaybookUncheckedCreateInput
+  ): Promise<PlaybookWithTenant> {
     return this.prisma.soarPlaybook.create({
       data,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
@@ -48,11 +56,11 @@ export class SoarRepository {
   async updateManyPlaybooks(params: {
     where: Prisma.SoarPlaybookWhereInput
     data: Prisma.SoarPlaybookUpdateManyMutationInput
-  }) {
+  }): Promise<Prisma.BatchPayload> {
     return this.prisma.soarPlaybook.updateMany(params)
   }
 
-  async deleteManyPlaybooks(where: Prisma.SoarPlaybookWhereInput) {
+  async deleteManyPlaybooks(where: Prisma.SoarPlaybookWhereInput): Promise<Prisma.BatchPayload> {
     return this.prisma.soarPlaybook.deleteMany({ where })
   }
 
@@ -69,7 +77,7 @@ export class SoarRepository {
     skip: number
     take: number
     orderBy: Prisma.SoarExecutionOrderByWithRelationInput
-  }) {
+  }): Promise<ExecutionWithPlaybook[]> {
     return this.prisma.soarExecution.findMany({
       ...params,
       include: SoarRepository.EXECUTION_WITH_PLAYBOOK,
@@ -80,7 +88,9 @@ export class SoarRepository {
     return this.prisma.soarExecution.count({ where })
   }
 
-  async findCompletedExecutions(tenantId: string) {
+  async findCompletedExecutions(
+    tenantId: string
+  ): Promise<Array<{ startedAt: Date; completedAt: Date | null }>> {
     return this.prisma.soarExecution.findMany({
       where: {
         tenantId,
@@ -94,7 +104,7 @@ export class SoarRepository {
     playbookId: string
     tenantId: string
     triggeredBy: string
-  }) {
+  }): Promise<ExecutionWithPlaybook> {
     return this.prisma.$transaction(async tx => {
       const execution = await tx.soarExecution.create({
         data: {
@@ -123,14 +133,14 @@ export class SoarRepository {
   /* USERS (for creator name resolution)                               */
   /* ---------------------------------------------------------------- */
 
-  async findUserByEmail(email: string) {
+  async findUserByEmail(email: string): Promise<{ name: string } | null> {
     return this.prisma.user.findUnique({
       where: { email },
       select: { name: true },
     })
   }
 
-  async findUsersByEmails(emails: string[]) {
+  async findUsersByEmails(emails: string[]): Promise<Array<{ email: string; name: string }>> {
     return this.prisma.user.findMany({
       where: { email: { in: emails } },
       select: { email: true, name: true },

@@ -30,7 +30,7 @@ import type {
   PaginatedCaseNotes,
   PaginatedCases,
 } from './cases.types'
-import type { CaseNote } from '@prisma/client'
+import type { CaseArtifact, CaseNote, CaseTask } from '@prisma/client'
 
 @Controller('cases')
 @UseGuards(AuthGuard, TenantGuard)
@@ -204,7 +204,7 @@ export class CasesController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateTaskSchema)) dto: CreateTaskDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ data: CaseTask }> {
     const task = await this.casesService.createTask(id, dto, user)
     return { data: task }
   }
@@ -217,7 +217,7 @@ export class CasesController {
     @Param('taskId') taskId: string,
     @Body(new ZodValidationPipe(UpdateTaskSchema)) dto: UpdateTaskDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ data: CaseTask }> {
     const task = await this.casesService.updateTask(id, taskId, dto, user)
     return { data: task }
   }
@@ -229,7 +229,7 @@ export class CasesController {
     @Param('id') id: string,
     @Param('taskId') taskId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ deleted: boolean }> {
     return this.casesService.deleteTask(id, taskId, user)
   }
 
@@ -244,7 +244,7 @@ export class CasesController {
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateArtifactSchema)) dto: CreateArtifactDto,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ data: CaseArtifact }> {
     const artifact = await this.casesService.createArtifact(id, dto, user)
     return { data: artifact }
   }
@@ -256,7 +256,7 @@ export class CasesController {
     @Param('id') id: string,
     @Param('artifactId') artifactId: string,
     @CurrentUser() user: JwtPayload
-  ) {
+  ): Promise<{ deleted: boolean }> {
     return this.casesService.deleteArtifact(id, artifactId, user)
   }
 }

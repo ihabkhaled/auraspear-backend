@@ -1,8 +1,8 @@
-import { connectorFetch } from '../../src/common/utils/connector-http.util'
+import { connectorFetch } from '../../src/common/utils/connector-http.utility'
 import { InfluxDBService } from '../../src/modules/connectors/services/influxdb.service'
-import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.util'
+import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.utility'
 
-jest.mock('../../src/common/utils/connector-http.util')
+jest.mock('../../src/common/utils/connector-http.utility')
 
 const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
 

@@ -7,7 +7,7 @@ import {
   buildAnomalyOrderBy,
   buildModelListWhere,
   buildModelOrderBy,
-} from './ueba.utils'
+} from './ueba.utilities'
 import {
   AppLogFeature,
   AppLogOutcome,
@@ -152,7 +152,11 @@ export class UebaService {
   /* UPDATE ENTITY                                                     */
   /* ---------------------------------------------------------------- */
 
-  async updateEntity(id: string, tenantId: string, dto: UpdateEntityDto): Promise<UebaEntityRecord> {
+  async updateEntity(
+    id: string,
+    tenantId: string,
+    dto: UpdateEntityDto
+  ): Promise<UebaEntityRecord> {
     const existing = await this.repository.findFirstEntityWithCount({
       where: { id, tenantId },
     })

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { CaseCycle, Prisma } from '@prisma/client'
 
 @Injectable()
 export class CaseCyclesRepository {
@@ -11,7 +11,9 @@ export class CaseCyclesRepository {
     orderBy: Prisma.CaseCycleOrderByWithRelationInput
     skip: number
     take: number
-  }) {
+  }): Promise<
+    [(CaseCycle & { _count: { cases: number }; cases: { status: string }[] })[], number]
+  > {
     return Promise.all([
       this.prisma.caseCycle.findMany({
         ...params,
@@ -24,7 +26,7 @@ export class CaseCyclesRepository {
     ])
   }
 
-  async countOrphanedCases(tenantId: string) {
+  async countOrphanedCases(tenantId: string): Promise<[number, number, number]> {
     return Promise.all([
       this.prisma.case.count({ where: { tenantId, cycleId: null } }),
       this.prisma.case.count({ where: { tenantId, cycleId: null, status: { not: 'closed' } } }),
@@ -32,7 +34,9 @@ export class CaseCyclesRepository {
     ])
   }
 
-  async findFirstActive(tenantId: string) {
+  async findFirstActive(
+    tenantId: string
+  ): Promise<(CaseCycle & { _count: { cases: number }; cases: { status: string }[] }) | null> {
     return this.prisma.caseCycle.findFirst({
       where: { tenantId, status: 'active' },
       include: {
@@ -42,7 +46,15 @@ export class CaseCyclesRepository {
     })
   }
 
-  async findFirstByIdAndTenantWithCases(id: string, tenantId: string) {
+  async findFirstByIdAndTenantWithCases(
+    id: string,
+    tenantId: string
+  ): Promise<Prisma.CaseCycleGetPayload<{
+    include: {
+      _count: { select: { cases: true } }
+      cases: { orderBy: { createdAt: 'desc' }; include: { tenant: { select: { name: true } } } }
+    }
+  }> | null> {
     return this.prisma.caseCycle.findFirst({
       where: { id, tenantId },
       include: {
@@ -55,18 +67,23 @@ export class CaseCyclesRepository {
     })
   }
 
-  async findUsersByIds(userIds: string[]) {
+  async findUsersByIds(
+    userIds: string[]
+  ): Promise<{ id: string; name: string | null; email: string }[]> {
     return this.prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, email: true },
     })
   }
 
-  async create(data: Prisma.CaseCycleUncheckedCreateInput) {
+  async create(data: Prisma.CaseCycleUncheckedCreateInput): Promise<CaseCycle> {
     return this.prisma.caseCycle.create({ data })
   }
 
-  async findFirstByIdAndTenantWithCounts(id: string, tenantId: string) {
+  async findFirstByIdAndTenantWithCounts(
+    id: string,
+    tenantId: string
+  ): Promise<(CaseCycle & { _count: { cases: number }; cases: { status: string }[] }) | null> {
     return this.prisma.caseCycle.findFirst({
       where: { id, tenantId },
       include: {
@@ -76,14 +93,18 @@ export class CaseCyclesRepository {
     })
   }
 
-  async update(id: string, data: Record<string, unknown>) {
+  async update(id: string, data: Record<string, unknown>): Promise<CaseCycle> {
     return this.prisma.caseCycle.update({
       where: { id },
       data,
     })
   }
 
-  async activateCycleTransaction(cycleId: string, tenantId: string, closedByEmail: string) {
+  async activateCycleTransaction(
+    cycleId: string,
+    tenantId: string,
+    closedByEmail: string
+  ): Promise<CaseCycle> {
     return this.prisma.$transaction(async tx => {
       await tx.caseCycle.updateMany({
         where: { tenantId, status: 'active', id: { not: cycleId } },
@@ -105,15 +126,18 @@ export class CaseCyclesRepository {
     })
   }
 
-  async findFirstByIdAndTenantWithCaseCount(id: string, tenantId: string) {
+  async findFirstByIdAndTenantWithCaseCount(
+    id: string,
+    tenantId: string
+  ): Promise<(CaseCycle & { _count: { cases: number } }) | null> {
     return this.prisma.caseCycle.findFirst({
       where: { id, tenantId },
       include: { _count: { select: { cases: true } } },
     })
   }
 
-  async deleteCycleWithCasesTransaction(cycleId: string, tenantId: string) {
-    return this.prisma.$transaction(async tx => {
+  async deleteCycleWithCasesTransaction(cycleId: string, tenantId: string): Promise<void> {
+    await this.prisma.$transaction(async tx => {
       await tx.case.updateMany({
         where: { cycleId, tenantId },
         data: { cycleId: null },
@@ -122,11 +146,13 @@ export class CaseCyclesRepository {
     })
   }
 
-  async deleteCycle(id: string) {
+  async deleteCycle(id: string): Promise<CaseCycle> {
     return this.prisma.caseCycle.delete({ where: { id } })
   }
 
-  async findManyForOverlapCheck(where: Prisma.CaseCycleWhereInput) {
+  async findManyForOverlapCheck(
+    where: Prisma.CaseCycleWhereInput
+  ): Promise<{ id: string; name: string; startDate: Date; endDate: Date | null }[]> {
     return this.prisma.caseCycle.findMany({
       where,
       select: { id: true, name: true, startDate: true, endDate: true },

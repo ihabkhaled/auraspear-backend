@@ -20,7 +20,12 @@ export class GrafanaWorkspaceStrategy implements ConnectorWorkspaceStrategy {
 
   constructor(private readonly grafanaService: GrafanaService) {}
 
-  async getOverview(config: Record<string, unknown>) {
+  async getOverview(config: Record<string, unknown>): Promise<{
+    summaryCards: WorkspaceSummaryCard[]
+    recentItems: WorkspaceRecentItem[]
+    entitiesPreview: WorkspaceEntity[]
+    quickActions: WorkspaceQuickAction[]
+  }> {
     const summaryCards: WorkspaceSummaryCard[] = []
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []

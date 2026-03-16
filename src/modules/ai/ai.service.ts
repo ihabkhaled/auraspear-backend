@@ -225,24 +225,22 @@ export class AiService {
     }
 
     // Fallback: rule-based template response
-    if (!response) {
-      response = {
-        result: this.generateHuntResponse(dto.query),
-        reasoning: [
-          `Analyzing hunt query: "${dto.query}"`,
-          'Decomposing query into sub-hypotheses for structured threat hunting',
-          'Cross-referencing with MITRE ATT&CK framework for technique coverage',
-          'Generating OpenSearch/Wazuh query syntax for each hypothesis',
-          'Prioritizing by likelihood of true positive based on environment context',
-          'Generating rule-based hunt analysis (AI model not available)',
-        ],
-        confidence: 0.87,
-        model: 'rule-based',
-        tokensUsed: {
-          input: 0,
-          output: 0,
-        },
-      }
+    response ??= {
+      result: this.generateHuntResponse(dto.query),
+      reasoning: [
+        `Analyzing hunt query: "${dto.query}"`,
+        'Decomposing query into sub-hypotheses for structured threat hunting',
+        'Cross-referencing with MITRE ATT&CK framework for technique coverage',
+        'Generating OpenSearch/Wazuh query syntax for each hypothesis',
+        'Prioritizing by likelihood of true positive based on environment context',
+        'Generating rule-based hunt analysis (AI model not available)',
+      ],
+      confidence: 0.87,
+      model: 'rule-based',
+      tokensUsed: {
+        input: 0,
+        output: 0,
+      },
     }
 
     const latencyMs = Date.now() - startTime
@@ -400,20 +398,18 @@ export class AiService {
     }
 
     // Fallback: data-driven template (not static — uses real alert data)
-    if (!response) {
-      response = {
-        result: this.generateDataDrivenInvestigation(fullAlert, relatedAlerts),
-        reasoning: [
-          `Loading alert ${dto.alertId} details and raw event data`,
-          `Found ${relatedAlerts.length} related alerts in 48-hour window`,
-          'Analyzing severity, MITRE ATT&CK mapping, and source/destination IPs',
-          'Evaluating false positive probability based on alert context',
-          'Generating rule-based investigation report (AI model not available)',
-        ],
-        confidence: this.computeInvestigationConfidence(fullAlert, relatedAlerts),
-        model: 'rule-based',
-        tokensUsed: { input: 0, output: 0 },
-      }
+    response ??= {
+      result: this.generateDataDrivenInvestigation(fullAlert, relatedAlerts),
+      reasoning: [
+        `Loading alert ${dto.alertId} details and raw event data`,
+        `Found ${relatedAlerts.length} related alerts in 48-hour window`,
+        'Analyzing severity, MITRE ATT&CK mapping, and source/destination IPs',
+        'Evaluating false positive probability based on alert context',
+        'Generating rule-based investigation report (AI model not available)',
+      ],
+      confidence: this.computeInvestigationConfidence(fullAlert, relatedAlerts),
+      model: 'rule-based',
+      tokensUsed: { input: 0, output: 0 },
     }
 
     const latencyMs = Date.now() - startTime

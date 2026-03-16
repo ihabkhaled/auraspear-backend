@@ -14,9 +14,9 @@ import { WazuhService } from './services/wazuh.service'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { encrypt, decrypt } from '../../common/utils/encryption.util'
-import { maskSecrets, REDACTED_PLACEHOLDER } from '../../common/utils/mask.util'
-import { validateUrl } from '../../common/utils/ssrf.util'
+import { encrypt, decrypt } from '../../common/utils/encryption.utility'
+import { maskSecrets, REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
+import { validateUrl } from '../../common/utils/ssrf.utility'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 
@@ -237,12 +237,7 @@ export class ConnectorsService {
       const existingDecrypted = this.decryptConfig(existing.encryptedConfig)
       const mergedConfig: Record<string, unknown> = {}
       for (const [key, value] of Object.entries(dto.config as Record<string, unknown>)) {
-        if (value === REDACTED_PLACEHOLDER) {
-          // Keep existing value for masked secrets
-          mergedConfig[key] = existingDecrypted[key]
-        } else {
-          mergedConfig[key] = value
-        }
+        mergedConfig[key] = value === REDACTED_PLACEHOLDER ? existingDecrypted[key] : value
       }
       // Also preserve any existing keys not sent in the update
       for (const [key, value] of Object.entries(existingDecrypted)) {

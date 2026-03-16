@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { Prisma, ComplianceFramework, ComplianceControl } from '@prisma/client'
+
+type ComplianceFrameworkWithTenant = ComplianceFramework & { tenant: { name: string } }
 
 @Injectable()
 export class ComplianceRepository {
@@ -15,7 +17,7 @@ export class ComplianceRepository {
     skip: number
     take: number
     orderBy: Prisma.ComplianceFrameworkOrderByWithRelationInput
-  }) {
+  }): Promise<ComplianceFramework[]> {
     return this.prisma.complianceFramework.findMany(params)
   }
 
@@ -24,7 +26,7 @@ export class ComplianceRepository {
     skip: number
     take: number
     orderBy: Prisma.ComplianceFrameworkOrderByWithRelationInput
-  }) {
+  }): Promise<ComplianceFrameworkWithTenant[]> {
     return this.prisma.complianceFramework.findMany({
       ...params,
       include: { tenant: { select: { name: true } } },
@@ -35,18 +37,24 @@ export class ComplianceRepository {
     return this.prisma.complianceFramework.count({ where })
   }
 
-  async findFirstFramework(where: Prisma.ComplianceFrameworkWhereInput) {
+  async findFirstFramework(
+    where: Prisma.ComplianceFrameworkWhereInput
+  ): Promise<ComplianceFramework | null> {
     return this.prisma.complianceFramework.findFirst({ where })
   }
 
-  async findFirstFrameworkWithTenant(where: Prisma.ComplianceFrameworkWhereInput) {
+  async findFirstFrameworkWithTenant(
+    where: Prisma.ComplianceFrameworkWhereInput
+  ): Promise<ComplianceFrameworkWithTenant | null> {
     return this.prisma.complianceFramework.findFirst({
       where,
       include: { tenant: { select: { name: true } } },
     })
   }
 
-  async createFramework(data: Prisma.ComplianceFrameworkUncheckedCreateInput) {
+  async createFramework(
+    data: Prisma.ComplianceFrameworkUncheckedCreateInput
+  ): Promise<ComplianceFrameworkWithTenant> {
     return this.prisma.complianceFramework.create({
       data,
       include: { tenant: { select: { name: true } } },
@@ -82,22 +90,31 @@ export class ComplianceRepository {
     by: ['frameworkId', 'status']
     where: Prisma.ComplianceControlWhereInput
     _count: { id: true }
-  }) {
-    return this.prisma.complianceControl.groupBy(params)
+  }): Promise<Array<{ frameworkId: string; status: string; _count: { id: number } }>> {
+    const results = await this.prisma.complianceControl.groupBy(params)
+    return results as unknown as Array<{
+      frameworkId: string
+      status: string
+      _count: { id: number }
+    }>
   }
 
   async findManyControls(params: {
     where: Prisma.ComplianceControlWhereInput
     orderBy: Prisma.ComplianceControlOrderByWithRelationInput
-  }) {
+  }): Promise<ComplianceControl[]> {
     return this.prisma.complianceControl.findMany(params)
   }
 
-  async findFirstControl(params: { where: Prisma.ComplianceControlWhereInput }) {
+  async findFirstControl(params: {
+    where: Prisma.ComplianceControlWhereInput
+  }): Promise<ComplianceControl | null> {
     return this.prisma.complianceControl.findFirst(params)
   }
 
-  async createControl(data: Prisma.ComplianceControlUncheckedCreateInput) {
+  async createControl(
+    data: Prisma.ComplianceControlUncheckedCreateInput
+  ): Promise<ComplianceControl> {
     return this.prisma.complianceControl.create({ data })
   }
 
@@ -108,7 +125,10 @@ export class ComplianceRepository {
     return this.prisma.complianceControl.updateMany(params)
   }
 
-  async findControlByIdAndTenant(controlId: string, tenantId: string) {
+  async findControlByIdAndTenant(
+    controlId: string,
+    tenantId: string
+  ): Promise<ComplianceControl | null> {
     return this.prisma.complianceControl.findFirst({
       where: {
         id: controlId,
@@ -117,12 +137,15 @@ export class ComplianceRepository {
     })
   }
 
-  async groupByControlStatus(where: Prisma.ComplianceControlWhereInput) {
-    return this.prisma.complianceControl.groupBy({
+  async groupByControlStatus(
+    where: Prisma.ComplianceControlWhereInput
+  ): Promise<Array<{ status: string; _count: { id: number } }>> {
+    const results = await this.prisma.complianceControl.groupBy({
       by: ['status'],
       where,
       _count: { id: true },
     })
+    return results as unknown as Array<{ status: string; _count: { id: number } }>
   }
 
   /* ---------------------------------------------------------------- */

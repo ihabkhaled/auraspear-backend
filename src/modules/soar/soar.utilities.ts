@@ -160,10 +160,12 @@ export function buildSoarStats(
 ): SoarStats {
   let avgExecutionTimeMs: number | null = null
   if (execTimes.length > 0) {
-    const totalMs = execTimes.reduce((sum, e) => {
-      if (!e.completedAt) return sum
-      return sum + (e.completedAt.getTime() - e.startedAt.getTime())
-    }, 0)
+    let totalMs = 0
+    for (const e of execTimes) {
+      if (e.completedAt) {
+        totalMs += e.completedAt.getTime() - e.startedAt.getTime()
+      }
+    }
     avgExecutionTimeMs = Math.round(totalMs / execTimes.length)
   }
 
