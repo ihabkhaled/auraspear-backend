@@ -40,6 +40,10 @@ export function buildPipelineOrderBy(sortBy?: string, sortOrder?: string): Recor
       return { sourceType: order }
     case 'status':
       return { status: order }
+    case 'processedCount':
+      return { processedCount: order }
+    case 'errorCount':
+      return { errorCount: order }
     case 'updatedAt':
       return { updatedAt: order }
     case 'createdAt':

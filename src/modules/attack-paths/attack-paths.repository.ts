@@ -121,15 +121,15 @@ export class AttackPathsRepository {
 
   private async generatePathNumber(
     tx: Prisma.TransactionClient,
-    tenantId: string
+    _tenantId: string
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('attack_path_number_gen'))::text`
 
-    const prefix = 'AP-'
+    const year = new Date().getFullYear()
+    const prefix = `AP-${year}-`
 
     const lastPath = await tx.attackPath.findFirst({
       where: {
-        tenantId,
         pathNumber: { startsWith: prefix },
       },
       orderBy: { pathNumber: 'desc' },
@@ -149,7 +149,6 @@ export class AttackPathsRepository {
       }
     }
 
-    const year = new Date().getFullYear()
     return `AP-${year}-${String(nextNumber).padStart(4, '0')}`
   }
 }

@@ -84,6 +84,12 @@ export function buildRuleOrderBy(
       return { status: order }
     case 'ruleNumber':
       return { ruleNumber: order }
+    case 'ruleType':
+      return { ruleType: order }
+    case 'hitCount':
+      return { hitCount: order }
+    case 'falsePositiveCount':
+      return { falsePositiveCount: order }
     case 'updatedAt':
       return { updatedAt: order }
     case 'createdAt':

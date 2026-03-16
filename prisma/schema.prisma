@@ -1143,6 +1143,7 @@ model CorrelationRule {
   severity        RuleSeverity @default(medium)
   status          RuleStatus   @default(active)
   yamlContent     String?      @map("yaml_content") @db.Text
+  conditions      Json?
   mitreTactics    String[]     @default([]) @map("mitre_tactics")
   mitreTechniques String[]     @default([]) @map("mitre_techniques")
   hitCount        Int          @default(0) @map("hit_count")

@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { type CreateReportDto, CreateReportSchema } from './dto/create-report.dto'
 import { ListReportsQuerySchema } from './dto/list-reports-query.dto'
 import { type UpdateReportDto, UpdateReportSchema } from './dto/update-report.dto'
@@ -25,7 +36,7 @@ export class ReportsController {
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedReports> {
-    const { page, limit, sortBy, sortOrder, type, status, query } =
+    const { page, limit, sortBy, sortOrder, type, status, query, format } =
       ListReportsQuerySchema.parse(rawQuery)
     return this.reportsService.listReports(
       tenantId,
@@ -35,7 +46,8 @@ export class ReportsController {
       sortOrder,
       type,
       status,
-      query
+      query,
+      format
     )
   }
 

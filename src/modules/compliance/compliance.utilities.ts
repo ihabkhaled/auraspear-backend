@@ -47,6 +47,13 @@ export function buildFrameworkOrderBy(
       return { name: order }
     case 'standard':
       return { standard: order }
+    case 'overallScore':
+    case 'complianceScore':
+      return { overallScore: order }
+    case 'totalControls':
+      return { totalControls: order }
+    case 'lastAssessedAt':
+      return { lastAssessedAt: order }
     default:
       return { createdAt: 'desc' }
   }

@@ -124,12 +124,11 @@ export class CorrelationRepository {
   /* ---------------------------------------------------------------- */
 
   async findLastRuleByPrefix(
-    tenantId: string,
+    _tenantId: string,
     prefix: string
   ): Promise<{ ruleNumber: string } | null> {
     return this.prisma.correlationRule.findFirst({
       where: {
-        tenantId,
         ruleNumber: { startsWith: prefix },
       },
       orderBy: { ruleNumber: 'desc' },

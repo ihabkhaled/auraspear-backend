@@ -36,6 +36,8 @@ export function buildHealthCheckOrderBy(
       return { status: order }
     case 'responseTimeMs':
       return { responseTimeMs: order }
+    case 'serviceType':
+      return { serviceType: order }
     case 'checkedAt':
     default:
       return { lastCheckedAt: order }

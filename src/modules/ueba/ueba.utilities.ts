@@ -46,6 +46,10 @@ export function buildEntityOrderBy(
       return { entityName: order }
     case 'lastSeenAt':
       return { lastSeenAt: order }
+    case 'riskLevel':
+      return { riskLevel: order }
+    case 'entityType':
+      return { entityType: order }
     default:
       return { riskScore: 'desc' }
   }

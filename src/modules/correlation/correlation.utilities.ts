@@ -56,6 +56,10 @@ export function buildRuleOrderBy(
       return { status: order }
     case 'ruleNumber':
       return { ruleNumber: order }
+    case 'hitCount':
+      return { hitCount: order }
+    case 'source':
+      return { source: order }
     case 'updatedAt':
       return { updatedAt: order }
     case 'createdAt':
@@ -77,6 +81,7 @@ export function buildRuleUpdateData(dto: UpdateRuleDto): Record<string, unknown>
   if (dto.severity !== undefined) data['severity'] = dto.severity
   if (dto.status !== undefined) data['status'] = dto.status
   if (dto.yamlContent !== undefined) data['yamlContent'] = dto.yamlContent
+  if (dto.conditions !== undefined) data['conditions'] = dto.conditions
   if (dto.mitreTactics !== undefined) data['mitreTactics'] = dto.mitreTactics
   if (dto.mitreTechniques !== undefined) data['mitreTechniques'] = dto.mitreTechniques
 

@@ -50,6 +50,12 @@ export function buildAttackPathOrderBy(
       return { pathNumber: order }
     case 'killChainCoverage':
       return { killChainCoverage: order }
+    case 'title':
+      return { title: order }
+    case 'affectedAssets':
+      return { affectedAssets: order }
+    case 'detectedAt':
+      return { detectedAt: order }
     default:
       return { createdAt: 'desc' }
   }

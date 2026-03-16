@@ -56,6 +56,10 @@ export function buildIncidentOrderBy(
       return { status: order }
     case 'incidentNumber':
       return { incidentNumber: order }
+    case 'category':
+      return { category: order }
+    case 'title':
+      return { title: order }
     default:
       return { createdAt: 'desc' }
   }

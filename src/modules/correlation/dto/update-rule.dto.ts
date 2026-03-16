@@ -6,7 +6,8 @@ export const UpdateRuleSchema = z.object({
   source: z.enum(['sigma', 'custom', 'ai_generated']).optional(),
   severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
   status: z.enum(['active', 'review', 'disabled']).optional(),
-  yamlContent: z.string().max(50000).optional(),
+  yamlContent: z.string().max(50000).nullable().optional(),
+  conditions: z.record(z.unknown()).nullable().optional(),
   mitreTactics: z.array(z.string().max(50)).max(50).optional(),
   mitreTechniques: z.array(z.string().max(50)).max(50).optional(),
 })

@@ -245,15 +245,15 @@ export class IncidentsRepository {
 
   private async generateIncidentNumber(
     tx: Prisma.TransactionClient,
-    tenantId: string
+    _tenantId: string
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('incident_number_gen'))::text`
 
-    const prefix = 'INC-'
+    const year = new Date().getFullYear()
+    const prefix = `INC-${year}-`
 
     const latestIncident = await tx.incident.findFirst({
       where: {
-        tenantId,
         incidentNumber: { startsWith: prefix },
       },
       orderBy: { incidentNumber: 'desc' },
@@ -273,7 +273,6 @@ export class IncidentsRepository {
       }
     }
 
-    const year = new Date().getFullYear()
     return `INC-${year}-${String(nextSequence).padStart(4, '0')}`
   }
 }

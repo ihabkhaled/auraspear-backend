@@ -4,7 +4,9 @@ import { SortOrder } from '../../../common/enums'
 export const ListPlaybooksQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  sortBy: z.enum(['createdAt', 'updatedAt', 'name', 'status']).default('createdAt'),
+  sortBy: z
+    .enum(['createdAt', 'updatedAt', 'name', 'status', 'triggerType', 'executionCount'])
+    .default('createdAt'),
   sortOrder: z.nativeEnum(SortOrder).default(SortOrder.DESC),
   status: z.string().max(200).optional(),
   triggerType: z.string().max(200).optional(),

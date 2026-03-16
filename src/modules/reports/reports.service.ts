@@ -61,9 +61,10 @@ export class ReportsService {
     sortOrder?: string,
     type?: string,
     status?: string,
-    query?: string
+    query?: string,
+    format?: string
   ): Promise<PaginatedReports> {
-    const where = buildReportListWhere(tenantId, type, status, query)
+    const where = buildReportListWhere(tenantId, type, status, query, format)
 
     const [reports, total] = await Promise.all([
       this.repository.findManyReports({

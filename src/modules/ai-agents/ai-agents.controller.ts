@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { AiAgentsService } from './ai-agents.service'
 import { type CreateAgentDto, CreateAgentSchema } from './dto/create-agent.dto'
 import { ListAgentsQuerySchema } from './dto/list-agents-query.dto'
@@ -100,6 +111,17 @@ export class AiAgentsController {
     @CurrentUser() user: JwtPayload
   ): Promise<AiAgentRecord> {
     return this.aiAgentsService.updateSoul(id, dto, user)
+  }
+
+  @Post(':id/start')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SOC_ANALYST_L2)
+  async startAgent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<AiAgentRecord> {
+    return this.aiAgentsService.startAgent(id, tenantId, user.email)
   }
 
   @Post(':id/stop')

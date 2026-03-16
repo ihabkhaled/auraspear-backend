@@ -4,7 +4,16 @@ export const ListRulesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   sortBy: z
-    .enum(['createdAt', 'updatedAt', 'severity', 'hitCount', 'ruleNumber'])
+    .enum([
+      'createdAt',
+      'updatedAt',
+      'severity',
+      'hitCount',
+      'ruleNumber',
+      'title',
+      'status',
+      'source',
+    ])
     .default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   source: z.string().max(100).optional(),

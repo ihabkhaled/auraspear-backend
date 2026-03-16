@@ -76,6 +76,12 @@ export function buildAgentOrderBy(
       return { status: order }
     case 'tier':
       return { tier: order }
+    case 'totalTasks':
+      return { totalTasks: order }
+    case 'totalTokens':
+      return { totalTokens: order }
+    case 'totalCost':
+      return { totalCost: order }
     default:
       return { createdAt: 'desc' }
   }

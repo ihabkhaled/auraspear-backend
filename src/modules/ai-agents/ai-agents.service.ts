@@ -300,6 +300,39 @@ export class AiAgentsService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* START AGENT                                                       */
+  /* ---------------------------------------------------------------- */
+
+  async startAgent(id: string, tenantId: string, actor: string): Promise<AiAgentRecord> {
+    const existing = await this.getAgentById(id, tenantId)
+
+    if (existing.status === AiAgentStatus.ONLINE) {
+      throw new BusinessException(400, 'Agent is already online', 'errors.aiAgents.alreadyOnline')
+    }
+
+    const updated = await this.repository.updateWithDetails({
+      where: { id },
+      data: { status: AiAgentStatus.ONLINE },
+    })
+
+    this.appLogger.info(`AI Agent "${existing.name}" started`, {
+      feature: AppLogFeature.AI_AGENTS,
+      action: 'startAgent',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: actor,
+      targetResource: 'AiAgent',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiAgentsService',
+      functionName: 'startAgent',
+      metadata: { previousStatus: existing.status },
+    })
+
+    return buildAgentRecord(updated as unknown as AgentWithRelations)
+  }
+
+  /* ---------------------------------------------------------------- */
   /* STOP AGENT                                                        */
   /* ---------------------------------------------------------------- */
 

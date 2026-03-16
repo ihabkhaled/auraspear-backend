@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import { CorrelationRepository } from './correlation.repository'
 import {
   buildRuleListWhere,
@@ -142,6 +143,7 @@ export class CorrelationService {
       severity: dto.severity,
       status: 'active',
       yamlContent: dto.yamlContent,
+      conditions: dto.conditions ? (dto.conditions as Prisma.InputJsonValue) : Prisma.DbNull,
       mitreTactics: dto.mitreTactics ?? [],
       mitreTechniques: dto.mitreTechniques ?? [],
       createdBy: user.email,
@@ -318,7 +320,9 @@ export class CorrelationService {
   /* ---------------------------------------------------------------- */
 
   private async generateRuleNumber(tenantId: string, prefix: string): Promise<string> {
-    const lastRule = await this.repository.findLastRuleByPrefix(tenantId, prefix)
+    const year = new Date().getFullYear()
+    const searchPrefix = `${prefix}-${year}-`
+    const lastRule = await this.repository.findLastRuleByPrefix(tenantId, searchPrefix)
 
     let nextNumber = 1
     if (lastRule?.ruleNumber) {
@@ -332,7 +336,6 @@ export class CorrelationService {
       }
     }
 
-    const year = new Date().getFullYear()
     return `${prefix}-${year}-${String(nextNumber).padStart(4, '0')}`
   }
 }

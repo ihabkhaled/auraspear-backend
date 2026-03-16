@@ -46,6 +46,10 @@ export function buildPlaybookOrderBy(
       return { name: order }
     case 'status':
       return { status: order }
+    case 'triggerType':
+      return { triggerType: order }
+    case 'executionCount':
+      return { executionCount: order }
     default:
       return { createdAt: 'desc' }
   }
@@ -93,6 +97,8 @@ export function buildPlaybookRecord(
   playbook: PlaybookWithTenant,
   createdByName: string | null
 ): SoarPlaybookRecord {
+  const stepsArray = Array.isArray(playbook.steps) ? (playbook.steps as unknown[]) : []
+
   return {
     id: playbook.id,
     tenantId: playbook.tenantId,
@@ -102,6 +108,7 @@ export function buildPlaybookRecord(
     triggerType: playbook.triggerType,
     triggerConditions: playbook.triggerConditions as Record<string, unknown> | null,
     steps: playbook.steps as Record<string, unknown>[],
+    stepsCount: stepsArray.length,
     executionCount: playbook.executionCount,
     lastExecutedAt: playbook.lastExecutedAt,
     createdBy: playbook.createdBy,

@@ -10,7 +10,8 @@ export function buildReportListWhere(
   tenantId: string,
   type?: string,
   status?: string,
-  query?: string
+  query?: string,
+  format?: string
 ): Prisma.ReportWhereInput {
   const where: Prisma.ReportWhereInput = { tenantId }
 
@@ -20,6 +21,10 @@ export function buildReportListWhere(
 
   if (status) {
     where.status = status as Prisma.ReportWhereInput['status']
+  }
+
+  if (format) {
+    where.format = format as Prisma.ReportWhereInput['format']
   }
 
   if (query && query.trim().length > 0) {
@@ -48,6 +53,8 @@ export function buildReportOrderBy(
       return { type: order }
     case 'status':
       return { status: order }
+    case 'format':
+      return { format: order }
     default:
       return { createdAt: 'desc' }
   }

@@ -9,6 +9,7 @@ export interface SoarPlaybookRecord {
   triggerType: string
   triggerConditions: Record<string, unknown> | null
   steps: Record<string, unknown>[]
+  stepsCount: number
   executionCount: number
   lastExecutedAt: Date | null
   createdBy: string

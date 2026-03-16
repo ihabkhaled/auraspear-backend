@@ -32,6 +32,14 @@ export function buildAccountOrderBy(sortBy?: string, sortOrder?: string): Record
       return { status: order }
     case 'accountId':
       return { accountId: order }
+    case 'alias':
+      return { alias: order }
+    case 'findingsCount':
+      return { findingsCount: order }
+    case 'complianceScore':
+      return { complianceScore: order }
+    case 'lastScanAt':
+      return { lastScanAt: order }
     case 'updatedAt':
       return { updatedAt: order }
     case 'createdAt':

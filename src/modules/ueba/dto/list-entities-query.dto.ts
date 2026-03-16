@@ -5,7 +5,15 @@ export const ListEntitiesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   sortBy: z
-    .enum(['createdAt', 'updatedAt', 'riskScore', 'entityName', 'lastSeenAt'])
+    .enum([
+      'createdAt',
+      'updatedAt',
+      'riskScore',
+      'entityName',
+      'lastSeenAt',
+      'riskLevel',
+      'entityType',
+    ])
     .default('riskScore'),
   sortOrder: z.nativeEnum(SortOrder).default(SortOrder.DESC),
   entityType: z.string().max(200).optional(),

@@ -112,15 +112,15 @@ export class DetectionRulesRepository {
 
   private async generateRuleNumber(
     tx: Prisma.TransactionClient,
-    tenantId: string
+    _tenantId: string
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('detection_rule_number_gen'))::text`
 
-    const prefix = 'DR-'
+    const year = new Date().getFullYear()
+    const prefix = `DR-${year}-`
 
     const latestRule = await tx.detectionRule.findFirst({
       where: {
-        tenantId,
         ruleNumber: { startsWith: prefix },
       },
       orderBy: { ruleNumber: 'desc' },
@@ -140,7 +140,6 @@ export class DetectionRulesRepository {
       }
     }
 
-    const year = new Date().getFullYear()
     return `DR-${year}-${String(nextSequence).padStart(4, '0')}`
   }
 }

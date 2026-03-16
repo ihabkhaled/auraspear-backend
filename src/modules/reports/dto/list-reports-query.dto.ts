@@ -4,9 +4,12 @@ import { SortOrder } from '../../../common/enums'
 export const ListReportsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  sortBy: z.enum(['createdAt', 'updatedAt', 'name', 'type', 'status']).default('createdAt'),
+  sortBy: z
+    .enum(['createdAt', 'name', 'type', 'format', 'status', 'generatedAt'])
+    .default('createdAt'),
   sortOrder: z.nativeEnum(SortOrder).default(SortOrder.DESC),
   type: z.string().max(200).optional(),
+  format: z.string().max(200).optional(),
   status: z.string().max(200).optional(),
   query: z.string().max(500).optional(),
 })
