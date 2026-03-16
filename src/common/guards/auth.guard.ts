@@ -80,7 +80,7 @@ export class AuthGuard implements CanActivate {
             include: { tenant: true },
           })
 
-          if (!membership || membership.status !== MembershipStatus.ACTIVE) {
+          if (membership?.status !== MembershipStatus.ACTIVE) {
             throw new BusinessException(
               403,
               'No access to this tenant',
