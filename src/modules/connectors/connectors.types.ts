@@ -21,3 +21,14 @@ export interface ConnectorTestResult extends TestResult {
   latencyMs: number
   testedAt: string
 }
+
+/** Parameters for the recursive scroll collection helper in WazuhService. */
+export interface ScrollCollectionParameters {
+  indexerUrl: string
+  authHeader: string
+  tlsOption: boolean
+  scrollId: string | undefined
+  allHits: unknown[]
+  total: number
+  maxEvents: number
+}

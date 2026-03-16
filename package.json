@@ -10,9 +10,9 @@
     "start:dev": "npm run prisma:migrate:prod && npm run prisma:seed && nest start --watch",
     "start:debug": "npm run prisma:migrate:prod && npm run prisma:seed && nest start --debug --watch",
     "start:prod": "npm run prisma:migrate:prod && npm run prisma:seed && node dist/main",
-    "lint": "eslint .",
-    "lint:strict": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --concurrency=auto",
+    "lint:strict": "eslint . --concurrency=auto --max-warnings 0",
+    "lint:fix": "eslint . --concurrency=auto --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check \"src/**/*.{ts,json,yml,yaml}\" \"test/**/*.ts\" \"*.{json,md,mjs,cjs}\"",
     "typecheck": "tsc --noEmit --pretty",
@@ -44,7 +44,7 @@
     "docker:all:down": "docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml down",
     "postinstall": "prisma generate",
     "prepare": "node .husky/install.mjs",
-    "lint-staged": "lint-staged --concurrent false"
+    "lint-staged": "lint-staged --concurrent true"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

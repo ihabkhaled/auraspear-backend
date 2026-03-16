@@ -12,6 +12,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { processChunked } from '../../common/utils/batch.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } from './hunts.types'
@@ -127,11 +128,7 @@ export class HuntsService {
 
       // Store events in chunks of 50 to avoid overwhelming Prisma
       if (eventData.length > 0) {
-        const chunkSize = 50
-        for (let index = 0; index < eventData.length; index += chunkSize) {
-          const chunk = eventData.slice(index, index + chunkSize)
-          await this.huntsRepository.createManyEvents(chunk)
-        }
+        await processChunked(eventData, 50, chunk => this.huntsRepository.createManyEvents(chunk))
       }
 
       // Compute unique IPs
@@ -458,17 +455,17 @@ export class HuntsService {
   private buildEsQuery(query: string, timeRange: string): Record<string, unknown> {
     const sanitizedQuery = this.sanitizeEsQuery(query)
     const now = new Date()
-    const rangeMap: Record<string, number> = {
-      '1h': 60 * 60 * 1000,
-      '6h': 6 * 60 * 60 * 1000,
-      '12h': 12 * 60 * 60 * 1000,
-      '24h': 24 * 60 * 60 * 1000,
-      '7d': 7 * 24 * 60 * 60 * 1000,
-      '30d': 30 * 24 * 60 * 60 * 1000,
-      '90d': 90 * 24 * 60 * 60 * 1000,
-    }
+    const rangeMap = new Map<string, number>([
+      ['1h', 60 * 60 * 1000],
+      ['6h', 6 * 60 * 60 * 1000],
+      ['12h', 12 * 60 * 60 * 1000],
+      ['24h', 24 * 60 * 60 * 1000],
+      ['7d', 7 * 24 * 60 * 60 * 1000],
+      ['30d', 30 * 24 * 60 * 60 * 1000],
+      ['90d', 90 * 24 * 60 * 60 * 1000],
+    ])
 
-    const rangeMs = rangeMap[timeRange] ?? 24 * 60 * 60 * 1000
+    const rangeMs = rangeMap.get(timeRange) ?? 24 * 60 * 60 * 1000
     const from = new Date(now.getTime() - rangeMs)
 
     return {
@@ -516,7 +513,8 @@ export class HuntsService {
    */
   private getNestedValue(source: Record<string, unknown>, path: string): unknown {
     // First try flat key (some indices flatten to 'data.srcip')
-    if (path in source) return source[path]
+    const sourceMap = new Map(Object.entries(source))
+    if (sourceMap.has(path)) return sourceMap.get(path)
 
     // Then walk the nested path
     const parts = path.split('.')
@@ -525,7 +523,8 @@ export class HuntsService {
       if (current === null || current === undefined || typeof current !== 'object') {
         return undefined
       }
-      current = (current as Record<string, unknown>)[part]
+      const currentMap = new Map(Object.entries(current as Record<string, unknown>))
+      current = currentMap.get(part)
     }
     return current
   }

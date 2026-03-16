@@ -18,20 +18,20 @@ interface ErrorResponse {
   path: string
 }
 
-const STATUS_MESSAGE_KEYS: Record<number, string> = {
-  [HttpStatus.BAD_REQUEST]: 'errors.badRequest',
-  [HttpStatus.UNAUTHORIZED]: 'errors.unauthorized',
-  [HttpStatus.FORBIDDEN]: 'errors.forbidden',
-  [HttpStatus.NOT_FOUND]: 'errors.notFound',
-  [HttpStatus.CONFLICT]: 'errors.conflict',
-  [HttpStatus.UNPROCESSABLE_ENTITY]: 'errors.validationFailed',
-  [HttpStatus.TOO_MANY_REQUESTS]: 'errors.tooManyRequests',
-  [HttpStatus.INTERNAL_SERVER_ERROR]: 'errors.internalError',
-  [HttpStatus.SERVICE_UNAVAILABLE]: 'errors.serviceUnavailable',
-}
+const STATUS_MESSAGE_KEYS = new Map<number, string>([
+  [HttpStatus.BAD_REQUEST, 'errors.badRequest'],
+  [HttpStatus.UNAUTHORIZED, 'errors.unauthorized'],
+  [HttpStatus.FORBIDDEN, 'errors.forbidden'],
+  [HttpStatus.NOT_FOUND, 'errors.notFound'],
+  [HttpStatus.CONFLICT, 'errors.conflict'],
+  [HttpStatus.UNPROCESSABLE_ENTITY, 'errors.validationFailed'],
+  [HttpStatus.TOO_MANY_REQUESTS, 'errors.tooManyRequests'],
+  [HttpStatus.INTERNAL_SERVER_ERROR, 'errors.internalError'],
+  [HttpStatus.SERVICE_UNAVAILABLE, 'errors.serviceUnavailable'],
+])
 
 function statusToMessageKey(status: number): string {
-  return STATUS_MESSAGE_KEYS[status] ?? 'errors.internalError'
+  return STATUS_MESSAGE_KEYS.get(status) ?? 'errors.internalError'
 }
 
 /** Strip internal file paths from error messages to prevent information leakage. */

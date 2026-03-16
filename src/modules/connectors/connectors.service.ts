@@ -234,17 +234,21 @@ export class ConnectorsService {
     if (dto.authType !== undefined) updateData.authType = dto.authType
     if (dto.config !== undefined) {
       // Merge with existing config — preserve redacted (masked) secret values
-      const existingDecrypted = this.decryptConfig(existing.encryptedConfig)
-      const mergedConfig: Record<string, unknown> = {}
+      const existingDecrypted = new Map(
+        Object.entries(this.decryptConfig(existing.encryptedConfig))
+      )
+      const merged = new Map<string, unknown>()
       for (const [key, value] of Object.entries(dto.config as Record<string, unknown>)) {
-        mergedConfig[key] = value === REDACTED_PLACEHOLDER ? existingDecrypted[key] : value
+        const resolvedValue = value === REDACTED_PLACEHOLDER ? existingDecrypted.get(key) : value
+        merged.set(key, resolvedValue)
       }
       // Also preserve any existing keys not sent in the update
-      for (const [key, value] of Object.entries(existingDecrypted)) {
-        if (!(key in mergedConfig)) {
-          mergedConfig[key] = value
+      for (const [key, value] of existingDecrypted) {
+        if (!merged.has(key)) {
+          merged.set(key, value)
         }
       }
+      const mergedConfig: Record<string, unknown> = Object.fromEntries(merged)
 
       let validatedConfig: Record<string, unknown>
       try {
@@ -544,7 +548,7 @@ export class ConnectorsService {
    * metadata endpoints (169.254.x) and loopback — internal ranges are allowed.
    */
   private validateConfigUrls(config: Record<string, unknown>): void {
-    const urlKeys = [
+    const urlKeys = new Set([
       'baseUrl',
       'managerUrl',
       'indexerUrl',
@@ -552,10 +556,9 @@ export class ConnectorsService {
       'apiUrl',
       'grafanaUrl',
       'mispUrl',
-    ]
-    for (const key of urlKeys) {
-      const value = config[key]
-      if (typeof value === 'string' && value.length > 0) {
+    ])
+    for (const [key, value] of Object.entries(config)) {
+      if (urlKeys.has(key) && typeof value === 'string' && value.length > 0) {
         // validateUrl throws BusinessException for private/invalid URLs
         validateUrl(value)
       }

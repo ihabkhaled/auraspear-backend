@@ -109,17 +109,17 @@ export const BedrockConfigSchema = z
   })
   .passthrough()
 
-const connectorConfigSchemas: Record<string, z.ZodType<Record<string, unknown>>> = {
-  wazuh: WazuhConfigSchema,
-  graylog: GraylogConfigSchema,
-  logstash: LogstashConfigSchema,
-  velociraptor: VelociraptorConfigSchema,
-  grafana: GrafanaConfigSchema,
-  influxdb: InfluxDBConfigSchema,
-  misp: MispConfigSchema,
-  shuffle: ShuffleConfigSchema,
-  bedrock: BedrockConfigSchema,
-}
+const connectorConfigSchemas = new Map<string, z.ZodType<Record<string, unknown>>>([
+  ['wazuh', WazuhConfigSchema],
+  ['graylog', GraylogConfigSchema],
+  ['logstash', LogstashConfigSchema],
+  ['velociraptor', VelociraptorConfigSchema],
+  ['grafana', GrafanaConfigSchema],
+  ['influxdb', InfluxDBConfigSchema],
+  ['misp', MispConfigSchema],
+  ['shuffle', ShuffleConfigSchema],
+  ['bedrock', BedrockConfigSchema],
+])
 
 /**
  * Validates a connector config against the type-specific schema.
@@ -130,7 +130,7 @@ export function validateConnectorConfig(
   type: string,
   config: Record<string, unknown>
 ): Record<string, unknown> {
-  const schema = connectorConfigSchemas[type]
+  const schema = connectorConfigSchemas.get(type)
   if (!schema) return config
   return schema.parse(config)
 }

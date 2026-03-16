@@ -42,8 +42,8 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
         variant: pipelineNames.length > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
       })
 
-      for (const name of pipelineNames.slice(0, 5)) {
-        const pipeline = pipelines[name] as Record<string, unknown> | undefined
+      for (const [name, pipelineValue] of Object.entries(pipelines).slice(0, 5)) {
+        const pipeline = pipelineValue as Record<string, unknown> | undefined
         entitiesPreview.push({
           id: name,
           name,
@@ -75,8 +75,8 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
       let totalEventsOut = 0
       let totalEventsFiltered = 0
 
-      for (const name of Object.keys(stats)) {
-        const stat = stats[name] as Record<string, unknown> | undefined
+      for (const [name, statValue] of Object.entries(stats)) {
+        const stat = statValue as Record<string, unknown> | undefined
         const events = stat?.events as Record<string, unknown> | undefined
 
         const eventIn = (events?.in ?? 0) as number
@@ -144,8 +144,8 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const { pipelines: stats } = await this.logstashService.getPipelineStats(config)
     const allItems: WorkspaceRecentItem[] = []
 
-    for (const name of Object.keys(stats)) {
-      const stat = stats[name] as Record<string, unknown> | undefined
+    for (const [name, statValue] of Object.entries(stats)) {
+      const stat = statValue as Record<string, unknown> | undefined
       const events = stat?.events as Record<string, unknown> | undefined
 
       allItems.push({
@@ -173,12 +173,12 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     pageSize: number
   ): Promise<WorkspaceEntitiesResponse> {
     const { pipelines } = await this.logstashService.getPipelines(config)
-    const names = Object.keys(pipelines)
+    const pipelineEntries = Object.entries(pipelines)
     const start = (page - 1) * pageSize
-    const sliced = names.slice(start, start + pageSize)
+    const sliced = pipelineEntries.slice(start, start + pageSize)
 
-    const entities: WorkspaceEntity[] = sliced.map(name => {
-      const pipeline = pipelines[name] as Record<string, unknown> | undefined
+    const entities: WorkspaceEntity[] = sliced.map(([name, pipelineValue]) => {
+      const pipeline = pipelineValue as Record<string, unknown> | undefined
       return {
         id: name,
         name,
@@ -192,7 +192,7 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
       }
     })
 
-    return { entities, total: names.length, page, pageSize }
+    return { entities, total: pipelineEntries.length, page, pageSize }
   }
 
   async search(

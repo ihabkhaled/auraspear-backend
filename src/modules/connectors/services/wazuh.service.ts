@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
-import type { TestResult } from '../connectors.types'
+import type { ScrollCollectionParameters, TestResult } from '../connectors.types'
 
 interface WazuhTokenCache {
   token: string
@@ -329,32 +329,16 @@ export class WazuhService {
 
     const allHits: unknown[] = [...((hitsWrapper.hits ?? []) as unknown[])]
 
-    // Scroll through remaining pages
-    while (scrollId && allHits.length < total && allHits.length < maxEvents) {
-      const scrollResponse = await connectorFetch(`${indexerUrl}/_search/scroll`, {
-        method: 'POST',
-        headers: { Authorization: authHeader },
-        body: { scroll: '1m', scroll_id: scrollId },
-        rejectUnauthorized: tlsOption,
-        allowPrivateNetwork: true,
-        timeoutMs: 30_000,
-      })
-
-      if (scrollResponse.status !== 200) {
-        break
-      }
-
-      const scrollBody = scrollResponse.data as Record<string, unknown>
-      const scrollHits = scrollBody.hits as Record<string, unknown>
-      const batch = (scrollHits.hits ?? []) as unknown[]
-
-      if (batch.length === 0) {
-        break
-      }
-
-      allHits.push(...batch)
-      scrollId = scrollBody._scroll_id as string | undefined
-    }
+    // Scroll through remaining pages using recursion to satisfy no-await-in-loop
+    scrollId = await this.collectScrollResults({
+      indexerUrl,
+      authHeader,
+      tlsOption,
+      scrollId,
+      allHits,
+      total,
+      maxEvents,
+    })
 
     // Clean up scroll context (fire and forget)
     if (scrollId) {
@@ -380,5 +364,54 @@ export class WazuhService {
     })
 
     return { hits: allHits, total }
+  }
+
+  /**
+   * Recursively collect scroll results from OpenSearch.
+   * Each iteration depends on the previous scroll_id, making this inherently sequential.
+   * Returns the final scrollId for cleanup.
+   */
+  private async collectScrollResults(
+    parameters: ScrollCollectionParameters
+  ): Promise<string | undefined> {
+    const { indexerUrl, authHeader, tlsOption, scrollId, allHits, total, maxEvents } = parameters
+
+    if (!scrollId || allHits.length >= total || allHits.length >= maxEvents) {
+      return scrollId
+    }
+
+    const scrollResponse = await connectorFetch(`${indexerUrl}/_search/scroll`, {
+      method: 'POST',
+      headers: { Authorization: authHeader },
+      body: { scroll: '1m', scroll_id: scrollId },
+      rejectUnauthorized: tlsOption,
+      allowPrivateNetwork: true,
+      timeoutMs: 30_000,
+    })
+
+    if (scrollResponse.status !== 200) {
+      return scrollId
+    }
+
+    const scrollBody = scrollResponse.data as Record<string, unknown>
+    const scrollHits = scrollBody.hits as Record<string, unknown>
+    const batch = (scrollHits.hits ?? []) as unknown[]
+
+    if (batch.length === 0) {
+      return scrollBody._scroll_id as string | undefined
+    }
+
+    allHits.push(...batch)
+    const nextScrollId = scrollBody._scroll_id as string | undefined
+
+    return this.collectScrollResults({
+      indexerUrl,
+      authHeader,
+      tlsOption,
+      scrollId: nextScrollId,
+      allHits,
+      total,
+      maxEvents,
+    })
   }
 }

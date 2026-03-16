@@ -4,6 +4,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enu
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { processInBatches } from '../../common/utils/batch.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { PaginatedAlerts, AlertRecord } from './alerts.types'
@@ -427,62 +428,55 @@ export class AlertsService {
 
       // Batch upserts in chunks of 50 to avoid overwhelming the database
       const BATCH_SIZE = 50
-      let ingested = 0
 
-      for (let index = 0; index < upsertOps.length; index += BATCH_SIZE) {
-        const batch = upsertOps.slice(index, index + BATCH_SIZE)
-        const batchResults = await Promise.allSettled(
-          batch.map(op =>
-            this.alertsRepository.upsertByTenantAndExternalId(
-              tenantId,
-              op.externalId,
-              {
-                externalId: op.externalId,
-                title: (op.rule?.description ??
-                  op.source.rule_description ??
-                  'Wazuh Alert') as string,
-                description: JSON.stringify(op.source),
-                severity: op.severity,
-                status: 'new_alert',
-                source: 'wazuh',
-                ruleName: (op.rule?.description ?? null) as string | null,
-                ruleId: (op.rule?.id ?? null) as string | null,
-                agentName:
-                  ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
-                sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ??
-                  op.source.src_ip ??
-                  null) as string | null,
-                destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
-                  op.source.dst_ip ??
-                  null) as string | null,
-                mitreTactics: op.mitreTactics,
-                mitreTechniques: op.mitreTechniques,
-                rawEvent: op.source as Prisma.InputJsonValue,
-                timestamp: op.timestamp,
-                tenant: { connect: { id: tenantId } },
-              },
-              {
-                rawEvent: op.source as Prisma.InputJsonValue,
-              }
-            )
-          )
-        )
-
-        for (const batchResult of batchResults) {
-          if (batchResult.status === 'fulfilled') {
-            ingested++
-          } else {
-            this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
-            this.appLogger.warn('Failed to ingest individual alert from Wazuh batch', {
-              feature: AppLogFeature.ALERTS,
-              action: 'ingestFromWazuh',
-              className: 'AlertsService',
-              sourceType: AppLogSourceType.SERVICE,
-              outcome: AppLogOutcome.FAILURE,
-              tenantId,
-              metadata: { error: (batchResult.reason as Error).message },
-            })
+      const allResults = await processInBatches(upsertOps, BATCH_SIZE, op =>
+        this.alertsRepository.upsertByTenantAndExternalId(
+          tenantId,
+          op.externalId,
+          {
+            externalId: op.externalId,
+            title: (op.rule?.description ?? op.source.rule_description ?? 'Wazuh Alert') as string,
+            description: JSON.stringify(op.source),
+            severity: op.severity,
+            status: 'new_alert',
+            source: 'wazuh',
+            ruleName: (op.rule?.description ?? null) as string | null,
+            ruleId: (op.rule?.id ?? null) as string | null,
+            agentName:
+              ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
+            sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ??
+              op.source.src_ip ??
+              null) as string | null,
+            destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
+              op.source.dst_ip ??
+              null) as string | null,
+            mitreTactics: op.mitreTactics,
+            mitreTechniques: op.mitreTechniques,
+            rawEvent: op.source as Prisma.InputJsonValue,
+            timestamp: op.timestamp,
+            tenant: { connect: { id: tenantId } },
+          },
+          {
+            rawEvent: op.source as Prisma.InputJsonValue,
           }
+        )
+      )
+
+      let ingested = 0
+      for (const batchResult of allResults) {
+        if (batchResult.status === 'fulfilled') {
+          ingested++
+        } else {
+          this.logger.warn(`Failed to ingest alert: ${(batchResult.reason as Error).message}`)
+          this.appLogger.warn('Failed to ingest individual alert from Wazuh batch', {
+            feature: AppLogFeature.ALERTS,
+            action: 'ingestFromWazuh',
+            className: 'AlertsService',
+            sourceType: AppLogSourceType.SERVICE,
+            outcome: AppLogOutcome.FAILURE,
+            tenantId,
+            metadata: { error: (batchResult.reason as Error).message },
+          })
         }
       }
 

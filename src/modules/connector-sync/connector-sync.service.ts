@@ -3,11 +3,12 @@ import { Interval } from '@nestjs/schedule'
 import { ConnectorSyncRepository } from './connector-sync.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, ConnectorType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { processInBatches } from '../../common/utils/batch.utility'
 import { AlertsService } from '../alerts/alerts.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GraylogService } from '../connectors/services/graylog.service'
 import { IntelService } from '../intel/intel.service'
-import type { ConnectorType as PrismaConnectorType, Prisma } from '@prisma/client'
+import type { ConnectorType as PrismaConnectorType, Alert, Prisma } from '@prisma/client'
 
 /** Sync runs every 2 minutes (120 000 ms). */
 const SYNC_INTERVAL_MS = 120_000
@@ -208,52 +209,51 @@ export class ConnectorSyncService {
       return 0
     }
 
-    let ingested = 0
     const BATCH_SIZE = 50
 
-    for (let index = 0; index < result.events.length; index += BATCH_SIZE) {
-      const batch = result.events.slice(index, index + BATCH_SIZE)
-      const batchResults = await Promise.allSettled(
-        batch.map(rawEvent => {
-          const wrapper = rawEvent as Record<string, unknown>
-          const event = (wrapper.event ?? wrapper) as Record<string, unknown>
-          const externalId = (event.id ?? `graylog-${Date.now()}-${Math.random()}`) as string
-          const message = (event.message ?? event.key ?? 'Graylog Event') as string
-          const priority = (event.priority ?? 2) as number
-          const timestamp = new Date((event.timestamp ?? new Date().toISOString()) as string)
-          const source_ = (event.source ?? '') as string
+    const allResults = await processInBatches<Record<string, unknown>, Alert>(
+      result.events as Record<string, unknown>[],
+      BATCH_SIZE,
+      (rawEvent): Promise<Alert> => {
+        const wrapper = rawEvent as Record<string, unknown>
+        const event = (wrapper.event ?? wrapper) as Record<string, unknown>
+        const externalId = (event.id ?? `graylog-${Date.now()}-${Math.random()}`) as string
+        const message = (event.message ?? event.key ?? 'Graylog Event') as string
+        const priority = (event.priority ?? 2) as number
+        const timestamp = new Date((event.timestamp ?? new Date().toISOString()) as string)
+        const source_ = (event.source ?? '') as string
 
-          return this.repository.upsertAlert({
-            where: { tenantId_externalId: { tenantId, externalId } },
-            create: {
-              tenantId,
-              externalId,
-              title: message,
-              description: JSON.stringify(event),
-              severity: this.mapGraylogPriority(priority),
-              status: 'new_alert',
-              source: 'graylog',
-              ruleName: (event.event_definition_id ?? null) as string | null,
-              ruleId: (event.event_definition_id ?? null) as string | null,
-              agentName: source_ || null,
-              sourceIp: (event.source_ip ?? null) as string | null,
-              destinationIp: null,
-              mitreTactics: [],
-              mitreTechniques: [],
-              rawEvent: event as Prisma.InputJsonValue,
-              timestamp,
-            },
-            update: {
-              rawEvent: event as Prisma.InputJsonValue,
-            },
-          })
+        return this.repository.upsertAlert({
+          where: { tenantId_externalId: { tenantId, externalId } },
+          create: {
+            tenantId,
+            externalId,
+            title: message,
+            description: JSON.stringify(event),
+            severity: this.mapGraylogPriority(priority),
+            status: 'new_alert',
+            source: 'graylog',
+            ruleName: (event.event_definition_id ?? null) as string | null,
+            ruleId: (event.event_definition_id ?? null) as string | null,
+            agentName: source_ || null,
+            sourceIp: (event.source_ip ?? null) as string | null,
+            destinationIp: null,
+            mitreTactics: [],
+            mitreTechniques: [],
+            rawEvent: event as Prisma.InputJsonValue,
+            timestamp,
+          },
+          update: {
+            rawEvent: event as Prisma.InputJsonValue,
+          },
         })
-      )
+      }
+    )
 
-      for (const batchResult of batchResults) {
-        if (batchResult.status === 'fulfilled') {
-          ingested++
-        }
+    let ingested = 0
+    for (const batchResult of allResults) {
+      if (batchResult.status === 'fulfilled') {
+        ingested++
       }
     }
 

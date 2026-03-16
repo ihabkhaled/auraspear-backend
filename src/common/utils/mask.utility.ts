@@ -25,17 +25,17 @@ const SENSITIVE_KEYS = new Set([
 ])
 
 export function maskSecrets(data: Record<string, unknown>): Record<string, unknown> {
-  const masked: Record<string, unknown> = {}
+  const masked = new Map<string, unknown>()
 
   for (const [key, value] of Object.entries(data)) {
     if (SENSITIVE_KEYS.has(key) || SENSITIVE_KEYS.has(key.toLowerCase())) {
-      masked[key] = typeof value === 'string' && value.length > 0 ? REDACTED_PLACEHOLDER : value
+      masked.set(key, typeof value === 'string' && value.length > 0 ? REDACTED_PLACEHOLDER : value)
     } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      masked[key] = maskSecrets(value as Record<string, unknown>)
+      masked.set(key, maskSecrets(value as Record<string, unknown>))
     } else {
-      masked[key] = value
+      masked.set(key, value)
     }
   }
 
-  return masked
+  return Object.fromEntries(masked)
 }

@@ -519,12 +519,12 @@ export class IntelService {
    * e.g. 'ip' → ['ip-src', 'ip-dst'], 'hash' → ['md5', 'sha1', 'sha256']
    */
   private expandIocTypeFilter(type: string): string[] {
-    const TYPE_GROUPS: Record<string, string[]> = {
-      ip: ['ip-src', 'ip-dst'],
-      hash: ['md5', 'sha1', 'sha256'],
-    }
+    const typeGroups = new Map<string, string[]>([
+      ['ip', ['ip-src', 'ip-dst']],
+      ['hash', ['md5', 'sha1', 'sha256']],
+    ])
 
-    const group = TYPE_GROUPS[type]
+    const group = typeGroups.get(type)
     if (group) {
       return group
     }

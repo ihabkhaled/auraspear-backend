@@ -2,6 +2,23 @@ import { createParamDecorator, type ExecutionContext } from '@nestjs/common'
 import { BusinessException } from '../exceptions/business.exception'
 import { type JwtPayload } from '../interfaces/authenticated-request.interface'
 
+function getPayloadField(user: JwtPayload, field: keyof JwtPayload): string {
+  const fieldGetters = new Map<keyof JwtPayload, () => string>([
+    ['sub', () => user.sub],
+    ['email', () => user.email],
+    ['tenantId', () => user.tenantId],
+    ['tenantSlug', () => user.tenantSlug],
+    ['role', () => user.role],
+    ['jti', () => String(user.jti ?? '')],
+    ['iat', () => String(user.iat ?? '')],
+    ['exp', () => String(user.exp ?? '')],
+    ['isImpersonated', () => String(user.isImpersonated ?? '')],
+  ])
+
+  const getter = fieldGetters.get(field)
+  return getter ? getter() : ''
+}
+
 /**
  * Extracts the authenticated user (JwtPayload) from the request.
  * Optionally pass a property name to extract a single field.
@@ -17,6 +34,6 @@ export const CurrentUser = createParamDecorator(
     if (!user) {
       throw new BusinessException(401, 'Authentication required', 'errors.auth.missingToken')
     }
-    return data ? (user[data] as string) : user
+    return data ? getPayloadField(user, data) : user
   }
 )

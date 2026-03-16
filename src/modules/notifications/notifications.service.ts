@@ -432,7 +432,7 @@ export class NotificationsService {
         createdAt: new Date(),
       }
       this.gateway.emitToUser(tenantId, recipientUserId, notificationPayload)
-      this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCounts[index] ?? 0)
+      this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCounts.at(index) ?? 0)
     }
 
     this.appLogger.info('Mention notifications created', {
