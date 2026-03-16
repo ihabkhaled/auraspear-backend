@@ -1,9 +1,19 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma, Notification, User, Case } from '@prisma/client'
+import type { Prisma, Notification, User, Case, UserPreference } from '@prisma/client'
 
 type UserNameSelect = Pick<User, 'name'>
 type UserIdNameEmailSelect = Pick<User, 'id' | 'name' | 'email'>
+
+export type NotificationPreferenceSelect = Pick<
+  UserPreference,
+  | 'notificationsInApp'
+  | 'notifyCaseAssignments'
+  | 'notifyCaseComments'
+  | 'notifyCaseActivity'
+  | 'notifyCaseUpdates'
+  | 'notifyUserManagement'
+>
 type CaseNumberSelect = Pick<Case, 'caseNumber'>
 
 @Injectable()
@@ -70,17 +80,24 @@ export class NotificationsRepository {
     return this.prisma.notification.create({ data })
   }
 
-  async createManyNotifications(
-    data: Prisma.NotificationCreateManyInput[],
-    skipDuplicates = true
-  ): Promise<Prisma.BatchPayload> {
-    return this.prisma.notification.createMany({ data, skipDuplicates })
-  }
-
   async findCaseById(caseId: string): Promise<CaseNumberSelect | null> {
     return this.prisma.case.findUnique({
       where: { id: caseId },
       select: { caseNumber: true },
+    })
+  }
+
+  async findUserPreference(userId: string): Promise<NotificationPreferenceSelect | null> {
+    return this.prisma.userPreference.findUnique({
+      where: { userId },
+      select: {
+        notificationsInApp: true,
+        notifyCaseAssignments: true,
+        notifyCaseComments: true,
+        notifyCaseActivity: true,
+        notifyCaseUpdates: true,
+        notifyUserManagement: true,
+      },
     })
   }
 }

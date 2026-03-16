@@ -259,7 +259,10 @@ export class CasesRepository {
           caseId: newCase.id,
           type: timelineData.type,
           actor: timelineData.actor,
-          description: `Case ${caseNumber} created: ${params.title}`,
+          description: JSON.stringify({
+            key: 'caseCreated',
+            params: { caseRef: caseNumber, title: params.title },
+          }),
         },
       })
 

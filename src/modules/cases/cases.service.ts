@@ -234,7 +234,7 @@ export class CasesService {
     await this.casesRepository.softDeleteCaseTransaction(id, tenantId, CaseStatus.CLOSED, {
       type: CaseTimelineType.DELETED,
       actor,
-      description: `Case ${existing.caseNumber} soft-deleted`,
+      description: JSON.stringify({ key: 'caseDeleted', params: { caseRef: existing.caseNumber } }),
     })
     this.logger.log(`Case ${existing.caseNumber} soft-deleted by ${actor}`)
     return { deleted: true }
@@ -293,7 +293,10 @@ export class CasesService {
     const note = await this.casesRepository.addNoteTransaction(caseId, user.email, dto.body, {
       type: CaseTimelineType.NOTE_ADDED,
       actor: user.email,
-      description: `Note added: ${truncateBody(dto.body)}`,
+      description: JSON.stringify({
+        key: 'noteAdded',
+        params: { content: truncateBody(dto.body) },
+      }),
     })
     this.logger.log(`Note added to case ${existing.caseNumber} by ${user.email}`)
     return note
@@ -346,7 +349,10 @@ export class CasesService {
       {
         type: CaseTimelineType.COMMENT_ADDED,
         actor: user.email,
-        description: `Comment added: ${truncateBody(dto.body)}`,
+        description: JSON.stringify({
+          key: 'commentAdded',
+          params: { content: truncateBody(dto.body) },
+        }),
       }
     )
 
@@ -387,7 +393,7 @@ export class CasesService {
       {
         type: CaseTimelineType.COMMENT_EDITED,
         actor: user.email,
-        description: 'Comment edited',
+        description: JSON.stringify({ key: 'commentEdited', params: {} }),
       }
     )
     this.logSuccess('updateCaseComment', user, 'CaseComment', commentId, { caseId })
@@ -406,7 +412,7 @@ export class CasesService {
     await this.casesRepository.softDeleteCommentTransaction(commentId, caseId, {
       type: CaseTimelineType.COMMENT_DELETED,
       actor: user.email,
-      description: 'Comment deleted',
+      description: JSON.stringify({ key: 'commentDeleted', params: {} }),
     })
     this.logSuccess('deleteCaseComment', user, 'CaseComment', commentId, {
       caseId,
@@ -454,7 +460,10 @@ export class CasesService {
       caseId,
       type: CaseTimelineType.UPDATED,
       actor: user.email,
-      description: `Task "${dto.title}" added by ${actorLabel}`,
+      description: JSON.stringify({
+        key: 'taskAdded',
+        params: { taskTitle: dto.title, actorLabel },
+      }),
     })
 
     this.logSuccess('createTask', user, 'CaseTask', task.id, {
@@ -467,7 +476,10 @@ export class CasesService {
       caseRecord.caseNumber,
       caseRecord.ownerUserId,
       NotificationType.CASE_TASK_ADDED,
-      `New task added to case ${caseRecord.caseNumber}: "${dto.title}"`,
+      JSON.stringify({
+        key: 'caseTaskMessage',
+        params: { caseRef: caseRecord.caseNumber, taskTitle: dto.title },
+      }),
       user.sub,
       user.email
     )
@@ -511,7 +523,10 @@ export class CasesService {
       caseId,
       type: CaseTimelineType.UPDATED,
       actor: user.email,
-      description: `Task "${existing.title}" removed by ${actorLabel}`,
+      description: JSON.stringify({
+        key: 'taskRemoved',
+        params: { taskTitle: existing.title, actorLabel },
+      }),
     })
     this.logSuccess('deleteTask', user, 'CaseTask', taskId, {
       caseId,
@@ -550,7 +565,10 @@ export class CasesService {
       caseId,
       type: CaseTimelineType.UPDATED,
       actor: user.email,
-      description: `Artifact ${dto.type}:${dto.value} added by ${actorLabel}`,
+      description: JSON.stringify({
+        key: 'artifactAdded',
+        params: { artifactValue: `${dto.type}:${dto.value}`, actorLabel },
+      }),
     })
 
     this.logSuccess('createArtifact', user, 'CaseArtifact', artifact.id, {
@@ -563,7 +581,10 @@ export class CasesService {
       caseRecord.caseNumber,
       caseRecord.ownerUserId,
       NotificationType.CASE_ARTIFACT_ADDED,
-      `New artifact added to case ${caseRecord.caseNumber}: ${dto.type}:${dto.value}`,
+      JSON.stringify({
+        key: 'caseArtifactMessage',
+        params: { caseRef: caseRecord.caseNumber, artifactValue: `${dto.type}:${dto.value}` },
+      }),
       user.sub,
       user.email
     )
@@ -584,7 +605,10 @@ export class CasesService {
       caseId,
       type: CaseTimelineType.UPDATED,
       actor: user.email,
-      description: `Artifact ${existing.type}:${existing.value} removed by ${actorLabel}`,
+      description: JSON.stringify({
+        key: 'artifactRemoved',
+        params: { artifactValue: `${existing.type}:${existing.value}`, actorLabel },
+      }),
     })
     this.logSuccess('deleteArtifact', user, 'CaseArtifact', artifactId, {
       caseId,
@@ -887,7 +911,10 @@ export class CasesService {
           ? {
               type: CaseTimelineType.ALERT_LINKED,
               actor: user.email,
-              description: `${linkedAlerts.length} alert(s) linked at creation`,
+              description: JSON.stringify({
+                key: 'alertsLinkedAtCreation',
+                params: { count: String(linkedAlerts.length) },
+              }),
             }
           : undefined
       )
@@ -934,7 +961,10 @@ export class CasesService {
         {
           type: CaseTimelineType.ALERT_LINKED,
           actor: user.email,
-          description: `Alert ${dto.alertId} linked from index ${dto.indexName}`,
+          description: JSON.stringify({
+            key: 'alertLinked',
+            params: { alertId: dto.alertId, indexName: dto.indexName },
+          }),
         }
       )
     } catch (error: unknown) {
@@ -1056,7 +1086,10 @@ export class CasesService {
       existing.caseNumber,
       existing.ownerUserId,
       NotificationType.CASE_STATUS_CHANGED,
-      `Case ${existing.caseNumber} status changed to ${dto.status}`,
+      JSON.stringify({
+        key: 'caseStatusChangedMessage',
+        params: { caseRef: existing.caseNumber, status: dto.status },
+      }),
       user.sub,
       user.email
     )
@@ -1095,7 +1128,10 @@ export class CasesService {
       existing.caseNumber,
       existing.ownerUserId,
       NotificationType.CASE_UPDATED,
-      `Case ${existing.caseNumber} has been updated`,
+      JSON.stringify({
+        key: 'caseUpdatedMessage',
+        params: { caseRef: existing.caseNumber, detail: 'has been updated' },
+      }),
       user.sub,
       user.email
     )
@@ -1124,7 +1160,10 @@ export class CasesService {
       existing.caseNumber,
       existing.ownerUserId,
       NotificationType.CASE_COMMENT_ADDED,
-      `New comment on case ${existing.caseNumber}: ${truncateBody(body)}`,
+      JSON.stringify({
+        key: 'caseCommentMessage',
+        params: { caseRef: existing.caseNumber, content: truncateBody(body) },
+      }),
       user.sub,
       user.email
     )

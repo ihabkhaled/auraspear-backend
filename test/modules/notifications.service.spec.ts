@@ -33,8 +33,8 @@ function createMockRepository() {
     findUserById: jest.fn().mockResolvedValue({ name: ACTOR_NAME }),
     findUsersByIds: jest.fn().mockResolvedValue([]),
     createNotification: jest.fn().mockResolvedValue({ id: 'notif-001' }),
-    createManyNotifications: jest.fn().mockResolvedValue({ count: 1 }),
     findCaseById: jest.fn().mockResolvedValue({ caseNumber: CASE_NUMBER }),
+    findUserPreference: jest.fn().mockResolvedValue(null),
   }
 }
 
@@ -284,7 +284,10 @@ describe('NotificationsService', () => {
 
       expect(repository.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: `Jane Admin assigned you to case ${CASE_NUMBER}`,
+          message: JSON.stringify({
+            key: 'caseAssignedMessage',
+            params: { actorName: 'Jane Admin', caseRef: CASE_NUMBER },
+          }),
         })
       )
     })
@@ -445,7 +448,10 @@ describe('NotificationsService', () => {
           recipientUserId: RECIPIENT_ID,
           entityType: NotificationEntityType.TENANT,
           entityId: TENANT_ID,
-          message: 'You have been added to tenant "AuraSpear" as SOC_ANALYST_L1',
+          message: JSON.stringify({
+            key: 'tenantAssignedMessage',
+            params: { actorName: ACTOR_NAME },
+          }),
         })
       )
       expect(mockGateway.emitToUser).toHaveBeenCalled()
@@ -485,7 +491,10 @@ describe('NotificationsService', () => {
           type: NotificationType.ROLE_CHANGED,
           recipientUserId: RECIPIENT_ID,
           entityType: NotificationEntityType.USER,
-          message: 'Your role has been changed from SOC_ANALYST_L1 to TENANT_ADMIN',
+          message: JSON.stringify({
+            key: 'roleChangedMessage',
+            params: { actorName: ACTOR_NAME, role: 'TENANT_ADMIN' },
+          }),
         })
       )
     })
@@ -503,7 +512,7 @@ describe('NotificationsService', () => {
         expect.objectContaining({
           type: NotificationType.USER_BLOCKED,
           recipientUserId: RECIPIENT_ID,
-          message: 'Your account has been suspended by an administrator',
+          message: JSON.stringify({ key: 'userBlockedMessage', params: { actorName: ACTOR_NAME } }),
         })
       )
     })
@@ -520,7 +529,10 @@ describe('NotificationsService', () => {
       expect(repository.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           type: NotificationType.USER_UNBLOCKED,
-          message: 'Your account has been reactivated by an administrator',
+          message: JSON.stringify({
+            key: 'userUnblockedMessage',
+            params: { actorName: ACTOR_NAME },
+          }),
         })
       )
     })
@@ -537,7 +549,7 @@ describe('NotificationsService', () => {
       expect(repository.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           type: NotificationType.USER_REMOVED,
-          message: 'Your account has been removed from this tenant',
+          message: JSON.stringify({ key: 'userRemovedMessage', params: { actorName: ACTOR_NAME } }),
         })
       )
     })
@@ -554,7 +566,10 @@ describe('NotificationsService', () => {
       expect(repository.createNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           type: NotificationType.USER_RESTORED,
-          message: 'Your account has been restored by an administrator',
+          message: JSON.stringify({
+            key: 'userRestoredMessage',
+            params: { actorName: ACTOR_NAME },
+          }),
         })
       )
     })
@@ -565,7 +580,7 @@ describe('NotificationsService', () => {
   /* ------------------------------------------------------------------ */
 
   describe('createMentionNotifications', () => {
-    it('should create notifications for mentioned users', async () => {
+    it('should create notifications for each mentioned user via createAndEmitNotification', async () => {
       repository.countUnread.mockResolvedValue(3)
 
       await service.createMentionNotifications(
@@ -576,19 +591,21 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(repository.createManyNotifications).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            recipientUserId: RECIPIENT_ID,
-            type: 'mention',
-            caseId: CASE_ID,
-            caseCommentId: COMMENT_ID,
-          }),
-          expect.objectContaining({
-            recipientUserId: 'user-002',
-          }),
-        ]),
-        true
+      expect(repository.createNotification).toHaveBeenCalledTimes(2)
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: RECIPIENT_ID,
+          type: NotificationType.MENTION,
+          caseId: CASE_ID,
+          caseCommentId: COMMENT_ID,
+          entityType: NotificationEntityType.CASE_COMMENT,
+        })
+      )
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: 'user-002',
+          type: NotificationType.MENTION,
+        })
       )
       expect(mockGateway.emitToUser).toHaveBeenCalledTimes(2)
       expect(mockGateway.emitUnreadCount).toHaveBeenCalledTimes(2)
@@ -597,14 +614,14 @@ describe('NotificationsService', () => {
     it('should filter out self-mentions', async () => {
       await service.createMentionNotifications(TENANT_ID, CASE_ID, COMMENT_ID, [ACTOR_ID], mockUser)
 
-      expect(repository.createManyNotifications).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
       expect(mockGateway.emitToUser).not.toHaveBeenCalled()
     })
 
     it('should skip when no recipients after filtering', async () => {
       await service.createMentionNotifications(TENANT_ID, CASE_ID, COMMENT_ID, [], mockUser)
 
-      expect(repository.createManyNotifications).not.toHaveBeenCalled()
+      expect(repository.createNotification).not.toHaveBeenCalled()
     })
 
     it('should use actor email as fallback name', async () => {
@@ -619,13 +636,10 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(repository.createManyNotifications).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            message: expect.stringContaining(ACTOR_EMAIL),
-          }),
-        ]),
-        true
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(ACTOR_EMAIL),
+        })
       )
     })
 
@@ -641,13 +655,10 @@ describe('NotificationsService', () => {
         mockUser
       )
 
-      expect(repository.createManyNotifications).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            message: expect.stringContaining(CASE_ID),
-          }),
-        ]),
-        true
+      expect(repository.createNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining(CASE_ID),
+        })
       )
     })
   })

@@ -46,7 +46,12 @@ describe('NotificationsController', () => {
         TENANT_ID,
         USER_ID,
         1,
-        15
+        15,
+        'createdAt',
+        'desc',
+        undefined,
+        undefined,
+        undefined
       )
     })
 
@@ -64,7 +69,12 @@ describe('NotificationsController', () => {
         TENANT_ID,
         USER_ID,
         3,
-        5
+        5,
+        'createdAt',
+        'desc',
+        undefined,
+        undefined,
+        undefined
       )
     })
   })

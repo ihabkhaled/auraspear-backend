@@ -101,19 +101,19 @@ export function buildFieldChangeDescription(
   existing: { title: string; description: string | null; severity: string },
   actorLabel: string
 ): string {
-  const changes: string[] = []
   if (dto.title !== undefined && dto.title !== existing.title) {
-    changes.push(`title changed to "${dto.title}"`)
-  }
-  if (dto.description !== undefined && dto.description !== existing.description) {
-    changes.push('description updated')
+    return JSON.stringify({ key: 'caseTitleChanged', params: { actorLabel, newTitle: dto.title } })
   }
   if (dto.severity !== undefined && dto.severity !== existing.severity) {
-    changes.push(`severity changed from ${existing.severity} to ${dto.severity}`)
+    return JSON.stringify({
+      key: 'caseSeverityChanged',
+      params: { actorLabel, oldSeverity: existing.severity, newSeverity: dto.severity },
+    })
   }
-  return changes.length > 0
-    ? `Case updated by ${actorLabel}: ${changes.join(', ')}`
-    : `Case updated by ${actorLabel}`
+  if (dto.description !== undefined && dto.description !== existing.description) {
+    return JSON.stringify({ key: 'caseDescriptionUpdated', params: { actorLabel } })
+  }
+  return JSON.stringify({ key: 'caseUpdatedGeneric', params: { actorLabel } })
 }
 
 /* ---------------------------------------------------------------- */
@@ -244,15 +244,23 @@ export function buildAssigneeTimelineDescription(
   actorLabel: string
 ): string {
   if (dto.ownerUserId === null) {
-    return previousOwnerLabel
-      ? `Assignee removed (was ${previousOwnerLabel}) by ${actorLabel}`
-      : `Assignee removed by ${actorLabel}`
+    if (previousOwnerLabel) {
+      return JSON.stringify({
+        key: 'assigneeRemovedWas',
+        params: { previousOwnerLabel, actorLabel },
+      })
+    }
+    return JSON.stringify({ key: 'assigneeRemoved', params: { actorLabel } })
   }
 
   const ownerLabel = newOwnerLabel ?? dto.ownerUserId ?? 'unknown'
-  return previousOwnerLabel
-    ? `Assigned to ${ownerLabel} from ${previousOwnerLabel} by ${actorLabel}`
-    : `Assigned to ${ownerLabel} by ${actorLabel}`
+  if (previousOwnerLabel) {
+    return JSON.stringify({
+      key: 'reassignedTo',
+      params: { ownerLabel, previousOwnerLabel, actorLabel },
+    })
+  }
+  return JSON.stringify({ key: 'assignedTo', params: { ownerLabel, actorLabel } })
 }
 
 /* ---------------------------------------------------------------- */
@@ -265,9 +273,12 @@ export function buildCycleTimelineDescription(
   actorLabel: string
 ): string {
   if (cycleId === null) {
-    return `Removed from cycle by ${actorLabel}`
+    return JSON.stringify({ key: 'removedFromCycle', params: { actorLabel } })
   }
-  return `Added to cycle "${cycleName ?? cycleId}" by ${actorLabel}`
+  return JSON.stringify({
+    key: 'addedToCycle',
+    params: { cycleName: cycleName ?? cycleId ?? '', actorLabel },
+  })
 }
 
 /* ---------------------------------------------------------------- */
@@ -279,8 +290,10 @@ export function buildStatusTimelineDescription(
   newStatus: string | undefined,
   actorLabel: string
 ): string {
-  if (isReopening) return `Case re-opened by ${actorLabel}`
-  return `Status changed to ${newStatus} by ${actorLabel}`
+  if (isReopening) {
+    return JSON.stringify({ key: 'caseReopened', params: { actorLabel } })
+  }
+  return JSON.stringify({ key: 'statusChanged', params: { status: newStatus ?? '', actorLabel } })
 }
 
 /* ---------------------------------------------------------------- */
@@ -308,9 +321,13 @@ export function buildTaskStatusTimelineDescription(
   newStatus: string,
   actorLabel: string
 ): string {
-  const statusText =
-    newStatus === CaseTaskStatus.COMPLETED ? 'completed' : `changed to ${newStatus}`
-  return `Task "${taskTitle}" ${statusText} by ${actorLabel}`
+  if (newStatus === CaseTaskStatus.COMPLETED) {
+    return JSON.stringify({ key: 'taskCompleted', params: { taskTitle, actorLabel } })
+  }
+  return JSON.stringify({
+    key: 'taskStatusChanged',
+    params: { taskTitle, status: newStatus, actorLabel },
+  })
 }
 
 /* ---------------------------------------------------------------- */
@@ -349,7 +366,6 @@ export function buildCycleNotificationMessage(
   caseNumber: string,
   cycleId: string | null | undefined
 ): string {
-  return cycleId === null
-    ? `Case ${caseNumber} removed from cycle`
-    : `Case ${caseNumber} added to a cycle`
+  const detail = cycleId === null ? 'removed from cycle' : 'added to a cycle'
+  return JSON.stringify({ key: 'caseUpdatedMessage', params: { caseRef: caseNumber, detail } })
 }

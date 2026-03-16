@@ -669,7 +669,10 @@ describe('CasesService', () => {
         'SOC-2026-001',
         'user-005',
         'case_status_changed',
-        'Case SOC-2026-001 status changed to in_progress',
+        JSON.stringify({
+          key: 'caseStatusChangedMessage',
+          params: { caseRef: 'SOC-2026-001', status: 'in_progress' },
+        }),
         mockUser.sub,
         mockUser.email
       )
@@ -727,7 +730,10 @@ describe('CasesService', () => {
         'SOC-2026-001',
         'user-005',
         'case_updated',
-        'Case SOC-2026-001 has been updated',
+        JSON.stringify({
+          key: 'caseUpdatedMessage',
+          params: { caseRef: 'SOC-2026-001', detail: 'has been updated' },
+        }),
         mockUser.sub,
         mockUser.email
       )

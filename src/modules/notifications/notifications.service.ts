@@ -3,8 +3,11 @@ import { NotificationsGateway } from './notifications.gateway'
 import { NotificationsRepository } from './notifications.repository'
 import {
   buildActorMap,
-  buildMentionNotificationData,
+  buildNotificationOrderBy,
   buildNotificationPayload,
+  buildNotificationWhereClause,
+  getNotificationTitle,
+  isNotificationAllowedByPreference,
   mapNotificationToResponse,
 } from './notifications.utilities'
 import {
@@ -13,7 +16,6 @@ import {
   AppLogSourceType,
   NotificationEntityType,
   NotificationType,
-  SortOrder,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -52,12 +54,18 @@ export class NotificationsService {
     tenantId: string,
     recipientUserId: string,
     page: number,
-    limit: number
+    limit: number,
+    sortBy?: string,
+    sortOrder?: string,
+    query?: string,
+    type?: string,
+    isRead?: string
   ): Promise<PaginatedNotifications> {
-    const where = { tenantId, recipientUserId }
+    const where = buildNotificationWhereClause(tenantId, recipientUserId, { query, type, isRead })
+    const orderBy = buildNotificationOrderBy(sortBy, sortOrder)
     const [notifications, total] = await this.notificationsRepository.findManyAndCount({
       where,
-      orderBy: { createdAt: SortOrder.DESC },
+      orderBy,
       skip: (page - 1) * limit,
       take: limit,
     })
@@ -114,8 +122,11 @@ export class NotificationsService {
       actorUserId,
       actorEmail,
       recipientUserId: assignedUserId,
-      title: 'case_assigned_title',
-      message: `${actorName} assigned you to case ${caseNumber}`,
+      title: getNotificationTitle(NotificationType.CASE_ASSIGNED),
+      message: JSON.stringify({
+        key: 'caseAssignedMessage',
+        params: { actorName, caseRef: caseNumber },
+      }),
       entityType: NotificationEntityType.CASE,
       entityId: caseId,
       caseId,
@@ -137,8 +148,11 @@ export class NotificationsService {
       actorUserId,
       actorEmail,
       recipientUserId: previousOwnerId,
-      title: 'case_unassigned_title',
-      message: `${actorName} unassigned you from case ${caseNumber}`,
+      title: getNotificationTitle(NotificationType.CASE_UNASSIGNED),
+      message: JSON.stringify({
+        key: 'caseUnassignedMessage',
+        params: { actorName, caseRef: caseNumber },
+      }),
       entityType: NotificationEntityType.CASE,
       entityId: caseId,
       caseId,
@@ -166,7 +180,7 @@ export class NotificationsService {
       actorUserId,
       actorEmail,
       recipientUserId: ownerUserId,
-      title: `${type}_title`,
+      title: getNotificationTitle(type),
       message,
       entityType: NotificationEntityType.CASE,
       entityId: caseId,
@@ -186,14 +200,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.TENANT_ASSIGNED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'tenant_assigned_title',
-      message: `You have been added to tenant "${tenantName}" as ${role}`,
+      title: getNotificationTitle(NotificationType.TENANT_ASSIGNED),
+      message: JSON.stringify({ key: 'tenantAssignedMessage', params: { actorName } }),
       entityType: NotificationEntityType.TENANT,
       entityId: tenantId,
     })
@@ -207,14 +222,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.ROLE_CHANGED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'role_changed_title',
-      message: `Your role has been changed from ${previousRole} to ${newRole}`,
+      title: getNotificationTitle(NotificationType.ROLE_CHANGED),
+      message: JSON.stringify({ key: 'roleChangedMessage', params: { actorName, role: newRole } }),
       entityType: NotificationEntityType.USER,
       entityId: userId,
     })
@@ -226,14 +242,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.USER_BLOCKED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'user_blocked_title',
-      message: 'Your account has been suspended by an administrator',
+      title: getNotificationTitle(NotificationType.USER_BLOCKED),
+      message: JSON.stringify({ key: 'userBlockedMessage', params: { actorName } }),
       entityType: NotificationEntityType.USER,
       entityId: userId,
     })
@@ -245,14 +262,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.USER_UNBLOCKED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'user_unblocked_title',
-      message: 'Your account has been reactivated by an administrator',
+      title: getNotificationTitle(NotificationType.USER_UNBLOCKED),
+      message: JSON.stringify({ key: 'userUnblockedMessage', params: { actorName } }),
       entityType: NotificationEntityType.USER,
       entityId: userId,
     })
@@ -264,14 +282,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.USER_REMOVED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'user_removed_title',
-      message: 'Your account has been removed from this tenant',
+      title: getNotificationTitle(NotificationType.USER_REMOVED),
+      message: JSON.stringify({ key: 'userRemovedMessage', params: { actorName } }),
       entityType: NotificationEntityType.USER,
       entityId: userId,
     })
@@ -283,14 +302,15 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.USER_RESTORED,
       actorUserId,
       actorEmail,
       recipientUserId: userId,
-      title: 'user_restored_title',
-      message: 'Your account has been restored by an administrator',
+      title: getNotificationTitle(NotificationType.USER_RESTORED),
+      message: JSON.stringify({ key: 'userRestoredMessage', params: { actorName } }),
       entityType: NotificationEntityType.USER,
       entityId: userId,
     })
@@ -314,37 +334,24 @@ export class NotificationsService {
     const caseRecord = await this.notificationsRepository.findCaseById(caseId)
     const caseNumber = caseRecord?.caseNumber ?? caseId
 
-    const notificationData = buildMentionNotificationData(
-      tenantId,
-      actor.sub,
-      actorName,
-      caseId,
-      commentId,
-      caseNumber,
-      recipientIds,
-      NotificationType.MENTION,
-      NotificationEntityType.CASE_COMMENT
-    )
-    await this.notificationsRepository.createManyNotifications(notificationData, true)
-    await this.emitMentionWebSocketEvents(
-      tenantId,
-      recipientIds,
-      actorName,
-      actor.email,
-      commentId,
-      caseId,
-      caseNumber
-    )
-    this.logSuccess(
-      'createMentionNotifications',
-      tenantId,
-      {
+    for (const recipientUserId of recipientIds) {
+      await this.createAndEmitNotification({
+        tenantId,
+        type: NotificationType.MENTION,
+        actorUserId: actor.sub,
+        actorEmail: actor.email,
+        recipientUserId,
+        title: getNotificationTitle(NotificationType.MENTION),
+        message: JSON.stringify({
+          key: 'mentionMessage',
+          params: { actorName, caseRef: caseNumber },
+        }),
+        entityType: NotificationEntityType.CASE_COMMENT,
+        entityId: commentId,
         caseId,
-        commentId,
-        recipientCount: recipientIds.length,
-      },
-      actor
-    )
+        caseCommentId: commentId,
+      })
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -353,6 +360,30 @@ export class NotificationsService {
 
   private async createAndEmitNotification(params: CreateNotificationParameters): Promise<void> {
     if (params.recipientUserId === params.actorUserId) return
+
+    const preferences = await this.notificationsRepository.findUserPreference(
+      params.recipientUserId
+    )
+    if (!isNotificationAllowedByPreference(preferences, params.type)) {
+      this.appLogger.info('Notification suppressed by user preference', {
+        feature: AppLogFeature.NOTIFICATIONS,
+        action: 'createNotification',
+        outcome: AppLogOutcome.SUCCESS,
+        tenantId: params.tenantId,
+        actorEmail: params.actorEmail,
+        actorUserId: params.actorUserId,
+        targetResource: 'Notification',
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'NotificationsService',
+        functionName: 'createAndEmitNotification',
+        metadata: {
+          type: params.type,
+          recipientUserId: params.recipientUserId,
+          reason: 'user_preference_disabled',
+        },
+      })
+      return
+    }
 
     const actorName = await this.resolveActorName(params.actorUserId, params.actorEmail)
     await this.notificationsRepository.createNotification({
@@ -404,36 +435,6 @@ export class NotificationsService {
     const unreadCount = await this.getUnreadCount(tenantId, recipientUserId)
     this.gateway.emitToUser(tenantId, recipientUserId, payload)
     this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCount)
-  }
-
-  private async emitMentionWebSocketEvents(
-    tenantId: string,
-    recipientIds: string[],
-    actorName: string,
-    actorEmail: string,
-    commentId: string,
-    caseId: string,
-    caseNumber: string
-  ): Promise<void> {
-    const unreadCounts = await Promise.all(
-      recipientIds.map(id => this.getUnreadCount(tenantId, id))
-    )
-    for (const [index, recipientUserId] of recipientIds.entries()) {
-      const payload = buildNotificationPayload(
-        commentId,
-        NotificationType.MENTION,
-        actorName,
-        actorEmail,
-        'mention_notification_title',
-        `${actorName} mentioned you in a comment on case ${caseNumber}`,
-        NotificationEntityType.CASE_COMMENT,
-        commentId,
-        caseId,
-        commentId
-      )
-      this.gateway.emitToUser(tenantId, recipientUserId, payload)
-      this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCounts.at(index) ?? 0)
-    }
   }
 
   /* ---------------------------------------------------------------- */

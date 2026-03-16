@@ -6,8 +6,6 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
-import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { ListNotificationsQueryDto } from './dto/list-notifications-query.dto'
 import type { PaginatedNotifications } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -21,9 +19,21 @@ export class NotificationsController {
   async listNotifications(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
-    @Query(new ZodValidationPipe(ListNotificationsQuerySchema)) query: ListNotificationsQueryDto
+    @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedNotifications> {
-    return this.notificationsService.listNotifications(tenantId, user.sub, query.page, query.limit)
+    const { page, limit, sortBy, sortOrder, query, type, isRead } =
+      ListNotificationsQuerySchema.parse(rawQuery)
+    return this.notificationsService.listNotifications(
+      tenantId,
+      user.sub,
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      query,
+      type,
+      isRead
+    )
   }
 
   @Get('unread-count')
