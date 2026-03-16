@@ -22,7 +22,7 @@
     "lint:mkdir": "node -e \"require('fs').mkdirSync('eslint-reports',{recursive:true})\"",
     "lint-report-all": "npm run lint:mkdir && eslint . -f json -o eslint-reports/eslint-all-report.json",
     "lint-report-ts": "npm run lint:mkdir && eslint \"src/**/*.ts\" -f json -o eslint-reports/eslint-ts-report.json",
-    "test": "jest --maxWorkers=100%",
+    "test": "jest --maxWorkers=50%",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
