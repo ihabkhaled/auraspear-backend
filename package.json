@@ -44,7 +44,7 @@
     "docker:all:down": "docker compose -f docker-compose.dev.yml -f docker-compose.connectors.yml down",
     "postinstall": "prisma generate",
     "prepare": "node .husky/install.mjs",
-    "lint-staged": "lint-staged --concurrent true"
+    "lint-staged": "lint-staged --concurrent 30"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
