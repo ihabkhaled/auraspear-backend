@@ -70,7 +70,7 @@ function createMockRepository() {
     deleteManyPlaybooks: jest.fn(),
     findManyExecutionsWithPlaybook: jest.fn(),
     countExecutions: jest.fn(),
-    findCompletedExecutions: jest.fn(),
+    getAvgExecutionTimeMs: jest.fn(),
     executePlaybookTransaction: jest.fn(),
     findUserByEmail: jest.fn(),
     findUsersByEmails: jest.fn(),
@@ -494,16 +494,7 @@ describe('SoarService', () => {
         .mockResolvedValueOnce(50) // totalExecutions
         .mockResolvedValueOnce(40) // successfulExecutions
         .mockResolvedValueOnce(5) // failedExecutions
-      repository.findCompletedExecutions.mockResolvedValue([
-        {
-          startedAt: new Date('2025-06-01T12:00:00Z'),
-          completedAt: new Date('2025-06-01T12:00:05Z'),
-        },
-        {
-          startedAt: new Date('2025-06-01T13:00:00Z'),
-          completedAt: new Date('2025-06-01T13:00:10Z'),
-        },
-      ])
+      repository.getAvgExecutionTimeMs.mockResolvedValue(7500)
 
       const result = await service.getSoarStats(TENANT_ID)
 
@@ -521,7 +512,7 @@ describe('SoarService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)
-      repository.findCompletedExecutions.mockResolvedValue([])
+      repository.getAvgExecutionTimeMs.mockResolvedValue(null)
 
       const result = await service.getSoarStats(TENANT_ID)
 
@@ -531,12 +522,12 @@ describe('SoarService', () => {
     it('should enforce tenant isolation in stats queries', async () => {
       repository.countPlaybooks.mockResolvedValue(0)
       repository.countExecutions.mockResolvedValue(0)
-      repository.findCompletedExecutions.mockResolvedValue([])
+      repository.getAvgExecutionTimeMs.mockResolvedValue(null)
 
       await service.getSoarStats('other-tenant')
 
       expect(repository.countPlaybooks).toHaveBeenCalledWith({ tenantId: 'other-tenant' })
-      expect(repository.findCompletedExecutions).toHaveBeenCalledWith('other-tenant')
+      expect(repository.getAvgExecutionTimeMs).toHaveBeenCalledWith('other-tenant')
     })
   })
 })

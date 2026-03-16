@@ -6,7 +6,13 @@ import {
   buildAgentOrderBy,
   buildAgentUpdateData,
 } from './ai-agents.utilities'
-import { AiAgentStatus, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import {
+  AiAgentStatus,
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  SortOrder,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -58,7 +64,7 @@ export class AiAgentsService {
       const { _count, ...rest } = agent
       return {
         ...rest,
-        totalTokens: Number(agent.totalTokens),
+        totalTokens: String(agent.totalTokens),
         toolsCount: _count.tools,
         sessionsCount: _count.sessions,
       }
@@ -165,7 +171,7 @@ export class AiAgentsService {
     }
 
     const updated = await this.repository.updateWithDetails({
-      where: { id },
+      where: { id, tenantId: user.tenantId },
       data: buildAgentUpdateData(dto),
     })
 
@@ -220,7 +226,7 @@ export class AiAgentsService {
     await this.getAgentById(id, user.tenantId)
 
     const updated = await this.repository.updateWithDetails({
-      where: { id },
+      where: { id, tenantId: user.tenantId },
       data: { soulMd: dto.soulMd },
     })
 
@@ -261,7 +267,7 @@ export class AiAgentsService {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { startedAt: 'desc' },
+        orderBy: { startedAt: SortOrder.DESC },
       }),
       this.repository.countSessions(where),
     ])
@@ -294,7 +300,7 @@ export class AiAgentsService {
       totalAgents,
       onlineAgents,
       totalSessions: sessionAgg,
-      totalTokens: Number(costAgg._sum?.totalTokens ?? 0),
+      totalTokens: String(costAgg._sum?.totalTokens ?? 0),
       totalCost: costAgg._sum?.totalCost ?? 0,
     }
   }
@@ -311,7 +317,7 @@ export class AiAgentsService {
     }
 
     const updated = await this.repository.updateWithDetails({
-      where: { id },
+      where: { id, tenantId },
       data: { status: AiAgentStatus.ONLINE },
     })
 
@@ -344,7 +350,7 @@ export class AiAgentsService {
     }
 
     const updated = await this.repository.updateWithDetails({
-      where: { id },
+      where: { id, tenantId },
       data: { status: AiAgentStatus.OFFLINE },
     })
 

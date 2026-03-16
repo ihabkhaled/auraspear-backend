@@ -45,7 +45,7 @@ function createMockRepository() {
     updateIncidentWithTimeline: jest.fn(),
     countByStatus: jest.fn(),
     countResolvedSince: jest.fn(),
-    findResolvedIncidents: jest.fn(),
+    getAvgResolveHours: jest.fn(),
   }
 }
 
@@ -806,16 +806,7 @@ describe('IncidentsService', () => {
       repository.countByStatus.mockResolvedValueOnce(3) // in_progress
       repository.countByStatus.mockResolvedValueOnce(2) // contained
       repository.countResolvedSince.mockResolvedValue(10)
-      repository.findResolvedIncidents.mockResolvedValue([
-        {
-          createdAt: new Date('2025-05-01T00:00:00Z'),
-          resolvedAt: new Date('2025-05-02T00:00:00Z'),
-        },
-        {
-          createdAt: new Date('2025-05-10T00:00:00Z'),
-          resolvedAt: new Date('2025-05-10T12:00:00Z'),
-        },
-      ])
+      repository.getAvgResolveHours.mockResolvedValue(18)
 
       const result = await service.getIncidentStats(TENANT_ID)
 
@@ -832,7 +823,7 @@ describe('IncidentsService', () => {
       repository.countByStatus.mockResolvedValueOnce(0)
       repository.countByStatus.mockResolvedValueOnce(0)
       repository.countResolvedSince.mockResolvedValue(0)
-      repository.findResolvedIncidents.mockResolvedValue([])
+      repository.getAvgResolveHours.mockResolvedValue(null)
 
       const result = await service.getIncidentStats(TENANT_ID)
 
@@ -842,14 +833,14 @@ describe('IncidentsService', () => {
     it('should always scope stats queries to tenantId', async () => {
       repository.countByStatus.mockResolvedValue(0)
       repository.countResolvedSince.mockResolvedValue(0)
-      repository.findResolvedIncidents.mockResolvedValue([])
+      repository.getAvgResolveHours.mockResolvedValue(null)
 
       await service.getIncidentStats(TENANT_ID)
 
       expect(repository.countByStatus).toHaveBeenCalledWith(TENANT_ID, IncidentStatus.OPEN)
       expect(repository.countByStatus).toHaveBeenCalledWith(TENANT_ID, IncidentStatus.IN_PROGRESS)
       expect(repository.countByStatus).toHaveBeenCalledWith(TENANT_ID, IncidentStatus.CONTAINED)
-      expect(repository.findResolvedIncidents).toHaveBeenCalledWith(TENANT_ID)
+      expect(repository.getAvgResolveHours).toHaveBeenCalledWith(TENANT_ID)
     })
 
     it('should rethrow errors from repository', async () => {

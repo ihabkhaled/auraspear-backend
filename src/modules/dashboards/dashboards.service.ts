@@ -270,6 +270,76 @@ export class DashboardsService {
     }
   }
 
+  async getRecentActivity(
+    tenantId: string,
+    limit: number
+  ): Promise<{
+    data: Array<{
+      id: string
+      type: string
+      actorName: string
+      title: string
+      message: string
+      createdAt: Date
+      isRead: boolean
+    }>
+    pagination: {
+      page: number
+      limit: number
+      total: number
+      totalPages: number
+      hasNext: boolean
+      hasPrev: boolean
+    }
+  }> {
+    this.appLogger.debug('Fetching recent activity', {
+      feature: AppLogFeature.DASHBOARD,
+      action: 'getRecentActivity',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DashboardsService',
+      functionName: 'getRecentActivity',
+    })
+
+    const [notifications, total] = await Promise.all([
+      this.dashboardsRepository.findRecentNotifications(tenantId, limit),
+      this.dashboardsRepository.countNotifications(tenantId),
+    ])
+
+    const actorIds = [...new Set(notifications.map(n => n.actorUserId))]
+    const actors =
+      actorIds.length > 0 ? await this.dashboardsRepository.findUsersByIds(actorIds) : []
+    const actorMap = new Map(actors.map(a => [a.id, a]))
+
+    const data = notifications.map(n => {
+      const actor = actorMap.get(n.actorUserId)
+      return {
+        id: n.id,
+        type: n.type,
+        actorName: actor?.name ?? 'Unknown',
+        title: n.title,
+        message: n.message,
+        createdAt: n.createdAt,
+        isRead: n.readAt !== null,
+      }
+    })
+
+    const totalPages = Math.ceil(total / limit)
+
+    return {
+      data,
+      pagination: {
+        page: 1,
+        limit,
+        total,
+        totalPages,
+        hasNext: totalPages > 1,
+        hasPrev: false,
+      },
+    }
+  }
+
   async getPipelineHealth(tenantId: string): Promise<{
     tenantId: string
     pipelines: Array<{

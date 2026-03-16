@@ -1,4 +1,5 @@
-import { IncidentStatus } from '../../common/enums'
+import { IncidentStatus, SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdateIncidentDto } from './dto/update-incident.dto'
 import type { Incident, Prisma } from '@prisma/client'
 
@@ -44,7 +45,7 @@ export function buildIncidentOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.IncidentOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -61,7 +62,7 @@ export function buildIncidentOrderBy(
     case 'title':
       return { title: order }
     default:
-      return { createdAt: 'desc' }
+      return { createdAt: SortOrder.DESC }
   }
 }
 

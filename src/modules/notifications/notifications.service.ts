@@ -2,11 +2,18 @@ import { Injectable, Inject, forwardRef } from '@nestjs/common'
 import { NotificationsGateway } from './notifications.gateway'
 import { NotificationsRepository } from './notifications.repository'
 import {
+  buildActorMap,
+  buildMentionNotificationData,
+  buildNotificationPayload,
+  mapNotificationToResponse,
+} from './notifications.utilities'
+import {
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
   NotificationEntityType,
   NotificationType,
+  SortOrder,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -37,6 +44,10 @@ export class NotificationsService {
     private readonly gateway: NotificationsGateway
   ) {}
 
+  /* ---------------------------------------------------------------- */
+  /* LIST                                                              */
+  /* ---------------------------------------------------------------- */
+
   async listNotifications(
     tenantId: string,
     recipientUserId: string,
@@ -46,37 +57,22 @@ export class NotificationsService {
     const where = { tenantId, recipientUserId }
     const [notifications, total] = await this.notificationsRepository.findManyAndCount({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: SortOrder.DESC },
       skip: (page - 1) * limit,
       take: limit,
     })
 
-    // Batch resolve actor names
     const actorIds = [...new Set(notifications.map(n => n.actorUserId))]
     const actors =
       actorIds.length > 0 ? await this.notificationsRepository.findUsersByIds(actorIds) : []
-    const actorMap = new Map(actors.map(a => [a.id, a]))
-
-    const data: NotificationResponse[] = notifications.map(n => {
-      const actor = actorMap.get(n.actorUserId)
-      return {
-        id: n.id,
-        type: n.type,
-        actorName: actor?.name ?? 'Unknown',
-        actorEmail: actor?.email ?? '',
-        title: n.title,
-        message: n.message,
-        entityType: n.entityType,
-        entityId: n.entityId,
-        caseId: n.caseId,
-        caseCommentId: n.caseCommentId,
-        isRead: n.readAt !== null,
-        createdAt: n.createdAt,
-      }
-    })
-
+    const actorMap = buildActorMap(actors)
+    const data = notifications.map(n => mapNotificationToResponse(n, actorMap))
     return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* UNREAD COUNT / READ                                               */
+  /* ---------------------------------------------------------------- */
 
   async getUnreadCount(tenantId: string, recipientUserId: string): Promise<number> {
     return this.notificationsRepository.countUnread(tenantId, recipientUserId)
@@ -91,10 +87,7 @@ export class NotificationsService {
     if (!notification) {
       throw new BusinessException(404, 'Notification not found', 'errors.notifications.notFound')
     }
-    if (notification.readAt) {
-      return
-    }
-
+    if (notification.readAt) return
     await this.notificationsRepository.markAsRead(notificationId, user.tenantId)
   }
 
@@ -102,69 +95,8 @@ export class NotificationsService {
     await this.notificationsRepository.markAllAsRead(tenantId, recipientUserId)
   }
 
-  /**
-   * Generic helper to create a single notification + emit WebSocket events.
-   * Skips notification if recipientUserId === actorUserId (no self-notifications).
-   */
-  private async createAndEmitNotification(params: CreateNotificationParameters): Promise<void> {
-    // Never notify yourself
-    if (params.recipientUserId === params.actorUserId) {
-      return
-    }
-
-    // Resolve actor name
-    const actorUser = await this.notificationsRepository.findUserById(params.actorUserId)
-    const actorName = actorUser?.name ?? params.actorEmail
-
-    await this.notificationsRepository.createNotification({
-      tenantId: params.tenantId,
-      type: params.type,
-      actorUserId: params.actorUserId,
-      recipientUserId: params.recipientUserId,
-      title: params.title,
-      message: params.message,
-      entityType: params.entityType,
-      entityId: params.entityId,
-      caseId: params.caseId ?? null,
-      caseCommentId: params.caseCommentId ?? null,
-    })
-
-    const unreadCount = await this.getUnreadCount(params.tenantId, params.recipientUserId)
-    const payload: NotificationResponse = {
-      id: params.entityId,
-      type: params.type,
-      actorName,
-      actorEmail: params.actorEmail,
-      title: params.title,
-      message: params.message,
-      entityType: params.entityType,
-      entityId: params.entityId,
-      caseId: params.caseId ?? null,
-      caseCommentId: params.caseCommentId ?? null,
-      isRead: false,
-      createdAt: new Date(),
-    }
-    this.gateway.emitToUser(params.tenantId, params.recipientUserId, payload)
-    this.gateway.emitUnreadCount(params.tenantId, params.recipientUserId, unreadCount)
-
-    this.appLogger.info(`Notification created: ${params.type}`, {
-      feature: AppLogFeature.NOTIFICATIONS,
-      action: 'createNotification',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: params.tenantId,
-      actorEmail: params.actorEmail,
-      actorUserId: params.actorUserId,
-      targetResource: 'Notification',
-      targetResourceId: params.entityId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NotificationsService',
-      functionName: 'createAndEmitNotification',
-      metadata: { type: params.type, recipientUserId: params.recipientUserId },
-    })
-  }
-
   /* ---------------------------------------------------------------- */
-  /* CASE ASSIGNMENT NOTIFICATIONS                                      */
+  /* CASE ASSIGNMENT NOTIFICATIONS                                     */
   /* ---------------------------------------------------------------- */
 
   async notifyCaseAssigned(
@@ -175,9 +107,7 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
-    const actorUser = await this.notificationsRepository.findUserById(actorUserId)
-    const actorName = actorUser?.name ?? actorEmail
-
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.CASE_ASSIGNED,
@@ -200,9 +130,7 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
-    const actorUser = await this.notificationsRepository.findUserById(actorUserId)
-    const actorName = actorUser?.name ?? actorEmail
-
+    const actorName = await this.resolveActorName(actorUserId, actorEmail)
     await this.createAndEmitNotification({
       tenantId,
       type: NotificationType.CASE_UNASSIGNED,
@@ -218,13 +146,9 @@ export class NotificationsService {
   }
 
   /* ---------------------------------------------------------------- */
-  /* CASE ACTIVITY NOTIFICATIONS (to case owner)                        */
+  /* CASE ACTIVITY NOTIFICATIONS                                       */
   /* ---------------------------------------------------------------- */
 
-  /**
-   * Notify the case owner about activity on their case.
-   * Skips notification if the actor IS the case owner.
-   */
   async notifyCaseActivity(
     tenantId: string,
     caseId: string,
@@ -235,10 +159,7 @@ export class NotificationsService {
     actorUserId: string,
     actorEmail: string
   ): Promise<void> {
-    if (!ownerUserId) {
-      return
-    }
-
+    if (!ownerUserId) return
     await this.createAndEmitNotification({
       tenantId,
       type,
@@ -254,7 +175,7 @@ export class NotificationsService {
   }
 
   /* ---------------------------------------------------------------- */
-  /* TENANT / USER MANAGEMENT NOTIFICATIONS                             */
+  /* TENANT / USER MANAGEMENT NOTIFICATIONS                            */
   /* ---------------------------------------------------------------- */
 
   async notifyTenantAssigned(
@@ -375,6 +296,10 @@ export class NotificationsService {
     })
   }
 
+  /* ---------------------------------------------------------------- */
+  /* MENTION NOTIFICATIONS                                             */
+  /* ---------------------------------------------------------------- */
+
   async createMentionNotifications(
     tenantId: string,
     caseId: string,
@@ -382,72 +307,162 @@ export class NotificationsService {
     mentionedUserIds: string[],
     actor: JwtPayload
   ): Promise<void> {
-    // Filter out self-mentions
     const recipientIds = mentionedUserIds.filter(id => id !== actor.sub)
-    if (recipientIds.length === 0) {
-      return
-    }
+    if (recipientIds.length === 0) return
 
-    // Resolve actor name
-    const actorUser = await this.notificationsRepository.findUserById(actor.sub)
-    const actorName = actorUser?.name ?? actor.email
-
-    // Get case number for notification message
+    const actorName = await this.resolveActorName(actor.sub, actor.email)
     const caseRecord = await this.notificationsRepository.findCaseById(caseId)
     const caseNumber = caseRecord?.caseNumber ?? caseId
 
-    const notificationData = recipientIds.map(recipientUserId => ({
+    const notificationData = buildMentionNotificationData(
       tenantId,
-      type: NotificationType.MENTION,
-      actorUserId: actor.sub,
-      recipientUserId,
-      title: 'mention_notification_title',
-      message: `${actorName} mentioned you in a comment on case ${caseNumber}`,
-      entityType: NotificationEntityType.CASE_COMMENT,
-      entityId: commentId,
+      actor.sub,
+      actorName,
       caseId,
-      caseCommentId: commentId,
-    }))
-
-    // Use skipDuplicates to handle idempotency (unique constraint on recipientUserId + caseCommentId)
+      commentId,
+      caseNumber,
+      recipientIds,
+      NotificationType.MENTION,
+      NotificationEntityType.CASE_COMMENT
+    )
     await this.notificationsRepository.createManyNotifications(notificationData, true)
+    await this.emitMentionWebSocketEvents(
+      tenantId,
+      recipientIds,
+      actorName,
+      actor.email,
+      commentId,
+      caseId,
+      caseNumber
+    )
+    this.logSuccess(
+      'createMentionNotifications',
+      tenantId,
+      {
+        caseId,
+        commentId,
+        recipientCount: recipientIds.length,
+      },
+      actor
+    )
+  }
 
-    // Emit real-time WebSocket events to each recipient
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Core Notification Creation                               */
+  /* ---------------------------------------------------------------- */
+
+  private async createAndEmitNotification(params: CreateNotificationParameters): Promise<void> {
+    if (params.recipientUserId === params.actorUserId) return
+
+    const actorName = await this.resolveActorName(params.actorUserId, params.actorEmail)
+    await this.notificationsRepository.createNotification({
+      tenantId: params.tenantId,
+      type: params.type,
+      actorUserId: params.actorUserId,
+      recipientUserId: params.recipientUserId,
+      title: params.title,
+      message: params.message,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      caseId: params.caseId ?? null,
+      caseCommentId: params.caseCommentId ?? null,
+    })
+
+    const payload = buildNotificationPayload(
+      params.entityId,
+      params.type,
+      actorName,
+      params.actorEmail,
+      params.title,
+      params.message,
+      params.entityType,
+      params.entityId,
+      params.caseId ?? null,
+      params.caseCommentId ?? null
+    )
+    await this.emitToRecipient(params.tenantId, params.recipientUserId, payload)
+    this.logSuccess(
+      'createNotification',
+      params.tenantId,
+      {
+        type: params.type,
+        recipientUserId: params.recipientUserId,
+      },
+      { sub: params.actorUserId, email: params.actorEmail } as JwtPayload
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: WebSocket Emission                                       */
+  /* ---------------------------------------------------------------- */
+
+  private async emitToRecipient(
+    tenantId: string,
+    recipientUserId: string,
+    payload: NotificationResponse
+  ): Promise<void> {
+    const unreadCount = await this.getUnreadCount(tenantId, recipientUserId)
+    this.gateway.emitToUser(tenantId, recipientUserId, payload)
+    this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCount)
+  }
+
+  private async emitMentionWebSocketEvents(
+    tenantId: string,
+    recipientIds: string[],
+    actorName: string,
+    actorEmail: string,
+    commentId: string,
+    caseId: string,
+    caseNumber: string
+  ): Promise<void> {
     const unreadCounts = await Promise.all(
       recipientIds.map(id => this.getUnreadCount(tenantId, id))
     )
     for (const [index, recipientUserId] of recipientIds.entries()) {
-      const notificationPayload: NotificationResponse = {
-        id: commentId,
-        type: NotificationType.MENTION,
+      const payload = buildNotificationPayload(
+        commentId,
+        NotificationType.MENTION,
         actorName,
-        actorEmail: actor.email,
-        title: 'mention_notification_title',
-        message: `${actorName} mentioned you in a comment on case ${caseNumber}`,
-        entityType: NotificationEntityType.CASE_COMMENT,
-        entityId: commentId,
+        actorEmail,
+        'mention_notification_title',
+        `${actorName} mentioned you in a comment on case ${caseNumber}`,
+        NotificationEntityType.CASE_COMMENT,
+        commentId,
         caseId,
-        caseCommentId: commentId,
-        isRead: false,
-        createdAt: new Date(),
-      }
-      this.gateway.emitToUser(tenantId, recipientUserId, notificationPayload)
+        commentId
+      )
+      this.gateway.emitToUser(tenantId, recipientUserId, payload)
       this.gateway.emitUnreadCount(tenantId, recipientUserId, unreadCounts.at(index) ?? 0)
     }
+  }
 
-    this.appLogger.info('Mention notifications created', {
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Helpers                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async resolveActorName(actorUserId: string, fallbackEmail: string): Promise<string> {
+    const user = await this.notificationsRepository.findUserById(actorUserId)
+    return user?.name ?? fallbackEmail
+  }
+
+  private logSuccess(
+    action: string,
+    tenantId: string,
+    metadata?: Record<string, unknown>,
+    actor?: JwtPayload
+  ): void {
+    this.appLogger.info(`Notification ${action}`, {
       feature: AppLogFeature.NOTIFICATIONS,
-      action: 'createMentionNotifications',
+      action,
       outcome: AppLogOutcome.SUCCESS,
       tenantId,
-      actorEmail: actor.email,
-      actorUserId: actor.sub,
+      actorEmail: actor?.email,
+      actorUserId: actor?.sub,
       targetResource: 'Notification',
-      targetResourceId: commentId,
       sourceType: AppLogSourceType.SERVICE,
       className: 'NotificationsService',
-      functionName: 'createMentionNotifications',
-      metadata: { caseId, commentId, recipientCount: recipientIds.length },
+      functionName: action,
+      metadata,
     })
   }
 }

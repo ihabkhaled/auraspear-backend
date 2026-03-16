@@ -163,7 +163,7 @@ describe('ReportsService', () => {
 
       const result = await service.listReports(TENANT_ID)
 
-      expect(result.data[0]?.fileSize).toBe(102400)
+      expect(result.data[0]?.fileSize).toBe('102400')
     })
 
     it('should handle null fileSize', async () => {

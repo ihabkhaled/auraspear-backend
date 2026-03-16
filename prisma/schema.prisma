@@ -481,6 +481,23 @@ model UserPreference {
   notificationsEmail Boolean @default(true) @map("notifications_email")
   notificationsInApp Boolean @default(true) @map("notifications_in_app")
 
+  // Notification category preferences
+  notifyCriticalAlerts  Boolean @default(true)  @map("notify_critical_alerts")
+  notifyHighAlerts      Boolean @default(true)  @map("notify_high_alerts")
+  notifyCaseAssignments Boolean @default(true)  @map("notify_case_assignments")
+  notifyIncidentUpdates Boolean @default(true)  @map("notify_incident_updates")
+  notifyComplianceAlerts Boolean @default(true) @map("notify_compliance_alerts")
+  notifyCaseUpdates      Boolean @default(true)  @map("notify_case_updates")
+  notifyCaseComments     Boolean @default(true)  @map("notify_case_comments")
+  notifyCaseActivity     Boolean @default(true)  @map("notify_case_activity")
+  notifyUserManagement   Boolean @default(true)  @map("notify_user_management")
+
+  // Data retention preferences (days as string, e.g. '30', '90', '365', 'unlimited')
+  retentionAlerts    String @default("90")  @map("retention_alerts") @db.VarChar(20)
+  retentionLogs      String @default("90")  @map("retention_logs") @db.VarChar(20)
+  retentionIncidents String @default("365") @map("retention_incidents") @db.VarChar(20)
+  retentionAuditLogs String @default("365") @map("retention_audit_logs") @db.VarChar(20)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -547,6 +564,7 @@ model Alert {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, externalId])
+  @@index([tenantId])
   @@index([tenantId, severity])
   @@index([tenantId, status])
   @@index([tenantId, timestamp])
@@ -655,6 +673,7 @@ model CaseCommentMention {
   comment CaseComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@unique([commentId, userId])
+  @@index([commentId])
   @@index([userId])
   @@map("case_comment_mentions")
 }
@@ -801,6 +820,7 @@ model HuntEvent {
   huntSession HuntSession @relation(fields: [huntSessionId], references: [id], onDelete: Cascade)
 
   @@index([huntSessionId])
+  @@index([eventId])
   @@map("hunt_events")
 }
 
@@ -933,6 +953,7 @@ model ConnectorSyncJob {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([tenantId])
   @@index([tenantId, connectorType])
   @@index([tenantId, startedAt])
   @@index([status])
@@ -985,6 +1006,7 @@ model VelociraptorEndpoint {
   @@unique([tenantId, clientId])
   @@index([tenantId])
   @@index([tenantId, hostname])
+  @@index([clientId])
   @@map("velociraptor_endpoints")
 }
 
@@ -1007,6 +1029,7 @@ model VelociraptorHunt {
 
   @@unique([tenantId, huntId])
   @@index([tenantId])
+  @@index([huntId])
   @@map("velociraptor_hunts")
 }
 
@@ -1026,6 +1049,7 @@ model VelociraptorNotebook {
 
   @@unique([tenantId, notebookId])
   @@index([tenantId])
+  @@index([notebookId])
   @@map("velociraptor_notebooks")
 }
 
@@ -1057,6 +1081,7 @@ model LogstashPipelineLog {
   @@index([tenantId, timestamp])
   @@index([tenantId, pipelineId])
   @@index([tenantId, level])
+  @@index([pipelineId])
   @@map("logstash_pipeline_logs")
 }
 
@@ -1079,6 +1104,7 @@ model ShuffleWorkflow {
 
   @@unique([tenantId, workflowId])
   @@index([tenantId])
+  @@index([workflowId])
   @@map("shuffle_workflows")
 }
 
@@ -1380,9 +1406,13 @@ model Notification {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@unique([recipientUserId, caseCommentId])
+  @@index([tenantId])
   @@index([tenantId, recipientUserId, readAt, createdAt])
   @@index([tenantId, recipientUserId, createdAt])
   @@index([caseCommentId])
+  @@index([actorUserId])
+  @@index([recipientUserId])
+  @@index([entityId])
   @@map("notifications")
 }
 

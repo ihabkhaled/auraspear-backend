@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 
 const TOKEN_BLACKLIST_PREFIX = 'token:blacklist:'
@@ -125,7 +125,7 @@ export class TokenBlacklistService implements OnModuleDestroy {
   async isRedisHealthy(): Promise<boolean> {
     try {
       const result = await this.redis.ping()
-      return result === 'PONG'
+      return result === RedisResponse.PONG
     } catch {
       this.appLogger.warn('Token blacklist Redis connection is unhealthy', {
         feature: AppLogFeature.AUTH,

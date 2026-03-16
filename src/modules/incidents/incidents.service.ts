@@ -5,12 +5,17 @@ import {
   buildIncidentOrderBy,
   buildIncidentUpdateData,
   describeIncidentChanges,
-  calculateAvgResolveHours,
   buildAssigneesMap,
   buildCreatorsMap,
   mapIncidentListItem,
 } from './incidents.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, IncidentStatus } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  IncidentStatus,
+  SortOrder,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -356,7 +361,7 @@ export class IncidentsService {
 
     return this.repository.findManyTimeline({
       where: { incidentId: id },
-      orderBy: { timestamp: 'desc' },
+      orderBy: { timestamp: SortOrder.DESC },
     })
   }
 
@@ -400,7 +405,7 @@ export class IncidentsService {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-    const [open, inProgress, contained, resolved30d, avgResult] = await Promise.all([
+    const [open, inProgress, contained, resolved30d, avgResolveHours] = await Promise.all([
       this.repository.countByStatus(tenantId, IncidentStatus.OPEN),
       this.repository.countByStatus(tenantId, IncidentStatus.IN_PROGRESS),
       this.repository.countByStatus(tenantId, IncidentStatus.CONTAINED),
@@ -409,7 +414,7 @@ export class IncidentsService {
         [IncidentStatus.RESOLVED, IncidentStatus.CLOSED],
         thirtyDaysAgo
       ),
-      this.repository.findResolvedIncidents(tenantId),
+      this.repository.getAvgResolveHours(tenantId),
     ])
 
     return {
@@ -417,7 +422,7 @@ export class IncidentsService {
       inProgress,
       contained,
       resolved30d,
-      avgResolveHours: calculateAvgResolveHours(avgResult),
+      avgResolveHours,
     }
   }
 

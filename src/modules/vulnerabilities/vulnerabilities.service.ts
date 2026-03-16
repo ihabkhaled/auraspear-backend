@@ -6,7 +6,13 @@ import {
   buildVulnerabilityUpdateData,
   buildVulnerabilityStats,
 } from './vulnerabilities.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  PatchStatus,
+  VulnerabilitySeverity,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -314,12 +320,12 @@ export class VulnerabilitiesService {
 
       const [criticalCount, highCount, mediumCount, patched30dCount, exploitCount] =
         await Promise.all([
-          this.repository.count({ tenantId, severity: 'critical' }),
-          this.repository.count({ tenantId, severity: 'high' }),
-          this.repository.count({ tenantId, severity: 'medium' }),
+          this.repository.count({ tenantId, severity: VulnerabilitySeverity.CRITICAL }),
+          this.repository.count({ tenantId, severity: VulnerabilitySeverity.HIGH }),
+          this.repository.count({ tenantId, severity: VulnerabilitySeverity.MEDIUM }),
           this.repository.count({
             tenantId,
-            patchStatus: 'mitigated',
+            patchStatus: PatchStatus.MITIGATED,
             patchedAt: { gte: thirtyDaysAgo },
           }),
           this.repository.count({ tenantId, exploitAvailable: true }),

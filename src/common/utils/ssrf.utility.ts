@@ -1,3 +1,4 @@
+import { NodeEnvironment } from '../enums'
 import { BusinessException } from '../exceptions/business.exception'
 
 const PRIVATE_RANGES = [
@@ -41,7 +42,7 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   }
 
   // Block private/internal IPs (skip in non-production for local testing)
-  const isProduction = process.env.NODE_ENV === 'production'
+  const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
   const { hostname } = parsed
   if (isProduction) {
     for (const pattern of PRIVATE_RANGES) {

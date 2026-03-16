@@ -1,6 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { DataExplorerRepository } from './data-explorer.repository'
 import {
+  buildFluxQuery,
+  buildGrafanaDashboardWhere,
+  buildLogstashLogWhere,
+  buildMispSearchParameters,
+  buildShuffleWorkflowWhere,
+  buildSyncJobWhere,
+  buildSyncSummaryMap,
+  buildVelociraptorEndpointWhere,
+  buildVelociraptorHuntWhere,
+  countBatchResults,
+  isMispAttributeSearch,
+  mapConnectorOverview,
+  mapGrafanaDashboardUpsert,
+  mapLogstashPipelineEntry,
+  mapShuffleWorkflowUpsert,
+  mapVelociraptorEndpointUpsert,
+  mapVelociraptorHuntUpsert,
+} from './data-explorer.utilities'
+import {
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
@@ -70,38 +89,11 @@ export class DataExplorerService {
       this.repository.groupBySyncJobStatus(tenantId),
     ])
 
-    const summaryMap = new Map<string, { count: number; connectors: string[] }>([
-      ['running', { count: 0, connectors: [] }],
-      ['completed', { count: 0, connectors: [] }],
-      ['failed', { count: 0, connectors: [] }],
-    ])
-    for (const group of syncSummary) {
-      const entry = summaryMap.get(group.status)
-      if (entry) {
-        entry.count += group._count
-        if (!entry.connectors.includes(group.connectorType)) {
-          entry.connectors.push(group.connectorType)
-        }
-      }
-    }
-
-    this.appLogger.info('Explorer overview fetched', {
-      feature: AppLogFeature.DATA_EXPLORER,
-      action: 'getOverview',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: CLASS_NAME,
-      functionName: 'getOverview',
-    })
+    const summaryMap = buildSyncSummaryMap(syncSummary)
+    this.logAction('getOverview', tenantId, {})
 
     return {
-      connectors: connectors.map(c => ({
-        type: c.type,
-        enabled: c.enabled,
-        configured: c.lastTestOk === true,
-        lastSyncAt: c.lastSyncAt?.toISOString() ?? null,
-      })),
+      connectors: mapConnectorOverview(connectors),
       syncJobsSummary: {
         running: summaryMap.get('running') ?? { count: 0, connectors: [] },
         completed: summaryMap.get('completed') ?? { count: 0, connectors: [] },
@@ -110,32 +102,22 @@ export class DataExplorerService {
     }
   }
 
-  // ── Graylog (Live Fetch) ───────────────────────────────────────────
+  // ── Graylog ───────────────────────────────────────────────────────
 
   async searchGraylogLogs(
     tenantId: string,
     dto: GraylogSearchDto
   ): Promise<PaginatedUnknownResult> {
     const config = await this.getConfig(tenantId, ConnectorType.GRAYLOG)
-
-    let result: { events: unknown[]; total: number }
-    try {
-      result = await this.graylogService.searchEvents(config, {
+    const result = await this.callExternalOrThrow('Graylog', () =>
+      this.graylogService.searchEvents(config, {
         query: dto.query,
         timerange: { type: 'relative', range: dto.timeRange },
         page: dto.page,
         per_page: dto.limit,
       })
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Graylog: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    )
     this.logAction('searchGraylogLogs', tenantId, { query: dto.query, total: result.total })
-
     return {
       data: result.events,
       pagination: buildPaginationMeta(dto.page, dto.limit, result.total),
@@ -144,43 +126,20 @@ export class DataExplorerService {
 
   async getGraylogEventDefinitions(tenantId: string): Promise<unknown[]> {
     const config = await this.getConfig(tenantId, ConnectorType.GRAYLOG)
-
-    let definitions: unknown[]
-    try {
-      definitions = await this.graylogService.getEventDefinitions(config)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Graylog: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    const definitions = await this.callExternalOrThrow('Graylog', () =>
+      this.graylogService.getEventDefinitions(config)
+    )
     this.logAction('getGraylogEventDefinitions', tenantId, { count: definitions.length })
     return definitions
   }
 
-  // ── Grafana (Metadata Sync + Live Drilldown) ──────────────────────
+  // ── Grafana ───────────────────────────────────────────────────────
 
   async getGrafanaDashboards(
     tenantId: string,
     dto: GrafanaDashboardQueryDto
   ): Promise<PaginatedGrafanaDashboards> {
-    // Read from synced metadata in DB
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.search) {
-      where['title'] = { contains: dto.search, mode: 'insensitive' }
-    }
-    if (dto.tag) {
-      where['tags'] = { has: dto.tag }
-    }
-    if (dto.folder) {
-      where['folderTitle'] = { contains: dto.folder, mode: 'insensitive' }
-    }
-    if (dto.starred !== undefined) {
-      where['isStarred'] = dto.starred
-    }
-
+    const where = buildGrafanaDashboardWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManyGrafanaDashboards({
         where,
@@ -190,210 +149,91 @@ export class DataExplorerService {
       }),
       this.repository.countGrafanaDashboards(where),
     ])
-
     this.logAction('getGrafanaDashboards', tenantId, { total })
-
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
 
   async syncGrafanaDashboards(tenantId: string): Promise<{ synced: number }> {
     const config = await this.getConfig(tenantId, ConnectorType.GRAFANA)
+    const dashboards = (await this.callExternalOrThrow('Grafana', () =>
+      this.grafanaService.getDashboards(config)
+    )) as Array<Record<string, unknown>>
 
-    let dashboards: Array<Record<string, unknown>>
-    try {
-      dashboards = (await this.grafanaService.getDashboards(config)) as Array<
-        Record<string, unknown>
-      >
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Grafana: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.syncFailed'
-      )
-    }
-
-    const job = await this.createSyncJob(tenantId, ConnectorType.GRAFANA)
-    let synced = 0
-    let recordsFailed = 0
-
-    try {
-      const allResults = await processInBatches(dashboards, 50, dashboard => {
-        const uid = String(dashboard['uid'] ?? '')
-        if (!uid) {
-          return Promise.reject(new Error('Missing uid'))
-        }
+    return this.runSyncJob(
+      tenantId,
+      ConnectorType.GRAFANA,
+      dashboards,
+      dashboard => {
+        const { uid, create, update } = mapGrafanaDashboardUpsert(tenantId, dashboard)
+        if (!uid) return Promise.reject(new Error('Missing uid'))
         return this.repository.upsertGrafanaDashboard({
           where: { tenantId_uid: { tenantId, uid } },
-          create: {
-            tenantId,
-            uid,
-            title: String(dashboard['title'] ?? 'Untitled'),
-            folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
-            url: String(dashboard['url'] ?? ''),
-            tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
-            type: String(dashboard['type'] ?? 'dash-db'),
-            isStarred: Boolean(dashboard['isStarred']),
-            syncedAt: new Date(),
-          },
-          update: {
-            title: String(dashboard['title'] ?? 'Untitled'),
-            folderTitle: dashboard['folderTitle'] ? String(dashboard['folderTitle']) : null,
-            url: String(dashboard['url'] ?? ''),
-            tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
-            type: String(dashboard['type'] ?? 'dash-db'),
-            isStarred: Boolean(dashboard['isStarred']),
-            syncedAt: new Date(),
-          },
+          create,
+          update,
         })
-      })
-      for (const result of allResults) {
-        if (result.status === 'fulfilled') {
-          synced++
-        } else {
-          recordsFailed++
-        }
-      }
-
-      await this.completeSyncJob(job.id, synced, recordsFailed)
-    } catch (error) {
-      await this.failSyncJob(job.id, recordsFailed, error)
-      throw error
-    }
-
-    this.logAction('syncGrafanaDashboards', tenantId, { synced, failed: recordsFailed })
-    return { synced }
+      },
+      'syncGrafanaDashboards'
+    )
   }
 
-  // ── InfluxDB (Live Query) ──────────────────────────────────────────
+  // ── InfluxDB ──────────────────────────────────────────────────────
 
   async queryInfluxDB(
     tenantId: string,
     dto: InfluxDBQueryDto
   ): Promise<{ data: string; bucket: string }> {
     const config = await this.getConfig(tenantId, ConnectorType.INFLUXDB)
-
-    // Build a safe Flux query from user params
-    const flux = [
-      `from(bucket: "${this.sanitizeFluxString(dto.bucket)}")`,
-      `  |> range(start: ${this.sanitizeFluxDuration(dto.range)})`,
-      dto.measurement
-        ? `  |> filter(fn: (r) => r._measurement == "${this.sanitizeFluxString(dto.measurement)}")`
-        : '',
-      `  |> limit(n: ${dto.limit})`,
-    ]
-      .filter(Boolean)
-      .join('\n')
-
-    let result: string
-    try {
-      result = await this.influxDBService.query(config, flux)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to InfluxDB: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    const flux = buildFluxQuery(dto.bucket, dto.range, dto.measurement, dto.limit)
+    const result = await this.callExternalOrThrow('InfluxDB', () =>
+      this.influxDBService.query(config, flux)
+    )
     this.logAction('queryInfluxDB', tenantId, { bucket: dto.bucket })
     return { data: result, bucket: dto.bucket }
   }
 
   async getInfluxDBBuckets(tenantId: string): Promise<unknown[]> {
     const config = await this.getConfig(tenantId, ConnectorType.INFLUXDB)
-
-    let buckets: unknown[]
-    try {
-      buckets = await this.influxDBService.getBuckets(config)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to InfluxDB: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    const buckets = await this.callExternalOrThrow('InfluxDB', () =>
+      this.influxDBService.getBuckets(config)
+    )
     this.logAction('getInfluxDBBuckets', tenantId, { count: buckets.length })
     return buckets
   }
 
-  // ── MISP (Full Metadata Sync) ──────────────────────────────────────
+  // ── MISP ──────────────────────────────────────────────────────────
 
   async searchMispEvents(
     tenantId: string,
     dto: MispEventQueryDto
   ): Promise<PaginatedUnknownResult> {
     const config = await this.getConfig(tenantId, ConnectorType.MISP)
+    const searchParameters = buildMispSearchParameters(dto)
 
-    // Build search params for MISP API
-    const searchParameters: Record<string, unknown> = {}
-    if (dto.value) {
-      searchParameters['value'] = dto.value
-    }
-    if (dto.type) {
-      searchParameters['type'] = dto.type
-    }
-    if (dto.category) {
-      searchParameters['category'] = dto.category
-    }
-
-    // If searching attributes, use searchAttributes; otherwise list events
-    let data: unknown[]
-    try {
-      data = await (dto.value || dto.type || dto.category
+    const data = await this.callExternalOrThrow('MISP', () =>
+      isMispAttributeSearch(dto)
         ? this.mispService.searchAttributes(config, searchParameters)
-        : this.mispService.getEvents(config, dto.limit))
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to MISP: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+        : this.mispService.getEvents(config, dto.limit)
+    )
     this.logAction('searchMispEvents', tenantId, { resultCount: data.length })
-
-    return {
-      data,
-      pagination: buildPaginationMeta(dto.page, dto.limit, data.length),
-    }
+    return { data, pagination: buildPaginationMeta(dto.page, dto.limit, data.length) }
   }
 
   async getMispEventDetail(tenantId: string, eventId: string): Promise<unknown> {
     const config = await this.getConfig(tenantId, ConnectorType.MISP)
-
-    let event: unknown
-    try {
-      event = await this.mispService.getEvent(config, eventId)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to MISP: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    const event = await this.callExternalOrThrow('MISP', () =>
+      this.mispService.getEvent(config, eventId)
+    )
     this.logAction('getMispEventDetail', tenantId, { eventId })
     return event
   }
 
-  // ── Velociraptor (Metadata Sync + Live Drilldown) ──────────────────
+  // ── Velociraptor ──────────────────────────────────────────────────
 
   async getVelociraptorEndpoints(
     tenantId: string,
     dto: VelociraptorEndpointQueryDto
   ): Promise<PaginatedVelociraptorEndpoints> {
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.search) {
-      where['hostname'] = { contains: dto.search, mode: 'insensitive' }
-    }
-    if (dto.os) {
-      where['os'] = { contains: dto.os, mode: 'insensitive' }
-    }
-    if (dto.label) {
-      where['labels'] = { has: dto.label }
-    }
-
+    const where = buildVelociraptorEndpointWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManyVelociraptorEndpoints({
         where,
@@ -403,7 +243,6 @@ export class DataExplorerService {
       }),
       this.repository.countVelociraptorEndpoints(where),
     ])
-
     this.logAction('getVelociraptorEndpoints', tenantId, { total })
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
@@ -412,14 +251,7 @@ export class DataExplorerService {
     tenantId: string,
     dto: VelociraptorHuntQueryDto
   ): Promise<PaginatedVelociraptorHunts> {
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.search) {
-      where['description'] = { contains: dto.search, mode: 'insensitive' }
-    }
-    if (dto.state) {
-      where['state'] = dto.state
-    }
-
+    const where = buildVelociraptorHuntWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManyVelociraptorHunts({
         where,
@@ -429,7 +261,6 @@ export class DataExplorerService {
       }),
       this.repository.countVelociraptorHunts(where),
     ])
-
     this.logAction('getVelociraptorHunts', tenantId, { total })
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
@@ -439,18 +270,9 @@ export class DataExplorerService {
     vql: string
   ): Promise<{ rows: unknown[]; columns: string[] }> {
     const config = await this.getConfig(tenantId, ConnectorType.VELOCIRAPTOR)
-
-    let result: { rows: unknown[]; columns: string[] }
-    try {
-      result = await this.velociraptorService.runVQL(config, vql)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Velociraptor: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.connectorUnavailable'
-      )
-    }
-
+    const result = await this.callExternalOrThrow('Velociraptor', () =>
+      this.velociraptorService.runVQL(config, vql)
+    )
     this.logAction('runVelociraptorVQL', tenantId, {
       rowCount: result.rows.length,
       columnCount: result.columns.length,
@@ -461,143 +283,36 @@ export class DataExplorerService {
   async syncVelociraptorMetadata(tenantId: string): Promise<{ endpoints: number; hunts: number }> {
     const config = await this.getConfig(tenantId, ConnectorType.VELOCIRAPTOR)
     const job = await this.createSyncJob(tenantId, ConnectorType.VELOCIRAPTOR)
-
-    let endpointsSynced = 0
-    let huntsSynced = 0
-    let recordsFailed = 0
+    let totalSynced = 0
+    let totalFailed = 0
 
     try {
-      // Sync endpoints
-      const clients = (await this.velociraptorService.getClients(config)) as Array<
-        Record<string, unknown>
-      >
-      const endpointResults = await processInBatches(clients, 50, client => {
-        const clientId = String(client['client_id'] ?? '')
-        if (!clientId) {
-          return Promise.reject(new Error('Missing client_id'))
-        }
-        return this.repository.upsertVelociraptorEndpoint({
-          where: { tenantId_clientId: { tenantId, clientId } },
-          create: {
-            tenantId,
-            clientId,
-            hostname: String(
-              (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
-                client['client_id'] ??
-                'unknown'
-            ),
-            os: String(
-              (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ?? 'unknown'
-            ),
-            labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
-            ipAddress: String(client['last_ip'] ?? ''),
-            lastSeenAt: client['last_seen_at']
-              ? new Date(Number(client['last_seen_at']) / 1000)
-              : new Date(),
-            syncedAt: new Date(),
-          },
-          update: {
-            hostname: String(
-              (client['os_info'] as Record<string, unknown> | undefined)?.['fqdn'] ??
-                client['client_id'] ??
-                'unknown'
-            ),
-            os: String(
-              (client['os_info'] as Record<string, unknown> | undefined)?.['system'] ?? 'unknown'
-            ),
-            labels: Array.isArray(client['labels']) ? (client['labels'] as string[]) : [],
-            ipAddress: String(client['last_ip'] ?? ''),
-            lastSeenAt: client['last_seen_at']
-              ? new Date(Number(client['last_seen_at']) / 1000)
-              : new Date(),
-            syncedAt: new Date(),
-          },
-        })
-      })
-      for (const result of endpointResults) {
-        if (result.status === 'fulfilled') {
-          endpointsSynced++
-        } else {
-          recordsFailed++
-        }
-      }
+      const endpointResult = await this.syncVelociraptorEndpoints(tenantId, config)
+      const huntResult = await this.syncVelociraptorHunts(tenantId, config)
 
-      // Sync hunts via VQL
-      const huntResult_ult = await this.velociraptorService.runVQL(
-        config,
-        'SELECT hunt_id, hunt_description, state, artifacts, stats, create_time FROM hunts()'
-      )
-      const huntResults = await processInBatches(huntResult_ult.rows, 50, row => {
-        const hunt = row as Record<string, unknown>
-        const huntId = String(hunt['hunt_id'] ?? '')
-        if (!huntId) {
-          return Promise.reject(new Error('Missing hunt_id'))
-        }
-        const stats = (hunt['stats'] ?? {}) as Record<string, unknown>
-        return this.repository.upsertVelociraptorHunt({
-          where: { tenantId_huntId: { tenantId, huntId } },
-          create: {
-            tenantId,
-            huntId,
-            description: String(hunt['hunt_description'] ?? ''),
-            state: String(hunt['state'] ?? 'PAUSED'),
-            artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
-            totalClients: Number(stats['total_clients_scheduled'] ?? 0),
-            finishedClients: Number(stats['total_clients_with_results'] ?? 0),
-            createdAt: hunt['create_time']
-              ? new Date(Number(hunt['create_time']) / 1000)
-              : new Date(),
-            syncedAt: new Date(),
-          },
-          update: {
-            description: String(hunt['hunt_description'] ?? ''),
-            state: String(hunt['state'] ?? 'PAUSED'),
-            artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
-            totalClients: Number(stats['total_clients_scheduled'] ?? 0),
-            finishedClients: Number(stats['total_clients_with_results'] ?? 0),
-            syncedAt: new Date(),
-          },
-        })
-      })
-      for (const huntResult of huntResults) {
-        if (huntResult.status === 'fulfilled') {
-          huntsSynced++
-        } else {
-          recordsFailed++
-        }
-      }
+      totalSynced = endpointResult.synced + huntResult.synced
+      totalFailed = endpointResult.failed + huntResult.failed
+      await this.completeSyncJob(job.id, tenantId, totalSynced, totalFailed)
 
-      await this.completeSyncJob(job.id, endpointsSynced + huntsSynced, recordsFailed)
+      this.logAction('syncVelociraptorMetadata', tenantId, {
+        endpoints: endpointResult.synced,
+        hunts: huntResult.synced,
+        failed: totalFailed,
+      })
+      return { endpoints: endpointResult.synced, hunts: huntResult.synced }
     } catch (error) {
-      await this.failSyncJob(job.id, recordsFailed, error)
+      await this.failSyncJob(job.id, tenantId, totalFailed, error)
       throw error
     }
-
-    this.logAction('syncVelociraptorMetadata', tenantId, {
-      endpoints: endpointsSynced,
-      hunts: huntsSynced,
-      failed: recordsFailed,
-    })
-    return { endpoints: endpointsSynced, hunts: huntsSynced }
   }
 
-  // ── Logstash (Pipeline Logs — DB Sync) ─────────────────────────────
+  // ── Logstash ──────────────────────────────────────────────────────
 
   async getLogstashLogs(
     tenantId: string,
     dto: LogstashLogQueryDto
   ): Promise<PaginatedLogstashLogs> {
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.search) {
-      where['message'] = { contains: dto.search, mode: 'insensitive' }
-    }
-    if (dto.level) {
-      where['level'] = dto.level
-    }
-    if (dto.pipelineId) {
-      where['pipelineId'] = { contains: dto.pipelineId, mode: 'insensitive' }
-    }
-
+    const where = buildLogstashLogWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManyLogstashLogs({
         where,
@@ -607,87 +322,36 @@ export class DataExplorerService {
       }),
       this.repository.countLogstashLogs(where),
     ])
-
     this.logAction('getLogstashLogs', tenantId, { total })
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
 
   async syncLogstashLogs(tenantId: string): Promise<{ synced: number }> {
     const config = await this.getConfig(tenantId, ConnectorType.LOGSTASH)
+    const pipelineStats = await this.callExternalOrThrow('Logstash', () =>
+      this.logstashService.getPipelineStats(config)
+    )
 
-    let pipelineStats: { pipelines: Record<string, unknown> }
-    try {
-      pipelineStats = await this.logstashService.getPipelineStats(config)
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Logstash: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.syncFailed'
-      )
-    }
-
-    const job = await this.createSyncJob(tenantId, ConnectorType.LOGSTASH)
-    let synced = 0
-    let recordsFailed = 0
-
-    try {
-      const pipelineEntries = Object.entries(pipelineStats.pipelines)
-      const pipelineResults = await processInBatches(
-        pipelineEntries,
-        50,
-        ([pipelineId, stats]: [string, unknown]) => {
-          const pipelineStat = stats as Record<string, unknown>
-          const events = (pipelineStat['events'] ?? {}) as Record<string, unknown>
-          return this.repository.createLogstashLog({
-            tenantId,
-            pipelineId,
-            timestamp: new Date(),
-            level: LogLevel.INFO,
-            message: `Pipeline ${pipelineId} stats snapshot`,
-            source: pipelineId,
-            eventsIn: Number(events['in'] ?? 0),
-            eventsOut: Number(events['out'] ?? 0),
-            eventsFiltered: Number(events['filtered'] ?? 0),
-            durationMs: Number(events['duration_in_millis'] ?? 0),
-            metadata: JSON.parse(JSON.stringify(pipelineStat)),
-            syncedAt: new Date(),
-          })
-        }
-      )
-      for (const result of pipelineResults) {
-        if (result.status === 'fulfilled') {
-          synced++
-        } else {
-          recordsFailed++
-        }
-      }
-
-      await this.completeSyncJob(job.id, synced, recordsFailed)
-    } catch (error) {
-      await this.failSyncJob(job.id, recordsFailed, error)
-      throw error
-    }
-
-    this.logAction('syncLogstashLogs', tenantId, { synced, failed: recordsFailed })
-    return { synced }
+    const entries = Object.entries(pipelineStats.pipelines)
+    return this.runSyncJob(
+      tenantId,
+      ConnectorType.LOGSTASH,
+      entries,
+      ([pipelineId, stats]) => {
+        const data = mapLogstashPipelineEntry(tenantId, pipelineId, stats, LogLevel.INFO)
+        return this.repository.createLogstashLog(data)
+      },
+      'syncLogstashLogs'
+    )
   }
 
-  // ── Shuffle (Metadata Sync + Live Status) ──────────────────────────
+  // ── Shuffle ───────────────────────────────────────────────────────
 
   async getShuffleWorkflows(
     tenantId: string,
     dto: ShuffleWorkflowQueryDto
   ): Promise<PaginatedShuffleWorkflows> {
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.search) {
-      where['name'] = { contains: dto.search, mode: 'insensitive' }
-    }
-    if (dto.status === 'valid') {
-      where['isValid'] = true
-    } else if (dto.status === 'invalid') {
-      where['isValid'] = false
-    }
-
+    const where = buildShuffleWorkflowWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManyShuffleWorkflows({
         where,
@@ -697,86 +361,37 @@ export class DataExplorerService {
       }),
       this.repository.countShuffleWorkflows(where),
     ])
-
     this.logAction('getShuffleWorkflows', tenantId, { total })
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
 
   async syncShuffleWorkflows(tenantId: string): Promise<{ synced: number }> {
     const config = await this.getConfig(tenantId, ConnectorType.SHUFFLE)
+    const workflows = (await this.callExternalOrThrow('Shuffle', () =>
+      this.shuffleService.getWorkflows(config)
+    )) as Array<Record<string, unknown>>
 
-    let workflows: Array<Record<string, unknown>>
-    try {
-      workflows = (await this.shuffleService.getWorkflows(config)) as Array<Record<string, unknown>>
-    } catch (error) {
-      throw new BusinessException(
-        502,
-        `Failed to connect to Shuffle: ${error instanceof Error ? error.message : 'unknown'}`,
-        'errors.explorer.syncFailed'
-      )
-    }
-
-    const job = await this.createSyncJob(tenantId, ConnectorType.SHUFFLE)
-    let synced = 0
-    let recordsFailed = 0
-
-    try {
-      const workflowResults = await processInBatches(workflows, 50, workflow => {
-        const workflowId = String(workflow['id'] ?? '')
-        if (!workflowId) {
-          return Promise.reject(new Error('Missing workflow id'))
-        }
+    return this.runSyncJob(
+      tenantId,
+      ConnectorType.SHUFFLE,
+      workflows,
+      workflow => {
+        const { workflowId, create, update } = mapShuffleWorkflowUpsert(tenantId, workflow)
+        if (!workflowId) return Promise.reject(new Error('Missing workflow id'))
         return this.repository.upsertShuffleWorkflow({
           where: { tenantId_workflowId: { tenantId, workflowId } },
-          create: {
-            tenantId,
-            workflowId,
-            name: String(workflow['name'] ?? 'Unnamed'),
-            description: workflow['description'] ? String(workflow['description']) : null,
-            isValid: Boolean(workflow['is_valid']),
-            triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
-            tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
-            syncedAt: new Date(),
-          },
-          update: {
-            name: String(workflow['name'] ?? 'Unnamed'),
-            description: workflow['description'] ? String(workflow['description']) : null,
-            isValid: Boolean(workflow['is_valid']),
-            triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
-            tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
-            syncedAt: new Date(),
-          },
+          create,
+          update,
         })
-      })
-      for (const result of workflowResults) {
-        if (result.status === 'fulfilled') {
-          synced++
-        } else {
-          recordsFailed++
-        }
-      }
-
-      await this.completeSyncJob(job.id, synced, recordsFailed)
-    } catch (error) {
-      await this.failSyncJob(job.id, recordsFailed, error)
-      throw error
-    }
-
-    this.logAction('syncShuffleWorkflows', tenantId, { synced, failed: recordsFailed })
-    return { synced }
+      },
+      'syncShuffleWorkflows'
+    )
   }
 
-  // ── Sync Jobs ──────────────────────────────────────────────────────
+  // ── Sync Jobs ─────────────────────────────────────────────────────
 
   async getSyncJobs(tenantId: string, dto: SyncJobQueryDto): Promise<PaginatedSyncJobs> {
-    const where: Record<string, unknown> = { tenantId }
-    if (dto.connectorType) {
-      where['connectorType'] = dto.connectorType
-    }
-    if (dto.status) {
-      where['status'] = dto.status
-    }
-
+    const where = buildSyncJobWhere(tenantId, dto)
     const [data, total] = await Promise.all([
       this.repository.findManySyncJobs({
         where,
@@ -786,7 +401,6 @@ export class DataExplorerService {
       }),
       this.repository.countSyncJobs(where),
     ])
-
     return { data, pagination: buildPaginationMeta(dto.page, dto.limit, total) }
   }
 
@@ -795,23 +409,94 @@ export class DataExplorerService {
     connectorType: ConnectorType,
     initiatedBy: string
   ): Promise<{ jobId: string }> {
-    // Validate connector is enabled
     await this.getConfig(tenantId, connectorType)
-
     const job = await this.createSyncJob(tenantId, connectorType, initiatedBy)
 
-    // Run sync in background — don't await
     this.executeSyncInBackground(tenantId, connectorType, job.id).catch(error => {
       this.logger.error(
         `Background sync failed for ${connectorType}: ${error instanceof Error ? error.message : 'unknown'}`
       )
     })
-
     this.logAction('triggerSync', tenantId, { connectorType, jobId: job.id })
     return { jobId: job.id }
   }
 
-  // ── Private Helpers ────────────────────────────────────────────────
+  // ── Private: External Call Wrapper ────────────────────────────────
+
+  private async callExternalOrThrow<T>(serviceName: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn()
+    } catch (error) {
+      throw new BusinessException(
+        502,
+        `Failed to connect to ${serviceName}: ${error instanceof Error ? error.message : 'unknown'}`,
+        'errors.explorer.connectorUnavailable'
+      )
+    }
+  }
+
+  // ── Private: Sync Job Pipeline ────────────────────────────────────
+
+  private async runSyncJob<T>(
+    tenantId: string,
+    connectorType: ConnectorType,
+    items: T[],
+    processFunction: (item: T) => Promise<unknown>,
+    actionName: string
+  ): Promise<{ synced: number }> {
+    const job = await this.createSyncJob(tenantId, connectorType)
+    try {
+      const results = await processInBatches(items, 50, processFunction)
+      const { synced, failed } = countBatchResults(results)
+      await this.completeSyncJob(job.id, tenantId, synced, failed)
+      this.logAction(actionName, tenantId, { synced, failed })
+      return { synced }
+    } catch (error) {
+      await this.failSyncJob(job.id, tenantId, 0, error)
+      throw error
+    }
+  }
+
+  private async syncVelociraptorEndpoints(
+    tenantId: string,
+    config: Record<string, unknown>
+  ): Promise<{ synced: number; failed: number }> {
+    const clients = (await this.velociraptorService.getClients(config)) as Array<
+      Record<string, unknown>
+    >
+    const results = await processInBatches(clients, 50, client => {
+      const { clientId, create, update } = mapVelociraptorEndpointUpsert(tenantId, client)
+      if (!clientId) return Promise.reject(new Error('Missing client_id'))
+      return this.repository.upsertVelociraptorEndpoint({
+        where: { tenantId_clientId: { tenantId, clientId } },
+        create,
+        update,
+      })
+    })
+    return countBatchResults(results)
+  }
+
+  private async syncVelociraptorHunts(
+    tenantId: string,
+    config: Record<string, unknown>
+  ): Promise<{ synced: number; failed: number }> {
+    const huntResult = await this.velociraptorService.runVQL(
+      config,
+      'SELECT hunt_id, hunt_description, state, artifacts, stats, create_time FROM hunts()'
+    )
+    const results = await processInBatches(huntResult.rows, 50, row => {
+      const { huntId, create, update } = mapVelociraptorHuntUpsert(tenantId, row)
+      if (!huntId) return Promise.reject(new Error('Missing hunt_id'))
+      return this.repository.upsertVelociraptorHunt({
+        where: { tenantId_huntId: { tenantId, huntId } },
+        create,
+        update,
+      })
+    })
+    return countBatchResults(results)
+  }
+
+  // ── Private: Config & Job Helpers ─────────────────────────────────
 
   private async getConfig(tenantId: string, type: ConnectorType): Promise<Record<string, unknown>> {
     const config = await this.connectorsService.getDecryptedConfig(tenantId, type)
@@ -841,13 +526,13 @@ export class DataExplorerService {
 
   private async completeSyncJob(
     jobId: string,
+    tenantId: string,
     recordsSynced: number,
     recordsFailed: number
   ): Promise<void> {
     const job = await this.repository.findSyncJobById(jobId)
     const durationMs = job ? Date.now() - job.startedAt.getTime() : null
-
-    await this.repository.updateSyncJob(jobId, {
+    await this.repository.updateSyncJob(jobId, tenantId, {
       status: SyncJobStatus.COMPLETED,
       recordsSynced,
       recordsFailed,
@@ -856,11 +541,15 @@ export class DataExplorerService {
     })
   }
 
-  private async failSyncJob(jobId: string, recordsFailed: number, error: unknown): Promise<void> {
+  private async failSyncJob(
+    jobId: string,
+    tenantId: string,
+    recordsFailed: number,
+    error: unknown
+  ): Promise<void> {
     const job = await this.repository.findSyncJobById(jobId)
     const durationMs = job ? Date.now() - job.startedAt.getTime() : null
-
-    await this.repository.updateSyncJob(jobId, {
+    await this.repository.updateSyncJob(jobId, tenantId, {
       status: SyncJobStatus.FAILED,
       recordsFailed,
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
@@ -876,20 +565,30 @@ export class DataExplorerService {
   ): Promise<void> {
     try {
       switch (connectorType) {
-        case ConnectorType.GRAFANA:
+        case ConnectorType.GRAFANA: {
           await this.syncGrafanaDashboards(tenantId)
           break
-        case ConnectorType.VELOCIRAPTOR:
+        }
+        case ConnectorType.VELOCIRAPTOR: {
           await this.syncVelociraptorMetadata(tenantId)
           break
-        case ConnectorType.SHUFFLE:
+        }
+        case ConnectorType.SHUFFLE: {
           await this.syncShuffleWorkflows(tenantId)
           break
-        case ConnectorType.LOGSTASH:
+        }
+        case ConnectorType.LOGSTASH: {
           await this.syncLogstashLogs(tenantId)
           break
-        default:
-          await this.failSyncJob(jobId, 0, new Error(`Sync not supported for ${connectorType}`))
+        }
+        default: {
+          await this.failSyncJob(
+            jobId,
+            tenantId,
+            0,
+            new Error(`Sync not supported for ${connectorType}`)
+          )
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -897,6 +596,8 @@ export class DataExplorerService {
       )
     }
   }
+
+  // ── Private: Logging ──────────────────────────────────────────────
 
   private logAction(
     functionName: string,
@@ -913,19 +614,5 @@ export class DataExplorerService {
       functionName,
       metadata,
     })
-  }
-
-  /** Sanitize a string value for Flux query injection prevention. */
-  private sanitizeFluxString(value: string): string {
-    return value.replaceAll('"', '\\"').replaceAll('\\', '\\\\')
-  }
-
-  /** Validate a Flux duration string (e.g. -1h, -24h, -7d). */
-  private sanitizeFluxDuration(value: string): string {
-    // Only allow safe duration patterns
-    if (/^-?\d+[smhdwy]$/.test(value)) {
-      return value
-    }
-    return '-1h' // fallback
   }
 }

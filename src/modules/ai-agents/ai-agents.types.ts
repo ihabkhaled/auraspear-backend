@@ -2,7 +2,7 @@ import type { PaginatedResponse } from '../../common/interfaces/pagination.inter
 import type { AiAgent, AiAgentSession, AiAgentTool } from '@prisma/client'
 
 export type AiAgentRecord = Omit<AiAgent, 'totalTokens'> & {
-  totalTokens: number
+  totalTokens: string
   toolsCount: number
   sessionsCount: number
   tools?: AiAgentTool[]
@@ -11,7 +11,7 @@ export type AiAgentRecord = Omit<AiAgent, 'totalTokens'> & {
 
 export type PaginatedAgents = PaginatedResponse<
   Omit<AiAgent, 'totalTokens'> & {
-    totalTokens: number
+    totalTokens: string
     toolsCount: number
     sessionsCount: number
   }
@@ -21,9 +21,11 @@ export interface AiAgentStats {
   totalAgents: number
   onlineAgents: number
   totalSessions: number
-  totalTokens: number
+  totalTokens: string
   totalCost: number
 }
+
+// Note: totalTokens is serialized as string to avoid JS Number overflow for BigInt values
 
 export type AiAgentSessionRecord = AiAgentSession
 

@@ -1,3 +1,4 @@
+import { PatchStatus, SortOrder, VulnerabilitySeverity } from '../../common/enums'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type { VulnerabilityStats } from './vulnerabilities.types'
 import type {
@@ -10,15 +11,9 @@ import type {
 /* CONSTANTS                                                         */
 /* ---------------------------------------------------------------- */
 
-const VALID_SEVERITIES = new Set<string>(['critical', 'high', 'medium', 'low', 'info'])
+const VALID_SEVERITIES = new Set<string>(Object.values(VulnerabilitySeverity))
 
-const VALID_PATCH_STATUSES = new Set<string>([
-  'patch_pending',
-  'patching',
-  'mitigated',
-  'scheduled',
-  'not_applicable',
-])
+const VALID_PATCH_STATUSES = new Set<string>(Object.values(PatchStatus))
 
 /* ---------------------------------------------------------------- */
 /* QUERY BUILDING                                                    */
@@ -89,7 +84,7 @@ export function buildVulnerabilityOrderBy(
     case 'createdAt':
       return { createdAt: sortOrder }
     default:
-      return { cvssScore: 'desc' }
+      return { cvssScore: SortOrder.DESC }
   }
 }
 
@@ -123,7 +118,10 @@ export function buildVulnerabilityUpdateData(
   }
   if (dto.patchStatus !== undefined) {
     updateData.patchStatus = dto.patchStatus as PrismaPatchStatus
-    if (dto.patchStatus === 'mitigated' && existingPatchStatus !== 'mitigated') {
+    if (
+      dto.patchStatus === PatchStatus.MITIGATED &&
+      existingPatchStatus !== PatchStatus.MITIGATED
+    ) {
       updateData.patchedAt = new Date()
     }
   }

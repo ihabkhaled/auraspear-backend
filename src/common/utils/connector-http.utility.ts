@@ -1,5 +1,6 @@
 import * as http from 'node:http'
 import * as https from 'node:https'
+import { NodeEnvironment } from '../enums'
 import { isPrivateHost } from './ssrf.utility'
 
 export interface ConnectorHttpOptions {
@@ -34,7 +35,7 @@ export function connectorFetch(
   url: string,
   options: ConnectorHttpOptions = {}
 ): Promise<ConnectorHttpResponse> {
-  const isProduction = process.env.NODE_ENV === 'production'
+  const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
   const {
     method = 'GET',
     headers = {},

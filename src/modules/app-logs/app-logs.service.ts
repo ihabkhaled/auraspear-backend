@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogsRepository } from './app-logs.repository'
+import { SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { PaginatedApplicationLogs, ApplicationLogRecord } from './app-logs.types'
 import type { SearchAppLogsDto } from './dto/search-app-logs.dto'
 import type { Prisma } from '@prisma/client'
@@ -113,7 +115,7 @@ export class AppLogsService {
     sortBy?: string,
     sortOrder?: string
   ): Prisma.ApplicationLogOrderByWithRelationInput {
-    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    const order = toSortOrder(sortOrder)
     switch (sortBy) {
       case 'createdAt':
         return { createdAt: order }
@@ -132,7 +134,7 @@ export class AppLogsService {
       case 'outcome':
         return { outcome: order }
       default:
-        return { createdAt: 'desc' }
+        return { createdAt: SortOrder.DESC }
     }
   }
 }

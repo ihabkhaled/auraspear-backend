@@ -513,8 +513,8 @@ export class CasesRepository {
     timelineData: { type: string; actor: string; description: string }
   ): Promise<CaseCommentWithMentions> {
     return this.prisma.$transaction(async tx => {
-      await tx.caseComment.update({
-        where: { id: commentId },
+      await tx.caseComment.updateMany({
+        where: { id: commentId, caseId },
         data: { body, isEdited: true },
       })
 
@@ -550,8 +550,8 @@ export class CasesRepository {
     timelineData: { type: string; actor: string; description: string }
   ): Promise<void> {
     return this.prisma.$transaction(async tx => {
-      await tx.caseComment.update({
-        where: { id: commentId },
+      await tx.caseComment.updateMany({
+        where: { id: commentId, caseId },
         data: { isDeleted: true },
       })
 
@@ -585,15 +585,19 @@ export class CasesRepository {
     })
   }
 
-  async updateTask(taskId: string, data: Record<string, unknown>): Promise<CaseTask> {
-    return this.prisma.caseTask.update({
-      where: { id: taskId },
+  async updateTask(
+    taskId: string,
+    caseId: string,
+    data: Record<string, unknown>
+  ): Promise<Prisma.BatchPayload> {
+    return this.prisma.caseTask.updateMany({
+      where: { id: taskId, caseId },
       data,
     })
   }
 
-  async deleteTask(taskId: string): Promise<CaseTask> {
-    return this.prisma.caseTask.delete({ where: { id: taskId } })
+  async deleteTask(taskId: string, caseId: string): Promise<Prisma.BatchPayload> {
+    return this.prisma.caseTask.deleteMany({ where: { id: taskId, caseId } })
   }
 
   async createTimeline(data: {
@@ -634,8 +638,8 @@ export class CasesRepository {
     })
   }
 
-  async deleteArtifact(artifactId: string): Promise<CaseArtifact> {
-    return this.prisma.caseArtifact.delete({ where: { id: artifactId } })
+  async deleteArtifact(artifactId: string, caseId: string): Promise<Prisma.BatchPayload> {
+    return this.prisma.caseArtifact.deleteMany({ where: { id: artifactId, caseId } })
   }
 
   /* ---------------------------------------------------------------- */
@@ -670,16 +674,16 @@ export class CasesRepository {
     })
   }
 
-  async findClosedCasesWithTiming(
-    tenantId: string
-  ): Promise<{ createdAt: Date; closedAt: Date | null }[]> {
-    return this.prisma.case.findMany({
-      where: {
-        tenantId,
-        closedAt: { not: null },
-      },
-      select: { createdAt: true, closedAt: true },
-    })
+  async getAvgResolutionHours(tenantId: string): Promise<number | null> {
+    const result = await this.prisma.$queryRaw<Array<{ avg_hours: number | null }>>`
+      SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 3600)::float as avg_hours
+      FROM cases
+      WHERE tenant_id = ${tenantId}::uuid
+        AND closed_at IS NOT NULL
+    `
+    const avgHours = result[0]?.avg_hours
+    if (avgHours === null || avgHours === undefined) return null
+    return Math.round(avgHours * 10) / 10
   }
 
   /* ---------------------------------------------------------------- */

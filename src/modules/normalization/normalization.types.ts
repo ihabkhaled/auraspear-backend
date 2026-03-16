@@ -9,7 +9,7 @@ export interface NormalizationPipelineRecord {
   status: string
   parserConfig: Record<string, unknown>
   fieldMappings: Record<string, unknown>
-  processedCount: number
+  processedCount: string
   errorCount: number
   lastProcessedAt: Date | null
   createdAt: Date
@@ -23,6 +23,6 @@ export interface NormalizationStats {
   activePipelines: number
   inactivePipelines: number
   errorPipelines: number
-  totalEventsProcessed: number
+  totalEventsProcessed: string
   totalErrors: number
 }

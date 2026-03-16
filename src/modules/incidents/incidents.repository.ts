@@ -227,16 +227,16 @@ export class IncidentsRepository {
     })
   }
 
-  async findResolvedIncidents(
-    tenantId: string
-  ): Promise<{ createdAt: Date; resolvedAt: Date | null }[]> {
-    return this.prisma.incident.findMany({
-      where: {
-        tenantId,
-        resolvedAt: { not: null },
-      },
-      select: { createdAt: true, resolvedAt: true },
-    })
+  async getAvgResolveHours(tenantId: string): Promise<number | null> {
+    const result = await this.prisma.$queryRaw<Array<{ avg_hours: number | null }>>`
+      SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600)::float as avg_hours
+      FROM incidents
+      WHERE tenant_id = ${tenantId}::uuid
+        AND resolved_at IS NOT NULL
+    `
+    const avgHours = result[0]?.avg_hours
+    if (avgHours === null || avgHours === undefined) return null
+    return Math.round(avgHours * 100) / 100
   }
 
   /* ---------------------------------------------------------------- */

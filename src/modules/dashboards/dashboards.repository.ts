@@ -31,6 +31,16 @@ interface ConnectorRow {
   lastError: string | null
 }
 
+interface RecentNotificationRow {
+  id: string
+  type: string
+  actorUserId: string
+  title: string
+  message: string
+  readAt: Date | null
+  createdAt: Date
+}
+
 @Injectable()
 export class DashboardsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -205,5 +215,36 @@ export class DashboardsRepository {
         lastError: true,
       },
     })
+  }
+
+  async findRecentNotifications(
+    tenantId: string,
+    limit: number
+  ): Promise<Array<RecentNotificationRow>> {
+    return this.prisma.notification.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        type: true,
+        actorUserId: true,
+        title: true,
+        message: true,
+        readAt: true,
+        createdAt: true,
+      },
+    })
+  }
+
+  async findUsersByIds(ids: string[]): Promise<Array<{ id: string; name: string | null }>> {
+    return this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })
+  }
+
+  async countNotifications(tenantId: string): Promise<number> {
+    return this.prisma.notification.count({ where: { tenantId } })
   }
 }

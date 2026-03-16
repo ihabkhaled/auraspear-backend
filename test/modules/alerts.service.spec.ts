@@ -650,7 +650,6 @@ describe('AlertsService', () => {
 
       expect(result.ingested).toBe(2)
       expect(repository.upsertByTenantAndExternalId).toHaveBeenCalledTimes(3)
-      expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should rethrow errors from wazuhService.searchAlerts', async () => {

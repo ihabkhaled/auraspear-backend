@@ -365,6 +365,19 @@ describe('UsersService', () => {
         language: 'en',
         notificationsEmail: true,
         notificationsInApp: true,
+        notifyCriticalAlerts: true,
+        notifyHighAlerts: true,
+        notifyCaseAssignments: true,
+        notifyIncidentUpdates: true,
+        notifyComplianceAlerts: true,
+        notifyCaseUpdates: true,
+        notifyCaseComments: true,
+        notifyCaseActivity: true,
+        notifyUserManagement: true,
+        retentionAlerts: '90',
+        retentionLogs: '90',
+        retentionIncidents: '365',
+        retentionAuditLogs: '365',
       })
     })
 
@@ -433,6 +446,19 @@ describe('UsersService', () => {
           language: 'fr',
           notificationsEmail: false,
           notificationsInApp: true,
+          notifyCriticalAlerts: true,
+          notifyHighAlerts: true,
+          notifyCaseAssignments: true,
+          notifyIncidentUpdates: true,
+          notifyComplianceAlerts: true,
+          notifyCaseUpdates: true,
+          notifyCaseComments: true,
+          notifyCaseActivity: true,
+          notifyUserManagement: true,
+          retentionAlerts: '90',
+          retentionLogs: '90',
+          retentionIncidents: '365',
+          retentionAuditLogs: '365',
         }
       )
     })
@@ -466,6 +492,19 @@ describe('UsersService', () => {
           language: 'en',
           notificationsEmail: true,
           notificationsInApp: true,
+          notifyCriticalAlerts: true,
+          notifyHighAlerts: true,
+          notifyCaseAssignments: true,
+          notifyIncidentUpdates: true,
+          notifyComplianceAlerts: true,
+          notifyCaseUpdates: true,
+          notifyCaseComments: true,
+          notifyCaseActivity: true,
+          notifyUserManagement: true,
+          retentionAlerts: '90',
+          retentionLogs: '90',
+          retentionIncidents: '365',
+          retentionAuditLogs: '365',
         }
       )
     })
@@ -490,6 +529,19 @@ describe('UsersService', () => {
           language: 'ar',
           notificationsEmail: true,
           notificationsInApp: true,
+          notifyCriticalAlerts: true,
+          notifyHighAlerts: true,
+          notifyCaseAssignments: true,
+          notifyIncidentUpdates: true,
+          notifyComplianceAlerts: true,
+          notifyCaseUpdates: true,
+          notifyCaseComments: true,
+          notifyCaseActivity: true,
+          notifyUserManagement: true,
+          retentionAlerts: '90',
+          retentionLogs: '90',
+          retentionIncidents: '365',
+          retentionAuditLogs: '365',
         }
       )
     })
@@ -514,6 +566,19 @@ describe('UsersService', () => {
           language: 'en',
           notificationsEmail: false,
           notificationsInApp: true,
+          notifyCriticalAlerts: true,
+          notifyHighAlerts: true,
+          notifyCaseAssignments: true,
+          notifyIncidentUpdates: true,
+          notifyComplianceAlerts: true,
+          notifyCaseUpdates: true,
+          notifyCaseComments: true,
+          notifyCaseActivity: true,
+          notifyUserManagement: true,
+          retentionAlerts: '90',
+          retentionLogs: '90',
+          retentionIncidents: '365',
+          retentionAuditLogs: '365',
         }
       )
     })
@@ -533,6 +598,19 @@ describe('UsersService', () => {
           language: 'en',
           notificationsEmail: true,
           notificationsInApp: true,
+          notifyCriticalAlerts: true,
+          notifyHighAlerts: true,
+          notifyCaseAssignments: true,
+          notifyIncidentUpdates: true,
+          notifyComplianceAlerts: true,
+          notifyCaseUpdates: true,
+          notifyCaseComments: true,
+          notifyCaseActivity: true,
+          notifyUserManagement: true,
+          retentionAlerts: '90',
+          retentionLogs: '90',
+          retentionIncidents: '365',
+          retentionAuditLogs: '365',
         }
       )
     })

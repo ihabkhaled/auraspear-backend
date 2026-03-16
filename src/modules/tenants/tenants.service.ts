@@ -1,6 +1,24 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
 import { TenantsRepository } from './tenants.repository'
+import {
+  buildPagination,
+  buildTenantOrderBy,
+  buildTenantSearchWhere,
+  buildUserOrderBy,
+  buildUserSearchWhere,
+  canCallerModifyGlobalAdmin,
+  isAlreadySuspended,
+  isNotInactive,
+  isNotSuspended,
+  isProtectedUser,
+  isSelfAction,
+  isUniqueConstraintError,
+  mapFindOrCreateResultToUserRecord,
+  mapMembershipToUserRecord,
+  mapTenantToCounts,
+  needsNewUserFields,
+} from './tenants.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import {
@@ -27,7 +45,7 @@ import type {
   ImpersonateUserResponse,
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { Prisma, UserStatus } from '@prisma/client'
+import type { TenantMembership, User } from '@prisma/client'
 
 const BCRYPT_SALT_ROUNDS = 12
 
@@ -44,6 +62,10 @@ export class TenantsService {
     private readonly notificationsService: NotificationsService
   ) {}
 
+  /* ---------------------------------------------------------------- */
+  /* FIND ALL TENANTS                                                  */
+  /* ---------------------------------------------------------------- */
+
   async findAll(
     page = 1,
     limit = 20,
@@ -51,37 +73,8 @@ export class TenantsService {
     sortBy = 'name',
     sortOrder = 'asc'
   ): Promise<PaginatedResult<TenantWithCounts>> {
-    const where: Prisma.TenantWhereInput = {}
-
-    if (search && search.length > 0) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { slug: { contains: search, mode: 'insensitive' } },
-      ]
-    }
-
-    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
-    let orderBy: Prisma.TenantOrderByWithRelationInput
-    switch (sortBy) {
-      case 'userCount':
-        orderBy = { memberships: { _count: order } }
-        break
-      case 'alertCount':
-        orderBy = { alerts: { _count: order } }
-        break
-      case 'caseCount':
-        orderBy = { cases: { _count: order } }
-        break
-      case 'slug':
-        orderBy = { slug: order }
-        break
-      case 'createdAt':
-        orderBy = { createdAt: order }
-        break
-      default:
-        orderBy = { name: order }
-        break
-    }
+    const where = buildTenantSearchWhere(search)
+    const orderBy = buildTenantOrderBy(sortBy, sortOrder)
 
     const [tenants, total] = await this.tenantsRepository.findAllTenantsWithCounts({
       where,
@@ -90,151 +83,79 @@ export class TenantsService {
       take: limit,
     })
 
-    this.appLogger.info('Tenants listed', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'findAll',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'findAll',
-      metadata: { page, limit, total, hasSearch: Boolean(search) },
+    this.logSuccess('findAll', undefined, undefined, {
+      page,
+      limit,
+      total,
+      hasSearch: Boolean(search),
     })
-
-    return {
-      data: tenants.map(t => ({
-        id: t.id,
-        name: t.name,
-        slug: t.slug,
-        createdAt: t.createdAt,
-        userCount: t._count.memberships,
-        alertCount: t._count.alerts,
-        caseCount: t._count.cases,
-      })),
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.max(1, Math.ceil(total / limit)),
-      },
-    }
+    return { data: tenants.map(mapTenantToCounts), pagination: buildPagination(page, limit, total) }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* FIND BY ID                                                        */
+  /* ---------------------------------------------------------------- */
 
   async findById(id: string): Promise<TenantWithCounts> {
     const tenant = await this.tenantsRepository.findByIdWithCounts(id)
     if (!tenant) {
-      this.appLogger.warn('Tenant not found', {
-        feature: AppLogFeature.TENANTS,
-        action: 'findById',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId: id },
-      })
+      this.logWarn('findById', id)
       throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
     }
-    this.appLogger.debug('Tenant retrieved by ID', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'findById',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'findById',
-    })
-
-    return {
-      id: tenant.id,
-      name: tenant.name,
-      slug: tenant.slug,
-      createdAt: tenant.createdAt,
-      userCount: tenant._count.memberships,
-      alertCount: tenant._count.alerts,
-      caseCount: tenant._count.cases,
-    }
+    this.logDebug('findById', id)
+    return mapTenantToCounts(tenant)
   }
+
+  /* ---------------------------------------------------------------- */
+  /* CREATE                                                            */
+  /* ---------------------------------------------------------------- */
 
   async create(dto: CreateTenantDto): Promise<TenantRecord> {
     try {
       const tenant = await this.tenantsRepository.create({ name: dto.name, slug: dto.slug })
-
-      this.appLogger.info('Tenant created', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'create',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId: tenant.id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'create',
-        metadata: { tenantName: dto.name, tenantSlug: dto.slug },
+      this.logSuccess('create', tenant.id, undefined, {
+        tenantName: dto.name,
+        tenantSlug: dto.slug,
       })
-
       return tenant
     } catch (error) {
-      const message = error instanceof Error ? error.message : ''
-      if (message.includes('Unique constraint')) {
-        this.appLogger.warn('Tenant creation failed: slug already exists', {
-          feature: AppLogFeature.TENANTS,
-          action: 'create',
-          className: 'TenantsService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: { slug: dto.slug },
-        })
+      if (isUniqueConstraintError(error)) {
+        this.logWarn('create', undefined, { slug: dto.slug })
         throw new BusinessException(
           409,
           'Tenant slug already exists',
           'errors.tenants.slugConflict'
         )
       }
-      this.appLogger.error('Unexpected error creating tenant', {
-        feature: AppLogFeature.TENANTS,
-        action: 'create',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          slug: dto.slug,
-        },
-      })
+      this.logError('create', error, { slug: dto.slug })
       throw error
     }
   }
 
+  /* ---------------------------------------------------------------- */
+  /* UPDATE                                                            */
+  /* ---------------------------------------------------------------- */
+
   async update(id: string, dto: UpdateTenantDto): Promise<TenantRecord> {
     const tenant = await this.tenantsRepository.update(id, dto)
-
-    this.appLogger.info('Tenant updated', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'update',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'update',
-      metadata: { updatedFields: Object.keys(dto) },
-    })
-
+    this.logSuccess('update', id, undefined, { updatedFields: Object.keys(dto) })
     return tenant
   }
 
+  /* ---------------------------------------------------------------- */
+  /* REMOVE (SOFT DELETE)                                               */
+  /* ---------------------------------------------------------------- */
+
   async remove(id: string): Promise<{ deleted: boolean }> {
-    // Soft-delete: deactivate all memberships instead of destroying tenant data
     await this.tenantsRepository.deactivateAllMemberships(id, MembershipStatus.INACTIVE)
     this.logger.log(`Tenant ${id} soft-deleted: all memberships deactivated`)
-
-    this.appLogger.info('Tenant soft-deleted', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'remove',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'remove',
-    })
-
+    this.logSuccess('remove', id)
     return { deleted: true }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* FIND USERS                                                        */
+  /* ---------------------------------------------------------------- */
 
   async findUsers(
     tenantId: string,
@@ -247,162 +168,66 @@ export class TenantsService {
     status?: string
   ): Promise<PaginatedResult<UserRecord>> {
     try {
-      const where: Prisma.TenantMembershipWhereInput = { tenantId }
-
-      if (role) {
-        where.role = role as UserRole
-      }
-
-      if (status) {
-        where.status = status as UserStatus
-      }
-
-      if (search && search.length > 0) {
-        where.user = {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { email: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      }
-
+      const where = buildUserSearchWhere(tenantId, search, role, status)
       const [memberships, total] = await this.tenantsRepository.findMembershipsWithUsers({
         where,
-        orderBy: this.buildUserOrderBy(sortBy, sortOrder),
+        orderBy: buildUserOrderBy(sortBy, sortOrder),
         skip: (page - 1) * limit,
         take: limit,
       })
 
-      this.appLogger.info('Tenant users listed', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'findUsers',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'findUsers',
-        metadata: { page, limit, total, hasSearch: Boolean(search) },
+      this.logSuccess('findUsers', tenantId, undefined, {
+        page,
+        limit,
+        total,
+        hasSearch: Boolean(search),
       })
-
       return {
-        data: memberships.map(m => ({
-          id: m.user.id,
-          email: m.user.email,
-          name: m.user.name,
-          role: m.role,
-          status: m.status,
-          lastLoginAt: m.user.lastLoginAt,
-          mfaEnabled: m.user.mfaEnabled,
-          isProtected: m.user.isProtected,
-          createdAt: m.createdAt,
-        })),
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.max(1, Math.ceil(total / limit)),
-        },
+        data: memberships.map(mapMembershipToUserRecord),
+        pagination: buildPagination(page, limit, total),
       }
     } catch (error) {
       this.logger.error(`Failed to fetch users for tenant ${tenantId}`, error)
-      this.appLogger.error('Failed to fetch users for tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'findUsers',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown error', tenantId },
-      })
+      this.logError('findUsers', error, { tenantId })
       throw error
     }
   }
 
-  /** Lightweight user list for assignee pickers — available to any authenticated user. */
+  /* ---------------------------------------------------------------- */
+  /* FIND MEMBERS (LIGHTWEIGHT)                                        */
+  /* ---------------------------------------------------------------- */
+
   async findMembers(tenantId: string): Promise<Array<{ id: string; name: string; email: string }>> {
     try {
       const memberships = await this.tenantsRepository.findActiveMembersWithUsers(
         tenantId,
         MembershipStatus.ACTIVE
       )
-      this.appLogger.debug('Tenant members retrieved', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'findMembers',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'findMembers',
-        metadata: { count: memberships.length },
-      })
-
-      return memberships.map(m => ({
-        id: m.user.id,
-        name: m.user.name,
-        email: m.user.email,
-      }))
+      this.logDebug('findMembers', tenantId, { count: memberships.length })
+      return memberships.map(m => ({ id: m.user.id, name: m.user.name, email: m.user.email }))
     } catch (error) {
       this.logger.error(`Failed to fetch members for tenant ${tenantId}`, error)
-      this.appLogger.error('Failed to fetch members for tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'findMembers',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown error', tenantId },
-      })
+      this.logError('findMembers', error, { tenantId })
       throw error
     }
   }
 
-  private buildUserOrderBy(
-    sortBy?: string,
-    sortOrder?: string
-  ): Prisma.TenantMembershipOrderByWithRelationInput {
-    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
-    switch (sortBy) {
-      case 'name':
-        return { user: { name: order } }
-      case 'email':
-        return { user: { email: order } }
-      case 'role':
-        return { role: order }
-      case 'status':
-        return { status: order }
-      case 'lastLoginAt':
-        return { user: { lastLoginAt: order } }
-      case 'createdAt':
-        return { createdAt: order }
-      default:
-        return { user: { name: 'asc' } }
-    }
-  }
+  /* ---------------------------------------------------------------- */
+  /* CHECK EMAIL                                                       */
+  /* ---------------------------------------------------------------- */
 
   async checkEmail(tenantId: string, email: string): Promise<CheckEmailResult> {
     const user = await this.tenantsRepository.findUserByEmail(email.toLowerCase().trim())
-
-    if (!user) {
-      return { exists: false, user: null, alreadyInTenant: false }
-    }
+    if (!user) return { exists: false, user: null, alreadyInTenant: false }
 
     const membership = await this.tenantsRepository.findMembershipByUserAndTenant(user.id, tenantId)
-
-    this.appLogger.debug('Email check performed', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'checkEmail',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'checkEmail',
-      metadata: { exists: true, alreadyInTenant: membership !== null },
-    })
-
-    return {
-      exists: true,
-      user,
-      alreadyInTenant: membership !== null,
-    }
+    this.logDebug('checkEmail', tenantId, { exists: true, alreadyInTenant: membership !== null })
+    return { exists: true, user, alreadyInTenant: membership !== null }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* ASSIGN USER                                                       */
+  /* ---------------------------------------------------------------- */
 
   async assignUser(
     tenantId: string,
@@ -411,68 +236,20 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Assign user denied: non-admin tried to assign GLOBAL_ADMIN role', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'assignUser',
-        outcome: AppLogOutcome.DENIED,
-        tenantId,
-        actorEmail: dto.email,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'assignUser',
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can assign Global Admin role',
-        'errors.tenants.cannotAssignGlobalAdmin'
-      )
-    }
-
+    this.guardGlobalAdminAssignment('assignUser', tenantId, dto.role, callerRole, dto.email)
     const normalizedEmail = dto.email.toLowerCase().trim()
 
     try {
-      // Pre-validate: check if user exists and membership state before transaction
       const { user: existingUser, membership: existingMembership } =
         await this.tenantsRepository.findUserWithTenantMembership(normalizedEmail, tenantId)
 
-      if (existingUser?.isProtected) {
-        throw new BusinessException(
-          403,
-          'Cannot assign a protected user to another tenant',
-          'errors.tenants.userProtected'
-        )
-      }
-
-      if (existingMembership) {
-        throw new BusinessException(
-          409,
-          'User is already a member of this tenant',
-          'errors.tenants.userAlreadyInTenant'
-        )
-      }
-
-      if (!existingUser) {
-        if (!dto.name || dto.name.trim().length === 0) {
-          throw new BusinessException(
-            400,
-            'Name is required when creating a new user',
-            'errors.validation.name.required'
-          )
-        }
-        if (!dto.password) {
-          throw new BusinessException(
-            400,
-            'Password is required when creating a new user',
-            'errors.validation.password.required'
-          )
-        }
-      }
+      this.guardProtectedUser('assignUser', tenantId, existingUser)
+      this.guardAlreadyInTenant('assignUser', tenantId, existingMembership, normalizedEmail)
+      this.guardNewUserFields('assignUser', tenantId, dto, Boolean(existingUser))
 
       const passwordHash = dto.password
         ? await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
         : undefined
-
       const result = await this.tenantsRepository.findOrCreateUserWithMembership(
         tenantId,
         normalizedEmail,
@@ -480,112 +257,33 @@ export class TenantsService {
         passwordHash ? { name: dto.name?.trim() ?? '', passwordHash } : undefined
       )
 
-      this.appLogger.info('User assigned to tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'assignUser',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        targetResource: 'User',
-        targetResourceId: result.user.id,
-        actorEmail: result.user.email,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'assignUser',
-        metadata: { role: result.membership.role },
-      })
-
-      // Notify the user about tenant assignment
-      const tenant = await this.tenantsRepository.findTenantById(tenantId)
-      await this.notificationsService.notifyTenantAssigned(
+      this.logSuccess('assignUser', tenantId, result.user.id, { role: result.membership.role })
+      await this.notifyTenantAssigned(
         tenantId,
         result.user.id,
-        tenant?.name ?? tenantId,
         result.membership.role,
         callerId,
         callerEmail
       )
-
-      return {
-        id: result.user.id,
-        email: result.user.email,
-        name: result.user.name,
-        role: result.membership.role,
-        status: result.membership.status,
-        lastLoginAt: result.user.lastLoginAt,
-        mfaEnabled: result.user.mfaEnabled,
-        isProtected: result.user.isProtected,
-        createdAt: result.membership.createdAt,
-      }
+      return mapFindOrCreateResultToUserRecord(result)
     } catch (error) {
-      if (error instanceof BusinessException) {
-        throw error
-      }
-      const message = error instanceof Error ? error.message : ''
-      if (message.includes('Unique constraint')) {
-        this.appLogger.warn('Assign user failed: unique constraint violation', {
-          feature: AppLogFeature.TENANT_MEMBERS,
-          action: 'assignUser',
-          className: 'TenantsService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: { tenantId, email: normalizedEmail },
-        })
-        throw new BusinessException(
-          409,
-          'User is already a member of this tenant',
-          'errors.tenants.userAlreadyInTenant'
-        )
-      }
-      this.appLogger.error('Unexpected error assigning user to tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'assignUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          tenantId,
-          email: normalizedEmail,
-        },
-      })
-      throw error
+      return this.handleUserMutationError(error, 'assignUser', tenantId, normalizedEmail)
     }
   }
 
-  async addUser(tenantId: string, dto: AddUserDto, callerRole: UserRole): Promise<UserRecord> {
-    if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Add user denied: non-admin tried to assign GLOBAL_ADMIN role', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'addUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, email: dto.email, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can create Global Admin users',
-        'errors.tenants.cannotAssignGlobalAdmin'
-      )
-    }
+  /* ---------------------------------------------------------------- */
+  /* ADD USER                                                          */
+  /* ---------------------------------------------------------------- */
 
+  async addUser(tenantId: string, dto: AddUserDto, callerRole: UserRole): Promise<UserRecord> {
+    this.guardGlobalAdminAssignment('addUser', tenantId, dto.role, callerRole, dto.email)
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
 
-    // Atomic: find-or-create user + create membership in a single transaction
-    // SECURITY: Never overwrite an existing user's password hash
     try {
-      // Pre-validate: check if user exists and their protection/membership state
       const { user: existingUser, membership: existingMembership } =
         await this.tenantsRepository.findUserWithTenantMembership(dto.email, tenantId)
 
-      if (existingUser?.isProtected) {
-        throw new BusinessException(
-          403,
-          'Cannot add a protected user to another tenant',
-          'errors.tenants.userProtected'
-        )
-      }
-
+      this.guardProtectedUser('addUser', tenantId, existingUser)
       if (existingUser && dto.password) {
         throw new BusinessException(
           409,
@@ -593,14 +291,7 @@ export class TenantsService {
           'errors.tenants.userAlreadyExists'
         )
       }
-
-      if (existingMembership) {
-        throw new BusinessException(
-          409,
-          'Email already exists in this tenant',
-          'errors.tenants.emailExists'
-        )
-      }
+      this.guardAlreadyInTenant('addUser', tenantId, existingMembership, dto.email)
 
       const result = await this.tenantsRepository.findOrCreateUserWithMembership(
         tenantId,
@@ -609,66 +300,16 @@ export class TenantsService {
         existingUser ? undefined : { name: dto.name, passwordHash }
       )
 
-      this.appLogger.info('User added to tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'addUser',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        targetResource: 'User',
-        targetResourceId: result.user.id,
-        actorEmail: result.user.email,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'addUser',
-        metadata: { role: result.membership.role },
-      })
-
-      return {
-        id: result.user.id,
-        email: result.user.email,
-        name: result.user.name,
-        role: result.membership.role,
-        status: result.membership.status,
-        lastLoginAt: result.user.lastLoginAt,
-        mfaEnabled: result.user.mfaEnabled,
-        isProtected: result.user.isProtected,
-        createdAt: result.membership.createdAt,
-      }
+      this.logSuccess('addUser', tenantId, result.user.id, { role: result.membership.role })
+      return mapFindOrCreateResultToUserRecord(result)
     } catch (error) {
-      if (error instanceof BusinessException) {
-        throw error
-      }
-      const message = error instanceof Error ? error.message : ''
-      if (message.includes('Unique constraint')) {
-        this.appLogger.warn('Add user failed: email already exists in tenant', {
-          feature: AppLogFeature.TENANT_MEMBERS,
-          action: 'addUser',
-          className: 'TenantsService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: { tenantId, email: dto.email },
-        })
-        throw new BusinessException(
-          409,
-          'Email already exists in this tenant',
-          'errors.tenants.emailExists'
-        )
-      }
-      this.appLogger.error('Unexpected error adding user to tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'addUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          tenantId,
-          email: dto.email,
-        },
-      })
-      throw error
+      return this.handleUserMutationError(error, 'addUser', tenantId, dto.email)
     }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* UPDATE USER                                                       */
+  /* ---------------------------------------------------------------- */
 
   async updateUser(
     tenantId: string,
@@ -678,142 +319,19 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    if (callerId === userId && dto.role !== undefined) {
-      this.appLogger.warn('Update user denied: cannot change own role', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerId },
-      })
-      throw new BusinessException(
-        403,
-        'Cannot change your own role',
-        'errors.tenants.cannotModifySelf'
-      )
-    }
+    this.guardSelfRoleChange('updateUser', tenantId, callerId, userId, dto.role)
+    const membership = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
 
-    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-    if (!membership) {
-      this.appLogger.warn('Update user failed: user not found in tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
+    this.guardProtectedRoleChange('updateUser', tenantId, userId, membership, dto.role)
+    this.guardGlobalAdminModification('updateUser', tenantId, userId, membership.role, callerRole)
+    this.guardGlobalAdminAssignment('updateUser', tenantId, dto.role, callerRole)
 
-    if (membership.user.isProtected && dto.role !== undefined && dto.role !== membership.role) {
-      this.appLogger.warn('Update user denied: protected user role change attempted', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        outcome: AppLogOutcome.DENIED,
-        tenantId,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'TenantsService',
-        functionName: 'updateUser',
-      })
-      throw new BusinessException(
-        403,
-        'Cannot change the role of a protected user',
-        'errors.tenants.userProtected'
-      )
-    }
-
-    if (membership.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Update user denied: non-admin tried to modify GLOBAL_ADMIN user', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can modify Global Admin users',
-        'errors.tenants.cannotModifyGlobalAdmin'
-      )
-    }
-
-    if (dto.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Update user denied: non-admin tried to assign GLOBAL_ADMIN role', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can assign the Global Admin role',
-        'errors.tenants.cannotAssignGlobalAdmin'
-      )
-    }
-
-    // Update membership role
     const previousRole = membership.role
-    if (dto.role !== undefined) {
-      await this.tenantsRepository.updateMembershipRole(userId, tenantId, dto.role as UserRole)
-    }
+    await this.applyUserUpdates(userId, tenantId, dto)
 
-    // Update user-level fields
-    const userUpdateData: Record<string, unknown> = {}
-    if (dto.name !== undefined) {
-      userUpdateData.name = dto.name
-    }
-    if (dto.password !== undefined) {
-      userUpdateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
-    }
-    if (Object.keys(userUpdateData).length > 0) {
-      await this.tenantsRepository.updateUser(userId, userUpdateData)
-    }
+    const updated = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
+    this.logSuccess('updateUser', tenantId, userId, { updatedFields: Object.keys(dto) }, callerId)
 
-    // Fetch updated state
-    const updated = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-
-    if (!updated) {
-      this.appLogger.warn('Update user failed: user not found after update', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'updateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
-
-    this.appLogger.info('User updated in tenant', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'updateUser',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      actorUserId: callerId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'updateUser',
-      metadata: { updatedFields: Object.keys(dto) },
-    })
-
-    // Notify user about role change
     if (dto.role !== undefined && dto.role !== previousRole) {
       await this.notificationsService.notifyRoleChanged(
         tenantId,
@@ -824,19 +342,12 @@ export class TenantsService {
         callerEmail
       )
     }
-
-    return {
-      id: updated.user.id,
-      email: updated.user.email,
-      name: updated.user.name,
-      role: updated.role,
-      status: updated.status,
-      lastLoginAt: updated.user.lastLoginAt,
-      mfaEnabled: updated.user.mfaEnabled,
-      isProtected: updated.user.isProtected,
-      createdAt: updated.createdAt,
-    }
+    return mapMembershipToUserRecord(updated)
   }
+
+  /* ---------------------------------------------------------------- */
+  /* REMOVE USER                                                       */
+  /* ---------------------------------------------------------------- */
 
   async removeUser(
     tenantId: string,
@@ -845,92 +356,27 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<{ deleted: boolean }> {
-    if (callerId === userId) {
-      this.appLogger.warn('Remove user denied: cannot delete own account', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'removeUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerId },
-      })
-      throw new BusinessException(
-        403,
-        'Cannot delete your own account',
-        'errors.tenants.cannotDeleteSelf'
-      )
-    }
-
-    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-    if (!membership) {
-      this.appLogger.warn('Remove user failed: user not found in tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'removeUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
-
-    if (membership.user.isProtected) {
-      this.appLogger.warn('Remove user denied: user is protected', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'removeUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        403,
-        'This user is protected and cannot be deleted',
-        'errors.tenants.userProtected'
-      )
-    }
-
-    if (membership.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Remove user denied: non-admin tried to remove GLOBAL_ADMIN user', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'removeUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can remove Global Admin users',
-        'errors.tenants.cannotModifyGlobalAdmin'
-      )
-    }
-
-    // Soft delete: set membership status to inactive
-    await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
-
-    this.appLogger.info('User soft-deleted from tenant', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'removeUser',
-      outcome: AppLogOutcome.SUCCESS,
+    this.guardSelfAction(
+      'removeUser',
+      'Cannot delete your own account',
+      'errors.tenants.cannotDeleteSelf',
       tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      actorUserId: callerId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'removeUser',
-    })
+      callerId,
+      userId
+    )
+    const membership = await this.findMembershipOrThrow(userId, tenantId, 'removeUser')
+    this.guardProtectedUserAction('removeUser', tenantId, userId, membership.user)
+    this.guardGlobalAdminModification('removeUser', tenantId, userId, membership.role, callerRole)
 
-    // Notify the removed user
+    await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
+    this.logSuccess('removeUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRemoved(tenantId, userId, callerId, callerEmail)
-
     return { deleted: true }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* RESTORE USER                                                      */
+  /* ---------------------------------------------------------------- */
 
   async restoreUser(
     tenantId: string,
@@ -939,84 +385,27 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-    if (!membership) {
-      this.appLogger.warn('Restore user failed: user not found in tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'restoreUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
+    const membership = await this.findMembershipOrThrow(userId, tenantId, 'restoreUser')
 
-    if (membership.status !== MembershipStatus.INACTIVE) {
-      this.appLogger.warn('Restore user failed: user is not deleted', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'restoreUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId, currentStatus: membership.status },
-      })
+    if (isNotInactive(membership.status)) {
+      this.logWarn('restoreUser', tenantId, { userId, currentStatus: membership.status })
       throw new BusinessException(400, 'User is not deleted', 'errors.tenants.userNotDeleted')
     }
-
-    if (membership.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Restore user denied: non-admin tried to restore GLOBAL_ADMIN user', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'restoreUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can restore Global Admin users',
-        'errors.tenants.cannotModifyGlobalAdmin'
-      )
-    }
+    this.guardGlobalAdminModification('restoreUser', tenantId, userId, membership.role, callerRole)
 
     const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
       userId,
       tenantId,
       MembershipStatus.ACTIVE
     )
-
-    this.appLogger.info('User restored in tenant', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'restoreUser',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'restoreUser',
-    })
-
-    // Notify the restored user
+    this.logSuccess('restoreUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRestored(tenantId, userId, callerId, callerEmail)
-
-    return {
-      id: updated.user.id,
-      email: updated.user.email,
-      name: updated.user.name,
-      role: updated.role,
-      status: updated.status,
-      lastLoginAt: updated.user.lastLoginAt,
-      mfaEnabled: updated.user.mfaEnabled,
-      isProtected: updated.user.isProtected,
-      createdAt: updated.createdAt,
-    }
+    return mapMembershipToUserRecord(updated)
   }
+
+  /* ---------------------------------------------------------------- */
+  /* BLOCK USER                                                        */
+  /* ---------------------------------------------------------------- */
 
   async blockUser(
     tenantId: string,
@@ -1025,80 +414,20 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    if (callerId === userId) {
-      this.appLogger.warn('Block user denied: cannot block own account', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'blockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerId },
-      })
-      throw new BusinessException(
-        403,
-        'Cannot block your own account',
-        'errors.tenants.cannotBlockSelf'
-      )
-    }
+    this.guardSelfAction(
+      'blockUser',
+      'Cannot block your own account',
+      'errors.tenants.cannotBlockSelf',
+      tenantId,
+      callerId,
+      userId
+    )
+    const membership = await this.findMembershipOrThrow(userId, tenantId, 'blockUser')
+    this.guardProtectedUserAction('blockUser', tenantId, userId, membership.user)
+    this.guardGlobalAdminModification('blockUser', tenantId, userId, membership.role, callerRole)
 
-    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-    if (!membership) {
-      this.appLogger.warn('Block user failed: user not found in tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'blockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
-
-    if (membership.user.isProtected) {
-      this.appLogger.warn('Block user denied: user is protected', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'blockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        403,
-        'This user is protected and cannot be blocked',
-        'errors.tenants.userProtected'
-      )
-    }
-
-    if (membership.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Block user denied: non-admin tried to block GLOBAL_ADMIN user', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'blockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can block Global Admin users',
-        'errors.tenants.cannotModifyGlobalAdmin'
-      )
-    }
-
-    if (membership.status === MembershipStatus.SUSPENDED) {
-      this.appLogger.warn('Block user failed: user is already blocked', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'blockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
+    if (isAlreadySuspended(membership.status)) {
+      this.logWarn('blockUser', tenantId, { userId })
       throw new BusinessException(
         400,
         'User is already blocked',
@@ -1111,35 +440,14 @@ export class TenantsService {
       tenantId,
       MembershipStatus.SUSPENDED
     )
-
-    this.appLogger.info('User blocked in tenant', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'blockUser',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      actorUserId: callerId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'blockUser',
-    })
-
-    // Notify the blocked user
+    this.logSuccess('blockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
-
-    return {
-      id: updated.user.id,
-      email: updated.user.email,
-      name: updated.user.name,
-      role: updated.role,
-      status: updated.status,
-      lastLoginAt: updated.user.lastLoginAt,
-      mfaEnabled: updated.user.mfaEnabled,
-      isProtected: updated.user.isProtected,
-      createdAt: updated.createdAt,
-    }
+    return mapMembershipToUserRecord(updated)
   }
+
+  /* ---------------------------------------------------------------- */
+  /* UNBLOCK USER                                                      */
+  /* ---------------------------------------------------------------- */
 
   async unblockUser(
     tenantId: string,
@@ -1148,270 +456,57 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
-    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
-    if (!membership) {
-      this.appLogger.warn('Unblock user failed: user not found in tenant', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'unblockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(
-        404,
-        'User not found in this tenant',
-        'errors.tenants.userNotFound'
-      )
-    }
+    const membership = await this.findMembershipOrThrow(userId, tenantId, 'unblockUser')
 
-    if (membership.status !== MembershipStatus.SUSPENDED) {
-      this.appLogger.warn('Unblock user failed: user is not blocked', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'unblockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId, currentStatus: membership.status },
-      })
+    if (isNotSuspended(membership.status)) {
+      this.logWarn('unblockUser', tenantId, { userId, currentStatus: membership.status })
       throw new BusinessException(400, 'User is not blocked', 'errors.tenants.userNotBlocked')
     }
-
-    if (membership.role === UserRole.GLOBAL_ADMIN && callerRole !== UserRole.GLOBAL_ADMIN) {
-      this.appLogger.warn('Unblock user denied: non-admin tried to unblock GLOBAL_ADMIN user', {
-        feature: AppLogFeature.TENANT_MEMBERS,
-        action: 'unblockUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole },
-      })
-      throw new BusinessException(
-        403,
-        'Only Global Admin can unblock Global Admin users',
-        'errors.tenants.cannotModifyGlobalAdmin'
-      )
-    }
+    this.guardGlobalAdminModification('unblockUser', tenantId, userId, membership.role, callerRole)
 
     const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
       userId,
       tenantId,
       MembershipStatus.ACTIVE
     )
-
-    this.appLogger.info('User unblocked in tenant', {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action: 'unblockUser',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'unblockUser',
-    })
-
-    // Notify the unblocked user
+    this.logSuccess('unblockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserUnblocked(tenantId, userId, callerId, callerEmail)
-
-    return {
-      id: updated.user.id,
-      email: updated.user.email,
-      name: updated.user.name,
-      role: updated.role,
-      status: updated.status,
-      lastLoginAt: updated.user.lastLoginAt,
-      mfaEnabled: updated.user.mfaEnabled,
-      isProtected: updated.user.isProtected,
-      createdAt: updated.createdAt,
-    }
+    return mapMembershipToUserRecord(updated)
   }
 
-  /**
-   * Generates impersonation tokens for a target user, allowing an admin
-   * to view the platform as that user. All validations are enforced here.
-   */
+  /* ---------------------------------------------------------------- */
+  /* IMPERSONATE USER                                                  */
+  /* ---------------------------------------------------------------- */
+
   async impersonateUser(
     tenantId: string,
     userId: string,
     caller: JwtPayload
   ): Promise<ImpersonateUserResponse> {
-    // 1. Reject nested impersonation
-    if (caller.isImpersonated === true) {
-      this.appLogger.warn('Impersonation denied: nested impersonation attempted', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerSub: caller.sub, callerEmail: caller.email },
-      })
-      throw new BusinessException(
-        403,
-        'Cannot impersonate while already impersonating',
-        'errors.impersonation.nestedNotAllowed'
-      )
-    }
+    this.guardNestedImpersonation(caller)
+    this.guardSelfImpersonation(caller, userId, tenantId)
 
-    // 2. Cannot impersonate self
-    if (caller.sub === userId) {
-      this.appLogger.warn('Impersonation denied: cannot impersonate self', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerSub: caller.sub },
-      })
-      throw new BusinessException(
-        400,
-        'Cannot impersonate yourself',
-        'errors.impersonation.cannotImpersonateSelf'
-      )
-    }
+    const tenant = await this.findTenantOrThrow(tenantId)
+    const targetUser = await this.findTargetUserOrThrow(userId, tenantId)
+    this.guardImpersonateProtectedUser(targetUser, tenantId)
 
-    // 3. Validate target tenant exists
-    const tenant = await this.tenantsRepository.findTenantById(tenantId)
-    if (!tenant) {
-      this.appLogger.warn('Impersonation failed: tenant not found', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
-    }
-
-    // 4. Validate target user exists
-    const targetUser = await this.tenantsRepository.findUserById(userId)
-    if (!targetUser) {
-      this.appLogger.warn('Impersonation failed: target user not found', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, userId },
-      })
-      throw new BusinessException(404, 'Target user not found', 'errors.impersonation.userNotFound')
-    }
-
-    // 5. Cannot impersonate protected users
-    if (targetUser.isProtected) {
-      this.appLogger.warn('Impersonation denied: target user is protected', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, targetEmail: targetUser.email },
-      })
-      throw new BusinessException(
-        403,
-        'Protected users cannot be impersonated',
-        'errors.impersonation.protectedUser'
-      )
-    }
-
-    // 6. Validate target has active membership in this tenant
-    const targetMembership = await this.tenantsRepository.findMembershipByUserAndTenant(
+    const targetMembership = await this.findActiveMembershipOrThrow(
       userId,
-      tenantId
-    )
-    if (targetMembership?.status !== MembershipStatus.ACTIVE) {
-      this.appLogger.warn('Impersonation denied: target user not active in tenant', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: {
-          tenantId,
-          userId,
-          targetEmail: targetUser.email,
-          membershipStatus: targetMembership?.status,
-        },
-      })
-      throw new BusinessException(
-        403,
-        'Target user is not active in this tenant',
-        'errors.impersonation.userNotActive'
-      )
-    }
-
-    // 7. Cannot impersonate a user with higher or equal privilege (unless GLOBAL_ADMIN)
-    const callerRoleIndex = ROLE_HIERARCHY.indexOf(caller.role)
-    const targetRoleIndex = ROLE_HIERARCHY.indexOf(targetMembership.role as UserRole)
-
-    if (callerRoleIndex === -1 || targetRoleIndex === -1) {
-      this.appLogger.warn('Impersonation denied: invalid role hierarchy', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole: caller.role, targetRole: targetMembership.role },
-      })
-      throw new BusinessException(
-        403,
-        'Invalid role hierarchy',
-        'errors.impersonation.insufficientPrivilege'
-      )
-    }
-
-    // Caller must be strictly more privileged (lower index) than target
-    if (callerRoleIndex >= targetRoleIndex) {
-      this.appLogger.warn('Impersonation denied: insufficient privilege', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'impersonateUser',
-        className: 'TenantsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { tenantId, userId, callerRole: caller.role, targetRole: targetMembership.role },
-      })
-      throw new BusinessException(
-        403,
-        'Cannot impersonate a user with equal or higher privileges',
-        'errors.impersonation.insufficientPrivilege'
-      )
-    }
-
-    // 8. Generate impersonation tokens for the target user
-    const targetPayload: JwtPayload = {
-      sub: targetUser.id,
-      email: targetUser.email,
       tenantId,
-      tenantSlug: tenant.slug,
-      role: targetMembership.role as UserRole,
-      isImpersonated: true,
-      impersonatorSub: caller.sub,
-      impersonatorEmail: caller.email,
-    }
+      targetUser.email
+    )
+    this.guardRoleHierarchy(caller, targetMembership.role as UserRole, tenantId, userId)
 
+    const targetPayload = this.buildImpersonationPayload(
+      targetUser,
+      tenant,
+      targetMembership,
+      caller
+    )
     const accessToken = this.authService.signAccessToken(targetPayload)
     const refreshToken = this.authService.signRefreshToken(targetPayload)
 
-    this.appLogger.info('Impersonation started', {
-      feature: AppLogFeature.IMPERSONATION,
-      action: 'impersonateUser',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: caller.email,
-      actorUserId: caller.sub,
-      targetResource: 'User',
-      targetResourceId: targetUser.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: 'impersonateUser',
-      metadata: {
-        targetEmail: targetUser.email,
-        targetRole: targetMembership.role,
-        callerRole: caller.role,
-      },
-    })
-
+    this.logImpersonation(tenantId, caller, targetUser, targetMembership.role)
     return {
       accessToken,
       refreshToken,
@@ -1430,5 +525,465 @@ export class TenantsService {
         tenantSlug: caller.tenantSlug,
       },
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Finders                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async findMembershipOrThrow(
+    userId: string,
+    tenantId: string,
+    action: string
+  ): Promise<TenantMembership & { user: User }> {
+    const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
+    if (!membership) {
+      this.logWarn(action, tenantId, { userId })
+      throw new BusinessException(
+        404,
+        'User not found in this tenant',
+        'errors.tenants.userNotFound'
+      )
+    }
+    return membership
+  }
+
+  private async findTenantOrThrow(
+    tenantId: string
+  ): Promise<{ id: string; slug: string; name: string }> {
+    const tenant = await this.tenantsRepository.findTenantById(tenantId)
+    if (!tenant) {
+      this.logWarn('impersonateUser', tenantId)
+      throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
+    }
+    return tenant
+  }
+
+  private async findTargetUserOrThrow(
+    userId: string,
+    tenantId: string
+  ): Promise<{ id: string; email: string; name: string; isProtected: boolean }> {
+    const user = await this.tenantsRepository.findUserById(userId)
+    if (!user) {
+      this.logWarn('impersonateUser', tenantId, { userId })
+      throw new BusinessException(404, 'Target user not found', 'errors.impersonation.userNotFound')
+    }
+    return user
+  }
+
+  private async findActiveMembershipOrThrow(
+    userId: string,
+    tenantId: string,
+    targetEmail: string
+  ): Promise<{ role: string; status: string }> {
+    const membership = await this.tenantsRepository.findMembershipByUserAndTenant(userId, tenantId)
+    if (membership?.status !== MembershipStatus.ACTIVE) {
+      this.logDenied('impersonateUser', tenantId, {
+        userId,
+        targetEmail,
+        membershipStatus: membership?.status,
+      })
+      throw new BusinessException(
+        403,
+        'Target user is not active in this tenant',
+        'errors.impersonation.userNotActive'
+      )
+    }
+    return membership
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Guards                                                   */
+  /* ---------------------------------------------------------------- */
+
+  private guardGlobalAdminAssignment(
+    action: string,
+    tenantId: string,
+    targetRole: string | undefined,
+    callerRole: UserRole,
+    email?: string
+  ): void {
+    if (targetRole === UserRole.GLOBAL_ADMIN && !canCallerModifyGlobalAdmin(callerRole)) {
+      this.logDenied(action, tenantId, { email, callerRole })
+      throw new BusinessException(
+        403,
+        'Only Global Admin can assign Global Admin role',
+        'errors.tenants.cannotAssignGlobalAdmin'
+      )
+    }
+  }
+
+  private guardGlobalAdminModification(
+    action: string,
+    tenantId: string,
+    userId: string,
+    targetRole: string,
+    callerRole: UserRole
+  ): void {
+    if (targetRole === UserRole.GLOBAL_ADMIN && !canCallerModifyGlobalAdmin(callerRole)) {
+      this.logDenied(action, tenantId, { userId, callerRole })
+      throw new BusinessException(
+        403,
+        'Only Global Admin can modify Global Admin users',
+        'errors.tenants.cannotModifyGlobalAdmin'
+      )
+    }
+  }
+
+  private guardProtectedUser(
+    action: string,
+    tenantId: string,
+    user: { isProtected: boolean } | null
+  ): void {
+    if (user && isProtectedUser(user)) {
+      throw new BusinessException(
+        403,
+        'Cannot assign a protected user to another tenant',
+        'errors.tenants.userProtected'
+      )
+    }
+  }
+
+  private guardProtectedUserAction(
+    action: string,
+    tenantId: string,
+    userId: string,
+    user: { isProtected: boolean }
+  ): void {
+    if (isProtectedUser(user)) {
+      this.logDenied(action, tenantId, { userId })
+      throw new BusinessException(
+        403,
+        'This user is protected and cannot be modified',
+        'errors.tenants.userProtected'
+      )
+    }
+  }
+
+  private guardProtectedRoleChange(
+    action: string,
+    tenantId: string,
+    userId: string,
+    membership: { role: string; user: { isProtected: boolean } },
+    newRole?: string
+  ): void {
+    if (membership.user.isProtected && newRole !== undefined && newRole !== membership.role) {
+      this.logDenied(action, tenantId, { userId })
+      throw new BusinessException(
+        403,
+        'Cannot change the role of a protected user',
+        'errors.tenants.userProtected'
+      )
+    }
+  }
+
+  private guardAlreadyInTenant(
+    action: string,
+    tenantId: string,
+    membership: unknown,
+    _email: string
+  ): void {
+    if (membership) {
+      throw new BusinessException(
+        409,
+        'User is already a member of this tenant',
+        'errors.tenants.userAlreadyInTenant'
+      )
+    }
+  }
+
+  private guardNewUserFields(
+    action: string,
+    tenantId: string,
+    dto: { name?: string; password?: string },
+    userExists: boolean
+  ): void {
+    const { missingName, missingPassword } = needsNewUserFields(dto, userExists)
+    if (missingName) {
+      throw new BusinessException(
+        400,
+        'Name is required when creating a new user',
+        'errors.validation.name.required'
+      )
+    }
+    if (missingPassword) {
+      throw new BusinessException(
+        400,
+        'Password is required when creating a new user',
+        'errors.validation.password.required'
+      )
+    }
+  }
+
+  private guardSelfAction(
+    action: string,
+    message: string,
+    key: string,
+    tenantId: string,
+    callerId: string,
+    userId: string
+  ): void {
+    if (isSelfAction(callerId, userId)) {
+      this.logDenied(action, tenantId, { userId, callerId })
+      throw new BusinessException(403, message, key)
+    }
+  }
+
+  private guardSelfRoleChange(
+    action: string,
+    tenantId: string,
+    callerId: string,
+    userId: string,
+    newRole?: string
+  ): void {
+    if (isSelfAction(callerId, userId) && newRole !== undefined) {
+      this.logDenied(action, tenantId, { userId, callerId })
+      throw new BusinessException(
+        403,
+        'Cannot change your own role',
+        'errors.tenants.cannotModifySelf'
+      )
+    }
+  }
+
+  private guardNestedImpersonation(caller: JwtPayload): void {
+    if (caller.isImpersonated === true) {
+      this.logDenied('impersonateUser', caller.tenantId, { callerSub: caller.sub })
+      throw new BusinessException(
+        403,
+        'Cannot impersonate while already impersonating',
+        'errors.impersonation.nestedNotAllowed'
+      )
+    }
+  }
+
+  private guardSelfImpersonation(caller: JwtPayload, userId: string, tenantId: string): void {
+    if (caller.sub === userId) {
+      this.logDenied('impersonateUser', tenantId, { userId, callerSub: caller.sub })
+      throw new BusinessException(
+        400,
+        'Cannot impersonate yourself',
+        'errors.impersonation.cannotImpersonateSelf'
+      )
+    }
+  }
+
+  private guardImpersonateProtectedUser(
+    user: { id: string; email: string; isProtected: boolean },
+    tenantId: string
+  ): void {
+    if (user.isProtected) {
+      this.logDenied('impersonateUser', tenantId, { userId: user.id, targetEmail: user.email })
+      throw new BusinessException(
+        403,
+        'Protected users cannot be impersonated',
+        'errors.impersonation.protectedUser'
+      )
+    }
+  }
+
+  private guardRoleHierarchy(
+    caller: JwtPayload,
+    targetRole: UserRole,
+    tenantId: string,
+    userId: string
+  ): void {
+    const callerIndex = ROLE_HIERARCHY.indexOf(caller.role)
+    const targetIndex = ROLE_HIERARCHY.indexOf(targetRole)
+
+    if (callerIndex === -1 || targetIndex === -1) {
+      this.logDenied('impersonateUser', tenantId, { userId, callerRole: caller.role, targetRole })
+      throw new BusinessException(
+        403,
+        'Invalid role hierarchy',
+        'errors.impersonation.insufficientPrivilege'
+      )
+    }
+    if (callerIndex >= targetIndex) {
+      this.logDenied('impersonateUser', tenantId, { userId, callerRole: caller.role, targetRole })
+      throw new BusinessException(
+        403,
+        'Cannot impersonate a user with equal or higher privileges',
+        'errors.impersonation.insufficientPrivilege'
+      )
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Mutation Helpers                                         */
+  /* ---------------------------------------------------------------- */
+
+  private async applyUserUpdates(
+    userId: string,
+    tenantId: string,
+    dto: UpdateUserDto
+  ): Promise<void> {
+    if (dto.role !== undefined) {
+      await this.tenantsRepository.updateMembershipRole(userId, tenantId, dto.role as UserRole)
+    }
+    const userUpdateData: Record<string, unknown> = {}
+    if (dto.name !== undefined) {
+      userUpdateData.name = dto.name
+    }
+    if (dto.password !== undefined) {
+      userUpdateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+    }
+    if (Object.keys(userUpdateData).length > 0) {
+      await this.tenantsRepository.updateUser(userId, userUpdateData)
+    }
+  }
+
+  private async notifyTenantAssigned(
+    tenantId: string,
+    userId: string,
+    role: string,
+    callerId: string,
+    callerEmail: string
+  ): Promise<void> {
+    const tenant = await this.tenantsRepository.findTenantById(tenantId)
+    await this.notificationsService.notifyTenantAssigned(
+      tenantId,
+      userId,
+      tenant?.name ?? tenantId,
+      role,
+      callerId,
+      callerEmail
+    )
+  }
+
+  private handleUserMutationError(
+    error: unknown,
+    action: string,
+    tenantId: string,
+    email: string
+  ): never {
+    if (error instanceof BusinessException) throw error
+    if (isUniqueConstraintError(error)) {
+      this.logWarn(action, tenantId, { email })
+      throw new BusinessException(
+        409,
+        'Email already exists in this tenant',
+        'errors.tenants.emailExists'
+      )
+    }
+    this.logError(action, error, { tenantId, email })
+    throw error
+  }
+
+  private buildImpersonationPayload(
+    targetUser: { id: string; email: string },
+    tenant: { slug: string },
+    membership: { role: string },
+    caller: JwtPayload
+  ): JwtPayload {
+    return {
+      sub: targetUser.id,
+      email: targetUser.email,
+      tenantId: caller.tenantId,
+      tenantSlug: tenant.slug,
+      role: membership.role as UserRole,
+      isImpersonated: true,
+      impersonatorSub: caller.sub,
+      impersonatorEmail: caller.email,
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(
+    action: string,
+    tenantId?: string,
+    resourceId?: string,
+    metadata?: Record<string, unknown>,
+    actorUserId?: string
+  ): void {
+    this.appLogger.info(`Tenant ${action}`, {
+      feature: AppLogFeature.TENANT_MEMBERS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Tenant',
+      targetResourceId: resourceId,
+      actorUserId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  private logDebug(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.debug(`Tenant ${action}`, {
+      feature: AppLogFeature.TENANT_MEMBERS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  private logWarn(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.warn(`Tenant ${action} failed`, {
+      feature: AppLogFeature.TENANTS,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  private logDenied(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.warn(`Tenant ${action} denied`, {
+      feature: AppLogFeature.TENANT_MEMBERS,
+      action,
+      outcome: AppLogOutcome.DENIED,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  private logError(action: string, error: unknown, metadata?: Record<string, unknown>): void {
+    this.appLogger.error(`Tenant ${action} error`, {
+      feature: AppLogFeature.TENANTS,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: action,
+      metadata: { ...metadata, error: error instanceof Error ? error.message : 'Unknown error' },
+    })
+  }
+
+  private logImpersonation(
+    tenantId: string,
+    caller: JwtPayload,
+    targetUser: { id: string; email: string },
+    targetRole: string
+  ): void {
+    this.appLogger.info('Impersonation started', {
+      feature: AppLogFeature.IMPERSONATION,
+      action: 'impersonateUser',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: caller.email,
+      actorUserId: caller.sub,
+      targetResource: 'User',
+      targetResourceId: targetUser.id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'TenantsService',
+      functionName: 'impersonateUser',
+      metadata: { targetEmail: targetUser.email, targetRole, callerRole: caller.role },
+    })
   }
 }

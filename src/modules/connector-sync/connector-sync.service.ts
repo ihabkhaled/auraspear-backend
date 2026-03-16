@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Interval } from '@nestjs/schedule'
 import { ConnectorSyncRepository } from './connector-sync.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, ConnectorType } from '../../common/enums'
+import {
+  AlertSeverity,
+  AlertStatus,
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+} from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { processInBatches } from '../../common/utils/batch.utility'
 import { AlertsService } from '../alerts/alerts.service'
@@ -231,7 +238,7 @@ export class ConnectorSyncService {
             title: message,
             description: JSON.stringify(event),
             severity: this.mapGraylogPriority(priority),
-            status: 'new_alert',
+            status: AlertStatus.NEW_ALERT,
             source: 'graylog',
             ruleName: (event.event_definition_id ?? null) as string | null,
             ruleId: (event.event_definition_id ?? null) as string | null,
@@ -266,11 +273,11 @@ export class ConnectorSyncService {
     return result.eventsUpserted + result.iocsUpserted
   }
 
-  private mapGraylogPriority(priority: number): 'critical' | 'high' | 'medium' | 'low' | 'info' {
-    if (priority >= 4) return 'critical'
-    if (priority >= 3) return 'high'
-    if (priority >= 2) return 'medium'
-    if (priority >= 1) return 'low'
-    return 'info'
+  private mapGraylogPriority(priority: number): AlertSeverity {
+    if (priority >= 4) return AlertSeverity.CRITICAL
+    if (priority >= 3) return AlertSeverity.HIGH
+    if (priority >= 2) return AlertSeverity.MEDIUM
+    if (priority >= 1) return AlertSeverity.LOW
+    return AlertSeverity.INFO
   }
 }

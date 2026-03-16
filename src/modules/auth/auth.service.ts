@@ -4,22 +4,21 @@ import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
 import { AuthRepository } from './auth.repository'
+import {
+  buildPayloadFromMembership,
+  computeRemainingTtl,
+  mapMembershipsToTenantInfos,
+  preserveImpersonationClaims,
+} from './auth.utilities'
 import { TokenBlacklistService } from './token-blacklist.service'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, TokenType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import type { TenantMembershipInfo } from './auth.utilities'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
-interface TenantMembershipInfo {
-  id: string
-  name: string
-  slug: string
-  role: UserRole
-}
-
 // Pre-computed bcrypt hash used for constant-time comparison when user doesn't exist.
-// Prevents timing-based email enumeration (bcrypt ~500ms vs immediate rejection ~1ms).
 const DUMMY_BCRYPT_HASH = '$2a$12$LJ3m4ys3Lp0Yf5YzF0OOjO5KbK6Fz6j4z5Y5Z5Y5Z5Y5Z5Y5Z5Y5u'
 
 @Injectable()
@@ -50,6 +49,10 @@ export class AuthService {
     ) as jwt.SignOptions['expiresIn']
   }
 
+  /* ---------------------------------------------------------------- */
+  /* LOGIN                                                             */
+  /* ---------------------------------------------------------------- */
+
   async login(
     email: string,
     password: string
@@ -63,23 +66,11 @@ export class AuthService {
       email,
       MembershipStatus.ACTIVE
     )
-
-    // Always run bcrypt.compare to prevent timing-based email enumeration.
-    // If user doesn't exist or has no password, compare against a dummy hash
-    // so the response time is constant (~500ms) regardless of user existence.
     const hashToCompare = user?.passwordHash ?? DUMMY_BCRYPT_HASH
     const valid = await bcrypt.compare(password, hashToCompare)
 
     if (!user?.passwordHash || !valid) {
-      this.appLogger.warn('Login failed: invalid credentials', {
-        feature: AppLogFeature.AUTH,
-        action: 'login',
-        outcome: AppLogOutcome.FAILURE,
-        actorEmail: email,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'login',
-      })
+      this.logWarn('login', { actorEmail: email })
       throw new BusinessException(
         401,
         'Invalid email or password',
@@ -87,71 +78,30 @@ export class AuthService {
       )
     }
 
-    if (user.memberships.length === 0) {
-      this.appLogger.warn('Login failed: no active memberships', {
-        feature: AppLogFeature.AUTH,
-        action: 'login',
-        outcome: AppLogOutcome.FAILURE,
-        actorEmail: email,
-        actorUserId: user.id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'login',
-      })
-      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
-    }
-
+    const firstMembership = this.getFirstMembershipOrThrow(user, 'login')
     await this.authRepository.updateLastLogin(user.id)
 
-    const firstMembership = user.memberships[0]
-    if (!firstMembership) {
-      this.appLogger.warn('Login failed: no first membership found', {
-        feature: AppLogFeature.AUTH,
-        action: 'login',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { userId: user.id, email: user.email },
-      })
-      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
-    }
-
-    const payload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      tenantId: firstMembership.tenantId,
-      tenantSlug: firstMembership.tenant.slug,
-      role: firstMembership.role as UserRole,
-    }
-
-    const accessToken = this.signAccessToken(payload)
-    const refreshToken = this.signRefreshToken(payload)
-
-    const tenants: TenantMembershipInfo[] = user.memberships.map(m => ({
-      id: m.tenant.id,
-      name: m.tenant.name,
-      slug: m.tenant.slug,
-      role: m.role as UserRole,
-    }))
-
-    this.appLogger.info('Login succeeded', {
-      feature: AppLogFeature.AUTH,
-      action: 'login',
-      outcome: AppLogOutcome.SUCCESS,
+    const payload = buildPayloadFromMembership(user, firstMembership)
+    this.logSuccess('login', {
       actorEmail: user.email,
       actorUserId: user.id,
       tenantId: firstMembership.tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: 'login',
     })
-
-    return { accessToken, refreshToken, user: payload, tenants }
+    return {
+      accessToken: this.signAccessToken(payload),
+      refreshToken: this.signRefreshToken(payload),
+      user: payload,
+      tenants: mapMembershipsToTenantInfos(user.memberships),
+    }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* TOKEN SIGNING                                                     */
+  /* ---------------------------------------------------------------- */
 
   signAccessToken(payload: JwtPayload): string {
     const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
-    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: 'access' }, this.jwtSecret, {
+    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.ACCESS }, this.jwtSecret, {
       algorithm: 'HS256',
       expiresIn: this.accessExpiry,
     })
@@ -159,289 +109,138 @@ export class AuthService {
 
   signRefreshToken(payload: JwtPayload): string {
     const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
-    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: 'refresh' }, this.jwtSecret, {
+    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.REFRESH }, this.jwtSecret, {
       algorithm: 'HS256',
       expiresIn: this.refreshExpiry,
     })
   }
 
+  /* ---------------------------------------------------------------- */
+  /* TOKEN VERIFICATION                                                */
+  /* ---------------------------------------------------------------- */
+
   async verifyAccessToken(token: string): Promise<JwtPayload> {
-    try {
-      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
-        tokenType?: string
-      }
-      if (decoded.tokenType !== 'access') {
-        throw new Error('Not an access token')
-      }
-
-      if (decoded.jti) {
-        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
-        if (revoked) {
-          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
-        }
-      }
-
-      return decoded
-    } catch (error) {
-      if (error instanceof BusinessException) {
-        throw error
-      }
-
-      this.appLogger.debug('Access token verification failed', {
-        feature: AppLogFeature.AUTH,
-        action: 'verifyAccessToken',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'verifyAccessToken',
-      })
-
-      throw new BusinessException(
-        401,
-        'Invalid or expired access token',
-        'errors.auth.invalidAccessToken'
-      )
-    }
+    return this.verifyToken(
+      token,
+      TokenType.ACCESS,
+      'verifyAccessToken',
+      'errors.auth.invalidAccessToken'
+    )
   }
 
   async verifyRefreshToken(token: string): Promise<JwtPayload> {
-    try {
-      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload & {
-        tokenType?: string
-      }
-      if (decoded.tokenType !== 'refresh') {
-        throw new Error('Not a refresh token')
-      }
-
-      if (decoded.jti) {
-        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
-        if (revoked) {
-          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
-        }
-      }
-
-      return decoded
-    } catch (error) {
-      if (error instanceof BusinessException) {
-        throw error
-      }
-      this.appLogger.warn('Refresh token verification failed', {
-        feature: AppLogFeature.AUTH,
-        action: 'verifyRefreshToken',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
-      })
-      throw new BusinessException(
-        401,
-        'Invalid or expired refresh token',
-        'errors.auth.invalidRefreshToken'
-      )
-    }
+    return this.verifyToken(
+      token,
+      TokenType.REFRESH,
+      'verifyRefreshToken',
+      'errors.auth.invalidRefreshToken'
+    )
   }
+
+  /* ---------------------------------------------------------------- */
+  /* REFRESH TOKENS                                                    */
+  /* ---------------------------------------------------------------- */
 
   async refreshTokens(
     refreshToken: string
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const payload = await this.verifyRefreshToken(refreshToken)
-
-    // Blacklist the old refresh token JTI to prevent replay attacks
-    if (payload.jti && payload.exp) {
-      const now = Math.floor(Date.now() / 1000)
-      const remainingTtl = Math.max(payload.exp - now, 0)
-      await this.tokenBlacklistService.blacklist(payload.jti, remainingTtl)
-    }
+    await this.blacklistTokenIfPresent(payload)
 
     const user = await this.authRepository.findUserByIdWithTenantMemberships(
       payload.sub,
       payload.tenantId,
       MembershipStatus.ACTIVE
     )
-
     if (!user) {
-      this.appLogger.warn('Token refresh failed: user no longer exists', {
-        feature: AppLogFeature.AUTH,
-        action: 'refreshTokens',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: payload.sub,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'refreshTokens',
-      })
+      this.logWarn('refreshTokens', { actorUserId: payload.sub })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
 
-    const membership = user.memberships[0]
-    if (!membership) {
-      this.appLogger.warn('Token refresh failed: no active membership', {
-        feature: AppLogFeature.AUTH,
-        action: 'refreshTokens',
-        outcome: AppLogOutcome.FAILURE,
-        actorEmail: user.email,
-        actorUserId: user.id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'refreshTokens',
-      })
-      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
-    }
+    const membership = this.getFirstMembershipOrThrow(user, 'refreshTokens')
+    const newPayload = buildPayloadFromMembership(user, membership)
+    preserveImpersonationClaims(newPayload, payload)
 
-    const newPayload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      tenantId: membership.tenantId,
-      tenantSlug: membership.tenant.slug,
-      role: membership.role as UserRole,
-    }
-
-    // Preserve impersonation claims across token refresh
-    if (payload.isImpersonated === true) {
-      newPayload.isImpersonated = true
-      newPayload.impersonatorSub = payload.impersonatorSub
-      newPayload.impersonatorEmail = payload.impersonatorEmail
-    }
-
-    this.appLogger.info('Token refresh succeeded', {
-      feature: AppLogFeature.AUTH,
-      action: 'refreshTokens',
-      outcome: AppLogOutcome.SUCCESS,
+    this.logSuccess('refreshTokens', {
       actorEmail: user.email,
       actorUserId: user.id,
       tenantId: membership.tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: 'refreshTokens',
     })
-
     return {
       accessToken: this.signAccessToken(newPayload),
       refreshToken: this.signRefreshToken(newPayload),
     }
   }
 
-  /**
-   * Blacklist both access and refresh tokens so they cannot be reused.
-   * Each token is stored in Redis with a TTL equal to its remaining lifetime.
-   */
+  /* ---------------------------------------------------------------- */
+  /* LOGOUT                                                            */
+  /* ---------------------------------------------------------------- */
+
   async logout(
     accessJti: string,
     refreshJti: string,
     accessExp: number,
     refreshExp: number
   ): Promise<void> {
-    const now = Math.floor(Date.now() / 1000)
-    const accessTtl = Math.max(accessExp - now, 0)
-    const refreshTtl = Math.max(refreshExp - now, 0)
-
     await Promise.all([
-      this.tokenBlacklistService.blacklist(accessJti, accessTtl),
-      this.tokenBlacklistService.blacklist(refreshJti, refreshTtl),
+      this.tokenBlacklistService.blacklist(accessJti, computeRemainingTtl(accessExp)),
+      this.tokenBlacklistService.blacklist(refreshJti, computeRemainingTtl(refreshExp)),
     ])
-
-    this.appLogger.info('User logged out', {
-      feature: AppLogFeature.AUTH,
-      action: 'logout',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: 'logout',
-    })
+    this.logSuccess('logout')
   }
+
+  /* ---------------------------------------------------------------- */
+  /* VALIDATE USER ACTIVE                                              */
+  /* ---------------------------------------------------------------- */
 
   async validateUserActive(userId: string): Promise<void> {
     const user = await this.authRepository.findUserByIdWithActiveMembershipCheck(
       userId,
       MembershipStatus.ACTIVE
     )
-
     if (!user) {
-      this.appLogger.warn('User validation failed: user no longer exists', {
-        feature: AppLogFeature.AUTH,
-        action: 'validateUserActive',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'validateUserActive',
-      })
+      this.logWarn('validateUserActive', { actorUserId: userId })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
-
     if (user.memberships.length === 0) {
-      this.appLogger.warn('User validation failed: no active memberships', {
-        feature: AppLogFeature.AUTH,
-        action: 'validateUserActive',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'validateUserActive',
-      })
+      this.logWarn('validateUserActive', { actorUserId: userId })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
 
-  /** Check if a user has an active membership for the given tenant. */
   async validateMembershipActive(userId: string, tenantId: string): Promise<void> {
     const membership = await this.authRepository.findMembershipByUserAndTenant(userId, tenantId)
-
     if (membership?.status !== MembershipStatus.ACTIVE) {
-      this.appLogger.warn('Membership validation failed: not active', {
-        feature: AppLogFeature.AUTH,
-        action: 'validateMembershipActive',
-        outcome: AppLogOutcome.DENIED,
-        actorUserId: userId,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'validateMembershipActive',
-      })
+      this.logDenied('validateMembershipActive', { actorUserId: userId, tenantId })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* GET USER TENANTS                                                  */
+  /* ---------------------------------------------------------------- */
 
   async getUserTenants(userId: string): Promise<TenantMembershipInfo[]> {
     const memberships = await this.authRepository.findActiveMembershipsWithTenant(
       userId,
       MembershipStatus.ACTIVE
     )
-
-    this.appLogger.info('User tenants retrieved', {
-      feature: AppLogFeature.AUTH,
-      action: 'getUserTenants',
-      outcome: AppLogOutcome.SUCCESS,
+    this.logSuccess('getUserTenants', {
       actorUserId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: 'getUserTenants',
       metadata: { tenantCount: memberships.length },
     })
-
-    return memberships.map(m => ({
-      id: m.tenant.id,
-      name: m.tenant.name,
-      slug: m.tenant.slug,
-      role: m.role as UserRole,
-    }))
+    return mapMembershipsToTenantInfos(memberships)
   }
 
-  /**
-   * End an impersonation session by restoring the original admin's tokens.
-   * Blacklists the current impersonation tokens and issues fresh admin tokens.
-   */
+  /* ---------------------------------------------------------------- */
+  /* END IMPERSONATION                                                 */
+  /* ---------------------------------------------------------------- */
+
   async endImpersonation(
     caller: JwtPayload
   ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
     if (caller.isImpersonated !== true || !caller.impersonatorSub) {
-      this.appLogger.warn('End impersonation failed: not currently impersonating', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'endImpersonation',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.DENIED,
-        metadata: { userId: caller.sub, email: caller.email },
-      })
+      this.logDenied('endImpersonation', { userId: caller.sub, email: caller.email })
       throw new BusinessException(
         400,
         'Not currently impersonating',
@@ -449,28 +248,14 @@ export class AuthService {
       )
     }
 
-    // Blacklist the current impersonation access token
-    if (caller.jti && caller.exp) {
-      const now = Math.floor(Date.now() / 1000)
-      const remainingTtl = Math.max(caller.exp - now, 0)
-      await this.tokenBlacklistService.blacklist(caller.jti, remainingTtl)
-    }
+    await this.blacklistTokenIfPresent(caller)
 
-    // Look up the original admin user
     const admin = await this.authRepository.findUserByIdWithAllActiveMemberships(
       caller.impersonatorSub,
       MembershipStatus.ACTIVE
     )
-
     if (!admin) {
-      this.appLogger.warn('End impersonation failed: original admin user no longer exists', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'endImpersonation',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { impersonatorSub: caller.impersonatorSub },
-      })
+      this.logWarn('endImpersonation', { impersonatorSub: caller.impersonatorSub })
       throw new BusinessException(
         401,
         'Original admin user no longer exists',
@@ -478,65 +263,24 @@ export class AuthService {
       )
     }
 
-    if (admin.memberships.length === 0) {
-      this.appLogger.warn('End impersonation failed: admin has no active memberships', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'endImpersonation',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { adminId: admin.id, adminEmail: admin.email },
-      })
-      throw new BusinessException(
-        401,
-        'Admin account is no longer active',
-        'errors.auth.accountInactive'
-      )
-    }
+    const firstMembership = this.getFirstMembershipOrThrow(admin, 'endImpersonation')
+    const adminPayload = buildPayloadFromMembership(admin, firstMembership)
 
-    const firstMembership = admin.memberships[0]
-    if (!firstMembership) {
-      this.appLogger.warn('End impersonation failed: admin first membership not found', {
-        feature: AppLogFeature.IMPERSONATION,
-        action: 'endImpersonation',
-        className: 'AuthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { adminId: admin.id, adminEmail: admin.email },
-      })
-      throw new BusinessException(
-        401,
-        'Admin account is no longer active',
-        'errors.auth.accountInactive'
-      )
-    }
-
-    const adminPayload: JwtPayload = {
-      sub: admin.id,
-      email: admin.email,
-      tenantId: firstMembership.tenantId,
-      tenantSlug: firstMembership.tenant.slug,
-      role: firstMembership.role as UserRole,
-    }
-
-    this.appLogger.info('Impersonation ended', {
-      feature: AppLogFeature.IMPERSONATION,
-      action: 'endImpersonation',
-      outcome: AppLogOutcome.SUCCESS,
+    this.logSuccess('endImpersonation', {
       actorEmail: admin.email,
       actorUserId: admin.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: 'endImpersonation',
       metadata: { impersonatedEmail: caller.email, impersonatedUserId: caller.sub },
     })
-
     return {
       accessToken: this.signAccessToken(adminPayload),
       refreshToken: this.signRefreshToken(adminPayload),
       user: adminPayload,
     }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* FIND OR CREATE USER (OIDC)                                        */
+  /* ---------------------------------------------------------------- */
 
   async findOrCreateUser(
     tenantId: string,
@@ -545,46 +289,137 @@ export class AuthService {
     name: string
   ): Promise<{ id: string; role: UserRole }> {
     try {
-      // Upsert global user
       const user = await this.authRepository.upsertUserByOidcSub(oidcSub, email, name)
-
-      // Upsert tenant membership
       const membership = await this.authRepository.upsertTenantMembership(
         user.id,
         tenantId,
         UserRole.SOC_ANALYST_L1
       )
-
-      this.appLogger.info('User found or created via OIDC', {
-        feature: AppLogFeature.AUTH,
-        action: 'findOrCreateUser',
-        outcome: AppLogOutcome.SUCCESS,
+      this.logSuccess('findOrCreateUser', {
         actorUserId: user.id,
         actorEmail: email,
         tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'findOrCreateUser',
         metadata: { role: membership.role },
       })
-
       return { id: user.id, role: membership.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
-
-      this.appLogger.error('Failed to find or create user via OIDC', {
-        feature: AppLogFeature.AUTH,
-        action: 'findOrCreateUser',
-        outcome: AppLogOutcome.FAILURE,
-        actorEmail: email,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuthService',
-        functionName: 'findOrCreateUser',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
+      this.logError('findOrCreateUser', { actorEmail: email, tenantId, error })
       throw new BusinessException(401, 'Unable to provision user', 'errors.auth.provisionFailed')
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Helpers                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private getFirstMembershipOrThrow(
+    user: {
+      id: string
+      email: string
+      memberships: Array<{
+        tenantId: string
+        role: string
+        tenant: { id: string; name: string; slug: string }
+      }>
+    },
+    action: string
+  ): { tenantId: string; role: string; tenant: { id: string; name: string; slug: string } } {
+    if (user.memberships.length === 0) {
+      this.logWarn(action, { actorEmail: user.email, actorUserId: user.id })
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
+    const first = user.memberships[0]
+    if (!first) {
+      this.logWarn(action, { userId: user.id, email: user.email })
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
+    return first
+  }
+
+  private async verifyToken(
+    token: string,
+    expectedType: string,
+    action: string,
+    errorKey: string
+  ): Promise<JwtPayload> {
+    try {
+      const decoded = jwt.verify(token, this.jwtSecret, {
+        algorithms: ['HS256'],
+        clockTolerance: 30,
+      }) as JwtPayload & { tokenType?: string }
+      if (decoded.tokenType !== expectedType) throw new Error(`Not a ${expectedType} token`)
+
+      if (decoded.jti) {
+        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
+        if (revoked) {
+          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
+        }
+      }
+      return decoded
+    } catch (error) {
+      if (error instanceof BusinessException) throw error
+      this.logWarn(action, { error: error instanceof Error ? error.message : 'Unknown error' })
+      throw new BusinessException(401, `Invalid or expired ${expectedType} token`, errorKey)
+    }
+  }
+
+  private async blacklistTokenIfPresent(payload: JwtPayload): Promise<void> {
+    if (payload.jti && payload.exp) {
+      await this.tokenBlacklistService.blacklist(payload.jti, computeRemainingTtl(payload.exp))
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(action: string, extra?: Record<string, unknown>): void {
+    this.appLogger.info(`Auth ${action}`, {
+      feature: AppLogFeature.AUTH,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: action,
+      ...extra,
+    })
+  }
+
+  private logWarn(action: string, extra?: Record<string, unknown>): void {
+    this.appLogger.warn(`Auth ${action} failed`, {
+      feature: AppLogFeature.AUTH,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: action,
+      ...extra,
+    })
+  }
+
+  private logDenied(action: string, extra?: Record<string, unknown>): void {
+    this.appLogger.warn(`Auth ${action} denied`, {
+      feature: AppLogFeature.AUTH,
+      action,
+      outcome: AppLogOutcome.DENIED,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: action,
+      ...extra,
+    })
+  }
+
+  private logError(action: string, extra?: Record<string, unknown>): void {
+    this.appLogger.error(`Auth ${action} error`, {
+      feature: AppLogFeature.AUTH,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuthService',
+      functionName: action,
+      stackTrace: extra?.['error'] instanceof Error ? (extra['error'] as Error).stack : undefined,
+      ...extra,
+    })
   }
 }

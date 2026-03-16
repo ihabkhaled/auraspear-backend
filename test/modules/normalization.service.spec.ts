@@ -135,7 +135,7 @@ describe('NormalizationService', () => {
 
       const result = await service.listPipelines(TENANT_ID)
 
-      expect(result.data[0]?.processedCount).toBe(15000)
+      expect(result.data[0]?.processedCount).toBe('15000')
     })
 
     it('should handle empty results', async () => {
@@ -181,7 +181,7 @@ describe('NormalizationService', () => {
 
       expect(result.id).toBe(PIPELINE_ID)
       expect(result.name).toBe('Syslog Parser')
-      expect(result.processedCount).toBe(15000)
+      expect(result.processedCount).toBe('15000')
     })
 
     it('should throw BusinessException 404 when not found', async () => {
@@ -357,7 +357,7 @@ describe('NormalizationService', () => {
       expect(result.activePipelines).toBe(6)
       expect(result.inactivePipelines).toBe(3)
       expect(result.errorPipelines).toBe(1)
-      expect(result.totalEventsProcessed).toBe(50000)
+      expect(result.totalEventsProcessed).toBe('50000')
       expect(result.totalErrors).toBe(150)
     })
 
@@ -370,7 +370,7 @@ describe('NormalizationService', () => {
 
       const result = await service.getNormalizationStats(TENANT_ID)
 
-      expect(result.totalEventsProcessed).toBe(0)
+      expect(result.totalEventsProcessed).toBe('0')
       expect(result.totalErrors).toBe(0)
     })
 

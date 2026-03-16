@@ -1,3 +1,4 @@
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { CorrelationStats } from './correlation.types'
 import type { UpdateRuleDto } from './dto/update-rule.dto'
 import type { Prisma } from '@prisma/client'
@@ -45,7 +46,7 @@ export function buildRuleOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.CorrelationRuleOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
 
   switch (sortBy) {
     case 'title':

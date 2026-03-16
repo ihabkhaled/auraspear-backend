@@ -61,6 +61,7 @@ export class CaseCyclesRepository {
         _count: { select: { cases: true } },
         cases: {
           orderBy: { createdAt: 'desc' },
+          take: 500,
           include: { tenant: { select: { name: true } } },
         },
       },
@@ -93,9 +94,13 @@ export class CaseCyclesRepository {
     })
   }
 
-  async update(id: string, data: Record<string, unknown>): Promise<CaseCycle> {
-    return this.prisma.caseCycle.update({
-      where: { id },
+  async update(
+    id: string,
+    tenantId: string,
+    data: Record<string, unknown>
+  ): Promise<Prisma.BatchPayload> {
+    return this.prisma.caseCycle.updateMany({
+      where: { id, tenantId },
       data,
     })
   }
@@ -115,14 +120,24 @@ export class CaseCyclesRepository {
         },
       })
 
-      return tx.caseCycle.update({
-        where: { id: cycleId },
+      await tx.caseCycle.updateMany({
+        where: { id: cycleId, tenantId },
         data: {
           status: 'active',
           closedBy: null,
           closedAt: null,
         },
       })
+
+      const activated = await tx.caseCycle.findFirst({
+        where: { id: cycleId, tenantId },
+      })
+
+      if (!activated) {
+        throw new Error(`CaseCycle ${cycleId} not found after activation`)
+      }
+
+      return activated
     })
   }
 
@@ -142,12 +157,12 @@ export class CaseCyclesRepository {
         where: { cycleId, tenantId },
         data: { cycleId: null },
       })
-      await tx.caseCycle.delete({ where: { id: cycleId } })
+      await tx.caseCycle.deleteMany({ where: { id: cycleId, tenantId } })
     })
   }
 
-  async deleteCycle(id: string): Promise<CaseCycle> {
-    return this.prisma.caseCycle.delete({ where: { id } })
+  async deleteCycle(id: string, tenantId: string): Promise<Prisma.BatchPayload> {
+    return this.prisma.caseCycle.deleteMany({ where: { id, tenantId } })
   }
 
   async findManyForOverlapCheck(

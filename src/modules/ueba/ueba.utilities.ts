@@ -1,3 +1,5 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -34,7 +36,7 @@ export function buildEntityOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.UebaEntityOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -51,7 +53,7 @@ export function buildEntityOrderBy(
     case 'entityType':
       return { entityType: order }
     default:
-      return { riskScore: 'desc' }
+      return { riskScore: SortOrder.DESC }
   }
 }
 
@@ -86,7 +88,7 @@ export function buildAnomalyOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.UebaAnomalyOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'detectedAt':
       return { detectedAt: order }
@@ -95,7 +97,7 @@ export function buildAnomalyOrderBy(
     case 'severity':
       return { severity: order }
     default:
-      return { detectedAt: 'desc' }
+      return { detectedAt: SortOrder.DESC }
   }
 }
 
@@ -125,7 +127,7 @@ export function buildModelOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.MlModelOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -138,6 +140,6 @@ export function buildModelOrderBy(
     case 'lastTrained':
       return { lastTrained: order }
     default:
-      return { updatedAt: 'desc' }
+      return { updatedAt: SortOrder.DESC }
   }
 }

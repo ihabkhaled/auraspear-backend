@@ -1,4 +1,5 @@
 import { ServiceStatus } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { HealthCheckRecord, MetricRecord, SystemHealthStats } from './system-health.types'
 import type { Prisma } from '@prisma/client'
 
@@ -28,7 +29,7 @@ export function buildHealthCheckOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SystemHealthCheckOrderByWithRelationInput {
-  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'serviceName':
       return { serviceName: order }
@@ -66,7 +67,7 @@ export function buildMetricOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SystemMetricOrderByWithRelationInput {
-  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'metricName':
       return { metricName: order }

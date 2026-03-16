@@ -1,3 +1,5 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdatePlaybookDto } from './dto/update-playbook.dto'
 import type { SoarPlaybookRecord, SoarExecutionRecord, SoarStats } from './soar.types'
 import type { Prisma } from '@prisma/client'
@@ -36,7 +38,7 @@ export function buildPlaybookOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SoarPlaybookOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -51,7 +53,7 @@ export function buildPlaybookOrderBy(
     case 'executionCount':
       return { executionCount: order }
     default:
-      return { createdAt: 'desc' }
+      return { createdAt: SortOrder.DESC }
   }
 }
 
@@ -163,19 +165,8 @@ export function buildSoarStats(
   totalExecutions: number,
   successfulExecutions: number,
   failedExecutions: number,
-  execTimes: { startedAt: Date; completedAt: Date | null }[]
+  avgExecutionTimeMs: number | null
 ): SoarStats {
-  let avgExecutionTimeMs: number | null = null
-  if (execTimes.length > 0) {
-    let totalMs = 0
-    for (const e of execTimes) {
-      if (e.completedAt) {
-        totalMs += e.completedAt.getTime() - e.startedAt.getTime()
-      }
-    }
-    avgExecutionTimeMs = Math.round(totalMs / execTimes.length)
-  }
-
   return {
     totalPlaybooks,
     activePlaybooks,

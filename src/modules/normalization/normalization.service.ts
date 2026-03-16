@@ -12,6 +12,7 @@ import {
   AppLogOutcome,
   AppLogSourceType,
   NormalizationPipelineStatus,
+  SortOrder,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -108,7 +109,7 @@ export class NormalizationService {
       where: { tenantId: user.tenantId, name: dto.name },
       skip: 0,
       take: 1,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: SortOrder.DESC },
     })
 
     if (duplicates.length > 0) {

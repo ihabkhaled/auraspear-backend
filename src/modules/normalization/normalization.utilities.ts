@@ -1,3 +1,4 @@
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
 import type { NormalizationPipelineRecord, NormalizationStats } from './normalization.types'
 
@@ -32,7 +33,7 @@ export function buildPipelineListWhere(
 }
 
 export function buildPipelineOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'name':
       return { name: order }
@@ -99,7 +100,7 @@ export function buildPipelineRecord(pipeline: PipelineEntity): NormalizationPipe
     status: pipeline.status,
     parserConfig: pipeline.parserConfig as Record<string, unknown>,
     fieldMappings: pipeline.fieldMappings as Record<string, unknown>,
-    processedCount: Number(pipeline.processedCount),
+    processedCount: String(pipeline.processedCount),
     errorCount: pipeline.errorCount,
     lastProcessedAt: pipeline.lastProcessedAt,
     createdAt: pipeline.createdAt,
@@ -123,7 +124,7 @@ export function buildNormalizationStats(
     activePipelines: active,
     inactivePipelines: inactive,
     errorPipelines,
-    totalEventsProcessed: Number(aggregates._sum.processedCount ?? 0),
+    totalEventsProcessed: String(aggregates._sum.processedCount ?? 0),
     totalErrors: aggregates._sum.errorCount ?? 0,
   }
 }

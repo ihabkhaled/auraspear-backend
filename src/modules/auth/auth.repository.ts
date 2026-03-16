@@ -5,6 +5,10 @@ import type { TenantMembership, User, UserRole as PrismaUserRole } from '@prisma
 
 @Injectable()
 export class AuthRepository {
+  private static readonly TENANT_SELECT = {
+    select: { id: true, name: true, slug: true },
+  } as const
+
   constructor(private readonly prisma: PrismaService) {}
 
   async findUserByEmailWithMemberships(
@@ -21,7 +25,7 @@ export class AuthRepository {
       include: {
         memberships: {
           where: { status: membershipStatus },
-          include: { tenant: true },
+          include: { tenant: AuthRepository.TENANT_SELECT },
         },
       },
     })
@@ -49,7 +53,7 @@ export class AuthRepository {
       include: {
         memberships: {
           where: { tenantId, status: membershipStatus },
-          include: { tenant: true },
+          include: { tenant: AuthRepository.TENANT_SELECT },
         },
       },
     })
@@ -86,7 +90,7 @@ export class AuthRepository {
   ): Promise<(TenantMembership & { tenant: { id: string; name: string; slug: string } })[]> {
     return this.prisma.tenantMembership.findMany({
       where: { userId, status: membershipStatus },
-      include: { tenant: true },
+      include: { tenant: AuthRepository.TENANT_SELECT },
     })
   }
 
@@ -104,7 +108,7 @@ export class AuthRepository {
       include: {
         memberships: {
           where: { status: membershipStatus },
-          include: { tenant: true },
+          include: { tenant: AuthRepository.TENANT_SELECT },
         },
       },
     })

@@ -488,7 +488,7 @@ describe('AiAgentsService', () => {
 
       expect(result.soulMd).toBe('# Updated Soul\nNew instructions.')
       expect(repository.updateWithDetails).toHaveBeenCalledWith({
-        where: { id: AGENT_ID },
+        where: { id: AGENT_ID, tenantId: TENANT_ID },
         data: { soulMd: '# Updated Soul\nNew instructions.' },
       })
     })
@@ -610,7 +610,7 @@ describe('AiAgentsService', () => {
         totalAgents: 5,
         onlineAgents: 3,
         totalSessions: 150,
-        totalTokens: 500000,
+        totalTokens: '500000',
         totalCost: 12.5,
       })
     })
@@ -645,7 +645,7 @@ describe('AiAgentsService', () => {
 
       const result = await service.getAgentStats(TENANT_ID)
 
-      expect(result.totalTokens).toBe(0)
+      expect(result.totalTokens).toBe('0')
       expect(result.totalCost).toBe(0)
     })
 
@@ -656,7 +656,7 @@ describe('AiAgentsService', () => {
 
       const result = await service.getAgentStats(TENANT_ID)
 
-      expect(result.totalTokens).toBe(0)
+      expect(result.totalTokens).toBe('0')
       expect(result.totalCost).toBe(0)
     })
   })
@@ -676,7 +676,7 @@ describe('AiAgentsService', () => {
 
       expect(result.status).toBe('offline')
       expect(repository.updateWithDetails).toHaveBeenCalledWith({
-        where: { id: AGENT_ID },
+        where: { id: AGENT_ID, tenantId: TENANT_ID },
         data: { status: 'offline' },
       })
     })

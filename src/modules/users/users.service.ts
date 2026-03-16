@@ -1,27 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
 import { UsersRepository } from './users.repository'
+import {
+  DEFAULT_PREFERENCES,
+  buildPreferenceCreateData,
+  buildPreferenceUpdateData,
+  mapUserToProfile,
+} from './users.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { ChangePasswordDto } from './dto/change-password.dto'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UpdateProfileDto } from './dto/update-profile.dto'
-import type { Tenant, User, UserPreference } from '@prisma/client'
-
-type UserProfile = Omit<User, 'passwordHash'> & {
-  tenant: Tenant | null
-  preference: UserPreference | null
-}
+import type { UserProfile } from './users.utilities'
+import type { User, UserPreference } from '@prisma/client'
 
 const BCRYPT_SALT_ROUNDS = 12
-
-const DEFAULT_PREFERENCES = {
-  theme: 'system',
-  language: 'en',
-  notificationsEmail: true,
-  notificationsInApp: true,
-}
 
 @Injectable()
 export class UsersService {
@@ -38,45 +33,12 @@ export class UsersService {
 
   async getProfile(userId: string, tenantId?: string): Promise<UserProfile> {
     const user = await this.usersRepository.findByIdWithPreferencesAndMemberships(userId, tenantId)
-
     if (!user) {
-      this.appLogger.warn(`User profile not found userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'getProfile',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        actorUserId: userId,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'getProfile',
-      })
+      this.logWarn('getProfile', userId, tenantId)
       throw new BusinessException(404, 'User not found', 'errors.users.notFound')
     }
-
-    const { passwordHash: _passwordHash, memberships, ...rest } = user
-    const firstMembership = memberships[0]
-
-    this.appLogger.info(`Retrieved user profile userId=${userId}`, {
-      feature: AppLogFeature.USERS,
-      action: 'getProfile',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorUserId: userId,
-      actorEmail: user.email,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: 'getProfile',
-    })
-
-    return {
-      ...rest,
-      tenant: firstMembership?.tenant ?? null,
-      preference: user.preference,
-    }
+    this.logSuccess('getProfile', userId, user.email, tenantId)
+    return mapUserToProfile(user)
   }
 
   /* ---------------------------------------------------------------- */
@@ -84,81 +46,13 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<UserProfile> {
-    const user = await this.usersRepository.findById(userId)
-
-    if (!user) {
-      this.appLogger.warn(`User not found for profile update userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'updateProfile',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'updateProfile',
-      })
-      throw new BusinessException(404, 'User not found', 'errors.users.notFound')
-    }
-
-    if (!user.passwordHash) {
-      this.appLogger.warn(`Profile update failed: no password set userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'updateProfile',
-        outcome: AppLogOutcome.DENIED,
-        actorUserId: userId,
-        actorEmail: user.email,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'updateProfile',
-      })
-      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
-    }
-
-    const isPasswordValid = await bcrypt.compare(dto.currentPassword, user.passwordHash)
-    if (!isPasswordValid) {
-      this.appLogger.warn(`Profile update failed: incorrect password userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'updateProfile',
-        outcome: AppLogOutcome.DENIED,
-        actorUserId: userId,
-        actorEmail: user.email,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'updateProfile',
-      })
-      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
-    }
+    const user = await this.findUserOrThrow(userId, 'updateProfile')
+    await this.verifyPasswordOrThrow(user, dto.currentPassword, 'updateProfile')
 
     const updated = await this.usersRepository.updateName(userId, dto.name)
-
-    const { passwordHash: _passwordHash, memberships, ...rest } = updated
-    const firstMembership = memberships[0]
-
     this.logger.log(`Profile updated for user ${userId}`)
-
-    this.appLogger.info(`Updated user profile userId=${userId}`, {
-      feature: AppLogFeature.USERS,
-      action: 'updateProfile',
-      outcome: AppLogOutcome.SUCCESS,
-      actorUserId: userId,
-      actorEmail: user.email,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: 'updateProfile',
-    })
-
-    return {
-      ...rest,
-      tenant: firstMembership?.tenant ?? null,
-      preference: updated.preference,
-    }
+    this.logSuccess('updateProfile', userId, user.email)
+    return mapUserToProfile(updated)
   }
 
   /* ---------------------------------------------------------------- */
@@ -166,75 +60,14 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ changed: boolean }> {
-    const user = await this.usersRepository.findById(userId)
-
-    if (!user) {
-      this.appLogger.warn(`User not found for password change userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'changePassword',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'changePassword',
-      })
-      throw new BusinessException(404, 'User not found', 'errors.users.notFound')
-    }
-
-    if (!user.passwordHash) {
-      this.appLogger.warn(`Password change failed: no password set userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'changePassword',
-        outcome: AppLogOutcome.DENIED,
-        actorUserId: userId,
-        actorEmail: user.email,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'changePassword',
-      })
-      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
-    }
-
-    const isPasswordValid = await bcrypt.compare(dto.currentPassword, user.passwordHash)
-    if (!isPasswordValid) {
-      this.appLogger.warn(`Password change failed: incorrect current password userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'changePassword',
-        outcome: AppLogOutcome.DENIED,
-        actorUserId: userId,
-        actorEmail: user.email,
-        targetResource: 'User',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'changePassword',
-      })
-      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
-    }
+    const user = await this.findUserOrThrow(userId, 'changePassword')
+    await this.verifyPasswordOrThrow(user, dto.currentPassword, 'changePassword')
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS)
-
     await this.usersRepository.updatePasswordHash(userId, hashedPassword)
 
     this.logger.log(`Password changed for user ${userId}`)
-
-    this.appLogger.info(`Password changed successfully userId=${userId}`, {
-      feature: AppLogFeature.USERS,
-      action: 'changePassword',
-      outcome: AppLogOutcome.SUCCESS,
-      actorUserId: userId,
-      actorEmail: user.email,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: 'changePassword',
-    })
-
+    this.logSuccess('changePassword', userId, user.email)
     return { changed: true }
   }
 
@@ -242,53 +75,13 @@ export class UsersService {
   /* GET PREFERENCES                                                   */
   /* ---------------------------------------------------------------- */
 
-  async getPreferences(userId: string): Promise<
-    | UserPreference
-    | {
-        userId: string
-        theme: string
-        language: string
-        notificationsEmail: boolean
-        notificationsInApp: boolean
-      }
-  > {
-    const user = await this.usersRepository.findById(userId)
-
-    if (!user) {
-      this.appLogger.warn(`User not found for preferences userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'getPreferences',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        targetResource: 'UserPreference',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'getPreferences',
-      })
-      throw new BusinessException(404, 'User not found', 'errors.users.notFound')
-    }
-
+  async getPreferences(
+    userId: string
+  ): Promise<UserPreference | (typeof DEFAULT_PREFERENCES & { userId: string })> {
+    const user = await this.findUserOrThrow(userId, 'getPreferences')
     const preference = await this.usersRepository.findPreference(userId)
-
-    this.appLogger.info(`Retrieved user preferences userId=${userId}`, {
-      feature: AppLogFeature.USERS,
-      action: 'getPreferences',
-      outcome: AppLogOutcome.SUCCESS,
-      actorUserId: userId,
-      actorEmail: user.email,
-      targetResource: 'UserPreference',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: 'getPreferences',
-    })
-
-    if (!preference) {
-      return { userId, ...DEFAULT_PREFERENCES }
-    }
-
-    return preference
+    this.logSuccess('getPreferences', userId, user.email)
+    return preference ?? { userId, ...DEFAULT_PREFERENCES }
   }
 
   /* ---------------------------------------------------------------- */
@@ -296,58 +89,109 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updatePreferences(userId: string, dto: UpdatePreferencesDto): Promise<UserPreference> {
-    const user = await this.usersRepository.findById(userId)
-
-    if (!user) {
-      this.appLogger.warn(`User not found for preferences update userId=${userId}`, {
-        feature: AppLogFeature.USERS,
-        action: 'updatePreferences',
-        outcome: AppLogOutcome.FAILURE,
-        actorUserId: userId,
-        targetResource: 'UserPreference',
-        targetResourceId: userId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'UsersService',
-        functionName: 'updatePreferences',
-      })
-      throw new BusinessException(404, 'User not found', 'errors.users.notFound')
-    }
+    const user = await this.findUserOrThrow(userId, 'updatePreferences')
 
     const preference = await this.usersRepository.upsertPreference(
       userId,
-      {
-        ...(dto.theme !== undefined && { theme: dto.theme }),
-        ...(dto.language !== undefined && { language: dto.language }),
-        ...(dto.notificationsEmail !== undefined && { notificationsEmail: dto.notificationsEmail }),
-        ...(dto.notificationsInApp !== undefined && { notificationsInApp: dto.notificationsInApp }),
-      },
-      {
-        theme: dto.theme ?? DEFAULT_PREFERENCES.theme,
-        language: dto.language ?? DEFAULT_PREFERENCES.language,
-        notificationsEmail: dto.notificationsEmail ?? DEFAULT_PREFERENCES.notificationsEmail,
-        notificationsInApp: dto.notificationsInApp ?? DEFAULT_PREFERENCES.notificationsInApp,
-      }
+      buildPreferenceUpdateData(dto),
+      buildPreferenceCreateData(dto)
     )
 
     this.logger.log(`Preferences updated for user ${userId}`)
+    this.logSuccess('updatePreferences', userId, user.email, undefined, {
+      theme: dto.theme ?? null,
+      language: dto.language ?? null,
+    })
+    return preference
+  }
 
-    this.appLogger.info(`Updated user preferences userId=${userId}`, {
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Finders                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async findUserOrThrow(userId: string, action: string): Promise<User> {
+    const user = await this.usersRepository.findById(userId)
+    if (!user) {
+      this.logWarn(action, userId)
+      throw new BusinessException(404, 'User not found', 'errors.users.notFound')
+    }
+    return user
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Password Verification                                    */
+  /* ---------------------------------------------------------------- */
+
+  private async verifyPasswordOrThrow(
+    user: { id: string; email: string; passwordHash: string | null },
+    password: string,
+    action: string
+  ): Promise<void> {
+    if (!user.passwordHash) {
+      this.logDenied(action, user.id, user.email)
+      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash)
+    if (!valid) {
+      this.logDenied(action, user.id, user.email)
+      throw new BusinessException(400, 'Incorrect password', 'errors.users.incorrectPassword')
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(
+    action: string,
+    userId: string,
+    email?: string,
+    tenantId?: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.appLogger.info(`Users ${action}`, {
       feature: AppLogFeature.USERS,
-      action: 'updatePreferences',
+      action,
       outcome: AppLogOutcome.SUCCESS,
       actorUserId: userId,
-      actorEmail: user.email,
-      targetResource: 'UserPreference',
+      actorEmail: email,
+      tenantId,
+      targetResource: 'User',
       targetResourceId: userId,
       sourceType: AppLogSourceType.SERVICE,
       className: 'UsersService',
-      functionName: 'updatePreferences',
-      metadata: {
-        theme: dto.theme ?? null,
-        language: dto.language ?? null,
-      },
+      functionName: action,
+      metadata,
     })
+  }
 
-    return preference
+  private logWarn(action: string, userId: string, tenantId?: string): void {
+    this.appLogger.warn(`Users ${action} failed`, {
+      feature: AppLogFeature.USERS,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      actorUserId: userId,
+      tenantId,
+      targetResource: 'User',
+      targetResourceId: userId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'UsersService',
+      functionName: action,
+    })
+  }
+
+  private logDenied(action: string, userId: string, email: string): void {
+    this.appLogger.warn(`Users ${action} denied`, {
+      feature: AppLogFeature.USERS,
+      action,
+      outcome: AppLogOutcome.DENIED,
+      actorUserId: userId,
+      actorEmail: email,
+      targetResource: 'User',
+      targetResourceId: userId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'UsersService',
+      functionName: action,
+    })
   }
 }

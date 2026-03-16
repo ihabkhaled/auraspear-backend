@@ -1,3 +1,5 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdateReportDto } from './dto/update-report.dto'
 import type { ReportRecord, ReportStats } from './reports.types'
 import type { Prisma } from '@prisma/client'
@@ -41,7 +43,7 @@ export function buildReportOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.ReportOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -56,7 +58,7 @@ export function buildReportOrderBy(
     case 'format':
       return { format: order }
     default:
-      return { createdAt: 'desc' }
+      return { createdAt: SortOrder.DESC }
   }
 }
 
@@ -112,7 +114,7 @@ export function buildReportRecord(
     status: report.status,
     parameters: report.parameters as Record<string, unknown> | null,
     fileUrl: report.fileUrl,
-    fileSize: report.fileSize ? Number(report.fileSize) : null,
+    fileSize: report.fileSize ? String(report.fileSize) : null,
     generatedAt: report.generatedAt,
     generatedBy: report.generatedBy,
     generatedByName,

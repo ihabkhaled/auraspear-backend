@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { DashboardsService } from './dashboards.service'
-import { AlertTrendQuerySchema } from './dto/dashboard-query.dto'
+import { AlertTrendQuerySchema, RecentActivityQuerySchema } from './dto/dashboard-query.dto'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 
 interface DashboardSummary {
@@ -75,6 +75,28 @@ interface PipelineHealth {
   pipelines: PipelineEntry[]
 }
 
+interface RecentActivityItem {
+  id: string
+  type: string
+  actorName: string
+  title: string
+  message: string
+  createdAt: Date
+  isRead: boolean
+}
+
+interface RecentActivityResponse {
+  data: RecentActivityItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+    hasNext: boolean
+    hasPrev: boolean
+  }
+}
+
 @ApiTags('dashboards')
 @ApiBearerAuth()
 @Controller('dashboards')
@@ -113,5 +135,14 @@ export class DashboardsController {
   @Get('pipeline-health')
   async getPipelineHealth(@TenantId() tenantId: string): Promise<PipelineHealth> {
     return this.dashboardsService.getPipelineHealth(tenantId)
+  }
+
+  @Get('recent-activity')
+  async getRecentActivity(
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, unknown>
+  ): Promise<RecentActivityResponse> {
+    const { limit } = RecentActivityQuerySchema.parse(rawQuery)
+    return this.dashboardsService.getRecentActivity(tenantId, limit)
   }
 }

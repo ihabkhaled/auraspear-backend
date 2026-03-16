@@ -110,15 +110,18 @@ export class AiAgentsRepository {
   }
 
   async update(params: {
-    where: Prisma.AiAgentWhereUniqueInput
-    data: Prisma.AiAgentUpdateInput | Record<string, unknown>
-  }): Promise<AiAgent> {
-    return this.prisma.aiAgent.update(params)
+    where: { id: string; tenantId: string }
+    data: Prisma.AiAgentUpdateManyMutationInput | Record<string, unknown>
+  }): Promise<Prisma.BatchPayload> {
+    return this.prisma.aiAgent.updateMany({
+      where: params.where,
+      data: params.data,
+    })
   }
 
   async updateWithDetails(params: {
-    where: Prisma.AiAgentWhereUniqueInput
-    data: Prisma.AiAgentUpdateInput | Record<string, unknown>
+    where: { id: string; tenantId: string }
+    data: Prisma.AiAgentUpdateManyMutationInput | Record<string, unknown>
   }): Promise<
     Prisma.AiAgentGetPayload<{
       include: {
@@ -128,8 +131,13 @@ export class AiAgentsRepository {
       }
     }>
   > {
-    return this.prisma.aiAgent.update({
-      ...params,
+    await this.prisma.aiAgent.updateMany({
+      where: params.where,
+      data: params.data,
+    })
+
+    const updated = await this.prisma.aiAgent.findFirst({
+      where: params.where,
       include: {
         tools: true,
         sessions: {
@@ -144,6 +152,12 @@ export class AiAgentsRepository {
         },
       },
     })
+
+    if (!updated) {
+      throw new Error(`AiAgent ${params.where.id} not found after update`)
+    }
+
+    return updated
   }
 
   async deleteMany(where: Prisma.AiAgentWhereInput): Promise<Prisma.BatchPayload> {

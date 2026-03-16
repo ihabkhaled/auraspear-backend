@@ -7,7 +7,13 @@ import {
   buildRuleUpdateData,
   buildCorrelationStats,
 } from './correlation.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, RuleSource } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  RuleSource,
+  RuleStatus,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -141,7 +147,7 @@ export class CorrelationService {
       description: dto.description,
       source: dto.source,
       severity: dto.severity,
-      status: 'active',
+      status: RuleStatus.ACTIVE,
       yamlContent: dto.yamlContent,
       conditions: dto.conditions ? (dto.conditions as Prisma.InputJsonValue) : Prisma.DbNull,
       mitreTactics: dto.mitreTactics ?? [],

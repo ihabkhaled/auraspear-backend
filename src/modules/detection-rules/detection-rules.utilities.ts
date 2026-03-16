@@ -1,3 +1,4 @@
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { DetectionRuleRecord, DetectionRuleStats } from './detection-rules.types'
 import type { UpdateDetectionRuleDto } from './dto/update-detection-rule.dto'
 import type {
@@ -73,7 +74,7 @@ export function buildRuleOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.DetectionRuleOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
 
   switch (sortBy) {
     case 'name':

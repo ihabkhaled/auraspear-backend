@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ConnectorsRepository } from './connectors.repository'
+import {
+  buildConnectorUpdateData,
+  extractUrlFields,
+  mapConnectorToResponse,
+  mergeConfigWithRedacted,
+  sanitizeErrorDetails,
+} from './connectors.utilities'
 import { validateConnectorConfig } from './dto/connector.dto'
 import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
@@ -15,15 +22,22 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enu
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.utility'
-import { maskSecrets, REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
+import { maskSecrets } from '../../common/utils/mask.utility'
 import { validateUrl } from '../../common/utils/ssrf.utility'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
+import type { ConnectorConfig } from '@prisma/client'
+
+interface ConnectorTestable {
+  testConnection(config: Record<string, unknown>): Promise<{ ok: boolean; details: string }>
+}
 
 @Injectable()
 export class ConnectorsService {
   private readonly logger = new Logger(ConnectorsService.name)
   private readonly encryptionKey: string
+
+  private readonly testServiceMap: Map<string, ConnectorTestable>
 
   constructor(
     private readonly connectorsRepository: ConnectorsRepository,
@@ -44,131 +58,55 @@ export class ConnectorsService {
       throw new Error('CONFIG_ENCRYPTION_KEY must be set and at least 32 characters')
     }
     this.encryptionKey = key
+
+    this.testServiceMap = new Map<string, ConnectorTestable>([
+      ['wazuh', this.wazuhService],
+      ['graylog', this.graylogService],
+      ['logstash', this.logstashService],
+      ['velociraptor', this.velociraptorService],
+      ['grafana', this.grafanaService],
+      ['influxdb', this.influxdbService],
+      ['misp', this.mispService],
+      ['shuffle', this.shuffleService],
+      ['bedrock', this.bedrockService],
+    ])
   }
+
+  /* ---------------------------------------------------------------- */
+  /* FIND ALL                                                          */
+  /* ---------------------------------------------------------------- */
 
   async findAll(tenantId: string): Promise<ConnectorResponse[]> {
     const configs = await this.connectorsRepository.findAllByTenant(tenantId)
-
-    const results = configs.map(
-      (c: {
-        type: string
-        name: string
-        enabled: boolean
-        authType: string
-        encryptedConfig: string
-        lastTestAt: Date | null
-        lastTestOk: boolean | null
-        lastError: string | null
-      }) => ({
-        type: c.type,
-        name: c.name,
-        enabled: c.enabled,
-        authType: c.authType,
-        config: maskSecrets(this.decryptConfig(c.encryptedConfig)),
-        lastTestAt: c.lastTestAt,
-        lastTestOk: c.lastTestOk,
-        lastError: c.lastError,
-      })
+    const results = configs.map(c =>
+      mapConnectorToResponse(c, e => this.decryptConfig(e), maskSecrets)
     )
-
-    this.appLogger.info('Connectors listed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'findAll',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'findAll',
-      metadata: { count: results.length },
-    })
-
+    this.logSuccess('findAll', tenantId, undefined, { count: results.length })
     return results
   }
 
+  /* ---------------------------------------------------------------- */
+  /* FIND BY TYPE                                                      */
+  /* ---------------------------------------------------------------- */
+
   async findByType(tenantId: string, type: string): Promise<ConnectorResponse> {
-    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
-
-    if (!config) {
-      this.appLogger.warn('Connector not found by type', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'findByType',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: type },
-      })
-      throw new BusinessException(
-        404,
-        `Connector '${type}' not found`,
-        'errors.connectors.notFound'
-      )
-    }
-
-    this.appLogger.info('Connector retrieved by type', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'findByType',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'findByType',
-      metadata: { connectorType: type },
-    })
-
-    return {
-      type: config.type,
-      name: config.name,
-      enabled: config.enabled,
-      authType: config.authType,
-      config: maskSecrets(this.decryptConfig(config.encryptedConfig)),
-      lastTestAt: config.lastTestAt,
-      lastTestOk: config.lastTestOk,
-      lastError: config.lastError,
-    }
+    const config = await this.findConnectorOrThrow(tenantId, type, 'findByType')
+    this.logSuccess('findByType', tenantId, type)
+    return mapConnectorToResponse(config, e => this.decryptConfig(e), maskSecrets)
   }
 
+  /* ---------------------------------------------------------------- */
+  /* CREATE                                                            */
+  /* ---------------------------------------------------------------- */
+
   async create(tenantId: string, dto: CreateConnectorDto): Promise<ConnectorResponse> {
-    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, dto.type)
-
-    if (existing) {
-      this.appLogger.warn('Connector already exists', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'create',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: dto.type },
-      })
-      throw new BusinessException(
-        409,
-        `Connector '${dto.type}' already exists`,
-        'errors.connectors.alreadyExists'
-      )
-    }
-
-    let validatedConfig: Record<string, unknown>
-    try {
-      validatedConfig = validateConnectorConfig(dto.type, dto.config as Record<string, unknown>)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Invalid connector config'
-      this.appLogger.warn('Invalid connector config during create', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'create',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: dto.type, error: message },
-      })
-      throw new BusinessException(
-        400,
-        `Invalid config for '${dto.type}': ${message}`,
-        'errors.connectors.invalidConfig'
-      )
-    }
-
-    // SSRF validation at input time — reject private/internal URLs before storing
-    this.validateConfigUrls(validatedConfig)
-
+    await this.guardDuplicate(tenantId, dto.type)
+    const validatedConfig = this.validateAndSanitizeConfig(
+      dto.type,
+      dto.config as Record<string, unknown>,
+      'create',
+      tenantId
+    )
     const encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
 
     const config = await this.connectorsRepository.create({
@@ -180,19 +118,10 @@ export class ConnectorsService {
       encryptedConfig,
     })
 
-    this.appLogger.info('Connector created', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'create',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: dto.type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'create',
-      metadata: { connectorName: dto.name, authType: dto.authType },
+    this.logSuccess('create', tenantId, dto.type, {
+      connectorName: dto.name,
+      authType: dto.authType,
     })
-
     return {
       type: config.type,
       name: config.name,
@@ -205,74 +134,25 @@ export class ConnectorsService {
     }
   }
 
+  /* ---------------------------------------------------------------- */
+  /* UPDATE                                                            */
+  /* ---------------------------------------------------------------- */
+
   async update(
     tenantId: string,
     type: string,
     dto: UpdateConnectorDto
   ): Promise<ConnectorResponse> {
-    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, type)
+    const existing = await this.findConnectorOrThrow(tenantId, type, 'update')
+    const updateData = buildConnectorUpdateData(dto)
 
-    if (!existing) {
-      this.appLogger.warn('Connector not found for update', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'update',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: type },
-      })
-      throw new BusinessException(
-        404,
-        `Connector '${type}' not found`,
-        'errors.connectors.notFound'
-      )
-    }
-
-    const updateData: Record<string, unknown> = {}
-    if (dto.name !== undefined) updateData.name = dto.name
-    if (dto.enabled !== undefined) updateData.enabled = dto.enabled
-    if (dto.authType !== undefined) updateData.authType = dto.authType
     if (dto.config !== undefined) {
-      // Merge with existing config — preserve redacted (masked) secret values
-      const existingDecrypted = new Map(
-        Object.entries(this.decryptConfig(existing.encryptedConfig))
+      updateData.encryptedConfig = this.buildMergedEncryptedConfig(
+        type,
+        dto.config as Record<string, unknown>,
+        existing.encryptedConfig,
+        tenantId
       )
-      const merged = new Map<string, unknown>()
-      for (const [key, value] of Object.entries(dto.config as Record<string, unknown>)) {
-        const resolvedValue = value === REDACTED_PLACEHOLDER ? existingDecrypted.get(key) : value
-        merged.set(key, resolvedValue)
-      }
-      // Also preserve any existing keys not sent in the update
-      for (const [key, value] of existingDecrypted) {
-        if (!merged.has(key)) {
-          merged.set(key, value)
-        }
-      }
-      const mergedConfig: Record<string, unknown> = Object.fromEntries(merged)
-
-      let validatedConfig: Record<string, unknown>
-      try {
-        validatedConfig = validateConnectorConfig(type, mergedConfig)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Invalid connector config'
-        this.appLogger.warn('Invalid connector config during update', {
-          feature: AppLogFeature.CONNECTORS,
-          action: 'update',
-          className: 'ConnectorsService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: { tenantId, connectorType: type, error: message },
-        })
-        throw new BusinessException(
-          400,
-          `Invalid config for '${type}': ${message}`,
-          'errors.connectors.invalidConfig'
-        )
-      }
-      // SSRF validation at input time — reject private/internal URLs before storing
-      this.validateConfigUrls(validatedConfig)
-
-      updateData.encryptedConfig = encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
     }
 
     const updated = await this.connectorsRepository.updateByTenantAndType(
@@ -280,67 +160,24 @@ export class ConnectorsService {
       type,
       updateData
     )
-
-    this.appLogger.info('Connector updated', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'update',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'update',
-      metadata: { updatedFields: Object.keys(dto) },
-    })
-
-    return {
-      type: updated.type,
-      name: updated.name,
-      enabled: updated.enabled,
-      authType: updated.authType,
-      config: maskSecrets(this.decryptConfig(updated.encryptedConfig)),
-      lastTestAt: updated.lastTestAt,
-      lastTestOk: updated.lastTestOk,
-      lastError: updated.lastError,
-    }
+    this.logSuccess('update', tenantId, type, { updatedFields: Object.keys(dto) })
+    return mapConnectorToResponse(updated, e => this.decryptConfig(e), maskSecrets)
   }
+
+  /* ---------------------------------------------------------------- */
+  /* REMOVE                                                            */
+  /* ---------------------------------------------------------------- */
 
   async remove(tenantId: string, type: string): Promise<{ deleted: boolean }> {
-    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, type)
-
-    if (!existing) {
-      this.appLogger.warn('Connector not found for removal', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'remove',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: type },
-      })
-      throw new BusinessException(
-        404,
-        `Connector '${type}' not found`,
-        'errors.connectors.notFound'
-      )
-    }
-
+    await this.findConnectorOrThrow(tenantId, type, 'remove')
     await this.connectorsRepository.deleteByTenantAndType(tenantId, type)
-
-    this.appLogger.info('Connector removed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'remove',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'remove',
-    })
-
+    this.logSuccess('remove', tenantId, type)
     return { deleted: true }
   }
+
+  /* ---------------------------------------------------------------- */
+  /* TOGGLE                                                            */
+  /* ---------------------------------------------------------------- */
 
   async toggle(
     tenantId: string,
@@ -348,222 +185,167 @@ export class ConnectorsService {
     enabled: boolean
   ): Promise<{ type: string; enabled: boolean }> {
     await this.connectorsRepository.updateByTenantAndType(tenantId, type, { enabled })
-
-    this.appLogger.info(`Connector ${enabled ? 'enabled' : 'disabled'}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'toggle',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'toggle',
-      metadata: { enabled },
-    })
-
+    this.logSuccess('toggle', tenantId, type, { enabled })
     return { type, enabled }
   }
 
+  /* ---------------------------------------------------------------- */
+  /* TEST CONNECTION                                                   */
+  /* ---------------------------------------------------------------- */
+
   async testConnection(tenantId: string, type: string): Promise<TestResult> {
-    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
-
-    if (!config) {
-      this.appLogger.warn('Connector not found for test', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: type },
-      })
-      throw new BusinessException(
-        404,
-        `Connector '${type}' not found`,
-        'errors.connectors.notFound'
-      )
-    }
-
+    const config = await this.findConnectorOrThrow(tenantId, type, 'testConnection')
     const decryptedConfig = this.decryptConfig(config.encryptedConfig)
-    const start = Date.now()
+    const { ok, details, latencyMs } = await this.runConnectionTest(type, decryptedConfig, tenantId)
 
-    let ok = false
-    let details = ''
-
-    try {
-      switch (type) {
-        case 'wazuh': {
-          const { ok: wazuhOk, details: wazuhDetails } =
-            await this.wazuhService.testConnection(decryptedConfig)
-          ok = wazuhOk
-          details = wazuhDetails
-          break
-        }
-        case 'graylog': {
-          const { ok: graylogOk, details: graylogDetails } =
-            await this.graylogService.testConnection(decryptedConfig)
-          ok = graylogOk
-          details = graylogDetails
-          break
-        }
-        case 'logstash': {
-          const { ok: logstashOk, details: logstashDetails } =
-            await this.logstashService.testConnection(decryptedConfig)
-          ok = logstashOk
-          details = logstashDetails
-          break
-        }
-        case 'velociraptor': {
-          const { ok: velociraptorOk, details: velociraptorDetails } =
-            await this.velociraptorService.testConnection(decryptedConfig)
-          ok = velociraptorOk
-          details = velociraptorDetails
-          break
-        }
-        case 'grafana': {
-          const { ok: grafanaOk, details: grafanaDetails } =
-            await this.grafanaService.testConnection(decryptedConfig)
-          ok = grafanaOk
-          details = grafanaDetails
-          break
-        }
-        case 'influxdb': {
-          const { ok: influxdbOk, details: influxdbDetails } =
-            await this.influxdbService.testConnection(decryptedConfig)
-          ok = influxdbOk
-          details = influxdbDetails
-          break
-        }
-        case 'misp': {
-          const { ok: mispOk, details: mispDetails } =
-            await this.mispService.testConnection(decryptedConfig)
-          ok = mispOk
-          details = mispDetails
-          break
-        }
-        case 'shuffle': {
-          const { ok: shuffleOk, details: shuffleDetails } =
-            await this.shuffleService.testConnection(decryptedConfig)
-          ok = shuffleOk
-          details = shuffleDetails
-          break
-        }
-        case 'bedrock': {
-          const { ok: bedrockOk, details: bedrockDetails } =
-            await this.bedrockService.testConnection(decryptedConfig)
-          ok = bedrockOk
-          details = bedrockDetails
-          break
-        }
-        default:
-          details = `Unknown connector type: ${type}`
-      }
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : 'Connection test failed'
-      // L11: Sanitize error details — strip internal paths and stack traces
-      details = rawMessage.replaceAll(/\/[\w./-]+/g, '[path]').slice(0, 500)
-      this.logger.error(`Connector ${type} test failed for tenant ${tenantId}: ${rawMessage}`)
-      this.appLogger.error('Connector test connection failed with exception', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { tenantId, connectorType: type, error: rawMessage },
-      })
-    }
-
-    const latencyMs = Date.now() - start
     const testedAt = new Date()
-
     await this.connectorsRepository.updateByTenantAndType(tenantId, type, {
       lastTestAt: testedAt,
       lastTestOk: ok,
       lastError: ok ? null : details.slice(0, 500),
     })
 
-    this.appLogger.info(`Connector test ${ok ? 'succeeded' : 'failed'}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'testConnection',
-      outcome: ok ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'testConnection',
-      metadata: { latencyMs, ok },
-    })
-
+    this.logSuccess('testConnection', tenantId, type, { latencyMs, ok })
     return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
   }
 
-  /**
-   * Get decrypted config for a connector (used by other modules).
-   */
+  /* ---------------------------------------------------------------- */
+  /* PUBLIC: Config Access (used by other modules)                     */
+  /* ---------------------------------------------------------------- */
+
   async getDecryptedConfig(
     tenantId: string,
     type: string
   ): Promise<Record<string, unknown> | null> {
     const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
-
     if (!config?.enabled) return null
-
-    this.appLogger.debug('Decrypted connector config accessed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'getDecryptedConfig',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Connector',
-      targetResourceId: type,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      functionName: 'getDecryptedConfig',
-    })
-
+    this.logDebug('getDecryptedConfig', tenantId, type)
     return this.decryptConfig(config.encryptedConfig)
   }
 
-  /**
-   * Check if a connector is enabled for a tenant.
-   */
   async isEnabled(tenantId: string, type: string): Promise<boolean> {
     const config = await this.connectorsRepository.findEnabledStatus(tenantId, type)
-
     return config?.enabled ?? false
   }
 
-  /**
-   * Get all enabled connectors for a tenant.
-   */
   async getEnabledConnectors(tenantId: string): Promise<Array<{ type: string; name: string }>> {
     const configs = await this.connectorsRepository.findEnabledByTenant(tenantId)
-
     return configs.map(c => ({ type: c.type, name: c.name }))
   }
 
-  /**
-   * Validate all URL fields in a connector config against SSRF rules at input time.
-   * Connectors intentionally connect to private infrastructure, so this only rejects
-   * metadata endpoints (169.254.x) and loopback — internal ranges are allowed.
-   */
-  private validateConfigUrls(config: Record<string, unknown>): void {
-    const urlKeys = new Set([
-      'baseUrl',
-      'managerUrl',
-      'indexerUrl',
-      'webhookUrl',
-      'apiUrl',
-      'grafanaUrl',
-      'mispUrl',
-    ])
-    for (const [key, value] of Object.entries(config)) {
-      if (urlKeys.has(key) && typeof value === 'string' && value.length > 0) {
-        // validateUrl throws BusinessException for private/invalid URLs
-        validateUrl(value)
-      }
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Finders                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async findConnectorOrThrow(
+    tenantId: string,
+    type: string,
+    action: string
+  ): Promise<ConnectorConfig> {
+    const config = await this.connectorsRepository.findByTenantAndType(tenantId, type)
+    if (!config) {
+      this.logWarn(action, tenantId, type)
+      throw new BusinessException(
+        404,
+        `Connector '${type}' not found`,
+        'errors.connectors.notFound'
+      )
+    }
+    return config
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Validation                                               */
+  /* ---------------------------------------------------------------- */
+
+  private async guardDuplicate(tenantId: string, type: string): Promise<void> {
+    const existing = await this.connectorsRepository.findByTenantAndType(tenantId, type)
+    if (existing) {
+      this.logWarn('create', tenantId, type)
+      throw new BusinessException(
+        409,
+        `Connector '${type}' already exists`,
+        'errors.connectors.alreadyExists'
+      )
     }
   }
+
+  private validateAndSanitizeConfig(
+    type: string,
+    config: Record<string, unknown>,
+    action: string,
+    tenantId: string
+  ): Record<string, unknown> {
+    let validated: Record<string, unknown>
+    try {
+      validated = validateConnectorConfig(type, config)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid connector config'
+      this.logWarn(action, tenantId, type, { error: message })
+      throw new BusinessException(
+        400,
+        `Invalid config for '${type}': ${message}`,
+        'errors.connectors.invalidConfig'
+      )
+    }
+    this.validateConfigUrls(validated)
+    return validated
+  }
+
+  private validateConfigUrls(config: Record<string, unknown>): void {
+    for (const { value } of extractUrlFields(config)) {
+      validateUrl(value)
+    }
+  }
+
+  private buildMergedEncryptedConfig(
+    type: string,
+    incomingConfig: Record<string, unknown>,
+    existingEncrypted: string,
+    tenantId: string
+  ): string {
+    const existingDecrypted = this.decryptConfig(existingEncrypted)
+    const mergedConfig = mergeConfigWithRedacted(incomingConfig, existingDecrypted)
+    const validatedConfig = this.validateAndSanitizeConfig(type, mergedConfig, 'update', tenantId)
+    return encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Connection Test Runner                                   */
+  /* ---------------------------------------------------------------- */
+
+  private async runConnectionTest(
+    type: string,
+    config: Record<string, unknown>,
+    tenantId: string
+  ): Promise<{ ok: boolean; details: string; latencyMs: number }> {
+    const start = Date.now()
+    let ok = false
+    let details = ''
+
+    try {
+      const service = this.testServiceMap.get(type)
+      if (service) {
+        const { ok: resultOk, details: resultDetails } = await service.testConnection(config)
+        ok = resultOk
+        details = resultDetails
+      } else {
+        details = `Unknown connector type: ${type}`
+      }
+    } catch (error) {
+      details = sanitizeErrorDetails(error)
+      this.logger.error(
+        `Connector ${type} test failed for tenant ${tenantId}: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+      this.logError('testConnection', tenantId, type, error)
+    }
+
+    return { ok, details, latencyMs: Date.now() - start }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Encryption                                               */
+  /* ---------------------------------------------------------------- */
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {
     try {
@@ -579,15 +361,78 @@ export class ConnectorsService {
       return JSON.parse(decrypted) as Record<string, unknown>
     } catch {
       this.logger.warn('Failed to decrypt connector config, returning empty')
-      this.appLogger.warn('Failed to decrypt connector config', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'decryptConfig',
-        className: 'ConnectorsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {},
-      })
+      this.logWarn('decryptConfig', '', '')
       return {}
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(
+    action: string,
+    tenantId: string,
+    resourceId?: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.appLogger.info(`Connector ${action}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: resourceId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  private logDebug(action: string, tenantId: string, resourceId?: string): void {
+    this.appLogger.debug(`Connector ${action}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'Connector',
+      targetResourceId: resourceId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: action,
+    })
+  }
+
+  private logWarn(
+    action: string,
+    tenantId: string,
+    type?: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.appLogger.warn(`Connector ${action} failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: action,
+      metadata: { ...metadata, tenantId, connectorType: type },
+    })
+  }
+
+  private logError(action: string, tenantId: string, type: string, error: unknown): void {
+    this.appLogger.error(`Connector ${action} error`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      metadata: {
+        tenantId,
+        connectorType: type,
+        error: error instanceof Error ? error.message : 'unknown',
+      },
+    })
   }
 }

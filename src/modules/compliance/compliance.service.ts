@@ -10,7 +10,7 @@ import {
   buildComplianceStats,
   buildControlStatsBatchMap,
 } from './compliance.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -270,7 +270,7 @@ export class ComplianceService {
 
     const controls = await this.repository.findManyControls({
       where: { frameworkId },
-      orderBy: { controlNumber: 'asc' },
+      orderBy: { controlNumber: SortOrder.ASC },
     })
 
     const assessorMap = await this.resolveNamesBatch(controls.map(c => c.assessedBy))

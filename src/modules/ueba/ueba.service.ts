@@ -166,7 +166,7 @@ export class UebaService {
     }
 
     const updated = await this.repository.updateEntity({
-      where: { id },
+      where: { id, tenantId },
       data: dto,
     })
 
@@ -199,7 +199,7 @@ export class UebaService {
       throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
     }
 
-    await this.repository.deleteEntity({ id })
+    await this.repository.deleteEntity({ id, tenantId })
 
     this.appLogger.info('UEBA entity deleted', {
       feature: AppLogFeature.UEBA,
@@ -231,7 +231,7 @@ export class UebaService {
     }
 
     const updated = await this.repository.updateAnomaly({
-      where: { id },
+      where: { id, tenantId },
       data: { resolved: true },
     })
 

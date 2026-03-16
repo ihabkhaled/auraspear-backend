@@ -8,6 +8,20 @@ import type {
 import type { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
 import type { Prisma, UserRole, UserStatus, TenantMembership, User } from '@prisma/client'
 
+/** Fields needed from User when listing members — excludes passwordHash and oidcSub */
+const USER_MEMBER_SELECT = {
+  select: {
+    id: true,
+    email: true,
+    name: true,
+    mfaEnabled: true,
+    isProtected: true,
+    lastLoginAt: true,
+    createdAt: true,
+    updatedAt: true,
+  },
+} as const
+
 @Injectable()
 export class TenantsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -99,11 +113,11 @@ export class TenantsRepository {
     skip: number
     take: number
   }): Promise<[Array<TenantMembership & { user: User }>, number]> {
-    return this.prisma.$transaction([
+    return Promise.all([
       this.prisma.tenantMembership.findMany({
         ...params,
-        include: { user: true },
-      }),
+        include: { user: USER_MEMBER_SELECT },
+      }) as unknown as Promise<Array<TenantMembership & { user: User }>>,
       this.prisma.tenantMembership.count({ where: params.where }),
     ])
   }
@@ -206,8 +220,8 @@ export class TenantsRepository {
   ): Promise<(TenantMembership & { user: User }) | null> {
     return this.prisma.tenantMembership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
-      include: { user: true },
-    })
+      include: { user: USER_MEMBER_SELECT },
+    }) as Promise<(TenantMembership & { user: User }) | null>
   }
 
   async updateMembershipRole(
@@ -247,8 +261,8 @@ export class TenantsRepository {
     return this.prisma.tenantMembership.update({
       where: { userId_tenantId: { userId, tenantId } },
       data: { status: status as UserStatus },
-      include: { user: true },
-    })
+      include: { user: USER_MEMBER_SELECT },
+    }) as unknown as Promise<TenantMembership & { user: User }>
   }
 
   async findTenantById(

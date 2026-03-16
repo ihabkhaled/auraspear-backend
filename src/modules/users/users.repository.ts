@@ -92,12 +92,38 @@ export class UsersRepository {
       language?: string
       notificationsEmail?: boolean
       notificationsInApp?: boolean
+      notifyCriticalAlerts?: boolean
+      notifyHighAlerts?: boolean
+      notifyCaseAssignments?: boolean
+      notifyIncidentUpdates?: boolean
+      notifyComplianceAlerts?: boolean
+      notifyCaseUpdates?: boolean
+      notifyCaseComments?: boolean
+      notifyCaseActivity?: boolean
+      notifyUserManagement?: boolean
+      retentionAlerts?: string
+      retentionLogs?: string
+      retentionIncidents?: string
+      retentionAuditLogs?: string
     },
     createData: {
       theme: string
       language: string
       notificationsEmail: boolean
       notificationsInApp: boolean
+      notifyCriticalAlerts: boolean
+      notifyHighAlerts: boolean
+      notifyCaseAssignments: boolean
+      notifyIncidentUpdates: boolean
+      notifyComplianceAlerts: boolean
+      notifyCaseUpdates: boolean
+      notifyCaseComments: boolean
+      notifyCaseActivity: boolean
+      notifyUserManagement: boolean
+      retentionAlerts: string
+      retentionLogs: string
+      retentionIncidents: string
+      retentionAuditLogs: string
     }
   ): Promise<Prisma.UserPreferenceGetPayload<Record<string, never>>> {
     return this.prisma.userPreference.upsert({

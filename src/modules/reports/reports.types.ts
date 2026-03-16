@@ -10,7 +10,7 @@ export interface ReportRecord {
   status: string
   parameters: Record<string, unknown> | null
   fileUrl: string | null
-  fileSize: number | null
+  fileSize: string | null
   generatedAt: Date | null
   generatedBy: string
   generatedByName: string | null

@@ -88,16 +88,16 @@ export class SoarRepository {
     return this.prisma.soarExecution.count({ where })
   }
 
-  async findCompletedExecutions(
-    tenantId: string
-  ): Promise<Array<{ startedAt: Date; completedAt: Date | null }>> {
-    return this.prisma.soarExecution.findMany({
-      where: {
-        tenantId,
-        completedAt: { not: null },
-      },
-      select: { startedAt: true, completedAt: true },
-    })
+  async getAvgExecutionTimeMs(tenantId: string): Promise<number | null> {
+    const result = await this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
+      SELECT AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000)::float as avg_ms
+      FROM soar_executions
+      WHERE tenant_id = ${tenantId}::uuid
+        AND completed_at IS NOT NULL
+    `
+    const avgMs = result[0]?.avg_ms
+    if (avgMs === null || avgMs === undefined) return null
+    return Math.round(avgMs)
   }
 
   async executePlaybookTransaction(params: {

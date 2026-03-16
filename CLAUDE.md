@@ -736,3 +736,33 @@ Follow Conventional Commits (enforced by commitlint):
 - `revert:` — Revert a previous commit
 
 Subject max length: 100 characters. No sentence-case, start-case, PascalCase, or UPPER_CASE in subject.
+
+---
+
+## Audit Rules (discovered during SpearX audit — MANDATORY)
+
+### Shared Utilities
+
+19. **Always use `toSortOrder()` from `src/common/utils/query.utility.ts`** — Never inline `sortOrder === 'asc' ? 'asc' : 'desc'`. Import and use the shared utility.
+
+### Service Method Size
+
+20. **No service method > 20 lines** — Extract logic (validation, mapping, query building, prompt construction, response parsing) into the module's `*.utilities.ts` file. The service method should read like a recipe: call util, call repo, return result.
+
+### Tenant Scoping
+
+21. **Every `update()` and `delete()` in a repository MUST include `tenantId` (or parent entity ID) in the where clause** — No exceptions. Use `updateMany({ where: { id, tenantId } })` + `findFirst` pattern when Prisma doesn't support compound unique. This is a critical security requirement for tenant isolation.
+
+### Seed Idempotency
+
+22. **All seed `.create()` calls MUST be idempotent** — Use `findFirst` guard + try/catch, or `.upsert()` with `update: {}`. Seeds must run twice without error. Use deterministic UUIDs for tenant records. Wrap each section in try/catch to log warnings, never crash.
+
+### Query Optimization
+
+23. **Never fetch all records to count in JS** — Use Prisma `_count`, `_avg`, `_sum`, `groupBy`, or raw SQL aggregations instead of `.findMany()` + `.length` / `.reduce()`.
+24. **Every `findMany` must have pagination (`take` + `skip`)** — Exception: small lookup tables (dropdowns, enum-like data). Add `take: 500` as a safety limit for larger unbounded queries.
+25. **BigInt fields (`totalTokens`, `processedCount`, `fileSize`) must serialize as strings** — Use `String()` not `Number()` to prevent JS Number overflow in API responses.
+
+### Database Indexes
+
+26. **Every FK field and every field used in `where` filters must have an `@@index`** — Especially `tenantId` on high-traffic tables. `@unique` fields already have implicit indexes.

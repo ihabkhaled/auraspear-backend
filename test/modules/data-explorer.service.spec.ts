@@ -371,6 +371,7 @@ describe('DataExplorerService', () => {
       expect(repository.upsertGrafanaDashboard).toHaveBeenCalledTimes(1)
       expect(repository.updateSyncJob).toHaveBeenCalledWith(
         'job-1',
+        TENANT_ID,
         expect.objectContaining({ status: 'completed', recordsSynced: 1 })
       )
     })

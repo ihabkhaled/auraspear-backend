@@ -211,9 +211,10 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
   },
 ]
 
+// Deterministic UUIDs for idempotent seeding (generated once, hardcoded)
 const TENANT_PROFILES: TenantProfile[] = [
   {
-    id: randomUUID(),
+    id: '00000000-0000-4000-a000-000000000001',
     name: 'Aura Finance',
     slug: 'aura-finance',
     alertCount: 32,
@@ -249,7 +250,7 @@ const TENANT_PROFILES: TenantProfile[] = [
     connectors: CONNECTOR_SEEDS,
   },
   {
-    id: randomUUID(),
+    id: '00000000-0000-4000-a000-000000000002',
     name: 'Aura Health',
     slug: 'aura-health',
     alertCount: 18,
@@ -285,7 +286,7 @@ const TENANT_PROFILES: TenantProfile[] = [
     connectors: CONNECTOR_SEEDS,
   },
   {
-    id: randomUUID(),
+    id: '00000000-0000-4000-a000-000000000003',
     name: 'Aura Enterprise',
     slug: 'aura-enterprise',
     alertCount: 45,
@@ -1214,7 +1215,7 @@ const RESOLUTION_TEXTS = [
 async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<void> {
   const templates = pickByIndices(ALERT_TEMPLATES, profile.alertTemplateIndices)
 
-  // Use deterministic externalId so alerts are idempotent via @@unique([tenantId, externalId])
+  // Use deterministic externalId for consistent alert identity across re-seeds
   // Seed a fixed set per tenant using the template index as part of the key
   for (let i = 0; i < profile.alertCount; i++) {
     const externalId = `seed-${profile.slug}-${i}`
@@ -1238,9 +1239,22 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
     await prisma.alert.upsert({
       where: { tenantId_externalId: { tenantId, externalId } },
       update: {
+        title: template.title,
+        description: template.description,
+        severity: template.severity,
+        status,
+        source: template.source,
+        ruleName: template.ruleName,
+        ruleId: template.ruleId,
+        agentName,
+        sourceIp: srcIp,
+        destinationIp: dstIp,
+        mitreTactics: template.mitreTactics,
+        mitreTechniques: template.mitreTechniques,
+        timestamp,
         rawEvent: hasRawEvent
           ? (buildRawEvent(template, agentName, srcIp, dstIp, timestamp) as Prisma.InputJsonValue)
-          : undefined,
+          : Prisma.DbNull,
         acknowledgedBy: hasAcknowledged ? `analyst@${profile.slug}.io` : null,
         acknowledgedAt: hasAcknowledged ? new Date(timestamp.getTime() + 300_000) : null,
         closedBy: hasClosed ? `analyst@${profile.slug}.io` : null,
@@ -1301,9 +1315,15 @@ async function seedCases(
     await prisma.case.upsert({
       where: { caseNumber },
       update: {
-        // Update existing seeded cases with owner + cycle assignment
-        ...(ownerUserId ? { ownerUserId } : {}),
+        tenantId,
+        title: template.title,
+        description: template.description,
+        severity: template.severity,
+        status: template.status,
+        createdBy: `admin@${profile.slug}.io`,
+        closedAt: template.status === 'closed' ? randomDate(5) : null,
         ...(cycleId ? { cycleId } : {}),
+        ...(ownerUserId ? { ownerUserId } : {}),
       },
       create: {
         tenantId,
@@ -1351,58 +1371,59 @@ async function seedCases(
 }
 
 async function seedHuntSessions(tenantId: string, profile: TenantProfile): Promise<void> {
-  const queries = pickByIndices(HUNT_QUERIES, profile.huntQueryIndices)
-
-  for (let qi = 0; qi < queries.length; qi++) {
-    const query = queries[qi] as string
-    const status = (profile.huntSessionStatuses[qi] ?? 'completed') as HuntSessionStatus
-    const eventsCount = status === 'error' ? 0 : 3 + Math.floor(Math.random() * 20)
-
-    // Skip if a session with this query already exists for this tenant
-    const existing = await prisma.huntSession.findFirst({
-      where: { tenantId, query },
-      select: { id: true },
-    })
-    if (existing) {
-      continue
+  try {
+    const existingSession = await prisma.huntSession.findFirst({ where: { tenantId } })
+    if (existingSession) {
+      logger.info({ tenant: profile.slug }, 'Hunt sessions already seeded — skipping')
+      return
     }
 
-    const session = await prisma.huntSession.create({
-      data: {
-        tenantId,
-        query,
-        status,
-        startedBy: `hunter@${profile.slug}.io`,
-        startedAt: randomDate(14),
-        completedAt: status === 'running' ? null : randomDate(13),
-        eventsFound: eventsCount,
-        reasoning:
-          status === 'error'
-            ? ['Searching for matching patterns in Wazuh alerts index', 'Connection timeout']
-            : status === 'running'
-              ? ['Searching for matching patterns in Wazuh alerts index']
-              : [
-                  'Searching for matching patterns in Wazuh alerts index',
-                  `Found ${eventsCount} events matching query criteria`,
-                  'Analysis complete. Results stored.',
-                ],
-      },
-    })
+    const queries = pickByIndices(HUNT_QUERIES, profile.huntQueryIndices)
 
-    const events = []
-    for (let i = 0; i < eventsCount; i++) {
-      events.push({
-        huntSessionId: session.id,
-        timestamp: randomDate(14),
-        severity: randomItem(['critical', 'high', 'medium', 'low', 'info']),
-        eventId: `evt-${randomUUID().slice(0, 8)}`,
-        sourceIp: randomIp(),
-        user: randomItem(['john.doe', 'jane.smith', 'admin', 'svc-backup', null]),
-        description: `Event matching hunt query: ${query.slice(0, 50)}...`,
+    for (let qi = 0; qi < queries.length; qi++) {
+      const query = queries[qi] as string
+      const status = (profile.huntSessionStatuses[qi] ?? 'completed') as HuntSessionStatus
+      const eventsCount = status === 'error' ? 0 : 3 + Math.floor(Math.random() * 20)
+
+      const session = await prisma.huntSession.create({
+        data: {
+          tenantId,
+          query,
+          status,
+          startedBy: `hunter@${profile.slug}.io`,
+          startedAt: randomDate(14),
+          completedAt: status === 'running' ? null : randomDate(13),
+          eventsFound: eventsCount,
+          reasoning:
+            status === 'error'
+              ? ['Searching for matching patterns in Wazuh alerts index', 'Connection timeout']
+              : status === 'running'
+                ? ['Searching for matching patterns in Wazuh alerts index']
+                : [
+                    'Searching for matching patterns in Wazuh alerts index',
+                    `Found ${eventsCount} events matching query criteria`,
+                    'Analysis complete. Results stored.',
+                  ],
+        },
       })
-    }
 
-    await prisma.huntEvent.createMany({ data: events })
+      const events = []
+      for (let i = 0; i < eventsCount; i++) {
+        events.push({
+          huntSessionId: session.id,
+          timestamp: randomDate(14),
+          severity: randomItem(['critical', 'high', 'medium', 'low', 'info']),
+          eventId: `evt-${randomUUID().slice(0, 8)}`,
+          sourceIp: randomIp(),
+          user: randomItem(['john.doe', 'jane.smith', 'admin', 'svc-backup', null]),
+          description: `Event matching hunt query: ${query.slice(0, 50)}...`,
+        })
+      }
+
+      await prisma.huntEvent.createMany({ data: events, skipDuplicates: true })
+    }
+  } catch (error) {
+    logger.warn({ tenant: profile.slug, error }, 'Failed to seed hunt sessions')
   }
 }
 
@@ -1415,7 +1436,15 @@ async function seedIntel(tenantId: string, profile: TenantProfile): Promise<void
       where: {
         tenantId_iocValue_iocType: { tenantId, iocValue: ioc.iocValue, iocType: ioc.iocType },
       },
-      update: {},
+      update: {
+        source: ioc.source,
+        severity: ioc.severity,
+        hitCount: Math.floor(Math.random() * 50),
+        firstSeen: randomDate(90),
+        lastSeen: randomDate(7),
+        tags: ['seed-data'],
+        active: true,
+      },
       create: {
         tenantId,
         ...ioc,
@@ -1433,7 +1462,15 @@ async function seedIntel(tenantId: string, profile: TenantProfile): Promise<void
       where: {
         tenantId_mispEventId: { tenantId, mispEventId: evt.mispEventId },
       },
-      update: {},
+      update: {
+        organization: evt.organization,
+        threatLevel: evt.threatLevel,
+        info: evt.info,
+        date: randomDate(60),
+        tags: JSON.parse('["seed-data"]'),
+        attributeCount: evt.attributeCount,
+        published: true,
+      },
       create: {
         tenantId,
         mispEventId: evt.mispEventId,
@@ -1588,13 +1625,9 @@ function deterministicInt(seed: number, min: number, max: number): number {
 }
 
 async function seedAiAuditLogs(tenantId: string, tenantSlug: string): Promise<void> {
-  // Idempotent: skip if already seeded
   const existingCount = await prisma.aiAuditLog.count({ where: { tenantId } })
-  if (existingCount >= AI_AUDIT_TARGET_COUNT) {
-    logger.info(
-      { tenant: tenantSlug, existing: existingCount },
-      'AI audit logs already seeded, skipping'
-    )
+  if (existingCount > 0) {
+    logger.info({ tenant: tenantSlug, existingCount }, 'AI audit logs already seeded — skipping')
     return
   }
 
@@ -1680,6 +1713,12 @@ let globalDetectionRuleCounter = 0
 
 async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void> {
   try {
+    const existingIncident = await prisma.incident.findFirst({ where: { tenantId } })
+    if (existingIncident) {
+      logger.info({ tenant: tenantSlug }, 'Incidents already seeded — skipping')
+      return
+    }
+
     const year = new Date().getFullYear()
     const incidents = [
       {
@@ -1882,14 +1921,27 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
       const inc = incidents[i]!
       const incidentNumber = `INC-${year}-${String(globalIncidentCounter).padStart(4, '0')}`
 
-      const existing = await prisma.incident.findUnique({ where: { incidentNumber } })
-      if (existing) continue
-
       const createdAt = new Date(Date.now() - (incidents.length - i) * 86_400_000 * 2)
       const timelineCount = 3 + (i % 4) // 3-6 entries
 
-      await prisma.incident.create({
-        data: {
+      await prisma.incident.upsert({
+        where: { incidentNumber },
+        update: {
+          tenantId,
+          title: inc.title,
+          description: `Incident detected: ${inc.title}. Investigation and response procedures initiated per SOC playbook.`,
+          severity: inc.severity,
+          status: inc.status,
+          category: inc.category,
+          mitreTactics: inc.tactics,
+          mitreTechniques: inc.techniques,
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+          resolvedAt:
+            inc.status === IncidentStatus.resolved || inc.status === IncidentStatus.closed
+              ? new Date(createdAt.getTime() + 86_400_000 * 3)
+              : null,
+        },
+        create: {
           tenantId,
           incidentNumber,
           title: inc.title,
@@ -2166,7 +2218,24 @@ async function seedCorrelationRules(tenantId: string, tenantSlug: string): Promi
 
       await prisma.correlationRule.upsert({
         where: { ruleNumber },
-        update: {},
+        update: {
+          tenantId,
+          title: rule.title,
+          description: `Sigma/Custom correlation rule: ${rule.title}. Detects suspicious activity matching MITRE ATT&CK ${rule.techniques.join(', ')}.`,
+          source: rule.source,
+          severity: rule.severity,
+          status: rule.status,
+          mitreTactics: rule.tactics,
+          mitreTechniques: rule.techniques,
+          hitCount: rule.hitCount,
+          linkedIncidents: Math.floor(rule.hitCount / 50),
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+          lastFiredAt: rule.hitCount > 0 ? randomDate(7) : null,
+          yamlContent:
+            rule.source === RuleSource.sigma
+              ? `title: ${rule.title}\nstatus: ${rule.status}\nlevel: ${rule.severity}\ndetection:\n  selection:\n    EventID: 4625\n  condition: selection`
+              : null,
+        },
         create: {
           tenantId,
           ruleNumber,
@@ -2603,9 +2672,27 @@ async function seedVulnerabilities(tenantId: string, tenantSlug: string): Promis
     ]
 
     for (const v of vulns) {
+      const remediation =
+        v.patch === PatchStatus.mitigated
+          ? `Patch applied. Verify all instances of ${v.software} are updated.`
+          : `Update ${v.software} to latest version. Apply vendor workarounds if patch unavailable.`
+      const discoveredAt = randomDate(90)
+      const patchedAt = v.patch === PatchStatus.mitigated ? randomDate(30) : null
+
       await prisma.vulnerability.upsert({
         where: { tenantId_cveId: { tenantId, cveId: v.cveId } },
-        update: {},
+        update: {
+          cvssScore: v.cvss,
+          severity: v.severity,
+          description: v.desc,
+          affectedHosts: v.hosts,
+          exploitAvailable: v.exploit,
+          patchStatus: v.patch,
+          affectedSoftware: v.software,
+          remediation,
+          discoveredAt,
+          patchedAt,
+        },
         create: {
           tenantId,
           cveId: v.cveId,
@@ -2616,12 +2703,9 @@ async function seedVulnerabilities(tenantId: string, tenantSlug: string): Promis
           exploitAvailable: v.exploit,
           patchStatus: v.patch,
           affectedSoftware: v.software,
-          remediation:
-            v.patch === PatchStatus.mitigated
-              ? `Patch applied. Verify all instances of ${v.software} are updated.`
-              : `Update ${v.software} to latest version. Apply vendor workarounds if patch unavailable.`,
-          discoveredAt: randomDate(90),
-          patchedAt: v.patch === PatchStatus.mitigated ? randomDate(30) : null,
+          remediation,
+          discoveredAt,
+          patchedAt,
         },
       })
     }
@@ -2914,48 +2998,59 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
     ]
 
     for (const agent of agents) {
-      const existing = await prisma.aiAgent.findFirst({
-        where: { tenantId, name: agent.name },
-        select: { id: true },
-      })
-      if (existing) continue
+      try {
+        const existing = await prisma.aiAgent.findFirst({
+          where: { tenantId, name: agent.name },
+          select: { id: true },
+        })
+        if (existing) {
+          continue
+        }
 
-      await prisma.aiAgent.create({
-        data: {
-          tenantId,
-          name: agent.name,
-          description: agent.description,
-          model: agent.model,
-          tier: agent.tier,
-          status: agent.status,
-          totalTasks: agent.totalTasks,
-          totalTokens: agent.totalTokens,
-          totalCost: agent.totalCost,
-          avgTimeMs: agent.avgTimeMs,
-          tools: {
-            create: agent.tools.map(t => ({
-              name: t.name,
-              description: t.description,
-              schema: t.schema as Prisma.InputJsonValue,
-            })),
+        await prisma.aiAgent.create({
+          data: {
+            tenantId,
+            name: agent.name,
+            description: agent.description,
+            model: agent.model,
+            tier: agent.tier,
+            status: agent.status,
+            totalTasks: agent.totalTasks,
+            totalTokens: agent.totalTokens,
+            totalCost: agent.totalCost,
+            avgTimeMs: agent.avgTimeMs,
+            tools: {
+              create: agent.tools.map(t => ({
+                name: t.name,
+                description: t.description,
+                schema: t.schema as Prisma.InputJsonValue,
+              })),
+            },
+            sessions: {
+              create: agent.sessions.map((s, idx) => ({
+                input: s.input,
+                output: s.output,
+                tokensUsed: s.tokensUsed,
+                cost: s.cost,
+                durationMs: s.durationMs,
+                status: s.status,
+                startedAt: new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000),
+                completedAt:
+                  s.status !== AiAgentSessionStatus.running
+                    ? new Date(
+                        Date.now() - (agent.sessions.length - idx) * 3_600_000 + s.durationMs
+                      )
+                    : null,
+              })),
+            },
           },
-          sessions: {
-            create: agent.sessions.map((s, idx) => ({
-              input: s.input,
-              output: s.output,
-              tokensUsed: s.tokensUsed,
-              cost: s.cost,
-              durationMs: s.durationMs,
-              status: s.status,
-              startedAt: new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000),
-              completedAt:
-                s.status !== AiAgentSessionStatus.running
-                  ? new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000 + s.durationMs)
-                  : null,
-            })),
-          },
-        },
-      })
+        })
+      } catch (agentError) {
+        logger.warn(
+          { tenant: tenantSlug, agent: agent.name, error: agentError },
+          'Skipped AI agent (already exists or error)'
+        )
+      }
     }
 
     logger.info({ tenant: tenantSlug, count: agents.length }, 'Seeded AI agents')
@@ -3164,53 +3259,62 @@ async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
     ]
 
     for (const entity of entities) {
-      const existing = await prisma.uebaEntity.findFirst({
-        where: { tenantId, entityName: entity.name, entityType: entity.type },
-        select: { id: true },
-      })
-      if (existing) continue
+      try {
+        const existing = await prisma.uebaEntity.findFirst({
+          where: { tenantId, entityName: entity.name, entityType: entity.type },
+          select: { id: true },
+        })
+        if (existing) {
+          continue
+        }
 
-      const trendData = Array.from({ length: 30 }, (_, i) => ({
-        date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10),
-        score: Math.max(0, entity.risk + Math.sin(i * 0.5) * 15),
-      }))
+        const trendData = Array.from({ length: 30 }, (_, i) => ({
+          date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10),
+          score: Math.max(0, entity.risk + Math.sin(i * 0.5) * 15),
+        }))
 
-      const anomalyCount =
-        entity.level === UebaRiskLevel.normal
-          ? 0
-          : entity.level === UebaRiskLevel.low
-            ? 2
-            : entity.level === UebaRiskLevel.medium
-              ? 3
-              : 4
+        const anomalyCount =
+          entity.level === UebaRiskLevel.normal
+            ? 0
+            : entity.level === UebaRiskLevel.low
+              ? 2
+              : entity.level === UebaRiskLevel.medium
+                ? 3
+                : 4
 
-      const createdEntity = await prisma.uebaEntity.create({
-        data: {
-          tenantId,
-          entityName: entity.name,
-          entityType: entity.type,
-          riskScore: entity.risk,
-          riskLevel: entity.level,
-          topAnomaly: entity.topAnomaly,
-          trendData: trendData as unknown as Prisma.InputJsonValue,
-          lastSeenAt: randomDate(3),
-        },
-      })
-
-      for (let a = 0; a < anomalyCount; a++) {
-        const tmpl = anomalyTemplates[a % anomalyTemplates.length]!
-        await prisma.uebaAnomaly.create({
+        const createdEntity = await prisma.uebaEntity.create({
           data: {
             tenantId,
-            entityId: createdEntity.id,
-            anomalyType: tmpl.anomalyType,
-            description: tmpl.description,
-            severity: tmpl.severity,
-            score: tmpl.score,
-            detectedAt: randomDate(14),
-            resolved: a === 0 ? false : Math.random() > 0.5,
+            entityName: entity.name,
+            entityType: entity.type,
+            riskScore: entity.risk,
+            riskLevel: entity.level,
+            topAnomaly: entity.topAnomaly,
+            trendData: trendData as unknown as Prisma.InputJsonValue,
+            lastSeenAt: randomDate(3),
           },
         })
+
+        for (let a = 0; a < anomalyCount; a++) {
+          const tmpl = anomalyTemplates[a % anomalyTemplates.length]!
+          await prisma.uebaAnomaly.create({
+            data: {
+              tenantId,
+              entityId: createdEntity.id,
+              anomalyType: tmpl.anomalyType,
+              description: tmpl.description,
+              severity: tmpl.severity,
+              score: tmpl.score,
+              detectedAt: randomDate(14),
+              resolved: a === 0 ? false : Math.random() > 0.5,
+            },
+          })
+        }
+      } catch (entityError) {
+        logger.warn(
+          { tenant: tenantSlug, entity: entity.name, error: entityError },
+          'Skipped UEBA entity (already exists or error)'
+        )
       }
     }
 
@@ -3253,9 +3357,18 @@ async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
     ]
 
     for (const model of mlModels) {
+      const lastTrained = model.status === MlModelStatus.training ? null : randomDate(7)
+
       await prisma.mlModel.upsert({
         where: { tenantId_name: { tenantId, name: model.name } },
-        update: {},
+        update: {
+          modelType: model.modelType,
+          accuracy: model.accuracy,
+          status: model.status,
+          dataPoints: model.dataPoints,
+          description: model.description,
+          lastTrained,
+        },
         create: {
           tenantId,
           name: model.name,
@@ -3264,7 +3377,7 @@ async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
           status: model.status,
           dataPoints: model.dataPoints,
           description: model.description,
-          lastTrained: model.status === MlModelStatus.training ? null : randomDate(7),
+          lastTrained,
         },
       })
     }
@@ -3614,7 +3727,19 @@ async function seedAttackPaths(tenantId: string, tenantSlug: string): Promise<vo
 
       await prisma.attackPath.upsert({
         where: { pathNumber },
-        update: {},
+        update: {
+          tenantId,
+          title: p.title,
+          description: p.description,
+          severity: p.severity,
+          status: p.status,
+          stages: p.stages as unknown as Prisma.InputJsonValue,
+          affectedAssets: p.assets,
+          killChainCoverage: p.coverage,
+          mitreTactics: p.tactics,
+          mitreTechniques: p.techniques,
+          detectedAt: randomDate(30),
+        },
         create: {
           tenantId,
           pathNumber,
@@ -3787,86 +3912,95 @@ async function seedSoar(tenantId: string, tenantSlug: string): Promise<void> {
     ]
 
     for (const pb of playbooks) {
-      const existing = await prisma.soarPlaybook.findFirst({
-        where: { tenantId, name: pb.name },
-        select: { id: true },
-      })
-      if (existing) continue
+      try {
+        const existingPlaybook = await prisma.soarPlaybook.findFirst({
+          where: { tenantId, name: pb.name },
+          select: { id: true },
+        })
+        if (existingPlaybook) {
+          continue
+        }
 
-      const playbook = await prisma.soarPlaybook.create({
-        data: {
-          tenantId,
-          name: pb.name,
-          description: pb.description,
-          status: pb.status,
-          triggerType: pb.trigger,
-          triggerConditions:
-            pb.trigger === SoarTriggerType.scheduled
-              ? ({ cron: '0 2 * * *', timezone: 'UTC' } as Prisma.InputJsonValue)
-              : ({
-                  severity: ['critical', 'high'],
-                  source: ['wazuh', 'graylog'],
-                } as Prisma.InputJsonValue),
-          steps: pb.steps as unknown as Prisma.InputJsonValue,
-          executionCount: pb.execCount,
-          lastExecutedAt: pb.execCount > 0 ? randomDate(7) : null,
-          createdBy: `admin@${tenantSlug}.io`,
-        },
-      })
-
-      // Create 3-8 executions per playbook
-      const execCount = Math.min(pb.execCount, 3 + (playbooks.indexOf(pb) % 6))
-      const statuses = [
-        SoarExecutionStatus.completed,
-        SoarExecutionStatus.completed,
-        SoarExecutionStatus.completed,
-        SoarExecutionStatus.failed,
-        SoarExecutionStatus.completed,
-        SoarExecutionStatus.completed,
-        SoarExecutionStatus.running,
-        SoarExecutionStatus.cancelled,
-      ]
-
-      for (let e = 0; e < execCount; e++) {
-        const execStatus = statuses[e % statuses.length]!
-        const totalSteps = pb.steps.length
-        const stepsCompleted =
-          execStatus === SoarExecutionStatus.completed
-            ? totalSteps
-            : execStatus === SoarExecutionStatus.running
-              ? Math.floor(totalSteps / 2)
-              : execStatus === SoarExecutionStatus.failed
-                ? Math.max(1, totalSteps - 2)
-                : 0
-        const startedAt = new Date(Date.now() - (execCount - e) * 86_400_000)
-
-        await prisma.soarExecution.create({
+        const playbook = await prisma.soarPlaybook.create({
           data: {
             tenantId,
-            playbookId: playbook.id,
-            status: execStatus,
-            triggerSource:
+            name: pb.name,
+            description: pb.description,
+            status: pb.status,
+            triggerType: pb.trigger,
+            triggerConditions:
               pb.trigger === SoarTriggerType.scheduled
-                ? 'cron'
-                : `alert-${randomUUID().slice(0, 8)}`,
-            triggeredBy: `analyst.l2@${tenantSlug}.io`,
-            startedAt,
-            completedAt:
-              execStatus === SoarExecutionStatus.running
-                ? null
-                : new Date(startedAt.getTime() + 30_000 * totalSteps),
-            stepsCompleted,
-            totalSteps,
-            output:
-              execStatus === SoarExecutionStatus.completed
-                ? ({ result: 'success', actionsCompleted: totalSteps } as Prisma.InputJsonValue)
-                : Prisma.DbNull,
-            error:
-              execStatus === SoarExecutionStatus.failed
-                ? 'Connection timeout to external service'
-                : null,
+                ? ({ cron: '0 2 * * *', timezone: 'UTC' } as Prisma.InputJsonValue)
+                : ({
+                    severity: ['critical', 'high'],
+                    source: ['wazuh', 'graylog'],
+                  } as Prisma.InputJsonValue),
+            steps: pb.steps as unknown as Prisma.InputJsonValue,
+            executionCount: pb.execCount,
+            lastExecutedAt: pb.execCount > 0 ? randomDate(7) : null,
+            createdBy: `admin@${tenantSlug}.io`,
           },
         })
+
+        // Create 3-8 executions per playbook
+        const execCount = Math.min(pb.execCount, 3 + (playbooks.indexOf(pb) % 6))
+        const statuses = [
+          SoarExecutionStatus.completed,
+          SoarExecutionStatus.completed,
+          SoarExecutionStatus.completed,
+          SoarExecutionStatus.failed,
+          SoarExecutionStatus.completed,
+          SoarExecutionStatus.completed,
+          SoarExecutionStatus.running,
+          SoarExecutionStatus.cancelled,
+        ]
+
+        for (let e = 0; e < execCount; e++) {
+          const execStatus = statuses[e % statuses.length]!
+          const totalSteps = pb.steps.length
+          const stepsCompleted =
+            execStatus === SoarExecutionStatus.completed
+              ? totalSteps
+              : execStatus === SoarExecutionStatus.running
+                ? Math.floor(totalSteps / 2)
+                : execStatus === SoarExecutionStatus.failed
+                  ? Math.max(1, totalSteps - 2)
+                  : 0
+          const startedAt = new Date(Date.now() - (execCount - e) * 86_400_000)
+
+          await prisma.soarExecution.create({
+            data: {
+              tenantId,
+              playbookId: playbook.id,
+              status: execStatus,
+              triggerSource:
+                pb.trigger === SoarTriggerType.scheduled
+                  ? 'cron'
+                  : `alert-${randomUUID().slice(0, 8)}`,
+              triggeredBy: `analyst.l2@${tenantSlug}.io`,
+              startedAt,
+              completedAt:
+                execStatus === SoarExecutionStatus.running
+                  ? null
+                  : new Date(startedAt.getTime() + 30_000 * totalSteps),
+              stepsCompleted,
+              totalSteps,
+              output:
+                execStatus === SoarExecutionStatus.completed
+                  ? ({ result: 'success', actionsCompleted: totalSteps } as Prisma.InputJsonValue)
+                  : Prisma.DbNull,
+              error:
+                execStatus === SoarExecutionStatus.failed
+                  ? 'Connection timeout to external service'
+                  : null,
+            },
+          })
+        }
+      } catch (pbError) {
+        logger.warn(
+          { tenant: tenantSlug, playbook: pb.name, error: pbError },
+          'Skipped SOAR playbook (already exists or error)'
+        )
       }
     }
 
@@ -4107,51 +4241,63 @@ async function seedCompliance(tenantId: string, tenantSlug: string): Promise<voi
     ]
 
     for (const fw of frameworks) {
-      const passedCount = fw.controls.filter(
-        c => c.status === ComplianceControlStatus.passed
-      ).length
-      const failedCount = fw.controls.filter(
-        c => c.status === ComplianceControlStatus.failed
-      ).length
-      const overallScore = (passedCount / fw.controls.length) * 100
+      try {
+        const existingFramework = await prisma.complianceFramework.findFirst({
+          where: { tenantId, standard: fw.standard, version: fw.version },
+          select: { id: true },
+        })
+        if (existingFramework) {
+          continue
+        }
 
-      const existing = await prisma.complianceFramework.findFirst({
-        where: { tenantId, standard: fw.standard, version: fw.version },
-        select: { id: true },
-      })
-      if (existing) continue
+        const passedCount = fw.controls.filter(
+          c => c.status === ComplianceControlStatus.passed
+        ).length
+        const failedCount = fw.controls.filter(
+          c => c.status === ComplianceControlStatus.failed
+        ).length
+        const overallScore = (passedCount / fw.controls.length) * 100
 
-      await prisma.complianceFramework.create({
-        data: {
-          tenantId,
-          name: fw.name,
-          description: `${fw.name} compliance framework assessment for ${tenantSlug}.`,
-          standard: fw.standard,
-          version: fw.version,
-          totalControls: fw.controls.length,
-          passedControls: passedCount,
-          failedControls: failedCount,
-          overallScore: Math.round(overallScore * 10) / 10,
-          lastAssessedAt: randomDate(14),
-          controls: {
-            create: fw.controls.map(c => ({
-              controlNumber: c.num,
-              title: c.title,
-              description: `Assessment of ${c.title} control requirements.`,
-              status: c.status,
-              evidence:
-                c.status === ComplianceControlStatus.passed
-                  ? 'Evidence collected from automated scanning and manual review. All criteria met.'
-                  : c.status === ComplianceControlStatus.failed
-                    ? 'Gap identified. Remediation plan required.'
+        await prisma.complianceFramework.create({
+          data: {
+            tenantId,
+            name: fw.name,
+            description: `${fw.name} compliance framework assessment for ${tenantSlug}.`,
+            standard: fw.standard,
+            version: fw.version,
+            totalControls: fw.controls.length,
+            passedControls: passedCount,
+            failedControls: failedCount,
+            overallScore: Math.round(overallScore * 10) / 10,
+            lastAssessedAt: randomDate(14),
+            controls: {
+              create: fw.controls.map(c => ({
+                controlNumber: c.num,
+                title: c.title,
+                description: `Assessment of ${c.title} control requirements.`,
+                status: c.status,
+                evidence:
+                  c.status === ComplianceControlStatus.passed
+                    ? 'Evidence collected from automated scanning and manual review. All criteria met.'
+                    : c.status === ComplianceControlStatus.failed
+                      ? 'Gap identified. Remediation plan required.'
+                      : null,
+                assessedAt:
+                  c.status !== ComplianceControlStatus.not_assessed ? randomDate(14) : null,
+                assessedBy:
+                  c.status !== ComplianceControlStatus.not_assessed
+                    ? `admin@${tenantSlug}.io`
                     : null,
-              assessedAt: c.status !== ComplianceControlStatus.not_assessed ? randomDate(14) : null,
-              assessedBy:
-                c.status !== ComplianceControlStatus.not_assessed ? `admin@${tenantSlug}.io` : null,
-            })),
+              })),
+            },
           },
-        },
-      })
+        })
+      } catch (fwError) {
+        logger.warn(
+          { tenant: tenantSlug, framework: fw.name, error: fwError },
+          'Skipped compliance framework (already exists or error)'
+        )
+      }
     }
 
     logger.info({ tenant: tenantSlug, count: frameworks.length }, 'Seeded compliance frameworks')
@@ -4164,6 +4310,12 @@ async function seedCompliance(tenantId: string, tenantSlug: string): Promise<voi
 
 async function seedReports(tenantId: string, tenantSlug: string): Promise<void> {
   try {
+    const existingCount = await prisma.report.count({ where: { tenantId } })
+    if (existingCount >= 7) {
+      logger.info({ tenant: tenantSlug, existingCount }, 'Reports already seeded — skipping')
+      return
+    }
+
     const reports = [
       {
         name: 'Weekly Executive Summary — W10 2025',
@@ -4216,29 +4368,41 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       },
     ]
 
-    // Idempotent: skip if already seeded
-    const existingCount = await prisma.report.count({ where: { tenantId } })
-    if (existingCount >= reports.length) return
-
     for (const r of reports) {
-      await prisma.report.create({
-        data: {
-          tenantId,
-          name: r.name,
-          description: `Auto-generated ${r.type} report for ${tenantSlug}.`,
-          type: r.type,
-          format: r.format,
-          status: r.status,
-          generatedBy: `admin@${tenantSlug}.io`,
-          parameters: { dateRange: 'last_30_days', includeCharts: true } as Prisma.InputJsonValue,
-          fileUrl:
-            r.status === ReportStatus.completed
-              ? `/reports/${tenantSlug}/${r.name.toLowerCase().split(' ').join('-')}.${r.format}`
-              : null,
-          fileSize: r.fileSize,
-          generatedAt: r.status === ReportStatus.completed ? randomDate(7) : null,
-        },
-      })
+      try {
+        // Check if this specific report already exists
+        const existingReport = await prisma.report.findFirst({
+          where: { tenantId, name: r.name },
+          select: { id: true },
+        })
+        if (existingReport) {
+          continue
+        }
+
+        await prisma.report.create({
+          data: {
+            tenantId,
+            name: r.name,
+            description: `Auto-generated ${r.type} report for ${tenantSlug}.`,
+            type: r.type,
+            format: r.format,
+            status: r.status,
+            generatedBy: `admin@${tenantSlug}.io`,
+            parameters: { dateRange: 'last_30_days', includeCharts: true } as Prisma.InputJsonValue,
+            fileUrl:
+              r.status === ReportStatus.completed
+                ? `/reports/${tenantSlug}/${r.name.toLowerCase().split(' ').join('-')}.${r.format}`
+                : null,
+            fileSize: r.fileSize,
+            generatedAt: r.status === ReportStatus.completed ? randomDate(7) : null,
+          },
+        })
+      } catch (reportError) {
+        logger.warn(
+          { tenant: tenantSlug, report: r.name, error: reportError },
+          'Skipped report (already exists or error)'
+        )
+      }
     }
 
     logger.info({ tenant: tenantSlug, count: reports.length }, 'Seeded reports')
@@ -4251,9 +4415,11 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
 
 async function seedSystemHealth(tenantId: string, tenantSlug: string): Promise<void> {
   try {
-    // Idempotent: skip if already seeded
     const existingChecks = await prisma.systemHealthCheck.count({ where: { tenantId } })
-    if (existingChecks >= 8) return
+    if (existingChecks >= 8) {
+      logger.info({ tenant: tenantSlug, existingChecks }, 'System health already seeded — skipping')
+      return
+    }
 
     const healthChecks = [
       {
@@ -4309,90 +4475,132 @@ async function seedSystemHealth(tenantId: string, tenantSlug: string): Promise<v
     ]
 
     for (const hc of healthChecks) {
-      await prisma.systemHealthCheck.create({
-        data: {
-          tenantId,
-          serviceName: hc.serviceName,
-          serviceType: hc.serviceType,
-          status: hc.status,
-          responseTimeMs: hc.responseTimeMs,
-          lastCheckedAt: new Date(),
-          errorMessage: 'error' in hc ? (hc as { error: string }).error : null,
-          metadata: { version: '1.0.0', region: 'us-east-1' } as Prisma.InputJsonValue,
-        },
-      })
+      try {
+        const existingHc = await prisma.systemHealthCheck.findFirst({
+          where: { tenantId, serviceName: hc.serviceName },
+          select: { id: true },
+        })
+        if (existingHc) {
+          continue
+        }
+
+        await prisma.systemHealthCheck.create({
+          data: {
+            tenantId,
+            serviceName: hc.serviceName,
+            serviceType: hc.serviceType,
+            status: hc.status,
+            responseTimeMs: hc.responseTimeMs,
+            lastCheckedAt: new Date(),
+            errorMessage: 'error' in hc ? (hc as { error: string }).error : null,
+            metadata: { version: '1.0.0', region: 'us-east-1' } as Prisma.InputJsonValue,
+          },
+        })
+      } catch (hcError) {
+        logger.warn(
+          { tenant: tenantSlug, service: hc.serviceName, error: hcError },
+          'Skipped health check (already exists or error)'
+        )
+      }
     }
 
-    // System Metrics — 10 snapshots
-    const metricSnapshots = [
-      { metricName: 'api_server_cpu', metricType: MetricType.cpu, value: 42.5, unit: 'percent' },
-      {
-        metricName: 'api_server_memory',
-        metricType: MetricType.memory,
-        value: 68.2,
-        unit: 'percent',
-      },
-      {
-        metricName: 'database_disk_usage',
-        metricType: MetricType.disk,
-        value: 45.8,
-        unit: 'percent',
-      },
-      {
-        metricName: 'ingest_network_throughput',
-        metricType: MetricType.network,
-        value: 125.6,
-        unit: 'mbps',
-      },
-      {
-        metricName: 'alert_processing_queue',
-        metricType: MetricType.queue_depth,
-        value: 23,
-        unit: 'messages',
-      },
-      {
-        metricName: 'api_response_latency_p99',
-        metricType: MetricType.latency,
-        value: 145,
-        unit: 'ms',
-      },
-      { metricName: 'wazuh_indexer_cpu', metricType: MetricType.cpu, value: 67.3, unit: 'percent' },
-      {
-        metricName: 'graylog_heap_usage',
-        metricType: MetricType.memory,
-        value: 82.1,
-        unit: 'percent',
-      },
-      { metricName: 'log_storage_disk', metricType: MetricType.disk, value: 71.4, unit: 'percent' },
-      {
-        metricName: 'event_correlation_latency',
-        metricType: MetricType.latency,
-        value: 89,
-        unit: 'ms',
-      },
-    ]
-
+    // System Metrics — 10 snapshots (only seed if none exist for this tenant)
     const existingMetrics = await prisma.systemMetric.count({ where: { tenantId } })
-    if (existingMetrics >= metricSnapshots.length) return
-
-    for (const m of metricSnapshots) {
-      await prisma.systemMetric.create({
-        data: {
-          tenantId,
-          metricName: m.metricName,
-          metricType: m.metricType,
-          value: m.value,
-          unit: m.unit,
-          tags: { host: 'soc-primary', environment: 'production' } as Prisma.InputJsonValue,
-          recordedAt: new Date(),
+    if (existingMetrics >= 10) {
+      logger.info(
+        { tenant: tenantSlug, existingMetrics },
+        'System metrics already seeded — skipping'
+      )
+    } else {
+      const metricSnapshots = [
+        { metricName: 'api_server_cpu', metricType: MetricType.cpu, value: 42.5, unit: 'percent' },
+        {
+          metricName: 'api_server_memory',
+          metricType: MetricType.memory,
+          value: 68.2,
+          unit: 'percent',
         },
-      })
+        {
+          metricName: 'database_disk_usage',
+          metricType: MetricType.disk,
+          value: 45.8,
+          unit: 'percent',
+        },
+        {
+          metricName: 'ingest_network_throughput',
+          metricType: MetricType.network,
+          value: 125.6,
+          unit: 'mbps',
+        },
+        {
+          metricName: 'alert_processing_queue',
+          metricType: MetricType.queue_depth,
+          value: 23,
+          unit: 'messages',
+        },
+        {
+          metricName: 'api_response_latency_p99',
+          metricType: MetricType.latency,
+          value: 145,
+          unit: 'ms',
+        },
+        {
+          metricName: 'wazuh_indexer_cpu',
+          metricType: MetricType.cpu,
+          value: 67.3,
+          unit: 'percent',
+        },
+        {
+          metricName: 'graylog_heap_usage',
+          metricType: MetricType.memory,
+          value: 82.1,
+          unit: 'percent',
+        },
+        {
+          metricName: 'log_storage_disk',
+          metricType: MetricType.disk,
+          value: 71.4,
+          unit: 'percent',
+        },
+        {
+          metricName: 'event_correlation_latency',
+          metricType: MetricType.latency,
+          value: 89,
+          unit: 'ms',
+        },
+      ]
+
+      for (const m of metricSnapshots) {
+        try {
+          const existingMetric = await prisma.systemMetric.findFirst({
+            where: { tenantId, metricName: m.metricName },
+            select: { id: true },
+          })
+          if (existingMetric) {
+            continue
+          }
+
+          await prisma.systemMetric.create({
+            data: {
+              tenantId,
+              metricName: m.metricName,
+              metricType: m.metricType,
+              value: m.value,
+              unit: m.unit,
+              tags: { host: 'soc-primary', environment: 'production' } as Prisma.InputJsonValue,
+              recordedAt: new Date(),
+            },
+          })
+        } catch (metricError) {
+          logger.warn(
+            { tenant: tenantSlug, metric: m.metricName, error: metricError },
+            'Skipped metric (already exists or error)'
+          )
+        }
+      }
     }
 
-    logger.info(
-      { tenant: tenantSlug, checks: healthChecks.length, metrics: metricSnapshots.length },
-      'Seeded system health'
-    )
+    logger.info({ tenant: tenantSlug }, 'Seeded system health')
   } catch (error) {
     logger.warn({ tenant: tenantSlug, error }, 'Failed to seed system health')
   }
@@ -4490,32 +4698,46 @@ async function seedNormalization(tenantId: string, tenantSlug: string): Promise<
     ]
 
     for (const p of pipelines) {
+      const description = `Normalization pipeline for ${p.sourceType} log sources. Parses and maps fields to ECS schema.`
+      const parserConfig = {
+        format: p.sourceType,
+        delimiter: p.sourceType === NormalizationSourceType.csv ? ',' : null,
+        timestampField: '@timestamp',
+        encoding: 'UTF-8',
+      } as Prisma.InputJsonValue
+      const fieldMappings = {
+        source_ip: 'source.ip',
+        dest_ip: 'destination.ip',
+        severity: 'event.severity',
+        message: 'message',
+        timestamp: '@timestamp',
+      } as Prisma.InputJsonValue
+      const lastProcessedAt =
+        p.status === NormalizationPipelineStatus.error ? randomDate(30) : randomDate(1)
+
       await prisma.normalizationPipeline.upsert({
         where: { tenantId_name: { tenantId, name: p.name } },
-        update: {},
+        update: {
+          description,
+          sourceType: p.sourceType,
+          status: p.status,
+          parserConfig,
+          fieldMappings,
+          processedCount: p.processed,
+          errorCount: p.errors,
+          lastProcessedAt,
+        },
         create: {
           tenantId,
           name: p.name,
-          description: `Normalization pipeline for ${p.sourceType} log sources. Parses and maps fields to ECS schema.`,
+          description,
           sourceType: p.sourceType,
           status: p.status,
-          parserConfig: {
-            format: p.sourceType,
-            delimiter: p.sourceType === NormalizationSourceType.csv ? ',' : null,
-            timestampField: '@timestamp',
-            encoding: 'UTF-8',
-          } as Prisma.InputJsonValue,
-          fieldMappings: {
-            source_ip: 'source.ip',
-            dest_ip: 'destination.ip',
-            severity: 'event.severity',
-            message: 'message',
-            timestamp: '@timestamp',
-          } as Prisma.InputJsonValue,
+          parserConfig,
+          fieldMappings,
           processedCount: p.processed,
           errorCount: p.errors,
-          lastProcessedAt:
-            p.status === NormalizationPipelineStatus.error ? randomDate(30) : randomDate(1),
+          lastProcessedAt,
         },
       })
     }
@@ -4659,42 +4881,60 @@ async function seedDetectionRules(tenantId: string, tenantSlug: string): Promise
       const r = rules[i]!
       const ruleNumber = `DR-${year}-${String(globalDetectionRuleCounter).padStart(4, '0')}`
 
+      const description = `Detection rule: ${r.name}. Type: ${r.ruleType}. Monitors for security events matching configured conditions.`
+      const conditions =
+        r.ruleType === DetectionRuleType.threshold
+          ? ({
+              field: 'event.count',
+              operator: 'gte',
+              value: 10,
+              window: '5m',
+            } as Prisma.InputJsonValue)
+          : r.ruleType === DetectionRuleType.chain
+            ? ({
+                steps: [
+                  { event: 'auth_failure', count: 5 },
+                  { event: 'auth_success', within: '10m' },
+                ],
+              } as Prisma.InputJsonValue)
+            : ({ model: 'baseline', deviation: 3.0 } as Prisma.InputJsonValue)
+      const actions = {
+        notify: true,
+        severity: r.severity,
+        createAlert: true,
+        channels: ['siem', 'slack'],
+      } as Prisma.InputJsonValue
+      const lastTriggeredAt = r.hitCount > 0 ? randomDate(3) : null
+
       await prisma.detectionRule.upsert({
         where: { ruleNumber },
-        update: {},
+        update: {
+          tenantId,
+          name: r.name,
+          description,
+          ruleType: r.ruleType,
+          severity: r.severity,
+          status: r.status,
+          conditions,
+          actions,
+          hitCount: r.hitCount,
+          falsePositiveCount: r.fpCount,
+          lastTriggeredAt,
+          createdBy: `analyst.l2@${tenantSlug}.io`,
+        },
         create: {
           tenantId,
           ruleNumber,
           name: r.name,
-          description: `Detection rule: ${r.name}. Type: ${r.ruleType}. Monitors for security events matching configured conditions.`,
+          description,
           ruleType: r.ruleType,
           severity: r.severity,
           status: r.status,
-          conditions:
-            r.ruleType === DetectionRuleType.threshold
-              ? ({
-                  field: 'event.count',
-                  operator: 'gte',
-                  value: 10,
-                  window: '5m',
-                } as Prisma.InputJsonValue)
-              : r.ruleType === DetectionRuleType.chain
-                ? ({
-                    steps: [
-                      { event: 'auth_failure', count: 5 },
-                      { event: 'auth_success', within: '10m' },
-                    ],
-                  } as Prisma.InputJsonValue)
-                : ({ model: 'baseline', deviation: 3.0 } as Prisma.InputJsonValue),
-          actions: {
-            notify: true,
-            severity: r.severity,
-            createAlert: true,
-            channels: ['siem', 'slack'],
-          } as Prisma.InputJsonValue,
+          conditions,
+          actions,
           hitCount: r.hitCount,
           falsePositiveCount: r.fpCount,
-          lastTriggeredAt: r.hitCount > 0 ? randomDate(3) : null,
+          lastTriggeredAt,
           createdBy: `analyst.l2@${tenantSlug}.io`,
         },
       })
@@ -4910,42 +5150,51 @@ async function seedCloudSecurity(tenantId: string, tenantSlug: string): Promise<
     ]
 
     for (const acc of accounts) {
-      const existing = await prisma.cloudAccount.findFirst({
-        where: { tenantId, provider: acc.provider, accountId: acc.accountId },
-        select: { id: true },
-      })
-      if (existing) continue
+      try {
+        const existingAccount = await prisma.cloudAccount.findFirst({
+          where: { tenantId, provider: acc.provider, accountId: acc.accountId },
+          select: { id: true },
+        })
+        if (existingAccount) {
+          continue
+        }
 
-      const createdAccount = await prisma.cloudAccount.create({
-        data: {
-          tenantId,
-          provider: acc.provider,
-          accountId: acc.accountId,
-          alias: acc.alias,
-          status: acc.status,
-          region: acc.region,
-          lastScanAt: randomDate(1),
-          findingsCount: acc.findings.length,
-          complianceScore: acc.complianceScore,
-        },
-      })
-
-      for (const f of acc.findings) {
-        await prisma.cloudFinding.create({
+        const createdAccount = await prisma.cloudAccount.create({
           data: {
             tenantId,
-            cloudAccountId: createdAccount.id,
-            resourceType: f.resourceType,
-            resourceId: f.resourceId,
-            severity: f.severity,
-            title: f.title,
-            description: `${f.title}. This finding was detected during automated cloud security assessment.`,
-            status: f.status,
-            remediationSteps: f.remediation,
-            detectedAt: randomDate(14),
-            resolvedAt: f.status === CloudFindingStatus.resolved ? randomDate(7) : null,
+            provider: acc.provider,
+            accountId: acc.accountId,
+            alias: acc.alias,
+            status: acc.status,
+            region: acc.region,
+            lastScanAt: randomDate(1),
+            findingsCount: acc.findings.length,
+            complianceScore: acc.complianceScore,
           },
         })
+
+        for (const f of acc.findings) {
+          await prisma.cloudFinding.create({
+            data: {
+              tenantId,
+              cloudAccountId: createdAccount.id,
+              resourceType: f.resourceType,
+              resourceId: f.resourceId,
+              severity: f.severity,
+              title: f.title,
+              description: `${f.title}. This finding was detected during automated cloud security assessment.`,
+              status: f.status,
+              remediationSteps: f.remediation,
+              detectedAt: randomDate(14),
+              resolvedAt: f.status === CloudFindingStatus.resolved ? randomDate(7) : null,
+            },
+          })
+        }
+      } catch (accError) {
+        logger.warn(
+          { tenant: tenantSlug, account: acc.alias, error: accError },
+          'Skipped cloud account (already exists or error)'
+        )
       }
     }
 
@@ -4955,6 +5204,157 @@ async function seedCloudSecurity(tenantId: string, tenantSlug: string): Promise<
   }
 }
 
+const NOTIFICATION_TARGET_COUNT = 15
+
+async function seedNotifications(
+  tenantId: string,
+  tenantSlug: string,
+  userIds: string[]
+): Promise<void> {
+  if (userIds.length < 2) return
+
+  const existingCount = await prisma.notification.count({ where: { tenantId } })
+  if (existingCount >= NOTIFICATION_TARGET_COUNT) {
+    logger.info(
+      { tenant: tenantSlug, existing: existingCount },
+      'Notifications already seeded, skipping'
+    )
+    return
+  }
+
+  // Fetch cases for this tenant to reference in notifications
+  const cases = await prisma.case.findMany({
+    where: { tenantId },
+    select: { id: true, caseNumber: true, title: true },
+    take: 5,
+    orderBy: { createdAt: 'desc' },
+  })
+
+  const notificationTemplates: Array<{
+    type: string
+    entityType: string
+    titleFn: (caseTitle?: string) => string
+    messageFn: (actorName: string, caseTitle?: string) => string
+    needsCase: boolean
+  }> = [
+    {
+      type: 'case_assigned',
+      entityType: 'case',
+      titleFn: caseTitle => `Assigned to case: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} assigned you to case "${caseTitle ?? 'Unknown'}"`,
+      needsCase: true,
+    },
+    {
+      type: 'case_status_changed',
+      entityType: 'case',
+      titleFn: caseTitle => `Case status updated: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} changed the status of "${caseTitle ?? 'Unknown'}" to in_progress`,
+      needsCase: true,
+    },
+    {
+      type: 'case_comment_added',
+      entityType: 'case_comment',
+      titleFn: caseTitle => `New comment on: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} commented on case "${caseTitle ?? 'Unknown'}"`,
+      needsCase: true,
+    },
+    {
+      type: 'case_updated',
+      entityType: 'case',
+      titleFn: caseTitle => `Case updated: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} updated case "${caseTitle ?? 'Unknown'}" severity to high`,
+      needsCase: true,
+    },
+    {
+      type: 'case_task_added',
+      entityType: 'case',
+      titleFn: caseTitle => `New task on: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} added a task to case "${caseTitle ?? 'Unknown'}"`,
+      needsCase: true,
+    },
+    {
+      type: 'role_changed',
+      entityType: 'user',
+      titleFn: () => 'Your role has been updated',
+      messageFn: actorName => `${actorName} changed your role to SOC_ANALYST_L2`,
+      needsCase: false,
+    },
+    {
+      type: 'mention',
+      entityType: 'case_comment',
+      titleFn: caseTitle => `You were mentioned in: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} mentioned you in a comment on "${caseTitle ?? 'Unknown'}"`,
+      needsCase: true,
+    },
+    {
+      type: 'case_artifact_added',
+      entityType: 'case',
+      titleFn: caseTitle => `New artifact on: ${caseTitle ?? 'Unknown'}`,
+      messageFn: (actorName, caseTitle) =>
+        `${actorName} added an artifact to case "${caseTitle ?? 'Unknown'}"`,
+      needsCase: true,
+    },
+  ]
+
+  const actorNames = ['Admin User', 'Senior Analyst', 'Junior Analyst', 'Threat Hunter']
+  const notifications: Array<{
+    tenantId: string
+    type: string
+    actorUserId: string
+    recipientUserId: string
+    title: string
+    message: string
+    entityType: string
+    entityId: string
+    caseId: string | null
+    readAt: Date | null
+    createdAt: Date
+  }> = []
+
+  for (let i = 0; i < NOTIFICATION_TARGET_COUNT; i++) {
+    const templateIndex = i % notificationTemplates.length
+    const template = notificationTemplates[templateIndex]!
+    const actorIndex = i % userIds.length
+    let recipientIndex = (i + 1) % userIds.length
+    if (recipientIndex === actorIndex) {
+      recipientIndex = (recipientIndex + 1) % userIds.length
+    }
+
+    const actorId = userIds[actorIndex]!
+    const recipientId = userIds[recipientIndex]!
+    const actorName = actorNames[actorIndex] ?? 'Unknown'
+
+    const caseRecord = template.needsCase && cases.length > 0 ? cases[i % cases.length] : undefined
+
+    const hoursAgo = (i + 1) * 2
+    const createdAt = new Date(Date.now() - hoursAgo * 60 * 60 * 1000)
+    const isRead = i > NOTIFICATION_TARGET_COUNT / 2
+
+    notifications.push({
+      tenantId,
+      type: template.type,
+      actorUserId: actorId,
+      recipientUserId: recipientId,
+      title: template.titleFn(caseRecord?.title),
+      message: template.messageFn(actorName, caseRecord?.title),
+      entityType: template.entityType,
+      entityId: caseRecord?.id ?? recipientId,
+      caseId: caseRecord?.id ?? null,
+      readAt: isRead ? new Date(createdAt.getTime() + 30 * 60 * 1000) : null,
+      createdAt,
+    })
+  }
+
+  await prisma.notification.createMany({ data: notifications, skipDuplicates: true })
+  logger.info({ tenant: tenantSlug, count: notifications.length }, 'Seeded notifications')
+}
+
 // ─── Main seed function ────────────────────────────────────────
 
 async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise<string[]> {
@@ -4962,35 +5362,41 @@ async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise
   const cycleIds: string[] = []
 
   for (const template of CYCLE_TEMPLATES) {
-    const startDate = new Date(now.getTime() - template.daysAgo * 24 * 60 * 60 * 1000)
-    const endDate = new Date(startDate.getTime() + template.durationDays * 24 * 60 * 60 * 1000)
-    const cycleName = `[${profile.slug}] ${template.name}`
+    try {
+      const startDate = new Date(now.getTime() - template.daysAgo * 24 * 60 * 60 * 1000)
+      const endDate = new Date(startDate.getTime() + template.durationDays * 24 * 60 * 60 * 1000)
+      const cycleName = `[${profile.slug}] ${template.name}`
 
-    // Idempotent: check if cycle with this name already exists for this tenant
-    const existing = await prisma.caseCycle.findFirst({
-      where: { tenantId, name: cycleName },
-      select: { id: true },
-    })
-    if (existing) {
-      cycleIds.push(existing.id)
-      continue
+      const existingCycle = await prisma.caseCycle.findFirst({
+        where: { tenantId, name: cycleName },
+        select: { id: true },
+      })
+      if (existingCycle) {
+        cycleIds.push(existingCycle.id)
+        continue
+      }
+
+      const cycle = await prisma.caseCycle.create({
+        data: {
+          tenantId,
+          name: cycleName,
+          description: template.description,
+          status: template.status,
+          startDate,
+          endDate: template.status === 'closed' ? endDate : null,
+          createdBy: `admin@${profile.slug}.io`,
+          closedBy: template.status === 'closed' ? `admin@${profile.slug}.io` : null,
+          closedAt: template.status === 'closed' ? endDate : null,
+        },
+      })
+
+      cycleIds.push(cycle.id)
+    } catch (cycleError) {
+      logger.warn(
+        { tenant: profile.slug, cycle: template.name, error: cycleError },
+        'Skipped case cycle (already exists or error)'
+      )
     }
-
-    const cycle = await prisma.caseCycle.create({
-      data: {
-        tenantId,
-        name: cycleName,
-        description: template.description,
-        status: template.status,
-        startDate,
-        endDate: template.status === 'closed' ? endDate : null,
-        createdBy: `admin@${profile.slug}.io`,
-        closedBy: template.status === 'closed' ? `admin@${profile.slug}.io` : null,
-        closedAt: template.status === 'closed' ? endDate : null,
-      },
-    })
-
-    cycleIds.push(cycle.id)
   }
 
   return cycleIds
@@ -5051,181 +5457,199 @@ async function main(): Promise<void> {
   }
 
   for (const profile of TENANT_PROFILES) {
-    await prisma.tenant.upsert({
-      where: { slug: profile.slug },
-      update: {},
-      create: {
-        id: profile.id,
-        name: profile.name,
-        slug: profile.slug,
-      },
-    })
-
-    const createdTenant = await prisma.tenant.findUnique({ where: { slug: profile.slug } })
-    const tenantId = createdTenant?.id ?? profile.id
-
-    // ─── Users + Memberships ───
-    const userDefs = [
-      {
-        oidcSub: `admin-${profile.slug}`,
-        email: `admin@${profile.slug}.io`,
-        name: 'Admin User',
-        role: UserRole.GLOBAL_ADMIN,
-      },
-      {
-        oidcSub: `analyst-l2-${profile.slug}`,
-        email: `analyst.l2@${profile.slug}.io`,
-        name: 'Senior Analyst',
-        role: UserRole.SOC_ANALYST_L2,
-      },
-      {
-        oidcSub: `analyst-l1-${profile.slug}`,
-        email: `analyst.l1@${profile.slug}.io`,
-        name: 'Junior Analyst',
-        role: UserRole.SOC_ANALYST_L1,
-      },
-      {
-        oidcSub: `hunter-${profile.slug}`,
-        email: `hunter@${profile.slug}.io`,
-        name: 'Threat Hunter',
-        role: UserRole.THREAT_HUNTER,
-      },
-      {
-        oidcSub: `exec-${profile.slug}`,
-        email: `exec@${profile.slug}.io`,
-        name: 'Executive',
-        role: UserRole.EXECUTIVE_READONLY,
-      },
-    ]
-
-    for (const userDef of userDefs) {
-      const isProtected = userDef.role === UserRole.GLOBAL_ADMIN
-
-      const createdUser = await prisma.user.upsert({
-        where: { email: userDef.email },
+    try {
+      await prisma.tenant.upsert({
+        where: { slug: profile.slug },
         update: {},
         create: {
-          email: userDef.email,
-          name: userDef.name,
-          oidcSub: userDef.oidcSub,
-          passwordHash,
-          isProtected,
+          id: profile.id,
+          name: profile.name,
+          slug: profile.slug,
         },
       })
 
-      await prisma.tenantMembership.upsert({
-        where: { userId_tenantId: { userId: createdUser.id, tenantId } },
-        update: {},
-        create: {
-          userId: createdUser.id,
+      const createdTenant = await prisma.tenant.findUnique({ where: { slug: profile.slug } })
+      const tenantId = createdTenant?.id ?? profile.id
+
+      // ─── Users + Memberships ───
+      const userDefs = [
+        {
+          oidcSub: `admin-${profile.slug}`,
+          email: `admin@${profile.slug}.io`,
+          name: 'Admin User',
+          role: UserRole.GLOBAL_ADMIN,
+        },
+        {
+          oidcSub: `analyst-l2-${profile.slug}`,
+          email: `analyst.l2@${profile.slug}.io`,
+          name: 'Senior Analyst',
+          role: UserRole.SOC_ANALYST_L2,
+        },
+        {
+          oidcSub: `analyst-l1-${profile.slug}`,
+          email: `analyst.l1@${profile.slug}.io`,
+          name: 'Junior Analyst',
+          role: UserRole.SOC_ANALYST_L1,
+        },
+        {
+          oidcSub: `hunter-${profile.slug}`,
+          email: `hunter@${profile.slug}.io`,
+          name: 'Threat Hunter',
+          role: UserRole.THREAT_HUNTER,
+        },
+        {
+          oidcSub: `exec-${profile.slug}`,
+          email: `exec@${profile.slug}.io`,
+          name: 'Executive',
+          role: UserRole.EXECUTIVE_READONLY,
+        },
+      ]
+
+      for (const userDef of userDefs) {
+        const isProtected = userDef.role === UserRole.GLOBAL_ADMIN
+
+        const createdUser = await prisma.user.upsert({
+          where: { email: userDef.email },
+          update: {},
+          create: {
+            email: userDef.email,
+            name: userDef.name,
+            oidcSub: userDef.oidcSub,
+            passwordHash,
+            isProtected,
+          },
+        })
+
+        await prisma.tenantMembership.upsert({
+          where: { userId_tenantId: { userId: createdUser.id, tenantId } },
+          update: {},
+          create: {
+            userId: createdUser.id,
+            tenantId,
+            role: userDef.role,
+          },
+        })
+
+        await prisma.userPreference.upsert({
+          where: { userId: createdUser.id },
+          update: {},
+          create: {
+            userId: createdUser.id,
+            theme: 'system',
+            language: 'en',
+            notificationsEmail: true,
+            notificationsInApp: true,
+          },
+        })
+
+        logger.info(
+          { tenant: profile.slug, email: userDef.email, role: userDef.role },
+          'Seeded user'
+        )
+      }
+
+      // Collect user IDs that can be assigned cases (analysts, hunters, admins — not execs)
+      const assignableUsers = await prisma.tenantMembership.findMany({
+        where: {
           tenantId,
-          role: userDef.role,
+          status: 'active',
+          role: {
+            in: [
+              UserRole.GLOBAL_ADMIN,
+              UserRole.TENANT_ADMIN,
+              UserRole.SOC_ANALYST_L2,
+              UserRole.SOC_ANALYST_L1,
+              UserRole.THREAT_HUNTER,
+            ],
+          },
         },
+        select: { userId: true },
       })
+      const assignableUserIds = assignableUsers.map(u => u.userId)
 
-      await prisma.userPreference.upsert({
-        where: { userId: createdUser.id },
-        update: {},
-        create: {
-          userId: createdUser.id,
-          theme: 'system',
-          language: 'en',
-          notificationsEmail: true,
-          notificationsInApp: true,
+      // ─── Connectors ───
+      const encryptionKey = process.env.CONFIG_ENCRYPTION_KEY
+      for (const connector of profile.connectors) {
+        const encryptedConfig = encryptionKey
+          ? encrypt(JSON.stringify(connector.config), encryptionKey)
+          : JSON.stringify(connector.config)
+
+        await prisma.connectorConfig.upsert({
+          where: { tenantId_type: { tenantId, type: connector.type } },
+          update: { encryptedConfig },
+          create: {
+            tenantId,
+            type: connector.type,
+            name: connector.name,
+            authType: connector.authType,
+            enabled: connector.enabled,
+            encryptedConfig,
+          },
+        })
+      }
+
+      // ─── Alerts ───
+      await seedAlerts(tenantId, profile)
+      logger.info({ tenant: profile.slug, count: profile.alertCount }, 'Seeded alerts')
+
+      // ─── Case Cycles ───
+      const cycleIds = await seedCaseCycles(tenantId, profile)
+      logger.info({ tenant: profile.slug, count: CYCLE_TEMPLATES.length }, 'Seeded case cycles')
+
+      // ─── Cases ───
+      await seedCases(tenantId, profile, cycleIds, assignableUserIds)
+      logger.info(
+        { tenant: profile.slug, count: profile.caseTemplateIndices.length },
+        'Seeded cases'
+      )
+
+      // ─── Notifications (depends on users + cases) ───
+      await seedNotifications(tenantId, profile.slug, assignableUserIds)
+
+      // ─── Hunt Sessions ───
+      await seedHuntSessions(tenantId, profile)
+      logger.info(
+        { tenant: profile.slug, count: profile.huntQueryIndices.length },
+        'Seeded hunt sessions'
+      )
+
+      // ─── Intel ───
+      await seedIntel(tenantId, profile)
+      logger.info(
+        {
+          tenant: profile.slug,
+          iocs: profile.iocIndices.length,
+          mispEvents: profile.mispEventIndices.length,
         },
-      })
+        'Seeded intel'
+      )
 
-      logger.info({ tenant: profile.slug, email: userDef.email, role: userDef.role }, 'Seeded user')
+      // ─── AI Audit Logs ───
+      await seedAiAuditLogs(tenantId, profile.slug)
+      logger.info({ tenant: profile.slug, count: AI_AUDIT_TARGET_COUNT }, 'Seeded AI audit logs')
+
+      // ─── Phase 1-4 Modules ───
+      await seedIncidents(tenantId, profile.slug)
+      await seedCorrelationRules(tenantId, profile.slug)
+      await seedVulnerabilities(tenantId, profile.slug)
+      await seedAiAgents(tenantId, profile.slug)
+      await seedUeba(tenantId, profile.slug)
+      await seedAttackPaths(tenantId, profile.slug)
+      await seedSoar(tenantId, profile.slug)
+      await seedCompliance(tenantId, profile.slug)
+      await seedReports(tenantId, profile.slug)
+      await seedSystemHealth(tenantId, profile.slug)
+      await seedNormalization(tenantId, profile.slug)
+      await seedDetectionRules(tenantId, profile.slug)
+      await seedCloudSecurity(tenantId, profile.slug)
+
+      logger.info({ tenant: profile.slug }, 'Tenant seeding completed')
+    } catch (tenantError) {
+      logger.warn(
+        { tenant: profile.slug, error: tenantError },
+        'Failed to seed tenant — continuing with next'
+      )
     }
-
-    // Collect user IDs that can be assigned cases (analysts, hunters, admins — not execs)
-    const assignableUsers = await prisma.tenantMembership.findMany({
-      where: {
-        tenantId,
-        status: 'active',
-        role: {
-          in: [
-            UserRole.GLOBAL_ADMIN,
-            UserRole.TENANT_ADMIN,
-            UserRole.SOC_ANALYST_L2,
-            UserRole.SOC_ANALYST_L1,
-            UserRole.THREAT_HUNTER,
-          ],
-        },
-      },
-      select: { userId: true },
-    })
-    const assignableUserIds = assignableUsers.map(u => u.userId)
-
-    // ─── Connectors ───
-    const encryptionKey = process.env.CONFIG_ENCRYPTION_KEY
-    for (const connector of profile.connectors) {
-      const encryptedConfig = encryptionKey
-        ? encrypt(JSON.stringify(connector.config), encryptionKey)
-        : JSON.stringify(connector.config)
-
-      await prisma.connectorConfig.upsert({
-        where: { tenantId_type: { tenantId, type: connector.type } },
-        update: { encryptedConfig },
-        create: {
-          tenantId,
-          type: connector.type,
-          name: connector.name,
-          authType: connector.authType,
-          enabled: connector.enabled,
-          encryptedConfig,
-        },
-      })
-    }
-
-    // ─── Alerts (idempotent via deterministic externalId) ───
-    await seedAlerts(tenantId, profile)
-    logger.info({ tenant: profile.slug, count: profile.alertCount }, 'Seeded alerts')
-
-    // ─── Case Cycles (idempotent via name check per tenant) ───
-    const cycleIds = await seedCaseCycles(tenantId, profile)
-    logger.info({ tenant: profile.slug, count: CYCLE_TEMPLATES.length }, 'Seeded case cycles')
-
-    // ─── Cases (idempotent via upsert on caseNumber) ───
-    await seedCases(tenantId, profile, cycleIds, assignableUserIds)
-    logger.info({ tenant: profile.slug, count: profile.caseTemplateIndices.length }, 'Seeded cases')
-
-    // ─── Hunt Sessions (idempotent via query check per tenant) ───
-    await seedHuntSessions(tenantId, profile)
-    logger.info(
-      { tenant: profile.slug, count: profile.huntQueryIndices.length },
-      'Seeded hunt sessions'
-    )
-
-    // ─── Intel ───
-    await seedIntel(tenantId, profile)
-    logger.info(
-      {
-        tenant: profile.slug,
-        iocs: profile.iocIndices.length,
-        mispEvents: profile.mispEventIndices.length,
-      },
-      'Seeded intel'
-    )
-
-    // ─── AI Audit Logs (idempotent via count check) ───
-    await seedAiAuditLogs(tenantId, profile.slug)
-    logger.info({ tenant: profile.slug, count: AI_AUDIT_TARGET_COUNT }, 'Seeded AI audit logs')
-
-    // ─── Phase 1-4 Modules ───
-    await seedIncidents(tenantId, profile.slug)
-    await seedCorrelationRules(tenantId, profile.slug)
-    await seedVulnerabilities(tenantId, profile.slug)
-    await seedAiAgents(tenantId, profile.slug)
-    await seedUeba(tenantId, profile.slug)
-    await seedAttackPaths(tenantId, profile.slug)
-    await seedSoar(tenantId, profile.slug)
-    await seedCompliance(tenantId, profile.slug)
-    await seedReports(tenantId, profile.slug)
-    await seedSystemHealth(tenantId, profile.slug)
-    await seedNormalization(tenantId, profile.slug)
-    await seedDetectionRules(tenantId, profile.slug)
-    await seedCloudSecurity(tenantId, profile.slug)
   }
 
   logger.info('Seed completed.')

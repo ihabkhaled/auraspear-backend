@@ -53,6 +53,7 @@ export class IntelRepository {
       where: { tenantId },
       select: { organization: true },
       distinct: ['organization'],
+      take: 500,
     })
   }
 

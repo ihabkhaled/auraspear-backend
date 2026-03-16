@@ -63,10 +63,11 @@ export class DataExplorerRepository {
 
   async updateSyncJob(
     id: string,
-    data: Prisma.ConnectorSyncJobUncheckedUpdateInput
-  ): Promise<ConnectorSyncJob> {
-    return this.prisma.connectorSyncJob.update({
-      where: { id },
+    tenantId: string,
+    data: Prisma.ConnectorSyncJobUpdateManyMutationInput
+  ): Promise<Prisma.BatchPayload> {
+    return this.prisma.connectorSyncJob.updateMany({
+      where: { id, tenantId },
       data,
     })
   }

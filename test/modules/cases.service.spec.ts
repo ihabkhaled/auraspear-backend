@@ -1311,12 +1311,14 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      repository.findTaskByIdAndCase.mockResolvedValue(existingTask)
-
       const updatedTask = {
         ...existingTask,
         status: 'completed',
       }
+      repository.findTaskByIdAndCase
+        .mockResolvedValueOnce(existingTask)
+        .mockResolvedValueOnce(updatedTask)
+
       repository.updateTask.mockResolvedValue(updatedTask)
       repository.createTimeline.mockResolvedValue({})
 
@@ -1327,6 +1329,7 @@ describe('CasesService', () => {
       expect(result.status).toBe('completed')
       expect(repository.updateTask).toHaveBeenCalledWith(
         'task-1',
+        'case-1',
         expect.objectContaining({ status: 'completed' })
       )
       // Timeline should be created because status changed
@@ -1370,12 +1373,14 @@ describe('CasesService', () => {
         updatedAt: new Date(),
       }
 
-      repository.findTaskByIdAndCase.mockResolvedValue(existingTask)
-
       const updatedTask = {
         ...existingTask,
         title: 'Review all logs',
       }
+      repository.findTaskByIdAndCase
+        .mockResolvedValueOnce(existingTask)
+        .mockResolvedValueOnce(updatedTask)
+
       repository.updateTask.mockResolvedValue(updatedTask)
 
       const dto = { title: 'Review all logs' }
@@ -1470,7 +1475,7 @@ describe('CasesService', () => {
       const result = await service.deleteTask('case-1', 'task-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(repository.deleteTask).toHaveBeenCalledWith('task-1')
+      expect(repository.deleteTask).toHaveBeenCalledWith('task-1', 'case-1')
       expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
           caseId: 'case-1',
@@ -1788,7 +1793,7 @@ describe('CasesService', () => {
       const result = await service.deleteArtifact('case-1', 'artifact-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(repository.deleteArtifact).toHaveBeenCalledWith('artifact-1')
+      expect(repository.deleteArtifact).toHaveBeenCalledWith('artifact-1', 'case-1')
       expect(repository.createTimeline).toHaveBeenCalledWith(
         expect.objectContaining({
           caseId: 'case-1',

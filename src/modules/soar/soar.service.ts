@@ -15,6 +15,7 @@ import {
   AppLogSourceType,
   SoarPlaybookStatus,
   SoarExecutionStatus,
+  SortOrder,
 } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -258,7 +259,7 @@ export class SoarService {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { startedAt: 'desc' },
+        orderBy: { startedAt: SortOrder.DESC },
       }),
       this.repository.countExecutions(where),
     ])
@@ -327,7 +328,7 @@ export class SoarService {
       totalExecutions,
       successfulExecutions,
       failedExecutions,
-      execTimes,
+      avgExecutionTimeMs,
     ] = await Promise.all([
       this.repository.countPlaybooks({ tenantId }),
       this.repository.countPlaybooks({
@@ -343,7 +344,7 @@ export class SoarService {
         tenantId,
         status: SoarExecutionStatus.FAILED,
       }),
-      this.repository.findCompletedExecutions(tenantId),
+      this.repository.getAvgExecutionTimeMs(tenantId),
     ])
 
     return buildSoarStats(
@@ -352,7 +353,7 @@ export class SoarService {
       totalExecutions,
       successfulExecutions,
       failedExecutions,
-      execTimes
+      avgExecutionTimeMs
     )
   }
 }

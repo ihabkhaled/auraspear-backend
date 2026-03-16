@@ -1,3 +1,4 @@
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { CloudAccountRecord, CloudFindingRecord } from './cloud-security.types'
 import type { UpdateAccountDto } from './dto/update-account.dto'
 
@@ -24,7 +25,7 @@ export function buildAccountListWhere(
 }
 
 export function buildAccountOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'provider':
       return { provider: order }
@@ -72,7 +73,7 @@ export function buildFindingListWhere(
 }
 
 export function buildFindingOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'severity':
       return { severity: order }

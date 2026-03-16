@@ -1,3 +1,5 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdateAttackPathDto } from './dto/update-attack-path.dto'
 import type { Prisma } from '@prisma/client'
 
@@ -36,7 +38,7 @@ export function buildAttackPathOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.AttackPathOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -57,7 +59,7 @@ export function buildAttackPathOrderBy(
     case 'detectedAt':
       return { detectedAt: order }
     default:
-      return { createdAt: 'desc' }
+      return { createdAt: SortOrder.DESC }
   }
 }
 

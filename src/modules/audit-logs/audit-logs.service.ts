@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AuditLogsRepository } from './audit-logs.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, SortOrder } from '../../common/enums'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { AuditLogRecord, PaginatedAuditLogs } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
 import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
@@ -102,7 +103,7 @@ export class AuditLogsService {
     sortBy?: string,
     sortOrder?: string
   ): Prisma.AuditLogOrderByWithRelationInput {
-    const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+    const order = toSortOrder(sortOrder)
     switch (sortBy) {
       case 'createdAt':
         return { createdAt: order }
@@ -113,7 +114,7 @@ export class AuditLogsService {
       case 'resource':
         return { resource: order }
       default:
-        return { createdAt: 'desc' }
+        return { createdAt: SortOrder.DESC }
     }
   }
 

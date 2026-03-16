@@ -1,3 +1,5 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
 import type { AiAgentRecord } from './ai-agents.types'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
 import type { Prisma, AiAgentSession, AiAgentTool } from '@prisma/client'
@@ -21,7 +23,7 @@ export function buildAgentRecord(agent: AgentWithRelations): AiAgentRecord {
   const { _count, sessions, tools, ...rest } = agent
   return {
     ...rest,
-    totalTokens: Number(agent['totalTokens'] ?? 0),
+    totalTokens: String(agent['totalTokens'] ?? 0),
     toolsCount: _count.tools,
     sessionsCount: _count.sessions,
     tools,
@@ -64,7 +66,7 @@ export function buildAgentOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.AiAgentOrderByWithRelationInput {
-  const order: 'asc' | 'desc' = sortOrder === 'asc' ? 'asc' : 'desc'
+  const order = toSortOrder(sortOrder)
   switch (sortBy) {
     case 'createdAt':
       return { createdAt: order }
@@ -83,7 +85,7 @@ export function buildAgentOrderBy(
     case 'totalCost':
       return { totalCost: order }
     default:
-      return { createdAt: 'desc' }
+      return { createdAt: SortOrder.DESC }
   }
 }
 

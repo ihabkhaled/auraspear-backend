@@ -48,17 +48,28 @@ export class UebaRepository {
   }
 
   async updateEntity(params: {
-    where: Prisma.UebaEntityWhereUniqueInput
-    data: Prisma.UebaEntityUpdateInput
+    where: { id: string; tenantId: string }
+    data: Prisma.UebaEntityUpdateManyMutationInput
   }): Promise<EntityWithAnomalyCount> {
-    return this.prisma.uebaEntity.update({
-      ...params,
+    await this.prisma.uebaEntity.updateMany({
+      where: params.where,
+      data: params.data,
+    })
+
+    const updated = await this.prisma.uebaEntity.findFirst({
+      where: params.where,
       include: { _count: { select: { anomalies: true } } },
     })
+
+    if (!updated) {
+      throw new Error(`UebaEntity ${params.where.id} not found after update`)
+    }
+
+    return updated
   }
 
-  async deleteEntity(where: Prisma.UebaEntityWhereUniqueInput): Promise<UebaEntity> {
-    return this.prisma.uebaEntity.delete({ where })
+  async deleteEntity(where: { id: string; tenantId: string }): Promise<Prisma.BatchPayload> {
+    return this.prisma.uebaEntity.deleteMany({ where })
   }
 
   /* ---------------------------------------------------------------- */
@@ -91,13 +102,24 @@ export class UebaRepository {
   }
 
   async updateAnomaly(params: {
-    where: Prisma.UebaAnomalyWhereUniqueInput
-    data: Prisma.UebaAnomalyUpdateInput
+    where: { id: string; tenantId: string }
+    data: Prisma.UebaAnomalyUpdateManyMutationInput
   }): Promise<AnomalyWithEntity> {
-    return this.prisma.uebaAnomaly.update({
-      ...params,
+    await this.prisma.uebaAnomaly.updateMany({
+      where: params.where,
+      data: params.data,
+    })
+
+    const updated = await this.prisma.uebaAnomaly.findFirst({
+      where: params.where,
       include: { entity: { select: { entityName: true, entityType: true } } },
     })
+
+    if (!updated) {
+      throw new Error(`UebaAnomaly ${params.where.id} not found after update`)
+    }
+
+    return updated
   }
 
   /* ---------------------------------------------------------------- */

@@ -311,13 +311,16 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
-
       const updatedCycle = {
         ...existingCycle,
         name: 'Q1 2026 Updated',
         description: 'Updated description',
       }
+
+      repository.findFirstByIdAndTenantWithCounts
+        .mockResolvedValueOnce(existingCycle)
+        .mockResolvedValueOnce(updatedCycle)
+
       repository.update.mockResolvedValue(updatedCycle)
 
       const dto = { name: 'Q1 2026 Updated', description: 'Updated description' }
@@ -326,6 +329,7 @@ describe('CaseCyclesService', () => {
       expect(result.name).toBe('Q1 2026 Updated')
       expect(repository.update).toHaveBeenCalledWith(
         'cycle-1',
+        TENANT_ID,
         expect.objectContaining({
           name: 'Q1 2026 Updated',
           description: 'Updated description',
@@ -444,16 +448,19 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }],
       }
 
-      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
-      // No overlapping cycles
-      repository.findManyForOverlapCheck.mockResolvedValue([])
-
       const updatedCycle = {
         ...existingCycle,
         status: 'closed',
         startDate: new Date('2028-01-01'),
         endDate: new Date('2028-06-30'),
       }
+
+      repository.findFirstByIdAndTenantWithCounts
+        .mockResolvedValueOnce(existingCycle)
+        .mockResolvedValueOnce(updatedCycle)
+      // No overlapping cycles
+      repository.findManyForOverlapCheck.mockResolvedValue([])
+
       repository.update.mockResolvedValue(updatedCycle)
 
       // Move dates far into the future (today is outside the range)
@@ -466,6 +473,7 @@ describe('CaseCyclesService', () => {
 
       expect(repository.update).toHaveBeenCalledWith(
         'cycle-1',
+        TENANT_ID,
         expect.objectContaining({
           status: 'closed',
           startDate: dto.startDate,
@@ -666,7 +674,7 @@ describe('CaseCyclesService', () => {
       const result = await service.deleteCycle('cycle-1', mockUser as never)
 
       expect(result.deleted).toBe(true)
-      expect(repository.deleteCycle).toHaveBeenCalledWith('cycle-1')
+      expect(repository.deleteCycle).toHaveBeenCalledWith('cycle-1', TENANT_ID)
       // Should not use transaction when no cases to unlink
       expect(repository.deleteCycleWithCasesTransaction).not.toHaveBeenCalled()
     })
@@ -735,9 +743,7 @@ describe('CaseCyclesService', () => {
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
-
-      const updatedCycle = {
+      const refreshedCycle = {
         id: 'cycle-1',
         tenantId: TENANT_ID,
         name: 'Q1 2026',
@@ -750,9 +756,15 @@ describe('CaseCyclesService', () => {
         closedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
+        _count: { cases: 2 },
+        cases: [{ status: 'open' }, { status: 'closed' }],
       }
 
-      repository.update.mockResolvedValue(updatedCycle)
+      repository.findFirstByIdAndTenantWithCounts
+        .mockResolvedValueOnce(existingCycle)
+        .mockResolvedValueOnce(refreshedCycle)
+
+      repository.update.mockResolvedValue(refreshedCycle)
 
       const dto = { endDate: new Date() }
       const result = await service.closeCycle('cycle-1', dto, mockUser as never)
@@ -762,6 +774,7 @@ describe('CaseCyclesService', () => {
       expect(result.closedCount).toBe(1)
       expect(repository.update).toHaveBeenCalledWith(
         'cycle-1',
+        TENANT_ID,
         expect.objectContaining({ status: 'closed' })
       )
     })
