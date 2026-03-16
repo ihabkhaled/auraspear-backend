@@ -74,6 +74,20 @@ function requireEnv(name: string): string {
 const DEFAULT_PASSWORD: string = requireEnv('SEED_DEFAULT_PASSWORD')
 const BCRYPT_ROUNDS = 12
 
+// Connector credentials — read from environment variables with obviously-fake fallbacks.
+// In production, always set real values via environment variables.
+const SEED_WAZUH_PASSWORD = process.env['SEED_WAZUH_PASSWORD'] ?? 'CHANGE_ME_NOT_A_REAL_PASSWORD'
+const SEED_WAZUH_INDEXER_PASSWORD =
+  process.env['SEED_WAZUH_INDEXER_PASSWORD'] ?? 'CHANGE_ME_NOT_A_REAL_PASSWORD'
+const SEED_GRAYLOG_PASSWORD =
+  process.env['SEED_GRAYLOG_PASSWORD'] ?? 'CHANGE_ME_NOT_A_REAL_PASSWORD'
+const SEED_VELOCIRAPTOR_PASSWORD =
+  process.env['SEED_VELOCIRAPTOR_PASSWORD'] ?? 'CHANGE_ME_NOT_A_REAL_PASSWORD'
+const SEED_GRAFANA_API_KEY = process.env['SEED_GRAFANA_API_KEY'] ?? 'CHANGE_ME_NOT_A_REAL_API_KEY'
+const SEED_INFLUXDB_TOKEN = process.env['SEED_INFLUXDB_TOKEN'] ?? 'CHANGE_ME_NOT_A_REAL_TOKEN'
+const SEED_MISP_AUTH_KEY = process.env['SEED_MISP_AUTH_KEY'] ?? 'CHANGE_ME_NOT_A_REAL_API_KEY'
+const SEED_SHUFFLE_API_KEY = process.env['SEED_SHUFFLE_API_KEY'] ?? 'CHANGE_ME_NOT_A_REAL_API_KEY'
+
 // Global case counter to ensure unique case numbers across tenants
 let globalCaseCounter = 0
 
@@ -106,7 +120,7 @@ interface TenantProfile {
 
 // ─── Connector configs matching docker-compose.connectors.yml ──
 // All connectors share the same real configs so every tenant can
-// query the local Docker stack.  Credentials come from the compose file.
+// query the local Docker stack.  Credentials come from SEED_* env vars.
 
 const CONNECTOR_SEEDS: ConnectorSeed[] = [
   {
@@ -118,9 +132,9 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
       baseUrl: 'https://localhost:55000',
       indexerUrl: 'https://localhost:9200',
       username: 'wazuh-wui',
-      password: 'MyS3cr37P450r.*-',
+      password: SEED_WAZUH_PASSWORD,
       indexerUsername: 'admin',
-      indexerPassword: 'admin',
+      indexerPassword: SEED_WAZUH_INDEXER_PASSWORD,
       verifyTls: false,
     },
   },
@@ -132,7 +146,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     config: {
       baseUrl: 'http://localhost:9000',
       username: 'admin',
-      password: 'admin@Graylog1',
+      password: SEED_GRAYLOG_PASSWORD,
       verifyTls: false,
     },
   },
@@ -145,7 +159,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
       baseUrl: 'https://localhost:8889',
       apiUrl: 'https://localhost:8001',
       username: 'admin',
-      password: 'admin',
+      password: SEED_VELOCIRAPTOR_PASSWORD,
       verifyTls: false,
     },
   },
@@ -156,7 +170,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     enabled: true,
     config: {
       baseUrl: 'http://localhost:3001',
-      apiKey: 'glsa_placeholder_dev_token',
+      apiKey: SEED_GRAFANA_API_KEY,
       verifyTls: false,
     },
   },
@@ -167,7 +181,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     enabled: true,
     config: {
       baseUrl: 'http://localhost:8086',
-      token: 'auraspear-dev-token-change-me',
+      token: SEED_INFLUXDB_TOKEN,
       org: 'auraspear',
       bucket: 'soc-metrics',
       verifyTls: false,
@@ -181,7 +195,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     config: {
       baseUrl: 'https://localhost:8443',
       mispUrl: 'https://localhost:8443',
-      mispAuthKey: 'placeholder-run-seed-connectors-sh',
+      mispAuthKey: SEED_MISP_AUTH_KEY,
       verifyTls: false,
     },
   },
@@ -192,7 +206,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     enabled: true,
     config: {
       baseUrl: 'http://localhost:3443',
-      apiKey: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      apiKey: SEED_SHUFFLE_API_KEY,
       verifyTls: false,
     },
   },

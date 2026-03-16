@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { type AddTimelineEntryDto, AddTimelineEntrySchema } from './dto/add-timeline-entry.dto'
 import { type CreateIncidentDto, CreateIncidentSchema } from './dto/create-incident.dto'
 import { ListIncidentsQuerySchema } from './dto/list-incidents-query.dto'
@@ -17,6 +18,7 @@ import type { IncidentTimeline } from '@prisma/client'
 
 @Controller('incidents')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class IncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
@@ -77,6 +79,7 @@ export class IncidentsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteIncident(
     @Param('id') id: string,
     @TenantId() tenantId: string,

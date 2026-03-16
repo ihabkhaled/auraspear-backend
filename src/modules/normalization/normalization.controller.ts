@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { type CreatePipelineDto, CreatePipelineSchema } from './dto/create-pipeline.dto'
 import { ListPipelinesQuerySchema } from './dto/list-pipelines-query.dto'
 import { type UpdatePipelineDto, UpdatePipelineSchema } from './dto/update-pipeline.dto'
@@ -19,6 +31,7 @@ import type {
 
 @Controller('normalization')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class NormalizationController {
   constructor(private readonly normalizationService: NormalizationService) {}
 
@@ -101,6 +114,7 @@ export class NormalizationController {
   @Delete('pipelines/:id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePipeline(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,

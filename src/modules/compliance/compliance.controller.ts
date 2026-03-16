@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { ComplianceService } from './compliance.service'
 import { type CreateControlDto, CreateControlSchema } from './dto/create-control.dto'
 import { type CreateFrameworkDto, CreateFrameworkSchema } from './dto/create-framework.dto'
@@ -22,6 +23,7 @@ import type {
 
 @Controller('compliance')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class ComplianceController {
   constructor(private readonly complianceService: ComplianceService) {}
 
@@ -86,6 +88,7 @@ export class ComplianceController {
   @Delete('frameworks/:id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteFramework(
     @Param('id') id: string,
     @TenantId() tenantId: string,

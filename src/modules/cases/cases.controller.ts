@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { CasesService } from './cases.service'
 import { type CreateArtifactDto, CreateArtifactSchema } from './dto/create-artifact.dto'
 import { type CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
@@ -34,6 +35,7 @@ import type { CaseArtifact, CaseNote, CaseTask } from '@prisma/client'
 
 @Controller('cases')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class CasesController {
   constructor(private readonly casesService: CasesService) {}
 
@@ -92,6 +94,7 @@ export class CasesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCase(
     @Param('id') id: string,
     @TenantId() tenantId: string,
@@ -185,6 +188,7 @@ export class CasesController {
   @Delete(':id/comments/:commentId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L1)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCaseComment(
     @Param('id') id: string,
     @Param('commentId') commentId: string,
@@ -225,6 +229,7 @@ export class CasesController {
   @Delete(':id/tasks/:taskId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L1)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteTask(
     @Param('id') id: string,
     @Param('taskId') taskId: string,
@@ -252,6 +257,7 @@ export class CasesController {
   @Delete(':id/artifacts/:artifactId')
   @UseGuards(RolesGuard)
   @Roles(UserRole.SOC_ANALYST_L1)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteArtifact(
     @Param('id') id: string,
     @Param('artifactId') artifactId: string,

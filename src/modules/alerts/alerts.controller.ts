@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { AlertsService } from './alerts.service'
 import { CloseAlertSchema, type CloseAlertDto } from './dto/close-alert.dto'
 import { InvestigateAlertSchema, type InvestigateAlertDto } from './dto/investigate-alert.dto'
@@ -15,6 +16,7 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @ApiTags('alerts')
 @ApiBearerAuth()
 @Controller('alerts')
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class AlertsController {
   constructor(private readonly alertsService: AlertsService) {}
 
@@ -65,6 +67,7 @@ export class AlertsController {
 
   @Post('ingest/wazuh')
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async ingestFromWazuh(@TenantId() tenantId: string): Promise<{ ingested: number }> {
     return this.alertsService.ingestFromWazuh(tenantId)
   }

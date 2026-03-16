@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { type CreatePlaybookDto, CreatePlaybookSchema } from './dto/create-playbook.dto'
 import { ListPlaybooksQuerySchema } from './dto/list-playbooks-query.dto'
 import { type UpdatePlaybookDto, UpdatePlaybookSchema } from './dto/update-playbook.dto'
@@ -21,6 +22,7 @@ import type {
 
 @Controller('soar')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class SoarController {
   constructor(private readonly soarService: SoarService) {}
 
@@ -86,6 +88,7 @@ export class SoarController {
   @Delete('playbooks/:id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePlaybook(
     @Param('id') id: string,
     @TenantId() tenantId: string,

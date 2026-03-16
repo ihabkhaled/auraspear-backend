@@ -31,6 +31,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { processInBatches } from '../../common/utils/batch.utility'
+import { sanitizeEsQueryString } from '../../common/utils/es-sanitize.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GrafanaService } from '../connectors/services/grafana.service'
 import { GraylogService } from '../connectors/services/graylog.service'
@@ -109,9 +110,10 @@ export class DataExplorerService {
     dto: GraylogSearchDto
   ): Promise<PaginatedUnknownResult> {
     const config = await this.getConfig(tenantId, ConnectorType.GRAYLOG)
+    const sanitizedQuery = dto.query === '*' ? '*' : sanitizeEsQueryString(dto.query)
     const result = await this.callExternalOrThrow('Graylog', () =>
       this.graylogService.searchEvents(config, {
-        query: dto.query,
+        query: sanitizedQuery || '*',
         timerange: { type: 'relative', range: dto.timeRange },
         page: dto.page,
         per_page: dto.limit,

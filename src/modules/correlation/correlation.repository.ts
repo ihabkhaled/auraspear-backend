@@ -68,25 +68,51 @@ export class CorrelationRepository {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
   }): Promise<CorrelationRule> {
-    return this.prisma.correlationRule.update({
+    // Use updateMany to enforce tenantId in WHERE clause (Prisma .update() only
+    // accepts unique fields, so tenantId would be silently ignored).
+    await this.prisma.correlationRule.updateMany({
       where: { id: params.where.id, tenantId: params.where.tenantId },
-      data: params.data,
+      data: params.data as Prisma.CorrelationRuleUncheckedUpdateManyInput,
     })
+
+    const updated = await this.prisma.correlationRule.findFirst({
+      where: { id: params.where.id, tenantId: params.where.tenantId },
+    })
+
+    if (!updated) {
+      throw new Error(`CorrelationRule ${params.where.id} not found after update`)
+    }
+
+    return updated
   }
 
   async updateWithTenant(params: {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
   }): Promise<CorrelationRule & { tenant: { name: string } }> {
-    return this.prisma.correlationRule.update({
+    // Use updateMany to enforce tenantId in WHERE clause (Prisma .update() only
+    // accepts unique fields, so tenantId would be silently ignored).
+    await this.prisma.correlationRule.updateMany({
       where: { id: params.where.id, tenantId: params.where.tenantId },
-      data: params.data,
+      data: params.data as Prisma.CorrelationRuleUncheckedUpdateManyInput,
+    })
+
+    const updated = await this.prisma.correlationRule.findFirst({
+      where: { id: params.where.id, tenantId: params.where.tenantId },
       include: { tenant: { select: { name: true } } },
     })
+
+    if (!updated) {
+      throw new Error(`CorrelationRule ${params.where.id} not found after update`)
+    }
+
+    return updated
   }
 
-  async deleteByIdAndTenantId(id: string, tenantId: string): Promise<CorrelationRule> {
-    return this.prisma.correlationRule.delete({
+  async deleteByIdAndTenantId(id: string, tenantId: string): Promise<Prisma.BatchPayload> {
+    // Use deleteMany to enforce tenantId in WHERE clause (Prisma .delete() only
+    // accepts unique fields, so tenantId would be silently ignored).
+    return this.prisma.correlationRule.deleteMany({
       where: { id, tenantId },
     })
   }

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { ListHuntEventsQuerySchema, ListHuntsQuerySchema } from './dto/list-hunts-query.dto'
 import { type RunHuntDto, RunHuntSchema } from './dto/run-hunt.dto'
 import { HuntsService } from './hunts.service'
@@ -14,6 +15,7 @@ import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } fr
 
 @Controller('hunts')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class HuntsController {
   constructor(private readonly huntsService: HuntsService) {}
 

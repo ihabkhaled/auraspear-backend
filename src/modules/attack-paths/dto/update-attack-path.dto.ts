@@ -9,7 +9,13 @@ export const UpdateAttackPathSchema = z.object({
   severity: AttackPathSeverityEnum.optional(),
   status: AttackPathStatusEnum.optional(),
   stages: z
-    .array(z.record(z.string().max(500), z.unknown()).refine(() => true))
+    .array(
+      z
+        .record(z.string().max(500), z.unknown())
+        .refine(value => JSON.stringify(value).length <= 16384, {
+          message: 'Individual stage too large (max 16KB)',
+        })
+    )
     .max(100)
     .optional(),
   affectedAssets: z.number().int().min(0).max(1_000_000).optional(),

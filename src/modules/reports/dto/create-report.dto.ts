@@ -8,7 +8,12 @@ export const CreateReportSchema = z.object({
   description: z.string().max(4096).optional(),
   type: ReportTypeEnum,
   format: ReportFormatEnum,
-  parameters: z.record(z.unknown()).optional(),
+  parameters: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Parameters too large (max 64KB)',
+    })
+    .optional(),
 })
 
 export type CreateReportDto = z.infer<typeof CreateReportSchema>

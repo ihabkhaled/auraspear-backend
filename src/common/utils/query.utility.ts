@@ -49,7 +49,7 @@ export function applyOptionalFilters<W extends Record<string, unknown>>(
 ): void {
   for (const [key, value] of Object.entries(filters)) {
     if (value !== undefined && value !== null && value !== '') {
-      ;(where as Record<string, unknown>)[key] = value
+      Reflect.set(where, key, value)
     }
   }
 }

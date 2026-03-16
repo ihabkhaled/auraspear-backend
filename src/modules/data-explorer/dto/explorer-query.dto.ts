@@ -14,7 +14,7 @@ export type ExplorerPaginationDto = z.infer<typeof ExplorerPaginationSchema>
 
 // ── Graylog log search ─────────────────────────────────────────────
 export const GraylogSearchSchema = ExplorerPaginationSchema.extend({
-  query: z.string().max(2000).default('*'),
+  query: z.string().max(1000).default('*'),
   timeRange: z.coerce.number().int().min(60).max(604800).default(86400), // seconds (1min–7days)
 })
 

@@ -1,4 +1,5 @@
 import { AlertSeverity, SortOrder } from '../../common/enums'
+import { sanitizeEsQueryString } from '../../common/utils/es-sanitize.utility'
 
 /* ---------------------------------------------------------------- */
 /* ES QUERY BUILDER                                                  */
@@ -354,13 +355,10 @@ function buildUniqueDescriptions(events: Array<{ description: string }>): string
 /* QUERY SANITIZATION                                                */
 /* ---------------------------------------------------------------- */
 
+/**
+ * Sanitize a user-supplied ES query string.
+ * Delegates to the shared utility in `common/utils/es-sanitize.utility.ts`.
+ */
 export function sanitizeEsQuery(query: string): string {
-  return query
-    .replaceAll(/\bscript\b/gi, '')
-    .replaceAll(/_search|_mapping|_cluster|_cat|_nodes|_mget|_bulk|_msearch/gi, '')
-    .replaceAll('*:*', '')
-    .replaceAll(/\baggregations?\b/gi, '')
-    .replaceAll(/\baggs?\b/gi, '')
-    .slice(0, 1000)
-    .trim()
+  return sanitizeEsQueryString(query)
 }

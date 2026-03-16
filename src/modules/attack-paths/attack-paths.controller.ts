@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { AttackPathsService } from './attack-paths.service'
 import { type CreateAttackPathDto, CreateAttackPathSchema } from './dto/create-attack-path.dto'
 import { ListAttackPathsQuerySchema } from './dto/list-attack-paths-query.dto'
@@ -15,6 +16,7 @@ import type { AttackPathRecord, AttackPathStats, PaginatedAttackPaths } from './
 
 @Controller('attack-paths')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class AttackPathsController {
   constructor(private readonly attackPathsService: AttackPathsService) {}
 
@@ -80,6 +82,7 @@ export class AttackPathsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePath(
     @Param('id') id: string,
     @TenantId() tenantId: string,

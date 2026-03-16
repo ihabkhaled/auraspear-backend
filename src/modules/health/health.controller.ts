@@ -23,7 +23,6 @@ export class HealthController {
       throw new ServiceUnavailableException({
         message: 'System is down',
         messageKey: 'errors.health.serviceUnavailable',
-        ...health,
       })
     }
 

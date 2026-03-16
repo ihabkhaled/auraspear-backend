@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { ListEventsQuerySchema, SearchIOCsQuerySchema } from './dto/list-intel-query.dto'
 import { MatchIocsSchema, type MatchIocsDto } from './dto/match-iocs.dto'
 import { IntelService } from './intel.service'
@@ -18,6 +19,7 @@ import type {
 
 @Controller('ti')
 @UseGuards(AuthGuard, TenantGuard, RolesGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class IntelController {
   constructor(private readonly intelService: IntelService) {}
 
@@ -93,6 +95,7 @@ export class IntelController {
    */
   @Post('sync/misp')
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async syncFromMisp(
     @TenantId() tenantId: string
   ): Promise<{ eventsUpserted: number; iocsUpserted: number }> {

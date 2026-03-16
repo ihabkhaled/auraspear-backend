@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import { ZodError, type ZodIssue } from 'zod'
 import type { Response } from 'express'
 
@@ -117,12 +118,31 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       errors = issueKeys
       message = `Validation failed: ${issueKeys.join(', ')}`
       this.logger.warn(`ZodError caught by GlobalExceptionFilter: ${issueKeys.join(', ')}`)
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      // Prisma known errors (unique constraint, foreign key, not found, etc.)
+      // NEVER leak table names, column names, or constraint names to the client
+      this.logger.error(`Prisma error [${exception.code}]: ${exception.message}`, exception.stack)
+      status = HttpStatus.INTERNAL_SERVER_ERROR
+      message = 'A database error occurred'
+      messageKey = 'errors.internalError'
+      error = 'Internal Server Error'
+    } else if (exception instanceof Prisma.PrismaClientValidationError) {
+      // Prisma validation errors — may contain model/field names
+      this.logger.error(`Prisma validation error: ${exception.message}`)
+      status = HttpStatus.BAD_REQUEST
+      message = 'Invalid database query'
+      messageKey = 'errors.badRequest'
+      error = 'Bad Request'
+    } else if (exception instanceof Prisma.PrismaClientInitializationError) {
+      // Connection failures — never leak connection strings
+      this.logger.error(`Prisma initialization error: ${exception.message}`)
+      status = HttpStatus.SERVICE_UNAVAILABLE
+      message = 'Service temporarily unavailable'
+      messageKey = 'errors.serviceUnavailable'
+      error = 'Service Unavailable'
     } else if (exception instanceof Error) {
-      if (process.env.NODE_ENV === 'production') {
-        this.logger.error(`Unhandled exception: ${exception.message}`)
-      } else {
-        this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack)
-      }
+      // Log full details server-side only; never send stack/message to client
+      this.logger.error(`Unhandled exception: ${exception.message}`, exception.stack)
     } else {
       this.logger.error('Unknown exception occurred')
     }
@@ -138,9 +158,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message: sanitizedMessage,
       messageKey,
-      error,
+      error: sanitizeMessage(error),
       timestamp: new Date().toISOString(),
-      path: process.env.NODE_ENV === 'production' ? (request.url.split('?')[0] ?? '') : request.url,
+      path: request.url.split('?')[0] ?? '',
     }
 
     // Include field-level validation errors when present

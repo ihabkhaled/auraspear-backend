@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { CloudSecurityService } from './cloud-security.service'
 import { type CreateAccountDto, CreateAccountSchema } from './dto/create-account.dto'
 import { ListAccountsQuerySchema } from './dto/list-accounts-query.dto'
@@ -21,6 +22,7 @@ import type {
 
 @Controller('cloud-security')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class CloudSecurityController {
   constructor(private readonly cloudSecurityService: CloudSecurityService) {}
 
@@ -92,6 +94,7 @@ export class CloudSecurityController {
   @Delete('accounts/:id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteAccount(
     @Param('id') id: string,
     @TenantId() tenantId: string,

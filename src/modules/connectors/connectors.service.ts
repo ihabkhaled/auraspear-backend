@@ -54,8 +54,8 @@ export class ConnectorsService {
     private readonly appLogger: AppLoggerService
   ) {
     const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
-    if (!key || key.length < 32) {
-      throw new Error('CONFIG_ENCRYPTION_KEY must be set and at least 32 characters')
+    if (key?.length !== 64 || !/^[\da-f]+$/i.test(key)) {
+      throw new Error('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
     }
     this.encryptionKey = key
 

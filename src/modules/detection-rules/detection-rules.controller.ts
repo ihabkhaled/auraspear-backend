@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { DetectionRulesService } from './detection-rules.service'
 import {
   type CreateDetectionRuleDto,
@@ -25,6 +37,7 @@ import type {
 
 @Controller('detection-rules')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class DetectionRulesController {
   constructor(private readonly detectionRulesService: DetectionRulesService) {}
 
@@ -91,6 +104,7 @@ export class DetectionRulesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteRule(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,

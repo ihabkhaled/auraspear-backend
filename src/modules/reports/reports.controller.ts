@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { type CreateReportDto, CreateReportSchema } from './dto/create-report.dto'
 import { ListReportsQuerySchema } from './dto/list-reports-query.dto'
 import { type UpdateReportDto, UpdateReportSchema } from './dto/update-report.dto'
@@ -26,6 +27,7 @@ import type { ReportRecord, PaginatedReports, ReportStats } from './reports.type
 
 @Controller('reports')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
@@ -92,6 +94,7 @@ export class ReportsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteReport(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,

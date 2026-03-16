@@ -8,8 +8,18 @@ export const UpdatePipelineSchema = z.object({
   description: z.string().max(2048).optional(),
   sourceType: NormalizationSourceTypeEnum.optional(),
   status: NormalizationPipelineStatusEnum.optional(),
-  parserConfig: z.record(z.unknown()).optional(),
-  fieldMappings: z.record(z.unknown()).optional(),
+  parserConfig: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Parser config too large (max 64KB)',
+    })
+    .optional(),
+  fieldMappings: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Field mappings too large (max 64KB)',
+    })
+    .optional(),
 })
 
 export type UpdatePipelineDto = z.infer<typeof UpdatePipelineSchema>

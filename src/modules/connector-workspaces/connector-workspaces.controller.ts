@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { ConnectorWorkspacesService } from './connector-workspaces.service'
 import {
   PaginationQuerySchema,
@@ -25,6 +26,7 @@ import type {
 @ApiTags('connector-workspaces')
 @ApiBearerAuth()
 @Controller('connector-workspaces')
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class ConnectorWorkspacesController {
   constructor(private readonly workspacesService: ConnectorWorkspacesService) {}
 

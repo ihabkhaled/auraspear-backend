@@ -26,7 +26,7 @@ const mockTokenBlacklist = {
 const mockConfigService = {
   get: jest.fn((key: string, defaultValue?: string) => {
     const config: Record<string, string> = {
-      JWT_SECRET: 'test-secret-key-for-testing-purposes',
+      JWT_SECRET: '0123456789abcdef'.repeat(4),
       JWT_ACCESS_EXPIRY: '15m',
       JWT_REFRESH_EXPIRY: '7d',
     }
@@ -127,7 +127,7 @@ describe('AuthService', () => {
       // bcrypt.compare should still be called with the dummy hash for timing attack prevention
       expect(mockedBcrypt.compare).toHaveBeenCalledWith(
         'password123',
-        expect.stringContaining('$2a$12$')
+        expect.stringContaining('$2b$12$')
       )
     })
 
@@ -205,7 +205,7 @@ describe('AuthService', () => {
           tokenType: 'access',
           jti: expect.stringMatching(/^[\da-f-]+$/),
         }),
-        'test-secret-key-for-testing-purposes',
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         { algorithm: 'HS256', expiresIn: '15m' }
       )
     })
@@ -258,7 +258,7 @@ describe('AuthService', () => {
           tokenType: 'refresh',
           jti: expect.stringMatching(/^[\da-f-]+$/),
         }),
-        'test-secret-key-for-testing-purposes',
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         { algorithm: 'HS256', expiresIn: '7d' }
       )
     })

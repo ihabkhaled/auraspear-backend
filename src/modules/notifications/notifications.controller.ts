@@ -1,4 +1,5 @@
 import { Controller, Get, Patch, Param, Query } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { ListNotificationsQuerySchema } from './dto/list-notifications-query.dto'
 import { NotificationsService } from './notifications.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -11,6 +12,7 @@ import type { PaginatedNotifications } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('notifications')
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

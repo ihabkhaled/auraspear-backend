@@ -18,8 +18,9 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { TenantMembershipInfo } from './auth.utilities'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
-// Pre-computed bcrypt hash used for constant-time comparison when user doesn't exist.
-const DUMMY_BCRYPT_HASH = '$2a$12$LJ3m4ys3Lp0Yf5YzF0OOjO5KbK6Fz6j4z5Y5Z5Y5Z5Y5Z5Y5Z5Y5u'
+// Pre-computed bcrypt hash (cost 12) used for constant-time comparison when user doesn't exist.
+// Generated via: bcrypt.hash('dummy-never-matches', 12)
+const DUMMY_BCRYPT_HASH = '$2b$12$mffuEnbgz2XglaCwSv1EFOwnXT8DaW5/CIE60E5/07DiN4b6Ncvxi'
 
 @Injectable()
 export class AuthService {
@@ -35,8 +36,8 @@ export class AuthService {
     private readonly appLogger: AppLoggerService
   ) {
     const secret = this.configService.get<string>('JWT_SECRET')
-    if (!secret || secret.length < 32) {
-      throw new Error('JWT_SECRET must be set and at least 32 characters long')
+    if (!secret || secret.length < 64 || !/^[\da-f]+$/i.test(secret)) {
+      throw new Error('JWT_SECRET must be at least 64 hex characters (32 bytes)')
     }
     this.jwtSecret = secret
     this.accessExpiry = this.configService.get<string>(

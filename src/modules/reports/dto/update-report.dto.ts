@@ -9,7 +9,12 @@ export const UpdateReportSchema = z.object({
   type: ReportTypeEnum.optional(),
   format: ReportFormatEnum.optional(),
   status: UpdateReportStatusEnum.optional(),
-  parameters: z.record(z.unknown()).optional(),
+  parameters: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Parameters too large (max 64KB)',
+    })
+    .optional(),
 })
 
 export type UpdateReportDto = z.infer<typeof UpdateReportSchema>

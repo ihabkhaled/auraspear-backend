@@ -1,5 +1,6 @@
 import { Controller, Post, Param, Get } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { ConnectorSyncService } from './connector-sync.service'
 import { Roles } from '../../common/decorators/roles.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
@@ -9,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 @ApiTags('connector-sync')
 @ApiBearerAuth()
 @Controller('connector-sync')
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class ConnectorSyncController {
   constructor(
     private readonly syncService: ConnectorSyncService,
@@ -18,6 +20,7 @@ export class ConnectorSyncController {
   /** Manually trigger a sync for a specific connector type. */
   @Post(':type/sync')
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async triggerSync(
     @TenantId() tenantId: string,
     @Param('type') type: string

@@ -103,7 +103,7 @@ describe('ConnectorsService', () => {
             services.bedrock as never,
             mockAppLogger as never
           )
-      ).toThrow('CONFIG_ENCRYPTION_KEY must be set')
+      ).toThrow('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
     })
 
     it('should throw if CONFIG_ENCRYPTION_KEY is too short', () => {
@@ -124,7 +124,7 @@ describe('ConnectorsService', () => {
             services.bedrock as never,
             mockAppLogger as never
           )
-      ).toThrow('CONFIG_ENCRYPTION_KEY must be set')
+      ).toThrow('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
     })
   })
 

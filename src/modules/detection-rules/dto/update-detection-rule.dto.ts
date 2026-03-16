@@ -9,8 +9,18 @@ export const UpdateDetectionRuleSchema = z.object({
   ruleType: DetectionRuleTypeEnum.optional(),
   severity: DetectionRuleSeverityEnum.optional(),
   status: DetectionRuleStatusEnum.optional(),
-  conditions: z.record(z.unknown()).optional(),
-  actions: z.record(z.unknown()).optional(),
+  conditions: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Conditions too large (max 64KB)',
+    })
+    .optional(),
+  actions: z
+    .record(z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Actions too large (max 64KB)',
+    })
+    .optional(),
 })
 
 export type UpdateDetectionRuleDto = z.infer<typeof UpdateDetectionRuleSchema>

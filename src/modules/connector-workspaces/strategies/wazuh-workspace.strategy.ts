@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CardVariant, Severity } from '../../../common/enums'
+import {
+  sanitizeEsQueryString,
+  buildSafeQueryStringClause,
+} from '../../../common/utils/es-sanitize.utility'
 import { WazuhService } from '../../connectors/services/wazuh.service'
 import type {
   ConnectorWorkspaceStrategy,
@@ -213,13 +217,18 @@ export class WazuhWorkspaceStrategy implements ConnectorWorkspaceStrategy {
   ): Promise<WorkspaceSearchResponse> {
     const from = ((request.page ?? 1) - 1) * (request.pageSize ?? 20)
 
+    const sanitizedQuery = sanitizeEsQueryString(request.query)
+    if (sanitizedQuery.length === 0) {
+      return { results: [], total: 0, page: request.page ?? 1, pageSize: request.pageSize ?? 20 }
+    }
+
     const esQuery: Record<string, unknown> = {
       size: request.pageSize ?? 20,
       from,
       sort: [{ timestamp: { order: 'desc' } }],
       query: {
         bool: {
-          must: [{ query_string: { query: request.query, default_operator: 'AND' } }],
+          must: [buildSafeQueryStringClause(sanitizedQuery, 'AND')],
           filter: [] as Record<string, unknown>[],
         },
       },

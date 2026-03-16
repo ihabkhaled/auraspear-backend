@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { AiAgentsService } from './ai-agents.service'
 import { type CreateAgentDto, CreateAgentSchema } from './dto/create-agent.dto'
 import { ListAgentsQuerySchema } from './dto/list-agents-query.dto'
@@ -29,6 +30,7 @@ import type { AiAgentSession } from '@prisma/client'
 
 @Controller('ai-agents')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class AiAgentsController {
   constructor(private readonly aiAgentsService: AiAgentsService) {}
 
@@ -94,6 +96,7 @@ export class AiAgentsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteAgent(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,

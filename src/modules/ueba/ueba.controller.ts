@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { type CreateEntityDto, CreateEntitySchema } from './dto/create-entity.dto'
 import { ListAnomaliesQuerySchema } from './dto/list-anomalies-query.dto'
 import { ListEntitiesQuerySchema } from './dto/list-entities-query.dto'
@@ -24,6 +25,7 @@ import type {
 @Controller('ueba')
 @UseGuards(AuthGuard, TenantGuard, RolesGuard)
 @Roles(UserRole.SOC_ANALYST_L2)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class UebaController {
   constructor(private readonly uebaService: UebaService) {}
 
@@ -89,6 +91,7 @@ export class UebaController {
   }
 
   @Post('entities')
+  @Roles(UserRole.TENANT_ADMIN)
   async createEntity(
     @Body(new ZodValidationPipe(CreateEntitySchema)) dto: CreateEntityDto,
     @TenantId() tenantId: string
@@ -106,6 +109,8 @@ export class UebaController {
   }
 
   @Delete('entities/:id')
+  @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteEntity(
     @Param('id') id: string,
     @TenantId() tenantId: string

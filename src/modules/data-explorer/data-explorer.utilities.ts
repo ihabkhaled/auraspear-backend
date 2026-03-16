@@ -316,7 +316,8 @@ export function mapShuffleWorkflowUpsert(
 /* ---------------------------------------------------------------- */
 
 export function sanitizeFluxString(value: string): string {
-  return value.replaceAll('"', '\\"').replaceAll('\\', '\\\\')
+  // Escape backslashes FIRST, then double-quotes — otherwise \" becomes \\\\"
+  return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
 }
 
 export function sanitizeFluxDuration(value: string): string {

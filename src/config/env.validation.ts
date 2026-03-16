@@ -40,7 +40,59 @@ export const envSchema = z
     PORT: z.coerce.number().default(4000),
     NODE_ENV: z.nativeEnum(NodeEnvironment).default(NodeEnvironment.PRODUCTION),
     LOG_LEVEL: z.nativeEnum(LogLevel).default(LogLevel.INFO),
-    CORS_ORIGINS: z.string().default('http://localhost:3000'),
+    CORS_ORIGINS: z
+      .string()
+      .default('http://localhost:3000')
+      .refine(
+        value => {
+          const origins = value
+            .split(',')
+            .map(o => o.trim())
+            .filter(Boolean)
+          return origins.every(o => {
+            try {
+              const url = new URL(o)
+              return url.protocol === 'http:' || url.protocol === 'https:'
+            } catch {
+              return false
+            }
+          })
+        },
+        { message: 'CORS_ORIGINS must be a comma-separated list of valid http/https URLs' }
+      )
+      .refine(
+        value => {
+          if (process.env.NODE_ENV !== 'production') {
+            return true
+          }
+          const origins = value
+            .split(',')
+            .map(o => o.trim())
+            .filter(Boolean)
+          return origins.length > 0
+        },
+        { message: 'CORS_ORIGINS must not be empty in production' }
+      )
+      .refine(
+        value => {
+          if (process.env.NODE_ENV !== 'production') {
+            return true
+          }
+          const origins = value
+            .split(',')
+            .map(o => o.trim())
+            .filter(Boolean)
+          return origins.every(o => {
+            try {
+              const url = new URL(o)
+              return url.hostname !== 'localhost' && url.hostname !== '127.0.0.1'
+            } catch {
+              return false
+            }
+          })
+        },
+        { message: 'CORS_ORIGINS must not include localhost origins in production' }
+      ),
 
     // Encryption — must be exactly 64-char hex (32 bytes for AES-256)
     CONFIG_ENCRYPTION_KEY: z

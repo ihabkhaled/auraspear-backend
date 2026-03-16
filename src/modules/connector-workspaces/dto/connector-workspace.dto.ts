@@ -17,7 +17,12 @@ export type PaginationQuery = z.infer<typeof PaginationQuerySchema>
 /** Search request body */
 export const WorkspaceSearchSchema = z.object({
   query: z.string().min(1).max(500).trim(),
-  filters: z.record(z.string().max(100), z.unknown()).optional(),
+  filters: z
+    .record(z.string().max(100), z.unknown())
+    .refine(value => JSON.stringify(value).length <= 65536, {
+      message: 'Filters too large (max 64KB)',
+    })
+    .optional(),
   page: z.number().int().min(1).max(1000).default(1),
   pageSize: z.number().int().min(1).max(100).default(20),
   from: z

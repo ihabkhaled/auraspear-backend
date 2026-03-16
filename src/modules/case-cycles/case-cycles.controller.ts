@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { CaseCyclesService } from './case-cycles.service'
 import { type CloseCaseCycleDto, CloseCaseCycleSchema } from './dto/close-case-cycle.dto'
 import { type CreateCaseCycleDto, CreateCaseCycleSchema } from './dto/create-case-cycle.dto'
@@ -16,6 +17,7 @@ import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './ca
 
 @Controller('case-cycles')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class CaseCyclesController {
   constructor(private readonly caseCyclesService: CaseCyclesService) {}
 
@@ -100,6 +102,7 @@ export class CaseCyclesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCycle(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import {
   CreateVulnerabilitySchema,
   type CreateVulnerabilityDto,
@@ -25,6 +26,7 @@ import type {
 
 @Controller('vulnerabilities')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class VulnerabilitiesController {
   constructor(private readonly vulnerabilitiesService: VulnerabilitiesService) {}
 
@@ -85,6 +87,7 @@ export class VulnerabilitiesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteVulnerability(
     @Param('id') id: string,
     @TenantId() tenantId: string,

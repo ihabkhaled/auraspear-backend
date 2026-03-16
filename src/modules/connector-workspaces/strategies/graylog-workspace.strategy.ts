@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CardVariant, Severity } from '../../../common/enums'
+import { sanitizeEsQueryString } from '../../../common/utils/es-sanitize.utility'
 import { GraylogService } from '../../connectors/services/graylog.service'
 import type {
   ConnectorWorkspaceStrategy,
@@ -160,8 +161,13 @@ export class GraylogWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     config: Record<string, unknown>,
     request: WorkspaceSearchRequest
   ): Promise<WorkspaceSearchResponse> {
+    const sanitizedQuery = sanitizeEsQueryString(request.query)
+    if (sanitizedQuery.length === 0) {
+      return { results: [], total: 0, page: request.page ?? 1, pageSize: request.pageSize ?? 20 }
+    }
+
     const filter: Record<string, unknown> = {
-      query: request.query,
+      query: sanitizedQuery,
       page: request.page ?? 1,
       per_page: request.pageSize ?? 20,
       timerange: { type: 'relative', range: 86400 },

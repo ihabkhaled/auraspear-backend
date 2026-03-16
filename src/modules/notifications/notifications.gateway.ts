@@ -11,7 +11,17 @@ import type { NotificationResponse } from './notifications.types'
 
 @WebSocketGateway({
   cors: {
-    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map(o => o.trim()),
+    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
+      .split(',')
+      .map(o => o.trim())
+      .filter(o => {
+        try {
+          const url = new URL(o)
+          return url.protocol === 'http:' || url.protocol === 'https:'
+        } catch {
+          return false
+        }
+      }),
     credentials: true,
   },
   namespace: '/notifications',

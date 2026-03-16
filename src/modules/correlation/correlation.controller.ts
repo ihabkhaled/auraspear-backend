@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { CorrelationService } from './correlation.service'
 import { type CreateRuleDto, CreateRuleSchema } from './dto/create-rule.dto'
 import { ListRulesQuerySchema } from './dto/list-rules-query.dto'
@@ -15,6 +27,7 @@ import type { CorrelationStats, PaginatedRules, RuleRecord } from './correlation
 
 @Controller('correlation')
 @UseGuards(AuthGuard, TenantGuard)
+@Throttle({ default: { limit: 30, ttl: 60000 } })
 export class CorrelationController {
   constructor(private readonly correlationService: CorrelationService) {}
 
@@ -44,7 +57,10 @@ export class CorrelationController {
   }
 
   @Get(':id')
-  async getRuleById(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string): Promise<RuleRecord> {
+  async getRuleById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string
+  ): Promise<RuleRecord> {
     return this.correlationService.getRuleById(id, tenantId)
   }
 
@@ -72,6 +88,7 @@ export class CorrelationController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.TENANT_ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteRule(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
