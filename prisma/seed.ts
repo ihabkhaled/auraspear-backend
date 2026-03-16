@@ -52,7 +52,7 @@ import {
 import * as bcrypt from 'bcryptjs'
 import { randomUUID } from 'node:crypto'
 import pino from 'pino'
-import { encrypt } from '../src/common/utils/encryption.util'
+import { encrypt } from '../src/common/utils/encryption.utility'
 
 const logger = pino({
   transport: { target: 'pino-pretty' },
