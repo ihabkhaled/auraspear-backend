@@ -11,9 +11,9 @@ import {
   type WorkspaceActionDto,
   ActionNameSchema,
 } from './dto/connector-workspace.dto'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { Permission } from '../../common/enums'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   ConnectorWorkspaceOverview,
@@ -31,7 +31,7 @@ export class ConnectorWorkspacesController {
   constructor(private readonly workspacesService: ConnectorWorkspacesService) {}
 
   @Get(':type/overview')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getOverview(
     @TenantId() tenantId: string,
     @Param('type') type: string
@@ -40,7 +40,7 @@ export class ConnectorWorkspacesController {
   }
 
   @Get(':type/recent-activity')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getRecentActivity(
     @TenantId() tenantId: string,
     @Param('type') type: string,
@@ -50,7 +50,7 @@ export class ConnectorWorkspacesController {
   }
 
   @Get(':type/entities')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getEntities(
     @TenantId() tenantId: string,
     @Param('type') type: string,
@@ -60,7 +60,7 @@ export class ConnectorWorkspacesController {
   }
 
   @Post(':type/search')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async search(
     @TenantId() tenantId: string,
     @Param('type') type: string,
@@ -70,7 +70,7 @@ export class ConnectorWorkspacesController {
   }
 
   @Post(':type/actions/:action')
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CONNECTORS_UPDATE)
   async executeAction(
     @TenantId() tenantId: string,
     @Param('type') type: string,

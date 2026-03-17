@@ -6,11 +6,10 @@ import { UpdatePreferencesSchema, type UpdatePreferencesDto } from './dto/update
 import { UpdateProfileSchema, type UpdateProfileDto } from './dto/update-profile.dto'
 import { UsersService } from './users.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Tenant, User, UserPreference } from '@prisma/client'
@@ -33,17 +32,18 @@ type UserPreferenceOrDefault =
 @ApiTags('users')
 @ApiBearerAuth()
 @Controller('users')
-@UseGuards(AuthGuard, TenantGuard, RolesGuard)
+@UseGuards(AuthGuard, TenantGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('profile')
+  @RequirePermission(Permission.PROFILE_VIEW)
   async getProfile(@CurrentUser() user: JwtPayload): Promise<UserProfile> {
     return this.usersService.getProfile(user.sub)
   }
 
   @Patch('profile')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.PROFILE_UPDATE)
   async updateProfile(
     @Body(new ZodValidationPipe(UpdateProfileSchema)) dto: UpdateProfileDto,
     @CurrentUser() user: JwtPayload
@@ -52,7 +52,7 @@ export class UsersController {
   }
 
   @Post('change-password')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.PROFILE_UPDATE)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async changePassword(
     @Body(new ZodValidationPipe(ChangePasswordSchema)) dto: ChangePasswordDto,
@@ -62,12 +62,13 @@ export class UsersController {
   }
 
   @Get('preferences')
+  @RequirePermission(Permission.SETTINGS_VIEW)
   async getPreferences(@CurrentUser() user: JwtPayload): Promise<UserPreferenceOrDefault> {
     return this.usersService.getPreferences(user.sub)
   }
 
   @Patch('preferences')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.SETTINGS_UPDATE)
   async updatePreferences(
     @Body(new ZodValidationPipe(UpdatePreferencesSchema)) dto: UpdatePreferencesDto,
     @CurrentUser() user: JwtPayload

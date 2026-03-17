@@ -16,14 +16,14 @@ import { ListReportsQuerySchema } from './dto/list-reports-query.dto'
 import { type UpdateReportDto, UpdateReportSchema } from './dto/update-report.dto'
 import { ReportsService } from './reports.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { ReportRecord, PaginatedReports, ReportStats } from './reports.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('reports')
 @UseGuards(AuthGuard, TenantGuard)
@@ -32,8 +32,7 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.REPORTS_VIEW)
   async listReports(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -54,15 +53,13 @@ export class ReportsController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.REPORTS_VIEW)
   async getReportStats(@TenantId() tenantId: string): Promise<ReportStats> {
     return this.reportsService.getReportStats(tenantId)
   }
 
   @Get(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.REPORTS_VIEW)
   async getReportById(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
@@ -71,8 +68,7 @@ export class ReportsController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.REPORTS_CREATE)
   async createReport(
     @Body(new ZodValidationPipe(CreateReportSchema)) dto: CreateReportDto,
     @CurrentUser() user: JwtPayload
@@ -81,8 +77,7 @@ export class ReportsController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.REPORTS_UPDATE)
   async updateReport(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateReportSchema)) dto: UpdateReportDto,
@@ -92,8 +87,7 @@ export class ReportsController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.REPORTS_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteReport(
     @Param('id', ParseUUIDPipe) id: string,

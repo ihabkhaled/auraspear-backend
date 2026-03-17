@@ -3,8 +3,9 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { AppLogsService } from './app-logs.service'
 import { SearchAppLogsSchema } from './dto/search-app-logs.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import type { PaginatedApplicationLogs, ApplicationLogRecord } from './app-logs.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -16,7 +17,7 @@ export class AppLogsController {
   constructor(private readonly appLogsService: AppLogsService) {}
 
   @Get()
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_VIEW)
   async search(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -31,7 +32,7 @@ export class AppLogsController {
   }
 
   @Get(':id')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_VIEW)
   async findById(
     @Param('id') id: string,
     @TenantId() tenantId: string,

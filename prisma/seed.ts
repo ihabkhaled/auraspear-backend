@@ -50,6 +50,11 @@ import {
   type HuntSessionStatus,
 } from '@prisma/client'
 import * as bcrypt from 'bcryptjs'
+import {
+  DEFAULT_PERMISSIONS,
+  CONFIGURABLE_ROLES,
+} from '../src/modules/role-settings/constants/default-permissions'
+import { PERMISSION_DEFINITIONS } from '../src/modules/role-settings/constants/permission-definitions'
 import { randomUUID } from 'node:crypto'
 import pino from 'pino'
 import { encrypt } from '../src/common/utils/encryption.utility'
@@ -5416,8 +5421,76 @@ async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise
   return cycleIds
 }
 
+async function seedRolePermissions(tenantId: string): Promise<void> {
+  // Build the full set of default role-permission records
+  const records: Prisma.RolePermissionCreateManyInput[] = []
+  for (const role of CONFIGURABLE_ROLES) {
+    const permissions = DEFAULT_PERMISSIONS[role] ?? []
+    for (const permissionKey of permissions) {
+      records.push({
+        tenantId,
+        role: role as UserRole,
+        permissionKey,
+        allowed: true,
+      })
+    }
+  }
+
+  if (records.length > 0) {
+    // skipDuplicates makes this idempotent — existing rows are left untouched,
+    // only missing permission rows (e.g. newly added permissions) are inserted.
+    await prisma.rolePermission.createMany({ data: records, skipDuplicates: true })
+  }
+
+  // Remove permissions that are no longer in the default set for each role.
+  // This handles cases like L1 losing CASES_ADD_TASK etc.
+  for (const role of CONFIGURABLE_ROLES) {
+    const allowedKeys = DEFAULT_PERMISSIONS[role] ?? []
+    if (allowedKeys.length > 0) {
+      await prisma.rolePermission.deleteMany({
+        where: {
+          tenantId,
+          role: role as UserRole,
+          permissionKey: { notIn: allowedKeys },
+        },
+      })
+    }
+  }
+
+  logger.info({ tenantId, count: records.length }, 'Seeded/synced role permissions')
+}
+
+async function seedPermissionDefinitions(): Promise<void> {
+  for (const def of PERMISSION_DEFINITIONS) {
+    const existing = await prisma.permissionDefinition.findFirst({
+      where: { tenantId: null, key: def.key },
+    })
+
+    if (existing) {
+      await prisma.permissionDefinition.update({
+        where: { id: existing.id },
+        data: { module: def.module, labelKey: def.labelKey, sortOrder: def.sortOrder },
+      })
+    } else {
+      await prisma.permissionDefinition.create({
+        data: {
+          key: def.key,
+          module: def.module,
+          labelKey: def.labelKey,
+          sortOrder: def.sortOrder,
+        },
+      })
+    }
+  }
+
+  logger.info({ count: PERMISSION_DEFINITIONS.length }, 'Seeded permission definitions')
+}
+
 async function main(): Promise<void> {
   logger.info('Seeding database...')
+
+  // Seed permission definitions (global, not per-tenant)
+  await seedPermissionDefinitions()
 
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, BCRYPT_ROUNDS)
 
@@ -5656,6 +5729,9 @@ async function main(): Promise<void> {
       await seedNormalization(tenantId, profile.slug)
       await seedDetectionRules(tenantId, profile.slug)
       await seedCloudSecurity(tenantId, profile.slug)
+
+      // ─── Role Permissions ───
+      await seedRolePermissions(tenantId)
 
       logger.info({ tenant: profile.slug }, 'Tenant seeding completed')
     } catch (tenantError) {

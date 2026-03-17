@@ -16,18 +16,18 @@ import { ListPipelinesQuerySchema } from './dto/list-pipelines-query.dto'
 import { type UpdatePipelineDto, UpdatePipelineSchema } from './dto/update-pipeline.dto'
 import { NormalizationService } from './normalization.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   NormalizationPipelineRecord,
   NormalizationStats,
   PaginatedPipelines,
 } from './normalization.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('normalization')
 @UseGuards(AuthGuard, TenantGuard)
@@ -36,8 +36,7 @@ export class NormalizationController {
   constructor(private readonly normalizationService: NormalizationService) {}
 
   @Get()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.NORMALIZATION_VIEW)
   async listPipelinesRoot(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -46,8 +45,7 @@ export class NormalizationController {
   }
 
   @Get('pipelines')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.NORMALIZATION_VIEW)
   async listPipelines(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -67,22 +65,19 @@ export class NormalizationController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.NORMALIZATION_VIEW)
   async getNormalizationStatsRoot(@TenantId() tenantId: string): Promise<NormalizationStats> {
     return this.normalizationService.getNormalizationStats(tenantId)
   }
 
   @Get('pipelines/stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.NORMALIZATION_VIEW)
   async getNormalizationStats(@TenantId() tenantId: string): Promise<NormalizationStats> {
     return this.normalizationService.getNormalizationStats(tenantId)
   }
 
   @Get('pipelines/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.NORMALIZATION_VIEW)
   async getPipelineById(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
@@ -91,8 +86,7 @@ export class NormalizationController {
   }
 
   @Post('pipelines')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.NORMALIZATION_CREATE)
   async createPipeline(
     @Body(new ZodValidationPipe(CreatePipelineSchema)) dto: CreatePipelineDto,
     @CurrentUser() user: JwtPayload
@@ -101,8 +95,7 @@ export class NormalizationController {
   }
 
   @Patch('pipelines/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.NORMALIZATION_UPDATE)
   async updatePipeline(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdatePipelineSchema)) dto: UpdatePipelineDto,
@@ -112,8 +105,7 @@ export class NormalizationController {
   }
 
   @Delete('pipelines/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.NORMALIZATION_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePipeline(
     @Param('id', ParseUUIDPipe) id: string,

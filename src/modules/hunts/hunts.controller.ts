@@ -4,14 +4,14 @@ import { ListHuntEventsQuerySchema, ListHuntsQuerySchema } from './dto/list-hunt
 import { type RunHuntDto, RunHuntSchema } from './dto/run-hunt.dto'
 import { HuntsService } from './hunts.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } from './hunts.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('hunts')
 @UseGuards(AuthGuard, TenantGuard)
@@ -20,8 +20,7 @@ export class HuntsController {
   constructor(private readonly huntsService: HuntsService) {}
 
   @Post('run')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.THREAT_HUNTER, UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.HUNT_EXECUTE)
   async runHunt(
     @Body(new ZodValidationPipe(RunHuntSchema)) dto: RunHuntDto,
     @CurrentUser() user: JwtPayload
@@ -30,6 +29,7 @@ export class HuntsController {
   }
 
   @Get('runs')
+  @RequirePermission(Permission.HUNT_VIEW)
   async listRuns(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -39,6 +39,7 @@ export class HuntsController {
   }
 
   @Get('runs/:id')
+  @RequirePermission(Permission.HUNT_VIEW)
   async getRunDetails(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -47,6 +48,7 @@ export class HuntsController {
   }
 
   @Get('runs/:id/events')
+  @RequirePermission(Permission.HUNT_VIEW)
   async getRunEvents(
     @Param('id') id: string,
     @TenantId() tenantId: string,

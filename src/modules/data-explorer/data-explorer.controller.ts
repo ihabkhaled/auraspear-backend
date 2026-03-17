@@ -16,9 +16,9 @@ import {
   TriggerSyncSchema,
 } from './dto/explorer-query.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { Permission } from '../../common/enums'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   ExplorerOverview,
@@ -58,7 +58,7 @@ export class DataExplorerController {
   // ── Overview ───────────────────────────────────────────────────────
 
   @Get('overview')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getOverview(@TenantId() tenantId: string): Promise<ExplorerOverview> {
     return this.explorerService.getOverview(tenantId)
   }
@@ -66,7 +66,7 @@ export class DataExplorerController {
   // ── Graylog (Logs) ────────────────────────────────────────────────
 
   @Get('graylog/logs')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_QUERY)
   async searchGraylogLogs(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(GraylogSearchSchema)) query: GraylogSearchDto
@@ -75,7 +75,7 @@ export class DataExplorerController {
   }
 
   @Get('graylog/event-definitions')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getGraylogEventDefinitions(@TenantId() tenantId: string): Promise<unknown[]> {
     return this.explorerService.getGraylogEventDefinitions(tenantId)
   }
@@ -83,7 +83,7 @@ export class DataExplorerController {
   // ── Grafana (Dashboards) ──────────────────────────────────────────
 
   @Get('grafana/dashboards')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getGrafanaDashboards(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(GrafanaDashboardQuerySchema)) query: GrafanaDashboardQueryDto
@@ -92,7 +92,7 @@ export class DataExplorerController {
   }
 
   @Post('grafana/sync')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async syncGrafanaDashboards(@TenantId() tenantId: string): Promise<SyncResult> {
     return this.explorerService.syncGrafanaDashboards(tenantId)
@@ -101,7 +101,7 @@ export class DataExplorerController {
   // ── InfluxDB (Metrics) ────────────────────────────────────────────
 
   @Get('influxdb/query')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_QUERY)
   async queryInfluxDB(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(InfluxDBQuerySchema)) query: InfluxDBQueryDto
@@ -110,7 +110,7 @@ export class DataExplorerController {
   }
 
   @Get('influxdb/buckets')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getInfluxDBBuckets(@TenantId() tenantId: string): Promise<unknown[]> {
     return this.explorerService.getInfluxDBBuckets(tenantId)
   }
@@ -118,7 +118,7 @@ export class DataExplorerController {
   // ── MISP (Threat Intel) ───────────────────────────────────────────
 
   @Get('misp/events')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async searchMispEvents(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(MispEventQuerySchema)) query: MispEventQueryDto
@@ -127,7 +127,7 @@ export class DataExplorerController {
   }
 
   @Get('misp/events/:eventId')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getMispEventDetail(
     @TenantId() tenantId: string,
     @Param('eventId') eventId: string
@@ -138,7 +138,7 @@ export class DataExplorerController {
   // ── Velociraptor (Endpoints & Hunts) ──────────────────────────────
 
   @Get('velociraptor/endpoints')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getVelociraptorEndpoints(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(VelociraptorEndpointQuerySchema))
@@ -148,7 +148,7 @@ export class DataExplorerController {
   }
 
   @Get('velociraptor/hunts')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getVelociraptorHunts(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(VelociraptorHuntQuerySchema)) query: VelociraptorHuntQueryDto
@@ -157,7 +157,7 @@ export class DataExplorerController {
   }
 
   @Post('velociraptor/vql')
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.EXPLORER_QUERY)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async runVelociraptorVQL(
     @TenantId() tenantId: string,
@@ -167,7 +167,7 @@ export class DataExplorerController {
   }
 
   @Post('velociraptor/sync')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async syncVelociraptorMetadata(@TenantId() tenantId: string): Promise<VelociraptorSyncResult> {
     return this.explorerService.syncVelociraptorMetadata(tenantId)
@@ -176,7 +176,7 @@ export class DataExplorerController {
   // ── Logstash (Pipeline Logs) ─────────────────────────────────────
 
   @Get('logstash/logs')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getLogstashLogs(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(LogstashLogQuerySchema)) query: LogstashLogQueryDto
@@ -185,7 +185,7 @@ export class DataExplorerController {
   }
 
   @Post('logstash/sync')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async syncLogstashLogs(@TenantId() tenantId: string): Promise<SyncResult> {
     return this.explorerService.syncLogstashLogs(tenantId)
@@ -194,7 +194,7 @@ export class DataExplorerController {
   // ── Shuffle (Automation) ──────────────────────────────────────────
 
   @Get('shuffle/workflows')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getShuffleWorkflows(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(ShuffleWorkflowQuerySchema)) query: ShuffleWorkflowQueryDto
@@ -203,7 +203,7 @@ export class DataExplorerController {
   }
 
   @Post('shuffle/sync')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async syncShuffleWorkflows(@TenantId() tenantId: string): Promise<SyncResult> {
     return this.explorerService.syncShuffleWorkflows(tenantId)
@@ -212,7 +212,7 @@ export class DataExplorerController {
   // ── Sync Jobs ─────────────────────────────────────────────────────
 
   @Get('sync-jobs')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.EXPLORER_VIEW)
   async getSyncJobs(
     @TenantId() tenantId: string,
     @Query(new ZodValidationPipe(SyncJobQuerySchema)) query: SyncJobQueryDto
@@ -221,7 +221,7 @@ export class DataExplorerController {
   }
 
   @Post('sync-jobs/trigger')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async triggerSync(
     @TenantId() tenantId: string,

@@ -6,14 +6,14 @@ import { type CreateCaseCycleDto, CreateCaseCycleSchema } from './dto/create-cas
 import { ListCaseCyclesQuerySchema } from './dto/list-case-cycles-query.dto'
 import { type UpdateCaseCycleDto, UpdateCaseCycleSchema } from './dto/update-case-cycle.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './case-cycles.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('case-cycles')
 @UseGuards(AuthGuard, TenantGuard)
@@ -22,6 +22,7 @@ export class CaseCyclesController {
   constructor(private readonly caseCyclesService: CaseCyclesService) {}
 
   @Get()
+  @RequirePermission(Permission.CASES_VIEW)
   async listCycles(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -31,12 +32,14 @@ export class CaseCyclesController {
   }
 
   @Get('active')
+  @RequirePermission(Permission.CASES_VIEW)
   async getActiveCycle(@TenantId() tenantId: string): Promise<{ data: CaseCycleRecord | null }> {
     const cycle = await this.caseCyclesService.getActiveCycle(tenantId)
     return { data: cycle }
   }
 
   @Get('orphaned-stats')
+  @RequirePermission(Permission.CASES_VIEW)
   async getOrphanedStats(
     @TenantId() tenantId: string
   ): Promise<{ data: { caseCount: number; openCount: number; closedCount: number } }> {
@@ -45,6 +48,7 @@ export class CaseCyclesController {
   }
 
   @Get(':id')
+  @RequirePermission(Permission.CASES_VIEW)
   async getCycleById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -54,8 +58,7 @@ export class CaseCyclesController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_CREATE)
   async createCycle(
     @Body(new ZodValidationPipe(CreateCaseCycleSchema)) dto: CreateCaseCycleDto,
     @CurrentUser() user: JwtPayload
@@ -65,8 +68,7 @@ export class CaseCyclesController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_UPDATE)
   async updateCycle(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateCaseCycleSchema)) dto: UpdateCaseCycleDto,
@@ -77,8 +79,7 @@ export class CaseCyclesController {
   }
 
   @Patch(':id/close')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_CHANGE_STATUS)
   async closeCycle(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CloseCaseCycleSchema)) dto: CloseCaseCycleDto,
@@ -89,8 +90,7 @@ export class CaseCyclesController {
   }
 
   @Patch(':id/activate')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_CHANGE_STATUS)
   async activateCycle(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload
@@ -100,8 +100,7 @@ export class CaseCyclesController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCycle(
     @Param('id') id: string,

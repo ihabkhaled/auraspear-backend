@@ -177,6 +177,49 @@ export class AlertsService {
     return results.map(r => ({ asset: r.asset, count: Number(r.count) }))
   }
 
+  async bulkAcknowledge(
+    tenantId: string,
+    ids: string[],
+    email: string
+  ): Promise<{ succeeded: number; failed: number }> {
+    let succeeded = 0
+    let failed = 0
+
+    for (const id of ids) {
+      try {
+        await this.acknowledge(tenantId, id, email)
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+
+    this.logSuccess('bulkAcknowledge', tenantId, { succeeded, failed, total: ids.length })
+    return { succeeded, failed }
+  }
+
+  async bulkClose(
+    tenantId: string,
+    ids: string[],
+    resolution: string,
+    email: string
+  ): Promise<{ succeeded: number; failed: number }> {
+    let succeeded = 0
+    let failed = 0
+
+    for (const id of ids) {
+      try {
+        await this.close(tenantId, id, resolution, email)
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+
+    this.logSuccess('bulkClose', tenantId, { succeeded, failed, total: ids.length })
+    return { succeeded, failed }
+  }
+
   /* ---------------------------------------------------------------- */
   /* PRIVATE HELPERS                                                   */
   /* ---------------------------------------------------------------- */

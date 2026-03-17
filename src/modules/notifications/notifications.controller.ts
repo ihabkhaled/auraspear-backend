@@ -3,9 +3,9 @@ import { Throttle } from '@nestjs/throttler'
 import { ListNotificationsQuerySchema } from './dto/list-notifications-query.dto'
 import { NotificationsService } from './notifications.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { Permission } from '../../common/enums'
 import type { PaginatedNotifications } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -15,7 +15,7 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.NOTIFICATIONS_VIEW)
   async listNotifications(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -37,7 +37,7 @@ export class NotificationsController {
   }
 
   @Get('unread-count')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.NOTIFICATIONS_VIEW)
   async getUnreadCount(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
@@ -47,7 +47,7 @@ export class NotificationsController {
   }
 
   @Patch('read-all')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.NOTIFICATIONS_MANAGE)
   async markAllAsRead(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
@@ -57,7 +57,7 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.NOTIFICATIONS_MANAGE)
   async markAsRead(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload

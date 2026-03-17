@@ -5,12 +5,11 @@ import { ListPlaybooksQuerySchema } from './dto/list-playbooks-query.dto'
 import { type UpdatePlaybookDto, UpdatePlaybookSchema } from './dto/update-playbook.dto'
 import { SoarService } from './soar.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   SoarPlaybookRecord,
@@ -19,6 +18,7 @@ import type {
   PaginatedExecutions,
   SoarStats,
 } from './soar.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('soar')
 @UseGuards(AuthGuard, TenantGuard)
@@ -27,8 +27,7 @@ export class SoarController {
   constructor(private readonly soarService: SoarService) {}
 
   @Get('playbooks')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.SOAR_VIEW)
   async listPlaybooks(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -48,15 +47,13 @@ export class SoarController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.SOAR_VIEW)
   async getSoarStats(@TenantId() tenantId: string): Promise<SoarStats> {
     return this.soarService.getSoarStats(tenantId)
   }
 
   @Get('playbooks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.SOAR_VIEW)
   async getPlaybookById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -65,8 +62,7 @@ export class SoarController {
   }
 
   @Post('playbooks')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.SOAR_CREATE)
   async createPlaybook(
     @Body(new ZodValidationPipe(CreatePlaybookSchema)) dto: CreatePlaybookDto,
     @CurrentUser() user: JwtPayload
@@ -75,8 +71,7 @@ export class SoarController {
   }
 
   @Patch('playbooks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.SOAR_UPDATE)
   async updatePlaybook(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdatePlaybookSchema)) dto: UpdatePlaybookDto,
@@ -86,8 +81,7 @@ export class SoarController {
   }
 
   @Delete('playbooks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.SOAR_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePlaybook(
     @Param('id') id: string,
@@ -98,8 +92,7 @@ export class SoarController {
   }
 
   @Get('executions')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.SOAR_VIEW)
   async listExecutions(
     @TenantId() tenantId: string,
     @Query('playbookId') playbookId?: string,
@@ -115,8 +108,7 @@ export class SoarController {
   }
 
   @Post('playbooks/:id/execute')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.SOAR_EXECUTE)
   async executePlaybook(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload

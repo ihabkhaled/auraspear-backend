@@ -18,6 +18,11 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
+const mockRoleSettingsService = {
+  getUserPermissions: jest.fn().mockResolvedValue([]),
+  hasPermission: jest.fn().mockResolvedValue(true),
+}
+
 const mockTokenBlacklist = {
   blacklist: jest.fn(),
   isBlacklisted: jest.fn().mockResolvedValue(false),
@@ -84,7 +89,8 @@ describe('AuthService', () => {
       repository as never,
       mockConfigService as never,
       mockTokenBlacklist as never,
-      mockAppLogger as never
+      mockAppLogger as never,
+      mockRoleSettingsService as never
     )
   })
 

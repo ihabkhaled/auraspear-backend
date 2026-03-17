@@ -22,18 +22,18 @@ import {
   UpdateDetectionRuleSchema,
 } from './dto/update-detection-rule.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   DetectionRuleRecord,
   DetectionRuleStats,
   PaginatedDetectionRules,
 } from './detection-rules.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 /**
  * Alias controller that registers /rules-engine routes,
@@ -46,8 +46,7 @@ export class RulesEngineController {
   constructor(private readonly detectionRulesService: DetectionRulesService) {}
 
   @Get()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.DETECTION_RULES_VIEW)
   async listRules(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -68,15 +67,13 @@ export class RulesEngineController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.DETECTION_RULES_VIEW)
   async getDetectionRuleStats(@TenantId() tenantId: string): Promise<DetectionRuleStats> {
     return this.detectionRulesService.getDetectionRuleStats(tenantId)
   }
 
   @Get(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.DETECTION_RULES_VIEW)
   async getRuleById(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
@@ -85,8 +82,7 @@ export class RulesEngineController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.DETECTION_RULES_CREATE)
   async createRule(
     @Body(new ZodValidationPipe(CreateDetectionRuleSchema)) dto: CreateDetectionRuleDto,
     @CurrentUser() user: JwtPayload
@@ -95,8 +91,7 @@ export class RulesEngineController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.DETECTION_RULES_UPDATE)
   async updateRule(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateDetectionRuleSchema)) dto: UpdateDetectionRuleDto,
@@ -106,8 +101,7 @@ export class RulesEngineController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.DETECTION_RULES_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteRule(
     @Param('id', ParseUUIDPipe) id: string,

@@ -9,9 +9,9 @@ import {
   type UpdateConnectorDto,
 } from './dto/connector.dto'
 import { ToggleConnectorSchema, type ToggleConnectorDto } from './dto/toggle-connector.dto'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { Permission } from '../../common/enums'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { ConnectorResponse, ConnectorTestResult } from './connectors.types'
 
@@ -22,11 +22,13 @@ export class ConnectorsController {
   constructor(private readonly connectorsService: ConnectorsService) {}
 
   @Get()
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async list(@TenantId() tenantId: string): Promise<ConnectorResponse[]> {
     return this.connectorsService.findAll(tenantId)
   }
 
   @Get(':type')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getByType(
     @TenantId() tenantId: string,
     @Param('type') type: string
@@ -35,7 +37,7 @@ export class ConnectorsController {
   }
 
   @Post()
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_CREATE)
   async create(
     @TenantId() tenantId: string,
     @Body(new ZodValidationPipe(CreateConnectorSchema)) dto: CreateConnectorDto
@@ -44,7 +46,7 @@ export class ConnectorsController {
   }
 
   @Patch(':type')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_UPDATE)
   async update(
     @TenantId() tenantId: string,
     @Param('type') type: string,
@@ -54,7 +56,7 @@ export class ConnectorsController {
   }
 
   @Delete(':type')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_DELETE)
   async remove(
     @TenantId() tenantId: string,
     @Param('type') type: string
@@ -63,7 +65,7 @@ export class ConnectorsController {
   }
 
   @Post(':type/test')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_TEST)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async test(
     @TenantId() tenantId: string,
@@ -73,7 +75,7 @@ export class ConnectorsController {
   }
 
   @Post(':type/toggle')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_UPDATE)
   async toggle(
     @TenantId() tenantId: string,
     @Param('type') type: string,

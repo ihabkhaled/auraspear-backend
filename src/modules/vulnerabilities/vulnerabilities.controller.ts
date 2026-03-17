@@ -11,18 +11,18 @@ import {
 } from './dto/update-vulnerability.dto'
 import { VulnerabilitiesService } from './vulnerabilities.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   PaginatedVulnerabilities,
   VulnerabilityRecord,
   VulnerabilityStats,
 } from './vulnerabilities.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('vulnerabilities')
 @UseGuards(AuthGuard, TenantGuard)
@@ -31,6 +31,7 @@ export class VulnerabilitiesController {
   constructor(private readonly vulnerabilitiesService: VulnerabilitiesService) {}
 
   @Get()
+  @RequirePermission(Permission.VULNERABILITIES_VIEW)
   async listVulnerabilities(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -51,11 +52,13 @@ export class VulnerabilitiesController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.VULNERABILITIES_VIEW)
   async getVulnerabilityStats(@TenantId() tenantId: string): Promise<VulnerabilityStats> {
     return this.vulnerabilitiesService.getVulnerabilityStats(tenantId)
   }
 
   @Get(':id')
+  @RequirePermission(Permission.VULNERABILITIES_VIEW)
   async getVulnerabilityById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -64,8 +67,7 @@ export class VulnerabilitiesController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.VULNERABILITIES_CREATE)
   async createVulnerability(
     @Body(new ZodValidationPipe(CreateVulnerabilitySchema)) dto: CreateVulnerabilityDto,
     @CurrentUser() user: JwtPayload
@@ -74,8 +76,7 @@ export class VulnerabilitiesController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.VULNERABILITIES_UPDATE)
   async updateVulnerability(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateVulnerabilitySchema)) dto: UpdateVulnerabilityDto,
@@ -85,8 +86,7 @@ export class VulnerabilitiesController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.VULNERABILITIES_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteVulnerability(
     @Param('id') id: string,

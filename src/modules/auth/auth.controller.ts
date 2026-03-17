@@ -27,6 +27,7 @@ export class AuthController {
     accessToken: string
     refreshToken: string
     user: JwtPayload
+    permissions: string[]
     tenants: Array<{ id: string; name: string; slug: string; role: string }>
   }> {
     return this.authService.login(dto.email, dto.password)
@@ -34,8 +35,11 @@ export class AuthController {
 
   @ApiBearerAuth()
   @Get('me')
-  getProfile(@CurrentUser() user: JwtPayload): JwtPayload {
-    return user
+  async getProfile(
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ user: JwtPayload; permissions: string[] }> {
+    const permissions = await this.authService.getPermissions(user.tenantId, user.role)
+    return { user, permissions }
   }
 
   @ApiBearerAuth()

@@ -3,12 +3,11 @@ import { Throttle } from '@nestjs/throttler'
 import { ListEventsQuerySchema, SearchIOCsQuerySchema } from './dto/list-intel-query.dto'
 import { MatchIocsSchema, type MatchIocsDto } from './dto/match-iocs.dto'
 import { IntelService } from './intel.service'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   PaginatedMispEvents,
@@ -18,7 +17,7 @@ import type {
 } from './intel.types'
 
 @Controller('ti')
-@UseGuards(AuthGuard, TenantGuard, RolesGuard)
+@UseGuards(AuthGuard, TenantGuard)
 @Throttle({ default: { limit: 30, ttl: 60000 } })
 export class IntelController {
   constructor(private readonly intelService: IntelService) {}
@@ -28,7 +27,7 @@ export class IntelController {
    * Returns aggregated IOC and threat actor counts for the tenant.
    */
   @Get('stats')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.INTEL_VIEW)
   async getStats(@TenantId() tenantId: string): Promise<IntelStatsResponse> {
     return this.intelService.getStats(tenantId)
   }
@@ -38,6 +37,7 @@ export class IntelController {
    * Returns recent MISP threat intelligence events, paginated and sorted.
    */
   @Get('events/recent')
+  @RequirePermission(Permission.INTEL_VIEW)
   async getRecentEvents(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -57,6 +57,7 @@ export class IntelController {
    * Search IOCs by value, with optional type and source filters, and sorting.
    */
   @Get('iocs/search')
+  @RequirePermission(Permission.INTEL_VIEW)
   async searchIOCs(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -80,7 +81,7 @@ export class IntelController {
    * Body: { alertIds: string[] }
    */
   @Post('iocs/match-alerts')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.INTEL_VIEW)
   async matchIOCsAgainstAlerts(
     @Body(new ZodValidationPipe(MatchIocsSchema)) dto: MatchIocsDto,
     @TenantId() tenantId: string
@@ -91,10 +92,9 @@ export class IntelController {
   /**
    * POST /ti/sync/misp
    * Trigger a sync from the tenant's MISP instance into the local database.
-   * Requires TENANT_ADMIN role.
    */
   @Post('sync/misp')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async syncFromMisp(
     @TenantId() tenantId: string

@@ -2,9 +2,9 @@ import { Controller, Post, Param, Get } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { ConnectorSyncService } from './connector-sync.service'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { Permission } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 
 @ApiTags('connector-sync')
@@ -19,7 +19,7 @@ export class ConnectorSyncController {
 
   /** Manually trigger a sync for a specific connector type. */
   @Post(':type/sync')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CONNECTORS_SYNC)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async triggerSync(
     @TenantId() tenantId: string,
@@ -30,7 +30,7 @@ export class ConnectorSyncController {
 
   /** Get sync status for all connectors of the current tenant. */
   @Get('status')
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getSyncStatus(@TenantId() tenantId: string): Promise<
     Array<{
       type: string

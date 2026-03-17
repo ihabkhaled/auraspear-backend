@@ -19,10 +19,11 @@ import {
 } from './dto/tenant.dto'
 import { TenantsService } from './tenants.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   TenantMember,
@@ -33,6 +34,7 @@ import type {
   CheckEmailResult,
   ImpersonateUserResponse,
 } from './tenants.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 /**
  * Validates that a TENANT_ADMIN is only operating on their own tenant.
@@ -55,7 +57,7 @@ export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
 
   @Get()
-  @Roles(UserRole.GLOBAL_ADMIN)
+  @RequirePermission(Permission.ADMIN_TENANTS_VIEW)
   async listTenants(
     @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedResult<TenantWithCounts>> {
@@ -64,7 +66,7 @@ export class TenantsController {
   }
 
   @Post()
-  @Roles(UserRole.GLOBAL_ADMIN)
+  @RequirePermission(Permission.ADMIN_TENANTS_CREATE)
   @UsePipes(new ZodValidationPipe(CreateTenantSchema))
   async createTenant(@Body() dto: CreateTenantDto): Promise<TenantRecord> {
     return this.tenantsService.create(dto)
@@ -82,7 +84,7 @@ export class TenantsController {
   }
 
   @Patch(':id')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_TENANTS_UPDATE)
   async updateTenant(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateTenantSchema)) dto: UpdateTenantDto,
@@ -93,7 +95,7 @@ export class TenantsController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.GLOBAL_ADMIN)
+  @RequirePermission(Permission.ADMIN_TENANTS_DELETE)
   async deleteTenant(@Param('id') id: string): Promise<{ deleted: boolean }> {
     return this.tenantsService.remove(id)
   }
@@ -101,7 +103,7 @@ export class TenantsController {
   // ─── User Management ────────────────────────────────
 
   @Get(':id/users')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_VIEW)
   async listUsers(
     @Param('id') tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -123,7 +125,7 @@ export class TenantsController {
   }
 
   @Get(':id/users/check-email')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_VIEW)
   async checkEmail(
     @Param('id') tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -135,7 +137,7 @@ export class TenantsController {
   }
 
   @Post(':id/users')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_CREATE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async addUser(
     @Param('id') tenantId: string,
@@ -147,7 +149,7 @@ export class TenantsController {
   }
 
   @Post(':id/users/assign')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_UPDATE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async assignUser(
     @Param('id') tenantId: string,
@@ -159,7 +161,7 @@ export class TenantsController {
   }
 
   @Patch(':tenantId/users/:userId')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_UPDATE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async updateUser(
     @Param('tenantId') tenantId: string,
@@ -172,7 +174,7 @@ export class TenantsController {
   }
 
   @Delete(':tenantId/users/:userId')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async removeUser(
     @Param('tenantId') tenantId: string,
@@ -184,7 +186,7 @@ export class TenantsController {
   }
 
   @Post(':tenantId/users/:userId/restore')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_RESTORE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async restoreUser(
     @Param('tenantId') tenantId: string,
@@ -196,7 +198,7 @@ export class TenantsController {
   }
 
   @Post(':tenantId/users/:userId/block')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_BLOCK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async blockUser(
     @Param('tenantId') tenantId: string,
@@ -208,7 +210,7 @@ export class TenantsController {
   }
 
   @Post(':tenantId/users/:userId/unblock')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_BLOCK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async unblockUser(
     @Param('tenantId') tenantId: string,
@@ -222,7 +224,7 @@ export class TenantsController {
   // ─── Impersonation ────────────────────────────────
 
   @Post(':tenantId/users/:userId/impersonate')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ADMIN_USERS_UPDATE)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async impersonateUser(
     @Param('tenantId') tenantId: string,

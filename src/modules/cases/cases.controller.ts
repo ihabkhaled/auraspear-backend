@@ -14,13 +14,13 @@ import { SearchMentionableUsersQuerySchema } from './dto/search-mentionable-user
 import { type UpdateCaseDto, UpdateCaseSchema } from './dto/update-case.dto'
 import { type UpdateCommentDto, UpdateCommentSchema } from './dto/update-comment.dto'
 import { type UpdateTaskDto, UpdateTaskSchema } from './dto/update-task.dto'
+import { AllowCaseOwner } from '../../common/decorators/allow-case-owner.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   CaseCommentResponse,
@@ -31,6 +31,7 @@ import type {
   PaginatedCaseNotes,
   PaginatedCases,
 } from './cases.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { CaseArtifact, CaseNote, CaseTask } from '@prisma/client'
 
 @Controller('cases')
@@ -40,6 +41,7 @@ export class CasesController {
   constructor(private readonly casesService: CasesService) {}
 
   @Get()
+  @RequirePermission(Permission.CASES_VIEW)
   async listCases(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -61,8 +63,7 @@ export class CasesController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_CREATE)
   async createCase(
     @Body(new ZodValidationPipe(CreateCaseSchema)) dto: CreateCaseDto,
     @CurrentUser() user: JwtPayload
@@ -71,18 +72,20 @@ export class CasesController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.CASES_VIEW)
   async getCaseStats(@TenantId() tenantId: string): Promise<CaseStats> {
     return this.casesService.getCaseStats(tenantId)
   }
 
   @Get(':id')
+  @RequirePermission(Permission.CASES_VIEW)
   async getCaseById(@Param('id') id: string, @TenantId() tenantId: string): Promise<CaseRecord> {
     return this.casesService.getCaseById(id, tenantId)
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_UPDATE)
+  @AllowCaseOwner()
   async updateCase(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateCaseSchema)) dto: UpdateCaseDto,
@@ -92,8 +95,7 @@ export class CasesController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CASES_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCase(
     @Param('id') id: string,
@@ -104,8 +106,8 @@ export class CasesController {
   }
 
   @Post(':id/link-alert')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_UPDATE)
+  @AllowCaseOwner()
   async linkAlert(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(LinkAlertSchema)) dto: LinkAlertDto,
@@ -115,6 +117,7 @@ export class CasesController {
   }
 
   @Get(':id/notes')
+  @RequirePermission(Permission.CASES_VIEW)
   async getCaseNotes(
     @Param('id') id: string,
     @TenantId() tenantId: string,
@@ -125,8 +128,8 @@ export class CasesController {
   }
 
   @Post(':id/notes')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_ADD_COMMENT)
+  @AllowCaseOwner()
   async addCaseNote(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateNoteSchema)) dto: CreateNoteDto,
@@ -140,6 +143,7 @@ export class CasesController {
   /* ---------------------------------------------------------------- */
 
   @Get(':id/comments/mentionable-users')
+  @RequirePermission(Permission.CASES_VIEW)
   async searchMentionableUsers(
     @Param('id') _id: string,
     @TenantId() tenantId: string,
@@ -151,6 +155,7 @@ export class CasesController {
   }
 
   @Get(':id/comments')
+  @RequirePermission(Permission.CASES_VIEW)
   async listCaseComments(
     @Param('id') id: string,
     @TenantId() tenantId: string,
@@ -161,8 +166,8 @@ export class CasesController {
   }
 
   @Post(':id/comments')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_ADD_COMMENT)
+  @AllowCaseOwner()
   async addCaseComment(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateCommentSchema)) dto: CreateCommentDto,
@@ -173,8 +178,8 @@ export class CasesController {
   }
 
   @Patch(':id/comments/:commentId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_ADD_COMMENT)
+  @AllowCaseOwner()
   async updateCaseComment(
     @Param('id') id: string,
     @Param('commentId') commentId: string,
@@ -186,8 +191,7 @@ export class CasesController {
   }
 
   @Delete(':id/comments/:commentId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_DELETE_COMMENT)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteCaseComment(
     @Param('id') id: string,
@@ -202,8 +206,8 @@ export class CasesController {
   /* ---------------------------------------------------------------- */
 
   @Post(':id/tasks')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_ADD_TASK)
+  @AllowCaseOwner()
   async createTask(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateTaskSchema)) dto: CreateTaskDto,
@@ -214,8 +218,8 @@ export class CasesController {
   }
 
   @Patch(':id/tasks/:taskId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_UPDATE_TASK)
+  @AllowCaseOwner()
   async updateTask(
     @Param('id') id: string,
     @Param('taskId') taskId: string,
@@ -227,8 +231,7 @@ export class CasesController {
   }
 
   @Delete(':id/tasks/:taskId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_DELETE_TASK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteTask(
     @Param('id') id: string,
@@ -243,8 +246,8 @@ export class CasesController {
   /* ---------------------------------------------------------------- */
 
   @Post(':id/artifacts')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_ADD_ARTIFACT)
+  @AllowCaseOwner()
   async createArtifact(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(CreateArtifactSchema)) dto: CreateArtifactDto,
@@ -255,8 +258,7 @@ export class CasesController {
   }
 
   @Delete(':id/artifacts/:artifactId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.CASES_DELETE_ARTIFACT)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteArtifact(
     @Param('id') id: string,

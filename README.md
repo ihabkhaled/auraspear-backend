@@ -63,7 +63,7 @@ Every request passes through a guard chain:
 1. **ThrottlerGuard** — Rate limiting per IP
 2. **AuthGuard** — JWT verification + user active check + token blacklist
 3. **TenantGuard** — Tenant context validation
-4. **RolesGuard** — Role-based authorization
+4. **PermissionsGuard** — Dynamic permission-based authorization (replaces static RolesGuard)
 5. **AuditInterceptor** — Mutation logging (async)
 
 ### Layering
@@ -180,9 +180,9 @@ src/
 ├── main.ts                    # Bootstrap (Helmet, CORS, Swagger, rate limits)
 ├── app.module.ts              # Root module
 ├── common/
-│   ├── decorators/            # @CurrentUser, @Roles, @Public, @TenantId
+│   ├── decorators/            # @CurrentUser, @RequirePermission, @Public, @TenantId
 │   ├── filters/               # GlobalExceptionFilter (error sanitization)
-│   ├── guards/                # AuthGuard, TenantGuard, RolesGuard
+│   ├── guards/                # AuthGuard, TenantGuard, PermissionsGuard
 │   ├── interceptors/          # AuditInterceptor
 │   ├── interfaces/            # JwtPayload, AuthenticatedRequest
 │   ├── pipes/                 # ZodValidationPipe
@@ -216,39 +216,40 @@ src/modules/<module>/
 
 ## API Modules
 
-| Module                   | Description                                          |
-| ------------------------ | ---------------------------------------------------- |
-| **auth**                 | Login, JWT refresh, logout, token blacklist          |
-| **alerts**               | Alert search, triage, investigation, ingestion       |
-| **cases**                | Case CRUD, notes, timeline, linked alerts, artifacts |
-| **case-cycles**          | Case cycle management                                |
-| **incidents**            | Incident lifecycle management                        |
-| **hunts**                | Threat hunting sessions with AI                      |
-| **intel**                | MISP threat intel, IOC search and matching           |
-| **connectors**           | Connector CRUD, test, toggle (9 types)               |
-| **connector-sync**       | Connector data synchronization                       |
-| **connector-workspaces** | Workspace-specific operations (Wazuh, Graylog)       |
-| **dashboards**           | KPIs, trends, MITRE stats, pipeline health           |
-| **data-explorer**        | Log/event search across connectors                   |
-| **correlation**          | Correlation rule engine                              |
-| **detection-rules**      | Detection rule management                            |
-| **normalization**        | Log normalization pipelines                          |
-| **attack-paths**         | Attack path analysis                                 |
-| **cloud-security**       | Cloud account findings                               |
-| **compliance**           | Compliance framework tracking                        |
-| **vulnerabilities**      | Vulnerability tracking                               |
-| **ueba**                 | User and Entity Behavior Analytics                   |
-| **soar**                 | Shuffle SOAR playbook management                     |
-| **ai-agents**            | AI agent management                                  |
-| **ai**                   | AI-powered analysis (Bedrock)                        |
-| **reports**              | Report generation (PDF, CSV, HTML)                   |
-| **notifications**        | WebSocket real-time notifications                    |
-| **tenants**              | Multi-tenant CRUD                                    |
-| **users**                | User profile and preferences                         |
-| **audit-logs**           | Audit trail queries                                  |
-| **app-logs**             | Application logging                                  |
-| **health**               | System health checks                                 |
-| **system-health**        | Detailed service monitoring                          |
+| Module                   | Description                                                       |
+| ------------------------ | ----------------------------------------------------------------- |
+| **auth**                 | Login, JWT refresh, logout, token blacklist, /me with permissions |
+| **alerts**               | Alert search, triage, investigation, ingestion, bulk ops          |
+| **cases**                | Case CRUD, notes, timeline, linked alerts, artifacts              |
+| **role-settings**        | Dynamic RBAC permission matrix management                         |
+| **case-cycles**          | Case cycle management                                             |
+| **incidents**            | Incident lifecycle management                                     |
+| **hunts**                | Threat hunting sessions with AI                                   |
+| **intel**                | MISP threat intel, IOC search and matching                        |
+| **connectors**           | Connector CRUD, test, toggle (9 types)                            |
+| **connector-sync**       | Connector data synchronization                                    |
+| **connector-workspaces** | Workspace-specific operations (Wazuh, Graylog)                    |
+| **dashboards**           | KPIs, trends, MITRE stats, pipeline health                        |
+| **data-explorer**        | Log/event search across connectors                                |
+| **correlation**          | Correlation rule engine                                           |
+| **detection-rules**      | Detection rule management                                         |
+| **normalization**        | Log normalization pipelines                                       |
+| **attack-paths**         | Attack path analysis                                              |
+| **cloud-security**       | Cloud account findings                                            |
+| **compliance**           | Compliance framework tracking                                     |
+| **vulnerabilities**      | Vulnerability tracking                                            |
+| **ueba**                 | User and Entity Behavior Analytics                                |
+| **soar**                 | Shuffle SOAR playbook management                                  |
+| **ai-agents**            | AI agent management                                               |
+| **ai**                   | AI-powered analysis (Bedrock)                                     |
+| **reports**              | Report generation (PDF, CSV, HTML)                                |
+| **notifications**        | WebSocket real-time notifications                                 |
+| **tenants**              | Multi-tenant CRUD                                                 |
+| **users**                | User profile and preferences                                      |
+| **audit-logs**           | Audit trail queries                                               |
+| **app-logs**             | Application logging                                               |
+| **health**               | System health checks                                              |
+| **system-health**        | Detailed service monitoring                                       |
 
 ---
 
@@ -256,7 +257,7 @@ src/modules/<module>/
 
 ### Token Lifecycle
 
-1. **Login** — Issues access token (15m) + refresh token (7d), both with `jti` and `tokenType`
+1. **Login** — Issues access token (15m) + refresh token (7d), both with `jti` and `tokenType`. Response includes `permissions[]` array based on tenant + role
 2. **Refresh** — Verifies token type + blacklist, issues new pair, blacklists old refresh JTI
 3. **Logout** — Blacklists both access and refresh JTIs in Redis
 4. **Every request** — Verifies JWT, checks `tokenType === 'access'`, checks Redis blacklist, validates user is active
@@ -271,6 +272,56 @@ src/modules/<module>/
 | `THREAT_HUNTER`      | 4     | Threat hunter       |
 | `SOC_ANALYST_L1`     | 5     | Junior analyst      |
 | `EXECUTIVE_READONLY` | 6     | Read-only executive |
+
+### Dynamic RBAC & Permission System
+
+AuraSpear uses a **database-backed permission matrix** replacing static role checks. The system consists of two Prisma models — `PermissionDefinition` (the catalog of ~70 granular permissions) and `RolePermission` (the per-tenant, per-role grant table).
+
+**Key behaviors:**
+
+- **`@RequirePermission()` decorator** on all endpoints replaces the old `@Roles()` approach. The `PermissionsGuard` resolves the current user's role + tenant, looks up granted permissions, and allows or denies access.
+- **GLOBAL_ADMIN always has full access** — the guard short-circuits for this role.
+- **In-memory cache with 5-minute TTL** for permission lookups, avoiding a database hit on every request.
+- **Login and `/auth/me` return a `permissions[]` array** so the frontend can drive UI visibility from the actual permission set.
+
+#### Permission Categories (~70 permissions)
+
+Permissions follow a `MODULE_ACTION` naming convention. Examples:
+
+| Permission                | Description                     |
+| ------------------------- | ------------------------------- |
+| `ALERTS_VIEW`             | View alert list and details     |
+| `ALERTS_ESCALATE`         | Escalate alerts to incidents    |
+| `ALERTS_BULK_ACKNOWLEDGE` | Bulk acknowledge alerts         |
+| `ALERTS_BULK_CLOSE`       | Bulk close alerts               |
+| `INCIDENTS_VIEW`          | View incident list and details  |
+| `INCIDENTS_CHANGE_STATUS` | Change incident status          |
+| `INCIDENTS_ADD_TIMELINE`  | Add timeline entries            |
+| `CASES_CREATE`            | Create new cases                |
+| `HUNTS_EXECUTE`           | Execute threat hunting sessions |
+| `CONNECTORS_MANAGE`       | Create/update/delete connectors |
+| `USERS_MANAGE`            | Manage tenant users             |
+| `ROLE_SETTINGS_VIEW`      | View role permission matrix     |
+| `ROLE_SETTINGS_MANAGE`    | Update role permissions         |
+
+#### Role Settings API
+
+| Method | Endpoint               | Description                                 |
+| ------ | ---------------------- | ------------------------------------------- |
+| GET    | `/role-settings`       | Retrieve the full permission matrix         |
+| PUT    | `/role-settings`       | Update role permissions (GLOBAL_ADMIN only) |
+| POST   | `/role-settings/reset` | Reset permissions to seeded defaults        |
+
+The seeder populates default permissions for all roles, ensuring every fresh deployment has a working RBAC baseline.
+
+### Bulk Alert Operations
+
+| Method | Endpoint                   | Description                      |
+| ------ | -------------------------- | -------------------------------- |
+| POST   | `/alerts/bulk/acknowledge` | Bulk acknowledge multiple alerts |
+| POST   | `/alerts/bulk/close`       | Bulk close multiple alerts       |
+
+Both endpoints accept an array of alert IDs and require the corresponding bulk permission.
 
 ### GLOBAL_ADMIN Tenant Switching
 
@@ -327,7 +378,7 @@ All connector configs are encrypted with AES-256-GCM and validated with per-type
 
 ### Schema
 
-PostgreSQL via Prisma with 20+ models including: `Tenant`, `TenantUser`, `TenantMembership`, `ConnectorConfig`, `Alert`, `Case`, `CaseNote`, `CaseTimeline`, `HuntSession`, `HuntEvent`, `IntelIOC`, `IntelMispEvent`, `AuditLog`, `AiAuditLog`, `Incident`, `SavedQuery`, and domain-specific models for compliance, vulnerabilities, UEBA, SOAR, detection rules, and correlation.
+PostgreSQL via Prisma with 20+ models including: `Tenant`, `TenantUser`, `TenantMembership`, `ConnectorConfig`, `Alert`, `Case`, `CaseNote`, `CaseTimeline`, `HuntSession`, `HuntEvent`, `IntelIOC`, `IntelMispEvent`, `AuditLog`, `AiAuditLog`, `Incident`, `SavedQuery`, `PermissionDefinition`, `RolePermission`, and domain-specific models for compliance, vulnerabilities, UEBA, SOAR, detection rules, and correlation.
 
 ### Seeding
 
@@ -335,6 +386,8 @@ Seeds are **idempotent** — safe to run multiple times. They create:
 
 - Default tenants with deterministic UUIDs
 - Protected GLOBAL_ADMIN users
+- Default permission definitions (~70 granular permissions)
+- Default role-permission assignments for all roles per tenant
 - Sample connector configs (credentials from env vars, no hardcoded passwords)
 - Sample alerts, cases, and lookup data
 

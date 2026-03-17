@@ -425,8 +425,47 @@ model Tenant {
   detectionRules          DetectionRule[]
   cloudAccounts           CloudAccount[]
   cloudFindings           CloudFinding[]
+  rolePermissions         RolePermission[]
+  permissionDefinitions   PermissionDefinition[]
 
   @@map("tenants")
+}
+
+// ─── Permission Definitions ──────────────────────────────────
+
+model PermissionDefinition {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  key         String   @db.VarChar(100)
+  module      String   @db.VarChar(50)
+  labelKey    String   @map("label_key") @db.VarChar(150)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@index([module])
+  @@map("permission_definitions")
+}
+
+// ─── Role Permissions ────────────────────────────────────────
+
+model RolePermission {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  role          UserRole
+  permissionKey String   @map("permission_key") @db.VarChar(100)
+  allowed       Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, role, permissionKey])
+  @@index([tenantId, role])
+  @@map("role_permissions")
 }
 
 // ─── Users ───────────────────────────────────────────────────

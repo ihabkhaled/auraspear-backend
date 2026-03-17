@@ -5,14 +5,14 @@ import { type CreateAttackPathDto, CreateAttackPathSchema } from './dto/create-a
 import { ListAttackPathsQuerySchema } from './dto/list-attack-paths-query.dto'
 import { type UpdateAttackPathDto, UpdateAttackPathSchema } from './dto/update-attack-path.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { AttackPathRecord, AttackPathStats, PaginatedAttackPaths } from './attack-paths.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('attack-paths')
 @UseGuards(AuthGuard, TenantGuard)
@@ -21,8 +21,7 @@ export class AttackPathsController {
   constructor(private readonly attackPathsService: AttackPathsService) {}
 
   @Get()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.ATTACK_PATHS_VIEW)
   async listPaths(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -42,15 +41,13 @@ export class AttackPathsController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.ATTACK_PATHS_VIEW)
   async getAttackPathStats(@TenantId() tenantId: string): Promise<AttackPathStats> {
     return this.attackPathsService.getAttackPathStats(tenantId)
   }
 
   @Get(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.ATTACK_PATHS_VIEW)
   async getPathById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -59,8 +56,7 @@ export class AttackPathsController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.ATTACK_PATHS_CREATE)
   async createPath(
     @Body(new ZodValidationPipe(CreateAttackPathSchema)) dto: CreateAttackPathDto,
     @CurrentUser() user: JwtPayload
@@ -69,8 +65,7 @@ export class AttackPathsController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.ATTACK_PATHS_UPDATE)
   async updatePath(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateAttackPathSchema)) dto: UpdateAttackPathDto,
@@ -80,8 +75,7 @@ export class AttackPathsController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.ATTACK_PATHS_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deletePath(
     @Param('id') id: string,

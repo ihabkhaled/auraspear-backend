@@ -2,12 +2,11 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { ListHealthChecksQuerySchema } from './dto/list-health-checks-query.dto'
 import { ListMetricsQuerySchema } from './dto/list-metrics-query.dto'
 import { SystemHealthService } from './system-health.service'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import type {
   HealthCheckRecord,
   PaginatedHealthChecks,
@@ -16,17 +15,18 @@ import type {
 } from './system-health.types'
 
 @Controller('system-health')
-@UseGuards(AuthGuard, TenantGuard, RolesGuard)
-@Roles(UserRole.SOC_ANALYST_L1)
+@UseGuards(AuthGuard, TenantGuard)
 export class SystemHealthController {
   constructor(private readonly systemHealthService: SystemHealthService) {}
 
   @Get()
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getSystemHealthOverview(@TenantId() tenantId: string): Promise<SystemHealthStats> {
     return this.systemHealthService.getSystemHealthStats(tenantId)
   }
 
   @Get('checks')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async listHealthChecks(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -45,11 +45,13 @@ export class SystemHealthController {
   }
 
   @Get('checks/latest')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getLatestHealthChecks(@TenantId() tenantId: string): Promise<HealthCheckRecord[]> {
     return this.systemHealthService.getLatestHealthChecks(tenantId)
   }
 
   @Get('metrics')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async listMetrics(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -68,6 +70,7 @@ export class SystemHealthController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getSystemHealthStats(@TenantId() tenantId: string): Promise<SystemHealthStats> {
     return this.systemHealthService.getSystemHealthStats(tenantId)
   }

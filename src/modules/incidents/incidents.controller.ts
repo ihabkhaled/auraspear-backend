@@ -6,14 +6,14 @@ import { ListIncidentsQuerySchema } from './dto/list-incidents-query.dto'
 import { type UpdateIncidentDto, UpdateIncidentSchema } from './dto/update-incident.dto'
 import { IncidentsService } from './incidents.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { IncidentRecord, IncidentStats, PaginatedIncidents } from './incidents.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { IncidentTimeline } from '@prisma/client'
 
 @Controller('incidents')
@@ -23,6 +23,7 @@ export class IncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
   @Get()
+  @RequirePermission(Permission.INCIDENTS_VIEW)
   async listIncidents(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -43,11 +44,13 @@ export class IncidentsController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.INCIDENTS_VIEW)
   async getIncidentStats(@TenantId() tenantId: string): Promise<IncidentStats> {
     return this.incidentsService.getIncidentStats(tenantId)
   }
 
   @Get(':id')
+  @RequirePermission(Permission.INCIDENTS_VIEW)
   async getIncidentById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -56,8 +59,7 @@ export class IncidentsController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.INCIDENTS_CREATE)
   async createIncident(
     @Body(new ZodValidationPipe(CreateIncidentSchema)) dto: CreateIncidentDto,
     @CurrentUser() user: JwtPayload
@@ -66,8 +68,7 @@ export class IncidentsController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.INCIDENTS_UPDATE)
   async updateIncident(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateIncidentSchema)) dto: UpdateIncidentDto,
@@ -77,8 +78,7 @@ export class IncidentsController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.INCIDENTS_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteIncident(
     @Param('id') id: string,
@@ -89,6 +89,7 @@ export class IncidentsController {
   }
 
   @Get(':id/timeline')
+  @RequirePermission(Permission.INCIDENTS_VIEW)
   async getIncidentTimeline(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -97,8 +98,7 @@ export class IncidentsController {
   }
 
   @Post(':id/timeline')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L1)
+  @RequirePermission(Permission.INCIDENTS_ADD_TIMELINE)
   async addTimelineEntry(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(AddTimelineEntrySchema)) dto: AddTimelineEntryDto,

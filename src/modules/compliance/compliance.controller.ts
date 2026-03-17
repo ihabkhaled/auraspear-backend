@@ -7,12 +7,11 @@ import { ListFrameworksQuerySchema } from './dto/list-frameworks-query.dto'
 import { type UpdateControlDto, UpdateControlSchema } from './dto/update-control.dto'
 import { type UpdateFrameworkDto, UpdateFrameworkSchema } from './dto/update-framework.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   ComplianceFrameworkRecord,
@@ -20,6 +19,7 @@ import type {
   ComplianceControlRecord,
   ComplianceStats,
 } from './compliance.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('compliance')
 @UseGuards(AuthGuard, TenantGuard)
@@ -28,8 +28,7 @@ export class ComplianceController {
   constructor(private readonly complianceService: ComplianceService) {}
 
   @Get('frameworks')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.COMPLIANCE_VIEW)
   async listFrameworks(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -48,15 +47,13 @@ export class ComplianceController {
   }
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.COMPLIANCE_VIEW)
   async getComplianceStats(@TenantId() tenantId: string): Promise<ComplianceStats> {
     return this.complianceService.getComplianceStats(tenantId)
   }
 
   @Get('frameworks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.COMPLIANCE_VIEW)
   async getFrameworkById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -65,8 +62,7 @@ export class ComplianceController {
   }
 
   @Post('frameworks')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.COMPLIANCE_CREATE)
   async createFramework(
     @Body(new ZodValidationPipe(CreateFrameworkSchema)) dto: CreateFrameworkDto,
     @CurrentUser() user: JwtPayload
@@ -75,8 +71,7 @@ export class ComplianceController {
   }
 
   @Patch('frameworks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.COMPLIANCE_UPDATE)
   async updateFramework(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateFrameworkSchema)) dto: UpdateFrameworkDto,
@@ -86,8 +81,7 @@ export class ComplianceController {
   }
 
   @Delete('frameworks/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.COMPLIANCE_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteFramework(
     @Param('id') id: string,
@@ -98,8 +92,7 @@ export class ComplianceController {
   }
 
   @Get('frameworks/:id/controls')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.COMPLIANCE_VIEW)
   async listControls(
     @Param('id') frameworkId: string,
     @TenantId() tenantId: string
@@ -108,8 +101,7 @@ export class ComplianceController {
   }
 
   @Post('frameworks/:id/controls')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.COMPLIANCE_CREATE)
   async createControl(
     @Param('id') frameworkId: string,
     @Body(new ZodValidationPipe(CreateControlSchema)) dto: CreateControlDto,
@@ -119,8 +111,7 @@ export class ComplianceController {
   }
 
   @Patch('frameworks/:id/controls/:controlId')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.COMPLIANCE_UPDATE)
   async updateControl(
     @Param('id') frameworkId: string,
     @Param('controlId') controlId: string,

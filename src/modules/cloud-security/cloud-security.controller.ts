@@ -6,12 +6,11 @@ import { ListAccountsQuerySchema } from './dto/list-accounts-query.dto'
 import { ListFindingsQuerySchema } from './dto/list-findings-query.dto'
 import { type UpdateAccountDto, UpdateAccountSchema } from './dto/update-account.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   CloudAccountRecord,
@@ -19,6 +18,7 @@ import type {
   PaginatedAccounts,
   PaginatedFindings,
 } from './cloud-security.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('cloud-security')
 @UseGuards(AuthGuard, TenantGuard)
@@ -27,15 +27,13 @@ export class CloudSecurityController {
   constructor(private readonly cloudSecurityService: CloudSecurityService) {}
 
   @Get('stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CLOUD_SECURITY_VIEW)
   async getStats(@TenantId() tenantId: string): Promise<CloudSecurityStats> {
     return this.cloudSecurityService.getCloudSecurityStats(tenantId)
   }
 
   @Get('accounts')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CLOUD_SECURITY_VIEW)
   async listAccounts(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -54,15 +52,13 @@ export class CloudSecurityController {
   }
 
   @Get('accounts/stats')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CLOUD_SECURITY_VIEW)
   async getCloudSecurityStats(@TenantId() tenantId: string): Promise<CloudSecurityStats> {
     return this.cloudSecurityService.getCloudSecurityStats(tenantId)
   }
 
   @Get('accounts/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CLOUD_SECURITY_VIEW)
   async getAccountById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -71,8 +67,7 @@ export class CloudSecurityController {
   }
 
   @Post('accounts')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CLOUD_SECURITY_CREATE)
   async createAccount(
     @Body(new ZodValidationPipe(CreateAccountSchema)) dto: CreateAccountDto,
     @CurrentUser() user: JwtPayload
@@ -81,8 +76,7 @@ export class CloudSecurityController {
   }
 
   @Patch('accounts/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CLOUD_SECURITY_UPDATE)
   async updateAccount(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateAccountSchema)) dto: UpdateAccountDto,
@@ -92,8 +86,7 @@ export class CloudSecurityController {
   }
 
   @Delete('accounts/:id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CLOUD_SECURITY_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteAccount(
     @Param('id') id: string,
@@ -104,8 +97,7 @@ export class CloudSecurityController {
   }
 
   @Get('findings')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CLOUD_SECURITY_VIEW)
   async listFindings(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>

@@ -16,14 +16,14 @@ import { type CreateRuleDto, CreateRuleSchema } from './dto/create-rule.dto'
 import { ListRulesQuerySchema } from './dto/list-rules-query.dto'
 import { type UpdateRuleDto, UpdateRuleSchema } from './dto/update-rule.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { type JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { CorrelationStats, PaginatedRules, RuleRecord } from './correlation.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('correlation')
 @UseGuards(AuthGuard, TenantGuard)
@@ -32,6 +32,7 @@ export class CorrelationController {
   constructor(private readonly correlationService: CorrelationService) {}
 
   @Get()
+  @RequirePermission(Permission.CORRELATION_VIEW)
   async listRules(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -52,11 +53,13 @@ export class CorrelationController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.CORRELATION_VIEW)
   async getCorrelationStats(@TenantId() tenantId: string): Promise<CorrelationStats> {
     return this.correlationService.getCorrelationStats(tenantId)
   }
 
   @Get(':id')
+  @RequirePermission(Permission.CORRELATION_VIEW)
   async getRuleById(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string
@@ -65,8 +68,7 @@ export class CorrelationController {
   }
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CORRELATION_CREATE)
   async createRule(
     @Body(new ZodValidationPipe(CreateRuleSchema)) dto: CreateRuleDto,
     @CurrentUser() user: JwtPayload
@@ -75,8 +77,7 @@ export class CorrelationController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.SOC_ANALYST_L2)
+  @RequirePermission(Permission.CORRELATION_UPDATE)
   async updateRule(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateRuleSchema)) dto: UpdateRuleDto,
@@ -86,8 +87,7 @@ export class CorrelationController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.CORRELATION_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteRule(
     @Param('id', ParseUUIDPipe) id: string,

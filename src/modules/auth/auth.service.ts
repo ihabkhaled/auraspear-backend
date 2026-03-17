@@ -15,6 +15,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType, TokenType } from '../..
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { RoleSettingsService } from '../role-settings/role-settings.service'
 import type { TenantMembershipInfo } from './auth.utilities'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
@@ -33,7 +34,8 @@ export class AuthService {
     private readonly authRepository: AuthRepository,
     private readonly configService: ConfigService,
     private readonly tokenBlacklistService: TokenBlacklistService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly roleSettingsService: RoleSettingsService
   ) {
     const secret = this.configService.get<string>('JWT_SECRET')
     if (!secret || secret.length < 64 || !/^[\da-f]+$/i.test(secret)) {
@@ -61,6 +63,7 @@ export class AuthService {
     accessToken: string
     refreshToken: string
     user: JwtPayload
+    permissions: string[]
     tenants: TenantMembershipInfo[]
   }> {
     const user = await this.authRepository.findUserByEmailWithMemberships(
@@ -83,6 +86,10 @@ export class AuthService {
     await this.authRepository.updateLastLogin(user.id)
 
     const payload = buildPayloadFromMembership(user, firstMembership)
+    const permissions = await this.roleSettingsService.getUserPermissions(
+      firstMembership.tenantId,
+      firstMembership.role
+    )
     this.logSuccess('login', {
       actorEmail: user.email,
       actorUserId: user.id,
@@ -92,8 +99,17 @@ export class AuthService {
       accessToken: this.signAccessToken(payload),
       refreshToken: this.signRefreshToken(payload),
       user: payload,
+      permissions,
       tenants: mapMembershipsToTenantInfos(user.memberships),
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* GET USER PERMISSIONS                                              */
+  /* ---------------------------------------------------------------- */
+
+  async getPermissions(tenantId: string, role: string): Promise<string[]> {
+    return this.roleSettingsService.getUserPermissions(tenantId, role)
   }
 
   /* ---------------------------------------------------------------- */

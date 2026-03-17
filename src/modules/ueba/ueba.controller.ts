@@ -6,12 +6,11 @@ import { ListEntitiesQuerySchema } from './dto/list-entities-query.dto'
 import { ListModelsQuerySchema } from './dto/list-models-query.dto'
 import { type UpdateEntityDto, UpdateEntitySchema } from './dto/update-entity.dto'
 import { UebaService } from './ueba.service'
-import { Roles } from '../../common/decorators/roles.decorator'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
-import { RolesGuard } from '../../common/guards/roles.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
-import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   UebaEntityRecord,
@@ -23,13 +22,13 @@ import type {
 } from './ueba.types'
 
 @Controller('ueba')
-@UseGuards(AuthGuard, TenantGuard, RolesGuard)
-@Roles(UserRole.SOC_ANALYST_L2)
+@UseGuards(AuthGuard, TenantGuard)
 @Throttle({ default: { limit: 30, ttl: 60000 } })
 export class UebaController {
   constructor(private readonly uebaService: UebaService) {}
 
   @Get('entities')
+  @RequirePermission(Permission.UEBA_VIEW)
   async listEntities(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -49,11 +48,13 @@ export class UebaController {
   }
 
   @Get('stats')
+  @RequirePermission(Permission.UEBA_VIEW)
   async getUebaStats(@TenantId() tenantId: string): Promise<UebaStats> {
     return this.uebaService.getUebaStats(tenantId)
   }
 
   @Get('anomalies')
+  @RequirePermission(Permission.UEBA_VIEW)
   async listAnomalies(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -73,6 +74,7 @@ export class UebaController {
   }
 
   @Get('models')
+  @RequirePermission(Permission.UEBA_VIEW)
   async listModels(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -83,6 +85,7 @@ export class UebaController {
   }
 
   @Get('entities/:id')
+  @RequirePermission(Permission.UEBA_VIEW)
   async getEntityById(
     @Param('id') id: string,
     @TenantId() tenantId: string
@@ -91,7 +94,7 @@ export class UebaController {
   }
 
   @Post('entities')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.UEBA_CREATE)
   async createEntity(
     @Body(new ZodValidationPipe(CreateEntitySchema)) dto: CreateEntityDto,
     @TenantId() tenantId: string
@@ -100,6 +103,7 @@ export class UebaController {
   }
 
   @Patch('entities/:id')
+  @RequirePermission(Permission.UEBA_UPDATE)
   async updateEntity(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateEntitySchema)) dto: UpdateEntityDto,
@@ -109,7 +113,7 @@ export class UebaController {
   }
 
   @Delete('entities/:id')
-  @Roles(UserRole.TENANT_ADMIN)
+  @RequirePermission(Permission.UEBA_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async deleteEntity(
     @Param('id') id: string,
@@ -119,6 +123,7 @@ export class UebaController {
   }
 
   @Patch('anomalies/:id/resolve')
+  @RequirePermission(Permission.UEBA_UPDATE)
   async resolveAnomaly(
     @Param('id') id: string,
     @TenantId() tenantId: string

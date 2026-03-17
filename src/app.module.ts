@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'
 import { LoggerModule } from 'nestjs-pino'
 import { AppController } from './app.controller'
 import { AuthGuard } from './common/guards/auth.guard'
+import { PermissionsGuard } from './common/guards/permissions.guard'
 import { RolesGuard } from './common/guards/roles.guard'
 import { TenantGuard } from './common/guards/tenant.guard'
 import { AuditInterceptor } from './common/interceptors/audit.interceptor'
@@ -34,6 +35,7 @@ import { IntelModule } from './modules/intel/intel.module'
 import { NormalizationModule } from './modules/normalization/normalization.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { ReportsModule } from './modules/reports/reports.module'
+import { RoleSettingsModule } from './modules/role-settings/role-settings.module'
 import { SoarModule } from './modules/soar/soar.module'
 import { SystemHealthModule } from './modules/system-health/system-health.module'
 import { TenantsModule } from './modules/tenants/tenants.module'
@@ -105,6 +107,7 @@ import { PrismaModule } from './prisma/prisma.module'
     NormalizationModule,
     DetectionRulesModule,
     CloudSecurityModule,
+    RoleSettingsModule,
   ],
   providers: [
     // Global guards (order matters: auth → tenant → roles)
@@ -112,6 +115,7 @@ import { PrismaModule } from './prisma/prisma.module'
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
 
     // Global interceptors
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
