@@ -9,6 +9,7 @@ import {
   type BulkCloseDto,
 } from './dto/bulk-alert-action.dto'
 import { CloseAlertSchema, type CloseAlertDto } from './dto/close-alert.dto'
+import { EscalateAlertSchema, type EscalateAlertDto } from './dto/escalate-alert.dto'
 import { InvestigateAlertSchema, type InvestigateAlertDto } from './dto/investigate-alert.dto'
 import { SearchAlertsSchema } from './dto/search-alerts.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -82,6 +83,17 @@ export class AlertsController {
     @Body(new ZodValidationPipe(InvestigateAlertSchema)) dto: InvestigateAlertDto
   ): Promise<AlertRecord> {
     return this.alertsService.investigate(tenantId, id, dto.notes)
+  }
+
+  @Post(':id/escalate')
+  @RequirePermission(Permission.ALERTS_ESCALATE)
+  async escalate(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(EscalateAlertSchema)) dto: EscalateAlertDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<AlertRecord> {
+    return this.alertsService.escalate(tenantId, id, dto.reason, user.email)
   }
 
   @Post(':id/close')

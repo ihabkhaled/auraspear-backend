@@ -114,6 +114,26 @@ export class HuntsService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* DELETE                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async deleteRun(tenantId: string, id: string, email: string): Promise<{ deleted: boolean }> {
+    const session = await this.huntsRepository.findSessionByIdAndTenant(id, tenantId)
+    if (!session) {
+      this.logWarn('deleteRun', tenantId, id)
+      throw new BusinessException(404, `Hunt session ${id} not found`, 'errors.hunts.notFound')
+    }
+
+    await this.huntsRepository.deleteSessionAndEvents(id, tenantId)
+
+    this.logAction('deleteRun', tenantId, email, id, {
+      query: session.query,
+    })
+
+    return { deleted: true }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* PRIVATE: Hunt Execution Pipeline                                  */
   /* ---------------------------------------------------------------- */
 

@@ -87,6 +87,23 @@ export class AlertsService {
     return updated
   }
 
+  async escalate(
+    tenantId: string,
+    id: string,
+    reason: string,
+    email: string
+  ): Promise<AlertRecord> {
+    const alert = await this.findById(tenantId, id)
+    this.ensureNotClosedOrResolved(alert, 'escalate', tenantId, email, id)
+
+    const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
+      status: AlertStatus.IN_PROGRESS,
+    })
+
+    this.logSuccess('escalate', tenantId, { alertId: id, reason })
+    return updated
+  }
+
   async close(
     tenantId: string,
     id: string,

@@ -8,11 +8,17 @@ export enum MembershipStatus {
 
 export enum UserRole {
   GLOBAL_ADMIN = 'GLOBAL_ADMIN',
+  PLATFORM_OPERATOR = 'PLATFORM_OPERATOR',
   TENANT_ADMIN = 'TENANT_ADMIN',
+  DETECTION_ENGINEER = 'DETECTION_ENGINEER',
+  INCIDENT_RESPONDER = 'INCIDENT_RESPONDER',
+  THREAT_INTEL_ANALYST = 'THREAT_INTEL_ANALYST',
+  SOAR_ENGINEER = 'SOAR_ENGINEER',
+  THREAT_HUNTER = 'THREAT_HUNTER',
   SOC_ANALYST_L2 = 'SOC_ANALYST_L2',
   SOC_ANALYST_L1 = 'SOC_ANALYST_L1',
-  THREAT_HUNTER = 'THREAT_HUNTER',
   EXECUTIVE_READONLY = 'EXECUTIVE_READONLY',
+  AUDITOR_READONLY = 'AUDITOR_READONLY',
 }
 
 /**
@@ -21,11 +27,17 @@ export enum UserRole {
  */
 export const ROLE_HIERARCHY: UserRole[] = [
   UserRole.GLOBAL_ADMIN,
+  UserRole.PLATFORM_OPERATOR,
   UserRole.TENANT_ADMIN,
-  UserRole.SOC_ANALYST_L2,
+  UserRole.DETECTION_ENGINEER,
+  UserRole.INCIDENT_RESPONDER,
+  UserRole.THREAT_INTEL_ANALYST,
+  UserRole.SOAR_ENGINEER,
   UserRole.THREAT_HUNTER,
+  UserRole.SOC_ANALYST_L2,
   UserRole.SOC_ANALYST_L1,
   UserRole.EXECUTIVE_READONLY,
+  UserRole.AUDITOR_READONLY,
 ]
 
 export interface JwtPayload {
@@ -43,6 +55,10 @@ export interface JwtPayload {
   impersonatorSub?: string
   /** The email of the admin who initiated the impersonation. */
   impersonatorEmail?: string
+  /** Refresh token family UUID for rotation tracking. */
+  family?: string
+  /** Refresh token generation number within the family. */
+  generation?: number
 }
 
 export interface AuthenticatedRequest extends Request {

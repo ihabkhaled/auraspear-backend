@@ -1,8 +1,10 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common'
-import { ApiTags } from '@nestjs/swagger'
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { HealthService } from './health.service'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { Public } from '../../common/decorators/public.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
+import { Permission } from '../../common/enums'
 import type { OverallHealth, ServiceHealthResult } from './health.types'
 
 @ApiTags('health')
@@ -34,6 +36,8 @@ export class HealthController {
    * All connector health for the authenticated tenant.
    */
   @Get('services')
+  @ApiBearerAuth()
+  @RequirePermission(Permission.CONNECTORS_VIEW)
   async getServicesHealth(@TenantId() tenantId: string): Promise<ServiceHealthResult[]> {
     return this.healthService.getAllServiceHealth(tenantId)
   }

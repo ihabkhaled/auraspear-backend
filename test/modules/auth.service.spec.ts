@@ -47,7 +47,14 @@ function createMockRepository() {
     findUserByIdWithActiveMembershipCheck: jest.fn(),
     findMembershipByUserAndTenant: jest.fn(),
     findActiveMembershipsWithTenant: jest.fn(),
+    findTenantById: jest.fn(),
     findUserByIdWithAllActiveMemberships: jest.fn(),
+    createRefreshTokenFamily: jest.fn(),
+    createRefreshTokenRotation: jest.fn(),
+    findRefreshTokenRotationByHash: jest.fn(),
+    rotateRefreshTokenFamily: jest.fn(),
+    revokeRefreshTokenFamily: jest.fn(),
+    expireRefreshTokenFamily: jest.fn(),
     upsertUserByOidcSub: jest.fn(),
     upsertTenantMembership: jest.fn(),
   }
@@ -77,6 +84,33 @@ const mockUserRecord = {
   memberships: [mockMembership],
 }
 
+const mockRefreshFamily = {
+  id: 'family-001',
+  userId: USER_ID,
+  tenantId: TENANT_ID,
+  currentGeneration: 0,
+  status: 'active',
+  revokedAt: null,
+  revokedReason: null,
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}
+
+const mockRefreshRotation = {
+  id: 'rotation-001',
+  familyId: mockRefreshFamily.id,
+  generation: 0,
+  jtiHash: 'hashed-jti',
+  parentRotationId: null,
+  status: 'active',
+  issuedAt: new Date(),
+  usedAt: null,
+  replacedAt: null,
+  replayedAt: null,
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+}
+
 describe('AuthService', () => {
   let service: AuthService
   let repository: ReturnType<typeof createMockRepository>
@@ -85,6 +119,23 @@ describe('AuthService', () => {
     jest.clearAllMocks()
     repository = createMockRepository()
     mockTokenBlacklist.isBlacklisted.mockResolvedValue(false)
+    repository.createRefreshTokenFamily.mockResolvedValue(mockRefreshFamily)
+    repository.createRefreshTokenRotation.mockResolvedValue(mockRefreshRotation)
+    repository.findRefreshTokenRotationByHash.mockResolvedValue({
+      ...mockRefreshRotation,
+      family: mockRefreshFamily,
+    })
+    repository.rotateRefreshTokenFamily.mockResolvedValue({
+      familyAdvanceCount: 1,
+      newRotation: {
+        ...mockRefreshRotation,
+        id: 'rotation-002',
+        generation: 1,
+        parentRotationId: mockRefreshRotation.id,
+      },
+    })
+    repository.revokeRefreshTokenFamily.mockResolvedValue(undefined)
+    repository.expireRefreshTokenFamily.mockResolvedValue(undefined)
     service = new AuthService(
       repository as never,
       mockConfigService as never,
@@ -430,6 +481,8 @@ describe('AuthService', () => {
       tenantSlug: 'auraspear',
       role: UserRole.SOC_ANALYST_L1,
       jti: 'old-refresh-jti',
+      family: mockRefreshFamily.id,
+      generation: 0,
       exp: Math.floor(Date.now() / 1000) + 3600,
       tokenType: 'refresh',
     }
@@ -440,7 +493,7 @@ describe('AuthService', () => {
     })
 
     it('should return new token pair', async () => {
-      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(mockUserRecord)
 
       const result = await service.refreshTokens('old-refresh-token')
 
@@ -449,7 +502,7 @@ describe('AuthService', () => {
     })
 
     it('should blacklist old refresh token JTI', async () => {
-      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(mockUserRecord)
 
       await service.refreshTokens('old-refresh-token')
 
@@ -460,7 +513,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when user no longer exists', async () => {
-      repository.findUserByIdWithTenantMemberships.mockResolvedValue(null)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(null)
 
       await expect(service.refreshTokens('old-refresh-token')).rejects.toThrow(BusinessException)
 
@@ -474,7 +527,7 @@ describe('AuthService', () => {
     })
 
     it('should throw 401 when user has no active memberships', async () => {
-      repository.findUserByIdWithTenantMemberships.mockResolvedValue({
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue({
         ...mockUserRecord,
         memberships: [],
       })
@@ -498,7 +551,7 @@ describe('AuthService', () => {
         impersonatorEmail: 'admin@auraspear.com',
       }
       mockedJwt.verify.mockReturnValue(impersonationPayload as never)
-      repository.findUserByIdWithTenantMemberships.mockResolvedValue(mockUserRecord)
+      repository.findUserByIdWithAllActiveMemberships.mockResolvedValue(mockUserRecord)
 
       await service.refreshTokens('impersonation-refresh-token')
 
@@ -685,6 +738,80 @@ describe('AuthService', () => {
       const result = await service.getUserTenants(USER_ID)
 
       expect(result).toEqual([])
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* resolveAuthorizedTenantContext                                      */
+  /* ------------------------------------------------------------------ */
+
+  describe('resolveAuthorizedTenantContext', () => {
+    const decodedPayload: JwtPayload = {
+      sub: USER_ID,
+      email: 'analyst@auraspear.com',
+      tenantId: TENANT_ID,
+      tenantSlug: 'auraspear',
+      role: UserRole.SOC_ANALYST_L1,
+    }
+
+    it('should return the current DB role for the active tenant membership', async () => {
+      repository.findActiveMembershipsWithTenant.mockResolvedValue([
+        {
+          tenantId: TENANT_ID,
+          tenant: mockTenant,
+          role: UserRole.TENANT_ADMIN,
+          status: 'active',
+        },
+      ])
+
+      const result = await service.resolveAuthorizedTenantContext(decodedPayload)
+
+      expect(result).toEqual({
+        tenantId: TENANT_ID,
+        tenantSlug: 'auraspear',
+        role: UserRole.TENANT_ADMIN,
+      })
+    })
+
+    it('should allow a current global admin to resolve a switched tenant', async () => {
+      repository.findActiveMembershipsWithTenant.mockResolvedValue([
+        {
+          tenantId: TENANT_ID,
+          tenant: mockTenant,
+          role: UserRole.GLOBAL_ADMIN,
+          status: 'active',
+        },
+      ])
+      repository.findTenantById.mockResolvedValue({
+        id: 'tenant-002',
+        name: 'SecondOrg',
+        slug: 'second-org',
+      })
+
+      const result = await service.resolveAuthorizedTenantContext(decodedPayload, 'tenant-002')
+
+      expect(result).toEqual({
+        tenantId: 'tenant-002',
+        tenantSlug: 'second-org',
+        role: UserRole.GLOBAL_ADMIN,
+      })
+    })
+
+    it('should reject switched-tenant access for non-global-admin users', async () => {
+      repository.findActiveMembershipsWithTenant.mockResolvedValue([
+        {
+          tenantId: TENANT_ID,
+          tenant: mockTenant,
+          role: UserRole.SOC_ANALYST_L1,
+          status: 'active',
+        },
+      ])
+
+      await expect(
+        service.resolveAuthorizedTenantContext(decodedPayload, 'tenant-002')
+      ).rejects.toMatchObject({
+        messageKey: 'errors.auth.noTenantAccess',
+      })
     })
   })
 

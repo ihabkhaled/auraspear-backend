@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { ListHuntEventsQuerySchema, ListHuntsQuerySchema } from './dto/list-hunts-query.dto'
 import { type RunHuntDto, RunHuntSchema } from './dto/run-hunt.dto'
@@ -56,5 +56,16 @@ export class HuntsController {
   ): Promise<PaginatedHuntEvents> {
     const { page, limit } = ListHuntEventsQuerySchema.parse(rawQuery)
     return this.huntsService.getEvents(tenantId, id, page, limit)
+  }
+
+  @Delete('runs/:id')
+  @RequirePermission(Permission.HUNT_DELETE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async deleteRun(
+    @Param('id') id: string,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
+    return this.huntsService.deleteRun(tenantId, id, user.email)
   }
 }

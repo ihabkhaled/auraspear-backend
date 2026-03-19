@@ -3,6 +3,16 @@ import { DashboardsRepository } from './dashboards.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
+import type {
+  AlertTrend,
+  AlertTrendEntry,
+  DashboardSummary,
+  MitreTopTechniques,
+  PipelineHealth,
+  RecentActivityResponse,
+  SeverityDistribution,
+  TopTargetedAssets,
+} from './dashboards.types'
 
 @Injectable()
 export class DashboardsService {
@@ -21,20 +31,7 @@ export class DashboardsService {
     return Math.round(((currentValue - previousValue) / previousValue) * 1000) / 10
   }
 
-  async getSummary(tenantId: string): Promise<{
-    tenantId: string
-    totalAlerts: number
-    criticalAlerts: number
-    openCases: number
-    alertsLast24h: number
-    resolvedLast24h: number
-    meanTimeToRespond: string
-    connectedSources: number
-    totalAlertsTrend: number
-    criticalAlertsTrend: number
-    openCasesTrend: number
-    mttrTrend: number
-  }> {
+  async getSummary(tenantId: string): Promise<DashboardSummary> {
     this.appLogger.debug('Fetching dashboard summary', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getSummary',
@@ -118,21 +115,7 @@ export class DashboardsService {
     }
   }
 
-  async getAlertTrend(
-    tenantId: string,
-    days: number
-  ): Promise<{
-    tenantId: string
-    days: number
-    trend: Array<{
-      date: string
-      critical: number
-      high: number
-      medium: number
-      low: number
-      info: number
-    }>
-  }> {
+  async getAlertTrend(tenantId: string, days: number): Promise<AlertTrend> {
     this.appLogger.debug('Fetching alert trend data', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getAlertTrend',
@@ -150,10 +133,7 @@ export class DashboardsService {
     const results = await this.dashboardsRepository.getAlertCountsByDateAndSeverity(tenantId, since)
 
     // Pivot into { date, critical, high, medium, low, info }
-    const trendMap = new Map<
-      string,
-      { date: string; critical: number; high: number; medium: number; low: number; info: number }
-    >()
+    const trendMap = new Map<string, AlertTrendEntry>()
 
     for (const r of results) {
       if (!trendMap.has(r.date)) {
@@ -185,10 +165,7 @@ export class DashboardsService {
     return { tenantId, days, trend: [...trendMap.values()] }
   }
 
-  async getSeverityDistribution(tenantId: string): Promise<{
-    tenantId: string
-    distribution: Array<{ severity: string; count: number; percentage: number }>
-  }> {
+  async getSeverityDistribution(tenantId: string): Promise<SeverityDistribution> {
     this.appLogger.debug('Fetching severity distribution', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getSeverityDistribution',
@@ -214,10 +191,7 @@ export class DashboardsService {
     return { tenantId, distribution }
   }
 
-  async getMitreTopTechniques(tenantId: string): Promise<{
-    tenantId: string
-    techniques: Array<{ id: string; count: number }>
-  }> {
+  async getMitreTopTechniques(tenantId: string): Promise<MitreTopTechniques> {
     this.appLogger.debug('Fetching MITRE top techniques', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getMitreTopTechniques',
@@ -241,10 +215,7 @@ export class DashboardsService {
     }
   }
 
-  async getTopTargetedAssets(tenantId: string): Promise<{
-    tenantId: string
-    assets: Array<{ hostname: string; alertCount: number; criticalCount: number; lastSeen: Date }>
-  }> {
+  async getTopTargetedAssets(tenantId: string): Promise<TopTargetedAssets> {
     this.appLogger.debug('Fetching top targeted assets', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getTopTargetedAssets',
@@ -270,28 +241,7 @@ export class DashboardsService {
     }
   }
 
-  async getRecentActivity(
-    tenantId: string,
-    limit: number
-  ): Promise<{
-    data: Array<{
-      id: string
-      type: string
-      actorName: string
-      title: string
-      message: string
-      createdAt: Date
-      isRead: boolean
-    }>
-    pagination: {
-      page: number
-      limit: number
-      total: number
-      totalPages: number
-      hasNext: boolean
-      hasPrev: boolean
-    }
-  }> {
+  async getRecentActivity(tenantId: string, limit: number): Promise<RecentActivityResponse> {
     this.appLogger.debug('Fetching recent activity', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getRecentActivity',
@@ -340,16 +290,7 @@ export class DashboardsService {
     }
   }
 
-  async getPipelineHealth(tenantId: string): Promise<{
-    tenantId: string
-    pipelines: Array<{
-      name: string
-      type: string
-      status: string
-      lastChecked: Date | null
-      lastError: string | null
-    }>
-  }> {
+  async getPipelineHealth(tenantId: string): Promise<PipelineHealth> {
     this.appLogger.debug('Fetching pipeline health status', {
       feature: AppLogFeature.DASHBOARD,
       action: 'getPipelineHealth',

@@ -20,7 +20,8 @@ export class ShuffleService {
       return { ok: false, details: 'Shuffle URL not configured' }
     }
 
-    const apiKey = config.apiKey as string | undefined
+    // apiKey is the canonical key; shuffleApiKey is a legacy fallback
+    const apiKey = (config.apiKey ?? config.shuffleApiKey) as string | undefined
     if (!apiKey) {
       return { ok: false, details: 'Shuffle API key not configured' }
     }
@@ -74,7 +75,8 @@ export class ShuffleService {
    */
   async getWorkflows(config: Record<string, unknown>): Promise<unknown[]> {
     const baseUrl = (config.webhookUrl ?? config.baseUrl) as string
-    const apiKey = config.apiKey as string
+    // apiKey is the canonical key; shuffleApiKey is a legacy fallback
+    const apiKey = (config.apiKey ?? config.shuffleApiKey) as string
 
     const res = await connectorFetch(`${baseUrl}/api/v1/workflows`, {
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -118,7 +120,8 @@ export class ShuffleService {
     data: Record<string, unknown> = {}
   ): Promise<{ executionId: string }> {
     const baseUrl = (config.webhookUrl ?? config.baseUrl) as string
-    const apiKey = config.apiKey as string
+    // apiKey is the canonical key; shuffleApiKey is a legacy fallback
+    const apiKey = (config.apiKey ?? config.shuffleApiKey) as string
 
     // Validate workflowId to prevent path traversal
     if (!/^[\da-f-]+$/i.test(workflowId)) {

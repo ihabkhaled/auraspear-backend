@@ -6,6 +6,7 @@ import {
   extractUrlFields,
   mapConnectorToResponse,
   mergeConfigWithRedacted,
+  normalizeConnectorConfig,
   sanitizeErrorDetails,
 } from './connectors.utilities'
 import { validateConnectorConfig } from './dto/connector.dto'
@@ -23,7 +24,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.utility'
 import { maskSecrets } from '../../common/utils/mask.utility'
-import { validateUrl } from '../../common/utils/ssrf.utility'
+import { resolveAndValidateUrl } from '../../common/utils/ssrf.utility'
 import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 import type { ConnectorConfig } from '@prisma/client'
@@ -101,7 +102,7 @@ export class ConnectorsService {
 
   async create(tenantId: string, dto: CreateConnectorDto): Promise<ConnectorResponse> {
     await this.guardDuplicate(tenantId, dto.type)
-    const validatedConfig = this.validateAndSanitizeConfig(
+    const validatedConfig = await this.validateAndSanitizeConfig(
       dto.type,
       dto.config as Record<string, unknown>,
       'create',
@@ -147,7 +148,7 @@ export class ConnectorsService {
     const updateData = buildConnectorUpdateData(dto)
 
     if (dto.config !== undefined) {
-      updateData.encryptedConfig = this.buildMergedEncryptedConfig(
+      updateData.encryptedConfig = await this.buildMergedEncryptedConfig(
         type,
         dto.config as Record<string, unknown>,
         existing.encryptedConfig,
@@ -270,12 +271,12 @@ export class ConnectorsService {
     }
   }
 
-  private validateAndSanitizeConfig(
+  private async validateAndSanitizeConfig(
     type: string,
     config: Record<string, unknown>,
     action: string,
     tenantId: string
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     let validated: Record<string, unknown>
     try {
       validated = validateConnectorConfig(type, config)
@@ -288,25 +289,36 @@ export class ConnectorsService {
         'errors.connectors.invalidConfig'
       )
     }
-    this.validateConfigUrls(validated)
+    await this.validateConfigUrls(validated)
     return validated
   }
 
-  private validateConfigUrls(config: Record<string, unknown>): void {
+  /**
+   * Validates all URL fields in the connector config using DNS-aware SSRF defense.
+   * In production, hostnames are resolved to IP addresses and checked against
+   * the private IP blocklist to prevent DNS rebinding attacks.
+   * Falls back to synchronous validation for basic URL structure checks.
+   */
+  private async validateConfigUrls(config: Record<string, unknown>): Promise<void> {
     for (const { value } of extractUrlFields(config)) {
-      validateUrl(value)
+      await resolveAndValidateUrl(value)
     }
   }
 
-  private buildMergedEncryptedConfig(
+  private async buildMergedEncryptedConfig(
     type: string,
     incomingConfig: Record<string, unknown>,
     existingEncrypted: string,
     tenantId: string
-  ): string {
+  ): Promise<string> {
     const existingDecrypted = this.decryptConfig(existingEncrypted)
     const mergedConfig = mergeConfigWithRedacted(incomingConfig, existingDecrypted)
-    const validatedConfig = this.validateAndSanitizeConfig(type, mergedConfig, 'update', tenantId)
+    const validatedConfig = await this.validateAndSanitizeConfig(
+      type,
+      mergedConfig,
+      'update',
+      tenantId
+    )
     return encrypt(JSON.stringify(validatedConfig), this.encryptionKey)
   }
 
@@ -348,22 +360,26 @@ export class ConnectorsService {
   /* ---------------------------------------------------------------- */
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {
+    let config: Record<string, unknown>
+
     try {
       const raw = JSON.parse(encryptedConfig) as Record<string, unknown>
       if ('placeholder' in raw) return raw
-      return raw
+      config = raw
     } catch {
-      // Try decrypting
+      // Not plain JSON — try decrypting
+      try {
+        const decrypted = decrypt(encryptedConfig, this.encryptionKey)
+        config = JSON.parse(decrypted) as Record<string, unknown>
+      } catch {
+        this.logger.warn('Failed to decrypt connector config, returning empty')
+        this.logWarn('decryptConfig', '', '')
+        return {}
+      }
     }
 
-    try {
-      const decrypted = decrypt(encryptedConfig, this.encryptionKey)
-      return JSON.parse(decrypted) as Record<string, unknown>
-    } catch {
-      this.logger.warn('Failed to decrypt connector config, returning empty')
-      this.logWarn('decryptConfig', '', '')
-      return {}
-    }
+    // Normalize deprecated keys (verifyTLS → verifyTls, mispAuthKey → authKey, etc.)
+    return normalizeConnectorConfig(config)
   }
 
   /* ---------------------------------------------------------------- */

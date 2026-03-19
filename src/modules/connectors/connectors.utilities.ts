@@ -73,6 +73,50 @@ export function buildConnectorUpdateData(dto: {
 }
 
 /* ---------------------------------------------------------------- */
+/* CONFIG KEY NORMALIZATION                                          */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Normalizes deprecated config keys to their canonical names at runtime.
+ * This ensures backward compatibility with existing encrypted configs that
+ * were stored before key naming was standardized:
+ * - verifyTLS → verifyTls
+ * - mispAuthKey → authKey
+ * - shuffleApiKey → apiKey
+ *
+ * In all cases, the canonical key takes precedence if both are present.
+ */
+export function normalizeConnectorConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const normalized = new Map(Object.entries(config))
+
+  // verifyTLS → verifyTls
+  if (normalized.has('verifyTLS') && !normalized.has('verifyTls')) {
+    normalized.set('verifyTls', normalized.get('verifyTLS'))
+    normalized.delete('verifyTLS')
+  } else if (normalized.has('verifyTLS') && normalized.has('verifyTls')) {
+    normalized.delete('verifyTLS')
+  }
+
+  // mispAuthKey → authKey
+  if (normalized.has('mispAuthKey') && !normalized.has('authKey')) {
+    normalized.set('authKey', normalized.get('mispAuthKey'))
+    normalized.delete('mispAuthKey')
+  } else if (normalized.has('mispAuthKey') && normalized.has('authKey')) {
+    normalized.delete('mispAuthKey')
+  }
+
+  // shuffleApiKey → apiKey
+  if (normalized.has('shuffleApiKey') && !normalized.has('apiKey')) {
+    normalized.set('apiKey', normalized.get('shuffleApiKey'))
+    normalized.delete('shuffleApiKey')
+  } else if (normalized.has('shuffleApiKey') && normalized.has('apiKey')) {
+    normalized.delete('shuffleApiKey')
+  }
+
+  return Object.fromEntries(normalized)
+}
+
+/* ---------------------------------------------------------------- */
 /* URL VALIDATION                                                    */
 /* ---------------------------------------------------------------- */
 

@@ -1,7 +1,9 @@
+import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
 import { NotificationsGateway } from '../../src/modules/notifications/notifications.gateway'
 
 const mockAuthService = {
   verifyAccessToken: jest.fn(),
+  resolveAuthorizedTenantContext: jest.fn(),
 }
 
 function createMockSocket(overrides: Record<string, unknown> = {}) {
@@ -31,6 +33,13 @@ describe('NotificationsGateway', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAuthService.resolveAuthorizedTenantContext.mockImplementation(
+      async (payload: { tenantId: string }, requestedTenantId?: string) => ({
+        tenantId: requestedTenantId ?? payload.tenantId,
+        tenantSlug: requestedTenantId ?? payload.tenantId,
+        role: UserRole.SOC_ANALYST_L1,
+      })
+    )
     gateway = new NotificationsGateway(mockAuthService as never)
     mockServer = createMockServer()
     // Inject mock server
@@ -50,7 +59,16 @@ describe('NotificationsGateway', () => {
       await gateway.handleConnection(socket as never)
 
       expect(mockAuthService.verifyAccessToken).toHaveBeenCalledWith('valid-jwt-token')
-      expect(socket.data['user']).toEqual(payload)
+      expect(mockAuthService.resolveAuthorizedTenantContext).toHaveBeenCalledWith(
+        payload,
+        undefined
+      )
+      expect(socket.data['user']).toEqual({
+        ...payload,
+        tenantId: 'tenant-001',
+        tenantSlug: 'tenant-001',
+        role: UserRole.SOC_ANALYST_L1,
+      })
       expect(socket.data['tenantId']).toBe('tenant-001')
       expect(socket.join).toHaveBeenCalledWith('tenant-001:user-001')
       expect(socket.disconnect).not.toHaveBeenCalled()
@@ -85,6 +103,10 @@ describe('NotificationsGateway', () => {
       await gateway.handleConnection(socket as never)
 
       expect(mockAuthService.verifyAccessToken).toHaveBeenCalledWith('header-token')
+      expect(mockAuthService.resolveAuthorizedTenantContext).toHaveBeenCalledWith(
+        payload,
+        undefined
+      )
       expect(socket.join).toHaveBeenCalledWith('tenant-002:user-002')
     })
 

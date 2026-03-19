@@ -341,8 +341,8 @@ describe('ROLE_HIERARCHY', () => {
     expect(ROLE_HIERARCHY[0]).toBe(UserRole.GLOBAL_ADMIN)
   })
 
-  it('should have EXECUTIVE_READONLY as least privileged (last)', () => {
-    expect(ROLE_HIERARCHY[ROLE_HIERARCHY.length - 1]).toBe(UserRole.EXECUTIVE_READONLY)
+  it('should have AUDITOR_READONLY as least privileged (last)', () => {
+    expect(ROLE_HIERARCHY[ROLE_HIERARCHY.length - 1]).toBe(UserRole.AUDITOR_READONLY)
   })
 
   it('should contain all UserRole values', () => {

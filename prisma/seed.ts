@@ -5439,25 +5439,11 @@ async function seedRolePermissions(tenantId: string): Promise<void> {
   if (records.length > 0) {
     // skipDuplicates makes this idempotent — existing rows are left untouched,
     // only missing permission rows (e.g. newly added permissions) are inserted.
+    // Tenant-customized permissions (added or removed by admins) are preserved.
     await prisma.rolePermission.createMany({ data: records, skipDuplicates: true })
   }
 
-  // Remove permissions that are no longer in the default set for each role.
-  // This handles cases like L1 losing CASES_ADD_TASK etc.
-  for (const role of CONFIGURABLE_ROLES) {
-    const allowedKeys = DEFAULT_PERMISSIONS[role] ?? []
-    if (allowedKeys.length > 0) {
-      await prisma.rolePermission.deleteMany({
-        where: {
-          tenantId,
-          role: role as UserRole,
-          permissionKey: { notIn: allowedKeys },
-        },
-      })
-    }
-  }
-
-  logger.info({ tenantId, count: records.length }, 'Seeded/synced role permissions')
+  logger.info({ tenantId, count: records.length }, 'Seeded default role permissions')
 }
 
 async function seedPermissionDefinitions(): Promise<void> {
@@ -5493,6 +5479,57 @@ async function main(): Promise<void> {
   await seedPermissionDefinitions()
 
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, BCRYPT_ROUNDS)
+
+  // ─── Platform Admin (true GLOBAL_ADMIN, member of every tenant) ───
+  const platformAdmin = await prisma.user.upsert({
+    where: { email: 'platform-admin@auraspear.io' },
+    update: { passwordHash, isProtected: true },
+    create: {
+      email: 'platform-admin@auraspear.io',
+      name: 'Platform Administrator',
+      passwordHash,
+      isProtected: true,
+    },
+  })
+
+  await prisma.userPreference.upsert({
+    where: { userId: platformAdmin.id },
+    update: {},
+    create: {
+      userId: platformAdmin.id,
+      theme: 'system',
+      language: 'en',
+      notificationsEmail: true,
+      notificationsInApp: true,
+    },
+  })
+
+  // Create GLOBAL_ADMIN membership for every tenant
+  for (const profile of TENANT_PROFILES) {
+    const tenant = await prisma.tenant.upsert({
+      where: { slug: profile.slug },
+      update: {},
+      create: {
+        id: profile.id,
+        name: profile.name,
+        slug: profile.slug,
+      },
+    })
+
+    await prisma.tenantMembership.upsert({
+      where: { userId_tenantId: { userId: platformAdmin.id, tenantId: tenant.id } },
+      update: { role: UserRole.GLOBAL_ADMIN, status: 'active' },
+      create: {
+        userId: platformAdmin.id,
+        tenantId: tenant.id,
+        role: UserRole.GLOBAL_ADMIN,
+      },
+    })
+  }
+  logger.info(
+    { email: 'platform-admin@auraspear.io' },
+    'Seeded platform admin with GLOBAL_ADMIN on all tenants'
+  )
 
   // Initialize global case counter from existing max case number
   const maxCase = await prisma.case.findFirst({
@@ -5564,7 +5601,7 @@ async function main(): Promise<void> {
           oidcSub: `admin-${profile.slug}`,
           email: `admin@${profile.slug}.io`,
           name: 'Admin User',
-          role: UserRole.GLOBAL_ADMIN,
+          role: UserRole.TENANT_ADMIN,
         },
         {
           oidcSub: `analyst-l2-${profile.slug}`,
@@ -5593,7 +5630,8 @@ async function main(): Promise<void> {
       ]
 
       for (const userDef of userDefs) {
-        const isProtected = userDef.role === UserRole.GLOBAL_ADMIN
+        const isProtected =
+          userDef.role === UserRole.GLOBAL_ADMIN || userDef.role === UserRole.TENANT_ADMIN
 
         const createdUser = await prisma.user.upsert({
           where: { email: userDef.email },

@@ -326,6 +326,19 @@ export class IncidentsService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* CHANGE STATUS                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async changeStatus(
+    id: string,
+    status: UpdateIncidentDto['status'],
+    user: JwtPayload
+  ): Promise<IncidentRecord> {
+    const dto: UpdateIncidentDto = { status }
+    return this.updateIncident(id, dto, user)
+  }
+
+  /* ---------------------------------------------------------------- */
   /* DELETE                                                            */
   /* ---------------------------------------------------------------- */
 

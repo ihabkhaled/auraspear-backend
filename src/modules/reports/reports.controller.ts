@@ -86,6 +86,17 @@ export class ReportsController {
     return this.reportsService.updateReport(id, dto, user)
   }
 
+  @Post(':id/export')
+  @RequirePermission(Permission.REPORTS_EXPORT)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async exportReport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<ReportRecord> {
+    return this.reportsService.exportReport(id, tenantId, user)
+  }
+
   @Delete(':id')
   @RequirePermission(Permission.REPORTS_DELETE)
   @Throttle({ default: { limit: 10, ttl: 60000 } })

@@ -1,3 +1,4 @@
+import { promises as dns } from 'node:dns'
 import * as http from 'node:http'
 import * as https from 'node:https'
 import { NodeEnvironment } from '../enums'
@@ -30,8 +31,9 @@ export interface ConnectorHttpResponse {
  * HTTP client for connector integrations.
  * Supports self-signed certificates (common in internal security tools).
  * Validates URL protocol and optionally blocks private network targets.
+ * In production, performs DNS resolution to prevent DNS rebinding SSRF attacks.
  */
-export function connectorFetch(
+export async function connectorFetch(
   url: string,
   options: ConnectorHttpOptions = {}
 ): Promise<ConnectorHttpResponse> {
@@ -51,34 +53,52 @@ export function connectorFetch(
   // In non-production, always accept self-signed certificates for local testing
   const rejectUnauthorized = isProduction ? callerRejectUnauthorized : false
 
+  const parsed = new URL(url)
+
+  // Only allow HTTP(S) protocols
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Only HTTP(S) URLs are allowed')
+  }
+
+  // Enforce HTTPS in production to prevent credential leakage over plain HTTP
+  if (isProduction && parsed.protocol !== 'https:') {
+    throw new Error('Only HTTPS URLs are allowed in production')
+  }
+
+  // Block private network targets when not explicitly allowed (skip in non-production)
+  if (isProduction && !allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
+    throw new Error('URLs pointing to private/internal networks are not allowed')
+  }
+
+  // DNS-aware SSRF defense: resolve hostname and verify resolved IP is not private.
+  // This prevents DNS rebinding attacks where a domain resolves to a private IP.
+  if (isProduction && !allowPrivateNetwork) {
+    try {
+      const { address } = await dns.lookup(parsed.hostname)
+      if (isPrivateHost(address)) {
+        throw new Error(
+          `Hostname '${parsed.hostname}' resolves to a private IP address (SSRF blocked)`
+        )
+      }
+    } catch (dnsError: unknown) {
+      if (dnsError instanceof Error && dnsError.message.includes('SSRF blocked')) {
+        throw dnsError
+      }
+      throw new Error(
+        `DNS resolution failed for '${parsed.hostname}': ${dnsError instanceof Error ? dnsError.message : 'unknown error'}`
+      )
+    }
+  }
+
+  const start = Date.now()
+  const isHttps = parsed.protocol === 'https:'
+
+  // L14: Warn when TLS verification is disabled
+  if (isHttps && !rejectUnauthorized) {
+    console.warn(`[connector-http] TLS verification disabled for ${parsed.hostname}`)
+  }
+
   return new Promise((resolve, reject) => {
-    const start = Date.now()
-    const parsed = new URL(url)
-
-    // Only allow HTTP(S) protocols
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      reject(new Error('Only HTTP(S) URLs are allowed'))
-      return
-    }
-
-    // Enforce HTTPS in production to prevent credential leakage over plain HTTP
-    if (isProduction && parsed.protocol !== 'https:') {
-      reject(new Error('Only HTTPS URLs are allowed in production'))
-      return
-    }
-
-    // Block private network targets when not explicitly allowed (skip in non-production)
-    if (isProduction && !allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
-      reject(new Error('URLs pointing to private/internal networks are not allowed'))
-      return
-    }
-    const isHttps = parsed.protocol === 'https:'
-
-    // L14: Warn when TLS verification is disabled
-    if (isHttps && !rejectUnauthorized) {
-      console.warn(`[connector-http] TLS verification disabled for ${parsed.hostname}`)
-    }
-
     const requestOptions: https.RequestOptions = {
       method,
       hostname: parsed.hostname,

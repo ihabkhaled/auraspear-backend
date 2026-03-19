@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { CasesService } from './cases.service'
+import { type AssignCaseDto, AssignCaseSchema } from './dto/assign-case.dto'
 import { type CreateArtifactDto, CreateArtifactSchema } from './dto/create-artifact.dto'
 import { type CreateCaseDto, CreateCaseSchema } from './dto/create-case.dto'
 import { type CreateCommentDto, CreateCommentSchema } from './dto/create-comment.dto'
@@ -92,6 +93,17 @@ export class CasesController {
     @CurrentUser() user: JwtPayload
   ): Promise<CaseRecord> {
     return this.casesService.updateCase(id, dto, user)
+  }
+
+  @Patch(':id/assign')
+  @RequirePermission(Permission.CASES_ASSIGN)
+  @AllowCaseOwner()
+  async assignCase(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(AssignCaseSchema)) dto: AssignCaseDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<CaseRecord> {
+    return this.casesService.assignCase(id, dto.ownerUserId, user)
   }
 
   @Delete(':id')

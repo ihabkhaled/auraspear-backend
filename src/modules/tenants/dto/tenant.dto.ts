@@ -30,11 +30,17 @@ export const AddUserSchema = z.object({
     ),
   role: z.enum([
     'GLOBAL_ADMIN',
+    'PLATFORM_OPERATOR',
     'TENANT_ADMIN',
+    'DETECTION_ENGINEER',
+    'INCIDENT_RESPONDER',
+    'THREAT_INTEL_ANALYST',
+    'SOAR_ENGINEER',
+    'THREAT_HUNTER',
     'SOC_ANALYST_L2',
     'SOC_ANALYST_L1',
-    'THREAT_HUNTER',
     'EXECUTIVE_READONLY',
+    'AUDITOR_READONLY',
   ]),
 })
 
@@ -54,11 +60,17 @@ export const AssignUserSchema = z.object({
     .optional(),
   role: z.enum([
     'GLOBAL_ADMIN',
+    'PLATFORM_OPERATOR',
     'TENANT_ADMIN',
+    'DETECTION_ENGINEER',
+    'INCIDENT_RESPONDER',
+    'THREAT_INTEL_ANALYST',
+    'SOAR_ENGINEER',
+    'THREAT_HUNTER',
     'SOC_ANALYST_L2',
     'SOC_ANALYST_L1',
-    'THREAT_HUNTER',
     'EXECUTIVE_READONLY',
+    'AUDITOR_READONLY',
   ]),
 })
 

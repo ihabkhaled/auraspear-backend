@@ -190,6 +190,39 @@ export class ReportsService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* EXPORT REPORT                                                     */
+  /* ---------------------------------------------------------------- */
+
+  async exportReport(id: string, tenantId: string, user: JwtPayload): Promise<ReportRecord> {
+    const report = await this.getReportById(id, tenantId)
+
+    if (report.status !== ReportStatus.COMPLETED) {
+      throw new BusinessException(
+        400,
+        'Only completed reports can be exported',
+        'errors.reports.notCompleted'
+      )
+    }
+
+    this.appLogger.info('Report exported', {
+      feature: AppLogFeature.REPORTS,
+      action: 'exportReport',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'Report',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ReportsService',
+      functionName: 'exportReport',
+      metadata: { name: report.name, format: report.format },
+    })
+
+    return report
+  }
+
+  /* ---------------------------------------------------------------- */
   /* DELETE REPORT                                                     */
   /* ---------------------------------------------------------------- */
 

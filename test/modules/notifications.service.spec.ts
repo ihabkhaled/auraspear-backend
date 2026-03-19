@@ -21,6 +21,7 @@ const mockAppLogger = {
 const mockGateway = {
   emitToUser: jest.fn(),
   emitUnreadCount: jest.fn(),
+  emitPermissionsUpdated: jest.fn(),
 }
 
 function createMockRepository() {
@@ -571,6 +572,42 @@ describe('NotificationsService', () => {
             params: { actorName: ACTOR_NAME },
           }),
         })
+      )
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* emitPermissionsUpdated                                              */
+  /* ------------------------------------------------------------------ */
+
+  describe('emitPermissionsUpdated', () => {
+    it('should emit a realtime permission refresh event to one user', () => {
+      service.emitPermissionsUpdated(TENANT_ID, RECIPIENT_ID, 'role-updated')
+
+      expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        RECIPIENT_ID,
+        'role-updated'
+      )
+    })
+
+    it('should emit to each unique user when updating multiple sessions', () => {
+      service.emitPermissionsUpdatedToUsers(
+        TENANT_ID,
+        [RECIPIENT_ID, RECIPIENT_ID, 'user-002'],
+        'role-matrix-updated'
+      )
+
+      expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledTimes(2)
+      expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        RECIPIENT_ID,
+        'role-matrix-updated'
+      )
+      expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        'user-002',
+        'role-matrix-updated'
       )
     })
   })

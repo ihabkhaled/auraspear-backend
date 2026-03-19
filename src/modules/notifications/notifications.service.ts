@@ -316,6 +316,26 @@ export class NotificationsService {
     })
   }
 
+  emitPermissionsUpdated(
+    tenantId: string,
+    userId: string,
+    reason: 'role-updated' | 'role-matrix-updated' | 'membership-status-updated'
+  ): void {
+    this.gateway.emitPermissionsUpdated(tenantId, userId, reason)
+  }
+
+  emitPermissionsUpdatedToUsers(
+    tenantId: string,
+    userIds: string[],
+    reason: 'role-updated' | 'role-matrix-updated' | 'membership-status-updated'
+  ): void {
+    const uniqueUserIds = [...new Set(userIds.filter(userId => userId.trim().length > 0))]
+
+    for (const userId of uniqueUserIds) {
+      this.gateway.emitPermissionsUpdated(tenantId, userId, reason)
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* MENTION NOTIFICATIONS                                             */
   /* ---------------------------------------------------------------- */
@@ -331,7 +351,7 @@ export class NotificationsService {
     if (recipientIds.length === 0) return
 
     const actorName = await this.resolveActorName(actor.sub, actor.email)
-    const caseRecord = await this.notificationsRepository.findCaseById(caseId)
+    const caseRecord = await this.notificationsRepository.findCaseById(caseId, tenantId)
     const caseNumber = caseRecord?.caseNumber ?? caseId
 
     for (const recipientUserId of recipientIds) {

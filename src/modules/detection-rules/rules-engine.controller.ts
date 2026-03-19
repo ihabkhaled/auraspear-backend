@@ -18,6 +18,10 @@ import {
 } from './dto/create-detection-rule.dto'
 import { ListDetectionRulesQuerySchema } from './dto/list-detection-rules-query.dto'
 import {
+  type ToggleDetectionRuleDto,
+  ToggleDetectionRuleSchema,
+} from './dto/toggle-detection-rule.dto'
+import {
   type UpdateDetectionRuleDto,
   UpdateDetectionRuleSchema,
 } from './dto/update-detection-rule.dto'
@@ -98,6 +102,16 @@ export class RulesEngineController {
     @CurrentUser() user: JwtPayload
   ): Promise<DetectionRuleRecord> {
     return this.detectionRulesService.updateRule(id, dto, user)
+  }
+
+  @Patch(':id/toggle')
+  @RequirePermission(Permission.DETECTION_RULES_TOGGLE)
+  async toggleRule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(ToggleDetectionRuleSchema)) dto: ToggleDetectionRuleDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<DetectionRuleRecord> {
+    return this.detectionRulesService.toggleRule(id, dto.enabled, user)
   }
 
   @Delete(':id')

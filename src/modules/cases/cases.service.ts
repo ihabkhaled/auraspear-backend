@@ -25,6 +25,7 @@ import {
   AppLogOutcome,
   AppLogSourceType,
   CaseStatus,
+  CaseTaskStatus,
   CaseTimelineType,
   NotificationType,
 } from '../../common/enums'
@@ -222,6 +223,72 @@ export class CasesService {
     })
 
     await this.sendUpdateNotifications(dto, existing, user, id)
+    return this.enrichCaseRecord(result)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* ASSIGN                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async assignCase(id: string, ownerUserId: string | null, user: JwtPayload): Promise<CaseRecord> {
+    const existing = await this.getCaseById(id, user.tenantId)
+    this.ensureNotClosed(existing.status, 'assignCase', user, id, 'Cannot reassign a closed case')
+
+    if (ownerUserId) {
+      await this.validateOwnerInTenant(ownerUserId, user.tenantId)
+    }
+
+    const actorLabel = await this.resolveActorLabel(user)
+    const timelineDescription = await this.buildAssignTimelineDescription(
+      ownerUserId,
+      existing.ownerUserId,
+      actorLabel
+    )
+
+    const result = await this.executeUpdateCase(
+      id,
+      user.tenantId,
+      { ownerUserId },
+      {
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: timelineDescription,
+      }
+    )
+
+    this.logSuccess('assignCase', user, 'Case', id, {
+      caseNumber: existing.caseNumber,
+      previousOwner: existing.ownerUserId,
+      newOwner: ownerUserId,
+    })
+
+    if (ownerUserId && ownerUserId !== existing.ownerUserId) {
+      await this.notificationsService.notifyCaseActivity(
+        user.tenantId,
+        id,
+        existing.caseNumber,
+        ownerUserId,
+        NotificationType.CASE_ASSIGNED,
+        JSON.stringify({
+          key: 'caseAssignedMessage',
+          params: { caseRef: existing.caseNumber },
+        }),
+        user.sub,
+        user.email
+      )
+    }
+
+    if (!ownerUserId && existing.ownerUserId) {
+      await this.notificationsService.notifyCaseUnassigned(
+        user.tenantId,
+        id,
+        existing.caseNumber,
+        existing.ownerUserId,
+        user.sub,
+        user.email
+      )
+    }
+
     return this.enrichCaseRecord(result)
   }
 
@@ -452,7 +519,7 @@ export class CasesService {
     const task = await this.casesRepository.createTask({
       caseId,
       title: dto.title,
-      status: dto.status ?? 'pending',
+      status: dto.status ?? CaseTaskStatus.PENDING,
       assignee: dto.assignee ?? null,
     })
     const actorLabel = await this.resolveActorLabel(user)
@@ -1026,6 +1093,26 @@ export class CasesService {
     }
     const cycle = cycleId ? await this.casesRepository.findCaseCycleById(cycleId) : null
     return buildCycleTimelineDescription(cycleId, cycle?.name ?? null, actorLabel)
+  }
+
+  private async buildAssignTimelineDescription(
+    newOwnerId: string | null,
+    previousOwnerId: string | null,
+    actorLabel: string
+  ): Promise<string> {
+    const previousOwner = previousOwnerId
+      ? await this.casesRepository.findUserById(previousOwnerId)
+      : null
+    const previousLabel = previousOwner ? formatUserLabel(previousOwner, '') : null
+    const newOwner = newOwnerId ? await this.casesRepository.findUserById(newOwnerId) : null
+    const newLabel = newOwner && newOwnerId ? formatUserLabel(newOwner, newOwnerId) : null
+
+    return buildAssigneeTimelineDescription(
+      { ownerUserId: newOwnerId },
+      previousLabel,
+      newLabel,
+      actorLabel
+    )
   }
 
   /* ---------------------------------------------------------------- */

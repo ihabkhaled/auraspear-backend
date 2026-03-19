@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UsePipes } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UsePipes,
+} from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { ImpersonateUserSchema, type ImpersonateUserDto } from './dto/impersonate-user.dto'
@@ -25,8 +36,10 @@ import { Permission } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import { issueCsrfToken, setAuthCookies } from '../auth/auth-cookie.utility'
 import type {
   TenantMember,
+  TenantMemberLimited,
   TenantRecord,
   TenantWithCounts,
   UserRecord,
@@ -35,6 +48,7 @@ import type {
   ImpersonateUserResponse,
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type { Response } from 'express'
 
 /**
  * Validates that a TENANT_ADMIN is only operating on their own tenant.
@@ -77,10 +91,22 @@ export class TenantsController {
     return this.tenantsService.findById(tenantId)
   }
 
-  /** Lightweight member list for assignee pickers — any authenticated user. */
+  /**
+   * Lightweight member list for assignee pickers — any authenticated user.
+   * Admin users receive full details (id, name, email).
+   * Non-admin users receive limited details (id, name) to prevent member enumeration.
+   */
   @Get('current/members')
-  async getCurrentTenantMembers(@TenantId() tenantId: string): Promise<TenantMember[]> {
-    return this.tenantsService.findMembers(tenantId)
+  async getCurrentTenantMembers(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<Array<TenantMember | TenantMemberLimited>> {
+    const members = await this.tenantsService.findMembers(tenantId)
+    const isAdmin = user.role === UserRole.GLOBAL_ADMIN || user.role === UserRole.TENANT_ADMIN
+    if (isAdmin) {
+      return members
+    }
+    return members.map(({ id, name }) => ({ id, name }))
   }
 
   @Patch(':id')
@@ -230,9 +256,19 @@ export class TenantsController {
     @Param('tenantId') tenantId: string,
     @Param('userId') userId: string,
     @Body(new ZodValidationPipe(ImpersonateUserSchema)) _dto: ImpersonateUserDto,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Res({ passthrough: true }) response: Response
   ): Promise<ImpersonateUserResponse> {
     assertTenantAccess(user, tenantId)
-    return this.tenantsService.impersonateUser(tenantId, userId, user)
+    const session = await this.tenantsService.impersonateUser(tenantId, userId, user)
+    setAuthCookies(response, session.accessToken, session.refreshToken)
+    const csrfToken = issueCsrfToken(response)
+
+    return {
+      accessToken: session.accessToken,
+      csrfToken,
+      user: session.user,
+      impersonator: session.impersonator,
+    }
   }
 }

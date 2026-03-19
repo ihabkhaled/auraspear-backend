@@ -238,6 +238,62 @@ export class CorrelationService {
   }
 
   /**
+   * Toggles a correlation rule between active and disabled status.
+   */
+  async toggleRule(id: string, enabled: boolean, user: JwtPayload): Promise<RuleRecord> {
+    const existing = await this.repository.findFirstSelect(
+      { id, tenantId: user.tenantId },
+      { id: true }
+    )
+
+    if (!existing) {
+      this.appLogger.warn('Correlation rule not found for toggle', {
+        feature: AppLogFeature.CORRELATION,
+        action: 'toggleRule',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'CorrelationService',
+        functionName: 'toggleRule',
+        targetResource: 'CorrelationRule',
+        targetResourceId: id,
+      })
+      throw new BusinessException(404, 'Rule not found', 'errors.correlation.notFound')
+    }
+
+    const newStatus = enabled ? RuleStatus.ACTIVE : RuleStatus.DISABLED
+    const rule = await this.repository.updateWithTenant({
+      where: { id, tenantId: user.tenantId },
+      data: { status: newStatus },
+    })
+
+    const creator = await this.repository.findUserNameByEmail(rule.createdBy)
+
+    this.logger.log(`User ${user.email} toggled correlation rule ${id} to ${newStatus}`)
+    this.appLogger.info('Correlation rule toggled', {
+      feature: AppLogFeature.CORRELATION,
+      action: 'toggleRule',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CorrelationService',
+      functionName: 'toggleRule',
+      targetResource: 'CorrelationRule',
+      targetResourceId: id,
+      metadata: { enabled, newStatus },
+    })
+
+    const { tenant, ...rest } = rule
+    return {
+      ...rest,
+      createdByName: creator?.name ?? null,
+      tenantName: tenant.name,
+    }
+  }
+
+  /**
    * Deletes a correlation rule, verifying tenant ownership.
    */
   async deleteRule(id: string, tenantId: string, email: string): Promise<{ deleted: boolean }> {

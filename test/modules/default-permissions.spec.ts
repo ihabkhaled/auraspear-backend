@@ -45,9 +45,9 @@ describe('Default Permissions', () => {
       expect(tenantAdminPerms.has(Permission.CASES_DELETE_ARTIFACT)).toBe(true)
     })
 
-    it('should NOT have role settings permissions (only GLOBAL_ADMIN manages roles by default)', () => {
-      expect(tenantAdminPerms.has(Permission.ROLE_SETTINGS_VIEW)).toBe(false)
-      expect(tenantAdminPerms.has(Permission.ROLE_SETTINGS_UPDATE)).toBe(false)
+    it('should have role settings permissions (TENANT_ADMIN manages tenant RBAC)', () => {
+      expect(tenantAdminPerms.has(Permission.ROLE_SETTINGS_VIEW)).toBe(true)
+      expect(tenantAdminPerms.has(Permission.ROLE_SETTINGS_UPDATE)).toBe(true)
     })
 
     it('should have DASHBOARD_VIEW', () => {
@@ -83,10 +83,12 @@ describe('Default Permissions', () => {
       expect(l1Perms.has(Permission.DASHBOARD_VIEW)).toBe(true)
     })
 
-    it('should have basic alert permissions', () => {
+    it('should have basic alert permissions (view + acknowledge only)', () => {
       expect(l1Perms.has(Permission.ALERTS_VIEW)).toBe(true)
-      expect(l1Perms.has(Permission.ALERTS_INVESTIGATE)).toBe(true)
-      expect(l1Perms.has(Permission.ALERTS_ESCALATE)).toBe(true)
+      expect(l1Perms.has(Permission.ALERTS_ACKNOWLEDGE)).toBe(true)
+      // L1 should NOT have investigate or escalate
+      expect(l1Perms.has(Permission.ALERTS_INVESTIGATE)).toBe(false)
+      expect(l1Perms.has(Permission.ALERTS_ESCALATE)).toBe(false)
     })
 
     it('should NOT have admin user permissions', () => {
@@ -189,11 +191,17 @@ describe('Default Permissions', () => {
 
   it('should include all non-GLOBAL_ADMIN roles in CONFIGURABLE_ROLES', () => {
     const expectedRoles = [
+      UserRole.PLATFORM_OPERATOR,
       UserRole.TENANT_ADMIN,
-      UserRole.SOC_ANALYST_L2,
+      UserRole.DETECTION_ENGINEER,
+      UserRole.INCIDENT_RESPONDER,
+      UserRole.THREAT_INTEL_ANALYST,
+      UserRole.SOAR_ENGINEER,
       UserRole.THREAT_HUNTER,
+      UserRole.SOC_ANALYST_L2,
       UserRole.SOC_ANALYST_L1,
       UserRole.EXECUTIVE_READONLY,
+      UserRole.AUDITOR_READONLY,
     ]
 
     for (const role of expectedRoles) {

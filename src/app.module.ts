@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'
 import { LoggerModule } from 'nestjs-pino'
 import { AppController } from './app.controller'
 import { AuthGuard } from './common/guards/auth.guard'
+import { CsrfGuard } from './common/guards/csrf.guard'
 import { PermissionsGuard } from './common/guards/permissions.guard'
 import { RolesGuard } from './common/guards/roles.guard'
 import { TenantGuard } from './common/guards/tenant.guard'
@@ -32,6 +33,7 @@ import { HealthModule } from './modules/health/health.module'
 import { HuntsModule } from './modules/hunts/hunts.module'
 import { IncidentsModule } from './modules/incidents/incidents.module'
 import { IntelModule } from './modules/intel/intel.module'
+import { JobsModule } from './modules/jobs/jobs.module'
 import { NormalizationModule } from './modules/normalization/normalization.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { ReportsModule } from './modules/reports/reports.module'
@@ -90,6 +92,7 @@ import { PrismaModule } from './prisma/prisma.module'
     CaseCyclesModule,
     CasesModule,
     IncidentsModule,
+    JobsModule,
     CorrelationModule,
     IntelModule,
     NotificationsModule,
@@ -110,9 +113,10 @@ import { PrismaModule } from './prisma/prisma.module'
     RoleSettingsModule,
   ],
   providers: [
-    // Global guards (order matters: auth → tenant → roles)
+    // Global guards (order matters: throttle → auth → csrf → tenant → roles)
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

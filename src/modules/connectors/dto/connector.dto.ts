@@ -1,5 +1,57 @@
 import { z } from 'zod'
 
+// --- Config normalization helpers ---
+// These ensure backward compatibility with existing encrypted configs that may
+// use the old key names (verifyTLS, mispAuthKey, shuffleApiKey).
+
+/**
+ * Normalizes verifyTLS → verifyTls for backward compatibility.
+ * If both are present, verifyTls takes precedence.
+ */
+function normalizeVerifyTls(config: Record<string, unknown>): Record<string, unknown> {
+  if ('verifyTLS' in config && !('verifyTls' in config)) {
+    const { verifyTLS, ...rest } = config
+    return { ...rest, verifyTls: verifyTLS }
+  }
+  if ('verifyTLS' in config && 'verifyTls' in config) {
+    const { verifyTLS: _deprecated, ...rest } = config
+    return rest
+  }
+  return config
+}
+
+/**
+ * Normalizes mispAuthKey → authKey for backward compatibility.
+ * If both are present, authKey takes precedence.
+ */
+function normalizeMispAuthKey(config: Record<string, unknown>): Record<string, unknown> {
+  if ('mispAuthKey' in config && !('authKey' in config)) {
+    const { mispAuthKey, ...rest } = config
+    return { ...rest, authKey: mispAuthKey }
+  }
+  if ('mispAuthKey' in config && 'authKey' in config) {
+    const { mispAuthKey: _deprecated, ...rest } = config
+    return rest
+  }
+  return config
+}
+
+/**
+ * Normalizes shuffleApiKey → apiKey for backward compatibility.
+ * If both are present, apiKey takes precedence.
+ */
+function normalizeShuffleApiKey(config: Record<string, unknown>): Record<string, unknown> {
+  if ('shuffleApiKey' in config && !('apiKey' in config)) {
+    const { shuffleApiKey, ...rest } = config
+    return { ...rest, apiKey: shuffleApiKey }
+  }
+  if ('shuffleApiKey' in config && 'apiKey' in config) {
+    const { shuffleApiKey: _deprecated, ...rest } = config
+    return rest
+  }
+  return config
+}
+
 // --- Per-connector-type config schemas ---
 
 export const WazuhConfigSchema = z
@@ -12,10 +64,13 @@ export const WazuhConfigSchema = z
     apiKey: z.string().max(500).optional(),
     indexerUsername: z.string().max(255).optional(),
     indexerPassword: z.string().max(255).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
     tenant: z.string().max(255).optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const GraylogConfigSchema = z
   .object({
@@ -25,9 +80,12 @@ export const GraylogConfigSchema = z
     apiKey: z.string().max(500).optional(),
     streamId: z.string().max(255).optional(),
     indexSetId: z.string().max(255).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const LogstashConfigSchema = z
   .object({
@@ -36,9 +94,12 @@ export const LogstashConfigSchema = z
     password: z.string().max(255).optional(),
     apiKey: z.string().max(500).optional(),
     pipelineId: z.string().max(255).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const VelociraptorConfigSchema = z
   .object({
@@ -50,9 +111,12 @@ export const VelociraptorConfigSchema = z
     clientCert: z.string().max(10000).optional(),
     clientKey: z.string().max(10000).optional(),
     caCert: z.string().max(10000).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const GrafanaConfigSchema = z
   .object({
@@ -62,9 +126,12 @@ export const GrafanaConfigSchema = z
     grafanaUrl: z.string().max(500).optional(),
     folderId: z.string().max(255).optional(),
     datasourceUid: z.string().max(255).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const InfluxDBConfigSchema = z
   .object({
@@ -72,19 +139,27 @@ export const InfluxDBConfigSchema = z
     token: z.string().max(500).optional(),
     org: z.string().max(255).optional(),
     bucket: z.string().max(255).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
 
 export const MispConfigSchema = z
   .object({
     baseUrl: z.string().max(500).optional(),
     mispUrl: z.string().max(500).optional(),
-    mispAuthKey: z.string().max(500).optional(),
     authKey: z.string().max(500).optional(),
+    /** @deprecated Use authKey. Kept for backward compatibility with existing encrypted configs. */
+    mispAuthKey: z.string().max(500).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
+  .transform(normalizeMispAuthKey)
 
 export const ShuffleConfigSchema = z
   .object({
@@ -92,10 +167,15 @@ export const ShuffleConfigSchema = z
     webhookUrl: z.string().max(500).optional(),
     workflowId: z.string().max(255).optional(),
     apiKey: z.string().max(500).optional(),
+    /** @deprecated Use apiKey. Kept for backward compatibility with existing encrypted configs. */
     shuffleApiKey: z.string().max(500).optional(),
+    verifyTls: z.boolean().optional(),
+    /** @deprecated Use verifyTls. Kept for backward compatibility with existing encrypted configs. */
     verifyTLS: z.boolean().optional(),
   })
   .passthrough()
+  .transform(normalizeVerifyTls)
+  .transform(normalizeShuffleApiKey)
 
 export const BedrockConfigSchema = z
   .object({
@@ -125,6 +205,11 @@ const connectorConfigSchemas = new Map<string, z.ZodType<Record<string, unknown>
  * Validates a connector config against the type-specific schema.
  * Returns the parsed (validated) config, or throws a ZodError on invalid input.
  * If the type has no known schema, returns the config as-is.
+ *
+ * Note: Schema transforms automatically normalize deprecated keys:
+ * - verifyTLS → verifyTls
+ * - mispAuthKey → authKey (MISP)
+ * - shuffleApiKey → apiKey (Shuffle)
  */
 export function validateConnectorConfig(
   type: string,

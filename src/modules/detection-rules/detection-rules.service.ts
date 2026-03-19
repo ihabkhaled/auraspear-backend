@@ -178,6 +178,47 @@ export class DetectionRulesService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* TOGGLE                                                            */
+  /* ---------------------------------------------------------------- */
+
+  async toggleRule(id: string, enabled: boolean, user: JwtPayload): Promise<DetectionRuleRecord> {
+    await this.getRuleById(id, user.tenantId)
+
+    const newStatus = enabled ? DetectionRuleStatus.ACTIVE : DetectionRuleStatus.DISABLED
+    const updateData: Prisma.DetectionRuleUpdateManyMutationInput = { status: newStatus }
+
+    const updated = await this.repository.updateMany({
+      where: { id, tenantId: user.tenantId },
+      data: updateData,
+    })
+
+    if (updated.count === 0) {
+      throw new BusinessException(
+        404,
+        `Detection rule ${id} not found`,
+        'errors.detectionRules.notFound'
+      )
+    }
+
+    this.appLogger.info('Detection rule toggled', {
+      feature: AppLogFeature.DETECTION_RULES,
+      action: 'toggleRule',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'DetectionRule',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DetectionRulesService',
+      functionName: 'toggleRule',
+      metadata: { enabled, newStatus },
+    })
+
+    return this.getRuleById(id, user.tenantId)
+  }
+
+  /* ---------------------------------------------------------------- */
   /* DELETE                                                            */
   /* ---------------------------------------------------------------- */
 

@@ -2,100 +2,18 @@ import { Controller, Get, Query } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { DashboardsService } from './dashboards.service'
 import { AlertTrendQuerySchema, RecentActivityQuerySchema } from './dto/dashboard-query.dto'
+import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-
-interface DashboardSummary {
-  tenantId: string
-  totalAlerts: number
-  criticalAlerts: number
-  openCases: number
-  alertsLast24h: number
-  resolvedLast24h: number
-  meanTimeToRespond: string
-  connectedSources: number
-  totalAlertsTrend: number
-  criticalAlertsTrend: number
-  openCasesTrend: number
-  mttrTrend: number
-}
-
-interface AlertTrendEntry {
-  date: string
-  critical: number
-  high: number
-  medium: number
-  low: number
-  info: number
-}
-
-interface AlertTrend {
-  tenantId: string
-  days: number
-  trend: AlertTrendEntry[]
-}
-
-interface SeverityDistributionEntry {
-  severity: string
-  count: number
-  percentage: number
-}
-
-interface SeverityDistribution {
-  tenantId: string
-  distribution: SeverityDistributionEntry[]
-}
-
-interface MitreTopTechniques {
-  tenantId: string
-  techniques: Array<{ id: string; count: number }>
-}
-
-interface TopTargetedAsset {
-  hostname: string
-  alertCount: number
-  criticalCount: number
-  lastSeen: Date
-}
-
-interface TopTargetedAssets {
-  tenantId: string
-  assets: TopTargetedAsset[]
-}
-
-interface PipelineEntry {
-  name: string
-  type: string
-  status: string
-  lastChecked: Date | null
-  lastError: string | null
-}
-
-interface PipelineHealth {
-  tenantId: string
-  pipelines: PipelineEntry[]
-}
-
-interface RecentActivityItem {
-  id: string
-  type: string
-  actorName: string
-  title: string
-  message: string
-  createdAt: Date
-  isRead: boolean
-}
-
-interface RecentActivityResponse {
-  data: RecentActivityItem[]
-  pagination: {
-    page: number
-    limit: number
-    total: number
-    totalPages: number
-    hasNext: boolean
-    hasPrev: boolean
-  }
-}
+import { Permission } from '../../common/enums'
+import type {
+  AlertTrend,
+  DashboardSummary,
+  MitreTopTechniques,
+  PipelineHealth,
+  RecentActivityResponse,
+  SeverityDistribution,
+  TopTargetedAssets,
+} from './dashboards.types'
 
 @ApiTags('dashboards')
 @ApiBearerAuth()
@@ -104,11 +22,13 @@ export class DashboardsController {
   constructor(private readonly dashboardsService: DashboardsService) {}
 
   @Get('summary')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getSummary(@TenantId() tenantId: string): Promise<DashboardSummary> {
     return this.dashboardsService.getSummary(tenantId)
   }
 
   @Get('alert-trend')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getAlertTrend(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, unknown>
@@ -118,26 +38,31 @@ export class DashboardsController {
   }
 
   @Get('severity-distribution')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getSeverityDistribution(@TenantId() tenantId: string): Promise<SeverityDistribution> {
     return this.dashboardsService.getSeverityDistribution(tenantId)
   }
 
   @Get('mitre-top-techniques')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getMitreTopTechniques(@TenantId() tenantId: string): Promise<MitreTopTechniques> {
     return this.dashboardsService.getMitreTopTechniques(tenantId)
   }
 
   @Get('top-targeted-assets')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getTopTargetedAssets(@TenantId() tenantId: string): Promise<TopTargetedAssets> {
     return this.dashboardsService.getTopTargetedAssets(tenantId)
   }
 
   @Get('pipeline-health')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getPipelineHealth(@TenantId() tenantId: string): Promise<PipelineHealth> {
     return this.dashboardsService.getPipelineHealth(tenantId)
   }
 
   @Get('recent-activity')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
   async getRecentActivity(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, unknown>

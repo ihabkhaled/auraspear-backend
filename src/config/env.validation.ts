@@ -35,6 +35,10 @@ export const envSchema = z
       }),
     JWT_ACCESS_EXPIRY: z.string().default('15m'),
     JWT_REFRESH_EXPIRY: z.string().default('7d'),
+    PLATFORM_ADMIN_PASSWORD: z
+      .string()
+      .min(12, { message: 'PLATFORM_ADMIN_PASSWORD must be at least 12 characters when set' })
+      .optional(),
 
     // Application
     PORT: z.coerce.number().default(4000),

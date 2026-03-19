@@ -1,3 +1,4 @@
+import { promises as dns } from 'node:dns'
 import { NodeEnvironment } from '../enums'
 import { BusinessException } from '../exceptions/business.exception'
 
@@ -75,4 +76,47 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
 
 export function isPrivateHost(hostname: string): boolean {
   return PRIVATE_RANGES.some(pattern => pattern.test(hostname))
+}
+
+/**
+ * DNS-aware SSRF defense: resolves the hostname to an IP address and validates
+ * the resolved IP against the private IP blocklist. This prevents DNS rebinding
+ * attacks where an attacker registers a domain that resolves to a private IP.
+ *
+ * In non-production environments, DNS resolution check is skipped to allow
+ * local development with private network addresses.
+ */
+export async function resolveAndValidateUrl(
+  urlString: string,
+  allowedHosts?: string[]
+): Promise<URL> {
+  const url = validateUrl(urlString, allowedHosts)
+
+  const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
+  if (!isProduction) {
+    return url
+  }
+
+  try {
+    const { address } = await dns.lookup(url.hostname)
+    if (isPrivateHost(address)) {
+      throw new BusinessException(
+        400,
+        `Hostname '${url.hostname}' resolves to a private IP address`,
+        'errors.connectors.ssrfBlocked'
+      )
+    }
+  } catch (error: unknown) {
+    if (error instanceof BusinessException) {
+      throw error
+    }
+    // DNS resolution failure — block the request in production
+    throw new BusinessException(
+      400,
+      `Failed to resolve hostname '${url.hostname}'`,
+      'errors.connectors.dnsResolutionFailed'
+    )
+  }
+
+  return url
 }

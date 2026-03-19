@@ -80,9 +80,9 @@ export class NotificationsRepository {
     return this.prisma.notification.create({ data })
   }
 
-  async findCaseById(caseId: string): Promise<CaseNumberSelect | null> {
-    return this.prisma.case.findUnique({
-      where: { id: caseId },
+  async findCaseById(caseId: string, tenantId: string): Promise<CaseNumberSelect | null> {
+    return this.prisma.case.findFirst({
+      where: { id: caseId, tenantId },
       select: { caseNumber: true },
     })
   }

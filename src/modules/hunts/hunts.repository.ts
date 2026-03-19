@@ -154,4 +154,11 @@ export class HuntsRepository {
   async countEvents(huntSessionId: string): Promise<number> {
     return this.prisma.huntEvent.count({ where: { huntSessionId } })
   }
+
+  async deleteSessionAndEvents(id: string, tenantId: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.huntEvent.deleteMany({ where: { huntSessionId: id } }),
+      this.prisma.huntSession.deleteMany({ where: { id, tenantId } }),
+    ])
+  }
 }

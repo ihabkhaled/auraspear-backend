@@ -26,18 +26,20 @@ export class RoleSettingsController {
   @Get('definitions')
   @RequirePermission(Permission.ROLE_SETTINGS_VIEW)
   async getPermissionDefinitions(
-    @TenantId() tenantId: string
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
   ): Promise<Array<{ key: string; module: string; labelKey: string; sortOrder: number }>> {
-    return this.roleSettingsService.getPermissionDefinitions(tenantId)
+    return this.roleSettingsService.getPermissionDefinitions(tenantId, user.role)
   }
 
   @Get()
   @RequirePermission(Permission.ROLE_SETTINGS_VIEW)
   async getPermissionMatrix(
     @TenantId() tenantId: string
-  ): Promise<{ matrix: Record<string, string[]> }> {
+  ): Promise<{ matrix: Record<string, string[]>; configurableRoles: string[] }> {
     const matrix = await this.roleSettingsService.getPermissionMatrix(tenantId)
-    return { matrix }
+    const configurableRoles = this.roleSettingsService.getConfigurableRoles()
+    return { matrix, configurableRoles }
   }
 
   @Put()
@@ -47,14 +49,16 @@ export class RoleSettingsController {
     @Body(new ZodValidationPipe(UpdateRolePermissionsSchema)) dto: UpdateRolePermissionsDto,
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
-  ): Promise<{ matrix: Record<string, string[]> }> {
+  ): Promise<{ matrix: Record<string, string[]>; configurableRoles: string[] }> {
     const matrix = await this.roleSettingsService.updatePermissionMatrix(
       tenantId,
       dto.matrix,
       user.email,
-      user.sub
+      user.sub,
+      user.role
     )
-    return { matrix }
+    const configurableRoles = this.roleSettingsService.getConfigurableRoles()
+    return { matrix, configurableRoles }
   }
 
   @Post('reset')
@@ -63,8 +67,14 @@ export class RoleSettingsController {
   async resetToDefaults(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
-  ): Promise<{ matrix: Record<string, string[]> }> {
-    const matrix = await this.roleSettingsService.resetToDefaults(tenantId, user.email, user.sub)
-    return { matrix }
+  ): Promise<{ matrix: Record<string, string[]>; configurableRoles: string[] }> {
+    const matrix = await this.roleSettingsService.resetToDefaults(
+      tenantId,
+      user.email,
+      user.sub,
+      user.role
+    )
+    const configurableRoles = this.roleSettingsService.getConfigurableRoles()
+    return { matrix, configurableRoles }
   }
 }

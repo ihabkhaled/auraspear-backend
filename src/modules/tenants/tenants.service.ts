@@ -42,7 +42,7 @@ import type {
   UserRecord,
   PaginatedResult,
   CheckEmailResult,
-  ImpersonateUserResponse,
+  ImpersonationSessionResult,
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { TenantMembership, User } from '@prisma/client'
@@ -322,6 +322,7 @@ export class TenantsService {
     this.guardSelfRoleChange('updateUser', tenantId, callerId, userId, dto.role)
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
 
+    this.guardProtectedUserAction('updateUser', tenantId, userId, membership.user)
     this.guardProtectedRoleChange('updateUser', tenantId, userId, membership, dto.role)
     this.guardGlobalAdminModification('updateUser', tenantId, userId, membership.role, callerRole)
     this.guardGlobalAdminAssignment('updateUser', tenantId, dto.role, callerRole)
@@ -341,6 +342,7 @@ export class TenantsService {
         callerId,
         callerEmail
       )
+      this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'role-updated')
     }
     return mapMembershipToUserRecord(updated)
   }
@@ -371,6 +373,7 @@ export class TenantsService {
     await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
     this.logSuccess('removeUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRemoved(tenantId, userId, callerId, callerEmail)
+    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
     return { deleted: true }
   }
 
@@ -400,6 +403,7 @@ export class TenantsService {
     )
     this.logSuccess('restoreUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRestored(tenantId, userId, callerId, callerEmail)
+    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
     return mapMembershipToUserRecord(updated)
   }
 
@@ -442,6 +446,7 @@ export class TenantsService {
     )
     this.logSuccess('blockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
+    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
     return mapMembershipToUserRecord(updated)
   }
 
@@ -471,6 +476,7 @@ export class TenantsService {
     )
     this.logSuccess('unblockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserUnblocked(tenantId, userId, callerId, callerEmail)
+    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
     return mapMembershipToUserRecord(updated)
   }
 
@@ -482,7 +488,7 @@ export class TenantsService {
     tenantId: string,
     userId: string,
     caller: JwtPayload
-  ): Promise<ImpersonateUserResponse> {
+  ): Promise<ImpersonationSessionResult> {
     this.guardNestedImpersonation(caller)
     this.guardSelfImpersonation(caller, userId, tenantId)
 
@@ -503,13 +509,12 @@ export class TenantsService {
       targetMembership,
       caller
     )
-    const accessToken = this.authService.signAccessToken(targetPayload)
-    const refreshToken = this.authService.signRefreshToken(targetPayload)
+    const session = await this.authService.issueSession(targetUser.id, tenantId, targetPayload)
 
     this.logImpersonation(tenantId, caller, targetUser, targetMembership.role)
     return {
-      accessToken,
-      refreshToken,
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
       user: {
         sub: targetUser.id,
         email: targetUser.email,

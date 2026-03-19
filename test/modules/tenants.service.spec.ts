@@ -24,6 +24,7 @@ const mockNotificationsService = {
   notifyUserUnblocked: jest.fn().mockResolvedValue(undefined),
   notifyUserRemoved: jest.fn().mockResolvedValue(undefined),
   notifyUserRestored: jest.fn().mockResolvedValue(undefined),
+  emitPermissionsUpdated: jest.fn(),
 }
 
 const TENANT_ID = 'tenant-001'
@@ -59,6 +60,10 @@ function createMockRepository() {
 const authService = {
   signAccessToken: jest.fn().mockReturnValue('mock-access'),
   signRefreshToken: jest.fn().mockReturnValue('mock-refresh'),
+  issueSession: jest.fn().mockResolvedValue({
+    accessToken: 'mock-access',
+    refreshToken: 'mock-refresh',
+  }),
 }
 
 function makeTenantRow(overrides: Record<string, unknown> = {}) {
@@ -666,6 +671,11 @@ describe('TenantsService', () => {
         CALLER_ID,
         CALLER_EMAIL
       )
+      expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'role-updated'
+      )
     })
 
     it('should throw 403 when trying to change own role', async () => {
@@ -718,6 +728,26 @@ describe('TenantsService', () => {
           TENANT_ID,
           USER_ID,
           { role: UserRole.SOC_ANALYST_L2 },
+          UserRole.GLOBAL_ADMIN,
+          CALLER_ID,
+          CALLER_EMAIL
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.tenants.userProtected',
+      })
+    })
+
+    it('should throw 403 when modifying any protected user fields', async () => {
+      const protectedMembership = makeMembershipRow({
+        user: { ...makeMembershipRow().user, isProtected: true },
+      })
+      repository.findMembershipWithUser.mockResolvedValue(protectedMembership)
+
+      await expect(
+        service.updateUser(
+          TENANT_ID,
+          USER_ID,
+          { name: 'Changed Name' },
           UserRole.GLOBAL_ADMIN,
           CALLER_ID,
           CALLER_EMAIL
@@ -818,6 +848,11 @@ describe('TenantsService', () => {
         CALLER_ID,
         CALLER_EMAIL
       )
+      expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'membership-status-updated'
+      )
     })
 
     it('should throw 403 when trying to delete self', async () => {
@@ -901,6 +936,11 @@ describe('TenantsService', () => {
         USER_ID,
         CALLER_ID,
         CALLER_EMAIL
+      )
+      expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'membership-status-updated'
       )
     })
 
@@ -999,6 +1039,11 @@ describe('TenantsService', () => {
         CALLER_ID,
         CALLER_EMAIL
       )
+      expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'membership-status-updated'
+      )
     })
 
     it('should throw 403 when blocking self', async () => {
@@ -1094,6 +1139,11 @@ describe('TenantsService', () => {
         USER_ID,
         CALLER_ID,
         CALLER_EMAIL
+      )
+      expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
+        TENANT_ID,
+        USER_ID,
+        'membership-status-updated'
       )
     })
 

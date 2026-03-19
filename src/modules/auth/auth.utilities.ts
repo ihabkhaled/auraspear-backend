@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   type UserRole,
   type JwtPayload,
@@ -63,4 +64,42 @@ export function preserveImpersonationClaims(newPayload: JwtPayload, original: Jw
 export function computeRemainingTtl(exp: number): number {
   const now = Math.floor(Date.now() / 1000)
   return Math.max(exp - now, 0)
+}
+
+export function buildExpiryDateFromSeconds(ttlSeconds: number): Date {
+  return new Date(Date.now() + ttlSeconds * 1000)
+}
+
+export function hashTokenIdentifier(identifier: string): string {
+  return createHash('sha256').update(identifier).digest('hex')
+}
+
+/* ---------------------------------------------------------------- */
+/* EXPIRY PARSING                                                    */
+/* ---------------------------------------------------------------- */
+
+const EXPIRY_UNITS: Record<string, number> = {
+  s: 1,
+  m: 60,
+  h: 3600,
+  d: 86400,
+  w: 604800,
+}
+
+/**
+ * Parse a JWT expiry string (e.g., '7d', '15m', '1h') into seconds.
+ * Returns a default of 604800 (7 days) if parsing fails.
+ */
+export function parseExpiryToSeconds(expiry: string): number {
+  const match = /^(\d+)([smhdw])$/i.exec(expiry)
+  if (!match) {
+    return 604800 // default 7 days
+  }
+  const value = Number.parseInt(match[1] ?? '7', 10)
+  const unit = (match[2] ?? 'd').toLowerCase()
+  const multiplier = EXPIRY_UNITS[unit]
+  if (multiplier === undefined) {
+    return 604800
+  }
+  return value * multiplier
 }

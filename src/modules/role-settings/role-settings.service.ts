@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common'
 import { CONFIGURABLE_ROLES, DEFAULT_PERMISSIONS } from './constants/default-permissions'
 import { PERMISSION_DEFINITIONS } from './constants/permission-definitions'
 import { PermissionCacheService } from './permission-cache.service'
@@ -10,9 +10,17 @@ import {
   AppLogOutcome,
   AppLogSourceType,
 } from '../../common/enums'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole as UserRoleEnum } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { NotificationsService } from '../notifications/notifications.service'
 import type { UserRole } from '@prisma/client'
+
+const ROLE_SETTINGS_MODULE = 'roleSettings'
+const TENANT_ADMIN_PROTECTED_PERMISSIONS = new Set<string>([
+  Permission.ROLE_SETTINGS_VIEW,
+  Permission.ROLE_SETTINGS_UPDATE,
+])
 
 @Injectable()
 export class RoleSettingsService {
@@ -21,8 +29,95 @@ export class RoleSettingsService {
   constructor(
     private readonly repository: RoleSettingsRepository,
     private readonly cache: PermissionCacheService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService
   ) {}
+
+  private normalizePermissions(permissions: string[]): string[] {
+    return [...permissions].sort((left, right) => left.localeCompare(right))
+  }
+
+  private getImpactedRoles(
+    currentMatrix: Record<string, string[]>,
+    nextMatrix: Record<string, string[]>
+  ): UserRole[] {
+    const impactedRoles: UserRole[] = []
+
+    for (const role of CONFIGURABLE_ROLES) {
+      const currentPermissions = JSON.stringify(
+        this.normalizePermissions(currentMatrix[role] ?? [])
+      )
+      const nextPermissions = JSON.stringify(this.normalizePermissions(nextMatrix[role] ?? []))
+
+      if (currentPermissions !== nextPermissions) {
+        impactedRoles.push(role as UserRole)
+      }
+    }
+
+    return impactedRoles
+  }
+
+  private async emitRoleMatrixPermissionChanges(
+    tenantId: string,
+    impactedRoles: UserRole[]
+  ): Promise<void> {
+    if (impactedRoles.length === 0) {
+      return
+    }
+
+    const userIds = await this.repository.findActiveUserIdsByRoles(tenantId, impactedRoles)
+    this.notificationsService.emitPermissionsUpdatedToUsers(
+      tenantId,
+      userIds,
+      'role-matrix-updated'
+    )
+  }
+
+  private async assertProtectedRoleSettingsPermissionsUnchanged(
+    tenantId: string,
+    matrix: Record<string, string[]>,
+    actorRole: string
+  ): Promise<void> {
+    if (actorRole !== UserRoleEnum.TENANT_ADMIN) {
+      return
+    }
+
+    const currentMatrix = await this.getPermissionMatrix(tenantId)
+
+    for (const role of CONFIGURABLE_ROLES) {
+      const currentPermissions = new Set(currentMatrix[role] ?? [])
+      const requestedPermissions = new Set(matrix[role] ?? [])
+
+      for (const permission of TENANT_ADMIN_PROTECTED_PERMISSIONS) {
+        if (currentPermissions.has(permission) !== requestedPermissions.has(permission)) {
+          throw new BusinessException(
+            403,
+            'Tenant admins cannot modify role settings permissions',
+            'errors.auth.insufficientPermissions'
+          )
+        }
+      }
+    }
+  }
+
+  private assertResetAllowed(actorRole: string): void {
+    if (actorRole === UserRoleEnum.TENANT_ADMIN) {
+      throw new BusinessException(
+        403,
+        'Tenant admins cannot reset role settings defaults',
+        'errors.auth.insufficientPermissions'
+      )
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* GET CONFIGURABLE ROLES                                            */
+  /* ---------------------------------------------------------------- */
+
+  getConfigurableRoles(): string[] {
+    return [...CONFIGURABLE_ROLES]
+  }
 
   /* ---------------------------------------------------------------- */
   /* GET PERMISSION MATRIX                                             */
@@ -55,8 +150,31 @@ export class RoleSettingsService {
     tenantId: string,
     matrix: Record<string, string[]>,
     actorEmail: string,
-    actorUserId: string
+    actorUserId: string,
+    actorRole: string
   ): Promise<Record<string, string[]>> {
+    const currentMatrix = await this.getPermissionMatrix(tenantId)
+    await this.assertProtectedRoleSettingsPermissionsUnchanged(tenantId, matrix, actorRole)
+
+    // Escalation prevention: non-GLOBAL_ADMIN users can only grant permissions they themselves have
+    if (actorRole !== UserRoleEnum.GLOBAL_ADMIN) {
+      const actorPermissions = await this.getUserPermissions(tenantId, actorRole)
+      const actorPermissionSet = new Set(actorPermissions)
+
+      const matrixEntries = Object.entries(matrix)
+      for (const [, permissions] of matrixEntries) {
+        for (const permission of permissions) {
+          if (!actorPermissionSet.has(permission)) {
+            throw new BusinessException(
+              403,
+              'Cannot grant a permission you do not have',
+              'errors.roleSettings.escalationPrevented'
+            )
+          }
+        }
+      }
+    }
+
     const allPermissionValues = new Set<string>(ALL_PERMISSIONS)
     const entries: Array<{ role: UserRole; permissionKey: string; allowed: boolean }> = []
 
@@ -76,6 +194,10 @@ export class RoleSettingsService {
 
     await this.repository.bulkUpsertPermissions(tenantId, entries)
     this.cache.invalidate(tenantId)
+    await this.emitRoleMatrixPermissionChanges(
+      tenantId,
+      this.getImpactedRoles(currentMatrix, matrix)
+    )
 
     this.appLogger.info('Permission matrix updated', {
       feature: AppLogFeature.AUTH,
@@ -99,11 +221,14 @@ export class RoleSettingsService {
   async resetToDefaults(
     tenantId: string,
     actorEmail: string,
-    actorUserId: string
+    actorUserId: string,
+    actorRole: string
   ): Promise<Record<string, string[]>> {
+    this.assertResetAllowed(actorRole)
     await this.repository.deleteAllByTenant(tenantId)
     await this.seedDefaultsForTenant(tenantId)
     this.cache.invalidate(tenantId)
+    await this.emitRoleMatrixPermissionChanges(tenantId, CONFIGURABLE_ROLES as UserRole[])
 
     this.appLogger.info('Permission matrix reset to defaults', {
       feature: AppLogFeature.AUTH,
@@ -207,9 +332,16 @@ export class RoleSettingsService {
    * Includes global defaults merged with any tenant-specific overrides.
    */
   async getPermissionDefinitions(
-    tenantId: string
+    tenantId: string,
+    actorRole?: string
   ): Promise<Array<{ key: string; module: string; labelKey: string; sortOrder: number }>> {
-    return this.repository.findPermissionDefinitions(tenantId)
+    const definitions = await this.repository.findPermissionDefinitions(tenantId)
+
+    if (actorRole === UserRoleEnum.TENANT_ADMIN) {
+      return definitions.filter(definition => definition.module !== ROLE_SETTINGS_MODULE)
+    }
+
+    return definitions
   }
 
   /**

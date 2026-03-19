@@ -5,6 +5,8 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType, RedisResponse } from '.
 import { AppLoggerService } from '../../common/services/app-logger.service'
 
 const TOKEN_BLACKLIST_PREFIX = 'token:blacklist:'
+const REFRESH_FAMILY_PREFIX = 'rf:'
+const REFRESH_FAMILY_REVOKED_PREFIX = 'rf:revoked:'
 
 @Injectable()
 export class TokenBlacklistService implements OnModuleDestroy {
@@ -136,6 +138,152 @@ export class TokenBlacklistService implements OnModuleDestroy {
         functionName: 'isRedisHealthy',
       })
       return false
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* REFRESH TOKEN FAMILY TRACKING                                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Store the latest valid generation for a refresh token family.
+   * Key: `rf:{family}` → generation number, with TTL matching refresh token expiry.
+   */
+  async setFamilyGeneration(family: string, generation: number, ttlSeconds: number): Promise<void> {
+    try {
+      const key = `${REFRESH_FAMILY_PREFIX}${family}`
+      const ttl = Math.max(ttlSeconds, 1)
+      await this.redis.set(key, String(generation), 'EX', ttl)
+
+      this.appLogger.info('Refresh token family generation set', {
+        feature: AppLogFeature.AUTH,
+        action: 'setFamilyGeneration',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'setFamilyGeneration',
+        metadata: { family, generation, ttlSeconds: ttl },
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Failed to set family generation for ${family}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+
+      this.appLogger.error('Failed to set refresh token family generation', {
+        feature: AppLogFeature.AUTH,
+        action: 'setFamilyGeneration',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'setFamilyGeneration',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+    }
+  }
+
+  /**
+   * Get the latest valid generation for a refresh token family.
+   * Returns `null` if the family does not exist or Redis is unavailable.
+   */
+  async getFamilyGeneration(family: string): Promise<number | null> {
+    try {
+      const key = `${REFRESH_FAMILY_PREFIX}${family}`
+      const result = await this.redis.get(key)
+      if (result === null) {
+        return null
+      }
+      return Number.parseInt(result, 10)
+    } catch (error) {
+      this.logger.warn(
+        `Failed to get family generation for ${family}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+
+      this.appLogger.error('Failed to get refresh token family generation (fail-open)', {
+        feature: AppLogFeature.AUTH,
+        action: 'getFamilyGeneration',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'getFamilyGeneration',
+        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
+      })
+
+      return null
+    }
+  }
+
+  /**
+   * Invalidate an entire refresh token family by deleting the generation key
+   * and marking the family as revoked (so any token from this family is rejected).
+   */
+  async invalidateFamily(family: string): Promise<void> {
+    try {
+      const familyKey = `${REFRESH_FAMILY_PREFIX}${family}`
+      const revokedKey = `${REFRESH_FAMILY_REVOKED_PREFIX}${family}`
+
+      // Get the TTL of the family key before deleting, so the revoked marker has the same TTL
+      const remainingTtl = await this.redis.ttl(familyKey)
+      await this.redis.del(familyKey)
+
+      // Set a revoked marker so any token from this family is rejected even after the generation key is gone
+      const ttl = Math.max(remainingTtl, 1)
+      await this.redis.set(revokedKey, '1', 'EX', ttl)
+
+      this.appLogger.warn('Refresh token family invalidated (possible replay attack)', {
+        feature: AppLogFeature.AUTH,
+        action: 'invalidateFamily',
+        outcome: AppLogOutcome.DENIED,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'invalidateFamily',
+        metadata: { family },
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate family ${family}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+
+      this.appLogger.error('Failed to invalidate refresh token family', {
+        feature: AppLogFeature.AUTH,
+        action: 'invalidateFamily',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'TokenBlacklistService',
+        functionName: 'invalidateFamily',
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
+    }
+  }
+
+  /**
+   * Check whether a refresh token family has been revoked.
+   */
+  async isFamilyRevoked(family: string): Promise<boolean> {
+    try {
+      const key = `${REFRESH_FAMILY_REVOKED_PREFIX}${family}`
+      const result = await this.redis.exists(key)
+      return result === 1
+    } catch (error) {
+      this.logger.warn(
+        `Failed to check family revocation for ${family}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+
+      // Fail-open: same rationale as isBlacklisted
+      return false
+    }
+  }
+
+  /**
+   * Delete the refresh token family key (used on logout).
+   */
+  async deleteFamilyKey(family: string): Promise<void> {
+    try {
+      const key = `${REFRESH_FAMILY_PREFIX}${family}`
+      await this.redis.del(key)
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete family key for ${family}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
     }
   }
 

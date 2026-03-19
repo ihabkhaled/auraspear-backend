@@ -1,6 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { type AddTimelineEntryDto, AddTimelineEntrySchema } from './dto/add-timeline-entry.dto'
+import {
+  type ChangeIncidentStatusDto,
+  ChangeIncidentStatusSchema,
+} from './dto/change-incident-status.dto'
 import { type CreateIncidentDto, CreateIncidentSchema } from './dto/create-incident.dto'
 import { ListIncidentsQuerySchema } from './dto/list-incidents-query.dto'
 import { type UpdateIncidentDto, UpdateIncidentSchema } from './dto/update-incident.dto'
@@ -75,6 +79,16 @@ export class IncidentsController {
     @CurrentUser() user: JwtPayload
   ): Promise<IncidentRecord> {
     return this.incidentsService.updateIncident(id, dto, user)
+  }
+
+  @Patch(':id/status')
+  @RequirePermission(Permission.INCIDENTS_CHANGE_STATUS)
+  async changeStatus(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(ChangeIncidentStatusSchema)) dto: ChangeIncidentStatusDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<IncidentRecord> {
+    return this.incidentsService.changeStatus(id, dto.status, user)
   }
 
   @Delete(':id')

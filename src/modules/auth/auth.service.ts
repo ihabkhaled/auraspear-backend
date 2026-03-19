@@ -6,8 +6,11 @@ import * as jwt from 'jsonwebtoken'
 import { AuthRepository } from './auth.repository'
 import {
   buildPayloadFromMembership,
+  buildExpiryDateFromSeconds,
   computeRemainingTtl,
+  hashTokenIdentifier,
   mapMembershipsToTenantInfos,
+  parseExpiryToSeconds,
   preserveImpersonationClaims,
 } from './auth.utilities'
 import { TokenBlacklistService } from './token-blacklist.service'
@@ -18,10 +21,40 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { RoleSettingsService } from '../role-settings/role-settings.service'
 import type { TenantMembershipInfo } from './auth.utilities'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type {
+  RefreshTokenFamily,
+  RefreshTokenRotation,
+  TenantMembership,
+  User,
+} from '@prisma/client'
 
-// Pre-computed bcrypt hash (cost 12) used for constant-time comparison when user doesn't exist.
-// Generated via: bcrypt.hash('dummy-never-matches', 12)
 const DUMMY_BCRYPT_HASH = '$2b$12$mffuEnbgz2XglaCwSv1EFOwnXT8DaW5/CIE60E5/07DiN4b6Ncvxi'
+
+type MembershipWithTenant = TenantMembership & {
+  tenant: { id: string; name: string; slug: string }
+}
+
+type UserWithMemberships = User & {
+  memberships: MembershipWithTenant[]
+}
+
+type RefreshRotationWithFamily = RefreshTokenRotation & {
+  family: RefreshTokenFamily
+}
+
+interface IssuedRefreshToken {
+  refreshToken: string
+  family: string
+  generation: number
+  jti: string
+  expiresAt: Date
+}
+
+interface AuthorizedTenantContext {
+  tenantId: string
+  tenantSlug: string
+  role: UserRole
+}
 
 @Injectable()
 export class AuthService {
@@ -41,6 +74,7 @@ export class AuthService {
     if (!secret || secret.length < 64 || !/^[\da-f]+$/i.test(secret)) {
       throw new Error('JWT_SECRET must be at least 64 hex characters (32 bytes)')
     }
+
     this.jwtSecret = secret
     this.accessExpiry = this.configService.get<string>(
       'JWT_ACCESS_EXPIRY',
@@ -51,10 +85,6 @@ export class AuthService {
       '7d'
     ) as jwt.SignOptions['expiresIn']
   }
-
-  /* ---------------------------------------------------------------- */
-  /* LOGIN                                                             */
-  /* ---------------------------------------------------------------- */
 
   async login(
     email: string,
@@ -90,58 +120,56 @@ export class AuthService {
       firstMembership.tenantId,
       firstMembership.role
     )
+    const session = await this.issueSession(user.id, firstMembership.tenantId, payload)
+
     this.logSuccess('login', {
       actorEmail: user.email,
       actorUserId: user.id,
       tenantId: firstMembership.tenantId,
     })
+
     return {
-      accessToken: this.signAccessToken(payload),
-      refreshToken: this.signRefreshToken(payload),
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
       user: payload,
       permissions,
       tenants: mapMembershipsToTenantInfos(user.memberships),
     }
   }
 
-  /* ---------------------------------------------------------------- */
-  /* GET USER PERMISSIONS                                              */
-  /* ---------------------------------------------------------------- */
-
   async getPermissions(tenantId: string, role: string): Promise<string[]> {
     return this.roleSettingsService.getUserPermissions(tenantId, role)
   }
 
-  /* ---------------------------------------------------------------- */
-  /* TOKEN SIGNING                                                     */
-  /* ---------------------------------------------------------------- */
+  async issueSession(
+    userId: string,
+    tenantId: string,
+    payload: JwtPayload
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    const accessToken = this.issueAccessToken(payload)
+    const refreshToken = await this.createRefreshSession(userId, tenantId, payload)
+
+    return {
+      accessToken,
+      refreshToken: refreshToken.refreshToken,
+    }
+  }
 
   signAccessToken(payload: JwtPayload): string {
-    const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
-    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.ACCESS }, this.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: this.accessExpiry,
-    })
+    return this.issueAccessToken(payload)
   }
 
-  signRefreshToken(payload: JwtPayload): string {
-    const { iat: _iat, exp: _exp, jti: _jti, ...clean } = payload
-    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.REFRESH }, this.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: this.refreshExpiry,
-    })
+  signRefreshToken(payload: JwtPayload, family?: string, generation?: number): string {
+    return this.issueRefreshToken(payload, family, generation).refreshToken
   }
-
-  /* ---------------------------------------------------------------- */
-  /* TOKEN VERIFICATION                                                */
-  /* ---------------------------------------------------------------- */
 
   async verifyAccessToken(token: string): Promise<JwtPayload> {
     return this.verifyToken(
       token,
       TokenType.ACCESS,
       'verifyAccessToken',
-      'errors.auth.invalidAccessToken'
+      'errors.auth.invalidAccessToken',
+      true
     )
   }
 
@@ -150,65 +178,95 @@ export class AuthService {
       token,
       TokenType.REFRESH,
       'verifyRefreshToken',
-      'errors.auth.invalidRefreshToken'
+      'errors.auth.invalidRefreshToken',
+      true
     )
   }
 
-  /* ---------------------------------------------------------------- */
-  /* REFRESH TOKENS                                                    */
-  /* ---------------------------------------------------------------- */
-
   async refreshTokens(
-    refreshToken: string
+    refreshToken: string,
+    requestedTenantId?: string
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const payload = await this.verifyRefreshToken(refreshToken)
-    await this.blacklistTokenIfPresent(payload)
+    const rotation = await this.getRefreshRotationOrThrow(payload)
+    await this.assertRefreshRotationCurrent(payload, rotation)
 
-    const user = await this.authRepository.findUserByIdWithTenantMemberships(
+    const user = await this.authRepository.findUserByIdWithAllActiveMemberships(
       payload.sub,
-      payload.tenantId,
       MembershipStatus.ACTIVE
     )
     if (!user) {
       this.logWarn('refreshTokens', { actorUserId: payload.sub })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
+    if (user.memberships.length === 0) {
+      this.logWarn('refreshTokens', { actorUserId: payload.sub })
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
 
-    const membership = this.getFirstMembershipOrThrow(user, 'refreshTokens')
-    const newPayload = buildPayloadFromMembership(user, membership)
-    preserveImpersonationClaims(newPayload, payload)
+    const membership = this.resolveRefreshMembership(user, payload, requestedTenantId)
+    const nextPayload = buildPayloadFromMembership(user, membership)
+    preserveImpersonationClaims(nextPayload, payload)
+
+    const issuedRefresh = this.issueRefreshToken(
+      nextPayload,
+      rotation.family.id,
+      rotation.generation + 1
+    )
+    const rotateResult = await this.authRepository.rotateRefreshTokenFamily({
+      familyId: rotation.family.id,
+      expectedGeneration: rotation.generation,
+      previousRotationId: rotation.id,
+      nextJtiHash: hashTokenIdentifier(issuedRefresh.jti),
+      nextExpiresAt: issuedRefresh.expiresAt,
+      nextGeneration: issuedRefresh.generation,
+      rotatedAt: new Date(),
+    })
+
+    if (rotateResult.familyAdvanceCount === 0 || rotateResult.newRotation === null) {
+      await this.handleRefreshReplay(rotation)
+    }
+
+    await this.blacklistTokenIfPresent(payload)
 
     this.logSuccess('refreshTokens', {
       actorEmail: user.email,
       actorUserId: user.id,
       tenantId: membership.tenantId,
+      metadata: {
+        requestedTenantId: requestedTenantId ?? membership.tenantId,
+        family: rotation.family.id,
+        generation: issuedRefresh.generation,
+      },
     })
+
     return {
-      accessToken: this.signAccessToken(newPayload),
-      refreshToken: this.signRefreshToken(newPayload),
+      accessToken: this.issueAccessToken(nextPayload),
+      refreshToken: issuedRefresh.refreshToken,
     }
   }
-
-  /* ---------------------------------------------------------------- */
-  /* LOGOUT                                                            */
-  /* ---------------------------------------------------------------- */
 
   async logout(
     accessJti: string,
     refreshJti: string,
     accessExp: number,
-    refreshExp: number
+    refreshExp: number,
+    family?: string
   ): Promise<void> {
-    await Promise.all([
+    const blacklistTasks: Promise<void>[] = [
       this.tokenBlacklistService.blacklist(accessJti, computeRemainingTtl(accessExp)),
       this.tokenBlacklistService.blacklist(refreshJti, computeRemainingTtl(refreshExp)),
-    ])
-    this.logSuccess('logout')
-  }
+    ]
 
-  /* ---------------------------------------------------------------- */
-  /* VALIDATE USER ACTIVE                                              */
-  /* ---------------------------------------------------------------- */
+    if (family) {
+      blacklistTasks.push(
+        this.authRepository.revokeRefreshTokenFamily(family, 'logout', new Date())
+      )
+    }
+
+    await Promise.all(blacklistTasks)
+    this.logSuccess('logout', { metadata: { family } })
+  }
 
   async validateUserActive(userId: string): Promise<void> {
     const user = await this.authRepository.findUserByIdWithActiveMembershipCheck(
@@ -233,9 +291,58 @@ export class AuthService {
     }
   }
 
-  /* ---------------------------------------------------------------- */
-  /* GET USER TENANTS                                                  */
-  /* ---------------------------------------------------------------- */
+  async resolveAuthorizedTenantContext(
+    payload: JwtPayload,
+    requestedTenantId?: string
+  ): Promise<AuthorizedTenantContext> {
+    const memberships = await this.authRepository.findActiveMembershipsWithTenant(
+      payload.sub,
+      MembershipStatus.ACTIVE
+    )
+
+    if (memberships.length === 0) {
+      this.logDenied('resolveAuthorizedTenantContext', {
+        actorUserId: payload.sub,
+        requestedTenantId,
+      })
+      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+    }
+
+    const targetTenantId = requestedTenantId ?? payload.tenantId
+    const targetMembership = memberships.find(item => item.tenantId === targetTenantId)
+
+    if (targetMembership) {
+      return {
+        tenantId: targetMembership.tenantId,
+        tenantSlug: targetMembership.tenant.slug,
+        role: targetMembership.role as UserRole,
+      }
+    }
+
+    const isGlobalAdmin = memberships.some(item => item.role === UserRole.GLOBAL_ADMIN)
+    if (!isGlobalAdmin) {
+      this.logDenied('resolveAuthorizedTenantContext', {
+        actorUserId: payload.sub,
+        requestedTenantId: targetTenantId,
+      })
+      throw new BusinessException(403, 'No access to this tenant', 'errors.auth.noTenantAccess')
+    }
+
+    const tenant = await this.authRepository.findTenantById(targetTenantId)
+    if (!tenant) {
+      this.logDenied('resolveAuthorizedTenantContext', {
+        actorUserId: payload.sub,
+        requestedTenantId: targetTenantId,
+      })
+      throw new BusinessException(400, 'Invalid tenant ID', 'errors.tenants.notFound')
+    }
+
+    return {
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      role: UserRole.GLOBAL_ADMIN,
+    }
+  }
 
   async getUserTenants(userId: string): Promise<TenantMembershipInfo[]> {
     const memberships = await this.authRepository.findActiveMembershipsWithTenant(
@@ -249,15 +356,11 @@ export class AuthService {
     return mapMembershipsToTenantInfos(memberships)
   }
 
-  /* ---------------------------------------------------------------- */
-  /* END IMPERSONATION                                                 */
-  /* ---------------------------------------------------------------- */
-
   async endImpersonation(
     caller: JwtPayload
   ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
     if (caller.isImpersonated !== true || !caller.impersonatorSub) {
-      this.logDenied('endImpersonation', { userId: caller.sub, email: caller.email })
+      this.logDenied('endImpersonation', { actorUserId: caller.sub, actorEmail: caller.email })
       throw new BusinessException(
         400,
         'Not currently impersonating',
@@ -266,6 +369,14 @@ export class AuthService {
     }
 
     await this.blacklistTokenIfPresent(caller)
+
+    if (caller.family) {
+      await this.authRepository.revokeRefreshTokenFamily(
+        caller.family,
+        'impersonation_ended',
+        new Date()
+      )
+    }
 
     const admin = await this.authRepository.findUserByIdWithAllActiveMemberships(
       caller.impersonatorSub,
@@ -282,22 +393,20 @@ export class AuthService {
 
     const firstMembership = this.getFirstMembershipOrThrow(admin, 'endImpersonation')
     const adminPayload = buildPayloadFromMembership(admin, firstMembership)
+    const session = await this.issueSession(admin.id, firstMembership.tenantId, adminPayload)
 
     this.logSuccess('endImpersonation', {
       actorEmail: admin.email,
       actorUserId: admin.id,
-      metadata: { impersonatedEmail: caller.email, impersonatedUserId: caller.sub },
+      metadata: { impersonatedUserId: caller.sub, impersonatedEmail: caller.email },
     })
+
     return {
-      accessToken: this.signAccessToken(adminPayload),
-      refreshToken: this.signRefreshToken(adminPayload),
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
       user: adminPayload,
     }
   }
-
-  /* ---------------------------------------------------------------- */
-  /* FIND OR CREATE USER (OIDC)                                        */
-  /* ---------------------------------------------------------------- */
 
   async findOrCreateUser(
     tenantId: string,
@@ -312,12 +421,14 @@ export class AuthService {
         tenantId,
         UserRole.SOC_ANALYST_L1
       )
+
       this.logSuccess('findOrCreateUser', {
         actorUserId: user.id,
         actorEmail: email,
         tenantId,
         metadata: { role: membership.role },
       })
+
       return { id: user.id, role: membership.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
@@ -326,9 +437,195 @@ export class AuthService {
     }
   }
 
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Helpers                                                  */
-  /* ---------------------------------------------------------------- */
+  private issueAccessToken(payload: JwtPayload): string {
+    const {
+      iat: _iat,
+      exp: _exp,
+      jti: _jti,
+      family: _family,
+      generation: _generation,
+      ...clean
+    } = payload
+
+    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.ACCESS }, this.jwtSecret, {
+      algorithm: 'HS256',
+      expiresIn: this.accessExpiry,
+    })
+  }
+
+  private issueRefreshToken(
+    payload: JwtPayload,
+    family?: string,
+    generation?: number
+  ): IssuedRefreshToken {
+    const tokenFamily = family ?? randomUUID()
+    const tokenGeneration = generation ?? 0
+    const tokenJti = randomUUID()
+    const {
+      iat: _iat,
+      exp: _exp,
+      jti: _jti,
+      family: _family,
+      generation: _generation,
+      ...clean
+    } = payload
+
+    return {
+      refreshToken: jwt.sign(
+        {
+          ...clean,
+          jti: tokenJti,
+          tokenType: TokenType.REFRESH,
+          family: tokenFamily,
+          generation: tokenGeneration,
+        },
+        this.jwtSecret,
+        {
+          algorithm: 'HS256',
+          expiresIn: this.refreshExpiry,
+        }
+      ),
+      family: tokenFamily,
+      generation: tokenGeneration,
+      jti: tokenJti,
+      expiresAt: buildExpiryDateFromSeconds(parseExpiryToSeconds(String(this.refreshExpiry))),
+    }
+  }
+
+  private async createRefreshSession(
+    userId: string,
+    tenantId: string,
+    payload: JwtPayload
+  ): Promise<IssuedRefreshToken> {
+    const issuedRefresh = this.issueRefreshToken(payload)
+
+    await this.authRepository.createRefreshTokenFamily({
+      id: issuedRefresh.family,
+      userId,
+      tenantId,
+      currentGeneration: issuedRefresh.generation,
+      expiresAt: issuedRefresh.expiresAt,
+    })
+    await this.authRepository.createRefreshTokenRotation({
+      familyId: issuedRefresh.family,
+      generation: issuedRefresh.generation,
+      jtiHash: hashTokenIdentifier(issuedRefresh.jti),
+      expiresAt: issuedRefresh.expiresAt,
+    })
+
+    return issuedRefresh
+  }
+
+  private async getRefreshRotationOrThrow(payload: JwtPayload): Promise<RefreshRotationWithFamily> {
+    if (
+      !payload.jti ||
+      typeof payload.family !== 'string' ||
+      typeof payload.generation !== 'number'
+    ) {
+      throw new BusinessException(
+        401,
+        'Refresh token missing rotation claims',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    const rotation = await this.authRepository.findRefreshTokenRotationByHash(
+      hashTokenIdentifier(payload.jti)
+    )
+    if (rotation?.family.id !== payload.family) {
+      this.logWarn('getRefreshRotationOrThrow', {
+        actorUserId: payload.sub,
+        metadata: { family: payload.family },
+      })
+      throw new BusinessException(
+        401,
+        'Refresh token rotation record not found',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    return rotation
+  }
+
+  private async assertRefreshRotationCurrent(
+    payload: JwtPayload,
+    rotation: RefreshRotationWithFamily
+  ): Promise<void> {
+    const now = new Date()
+
+    if (payload.generation !== rotation.generation) {
+      throw new BusinessException(
+        401,
+        'Refresh token generation mismatch',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    if (rotation.family.status === 'revoked') {
+      throw new BusinessException(
+        401,
+        'Refresh token family has been revoked',
+        'errors.auth.tokenReplayDetected'
+      )
+    }
+
+    if (
+      rotation.family.status === 'expired' ||
+      rotation.expiresAt <= now ||
+      rotation.family.expiresAt <= now
+    ) {
+      void this.authRepository.expireRefreshTokenFamily(rotation.family.id)
+      throw new BusinessException(
+        401,
+        'Refresh token session expired',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    if (rotation.status !== 'active' || rotation.generation !== rotation.family.currentGeneration) {
+      await this.handleRefreshReplay(rotation)
+    }
+  }
+
+  private resolveRefreshMembership(
+    user: UserWithMemberships,
+    payload: JwtPayload,
+    requestedTenantId?: string
+  ): MembershipWithTenant {
+    const targetTenantId = requestedTenantId ?? payload.tenantId
+    const membership = user.memberships.find(item => item.tenantId === targetTenantId)
+
+    if (!membership) {
+      this.logDenied('resolveRefreshMembership', {
+        actorUserId: user.id,
+        requestedTenantId: targetTenantId,
+      })
+      throw new BusinessException(403, 'No access to this tenant', 'errors.auth.noTenantAccess')
+    }
+
+    return membership
+  }
+
+  private async handleRefreshReplay(rotation: RefreshRotationWithFamily): Promise<never> {
+    await this.authRepository.revokeRefreshTokenFamily(
+      rotation.family.id,
+      'replay_detected',
+      new Date(),
+      rotation.id
+    )
+
+    this.logDenied('refreshTokens', {
+      actorUserId: rotation.family.userId,
+      tenantId: rotation.family.tenantId,
+      metadata: { family: rotation.family.id, generation: rotation.generation },
+    })
+
+    throw new BusinessException(
+      401,
+      'Refresh token replay detected',
+      'errors.auth.tokenReplayDetected'
+    )
+  }
 
   private getFirstMembershipOrThrow(
     user: {
@@ -346,11 +643,13 @@ export class AuthService {
       this.logWarn(action, { actorEmail: user.email, actorUserId: user.id })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
+
     const first = user.memberships[0]
     if (!first) {
-      this.logWarn(action, { userId: user.id, email: user.email })
+      this.logWarn(action, { actorEmail: user.email, actorUserId: user.id })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
+
     return first
   }
 
@@ -358,24 +657,32 @@ export class AuthService {
     token: string,
     expectedType: string,
     action: string,
-    errorKey: string
+    errorKey: string,
+    checkBlacklist: boolean
   ): Promise<JwtPayload> {
     try {
       const decoded = jwt.verify(token, this.jwtSecret, {
         algorithms: ['HS256'],
         clockTolerance: 30,
       }) as JwtPayload & { tokenType?: string }
-      if (decoded.tokenType !== expectedType) throw new Error(`Not a ${expectedType} token`)
 
-      if (decoded.jti) {
+      if (decoded.tokenType !== expectedType) {
+        throw new Error(`Not a ${expectedType} token`)
+      }
+
+      if (checkBlacklist && decoded.jti) {
         const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
         if (revoked) {
           throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
         }
       }
+
       return decoded
     } catch (error) {
-      if (error instanceof BusinessException) throw error
+      if (error instanceof BusinessException) {
+        throw error
+      }
+
       this.logWarn(action, { error: error instanceof Error ? error.message : 'Unknown error' })
       throw new BusinessException(401, `Invalid or expired ${expectedType} token`, errorKey)
     }
@@ -386,10 +693,6 @@ export class AuthService {
       await this.tokenBlacklistService.blacklist(payload.jti, computeRemainingTtl(payload.exp))
     }
   }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
 
   private logSuccess(action: string, extra?: Record<string, unknown>): void {
     this.appLogger.info(`Auth ${action}`, {

@@ -20,6 +20,7 @@ const SENSITIVE_KEYS = new Set([
   'indexer_password',
   'clientKey',
   'client_key',
+  // Deprecated key names kept for backward compatibility with existing encrypted configs
   'mispAuthKey',
   'shuffleApiKey',
 ])

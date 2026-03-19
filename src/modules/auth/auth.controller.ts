@@ -1,18 +1,21 @@
-import { Controller, Get, Post, Body, Req, UsePipes } from '@nestjs/common'
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
+import { Body, Controller, Get, Post, Req, Res, UsePipes } from '@nestjs/common'
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
+import { clearAuthCookies, issueCsrfToken, setAuthCookies } from './auth-cookie.utility'
 import { AuthService } from './auth.service'
 import { AuthLoginSchema, type AuthLoginDto } from './dto/auth-login.dto'
 import { AuthLogoutSchema, type AuthLogoutDto } from './dto/auth-logout.dto'
 import { AuthRefreshSchema, type AuthRefreshDto } from './dto/auth-refresh.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Public } from '../../common/decorators/public.decorator'
+import { SkipCsrf } from '../../common/decorators/skip-csrf.decorator'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   AuthenticatedRequest,
   JwtPayload,
 } from '../../common/interfaces/authenticated-request.interface'
+import type { Request, Response } from 'express'
 
 @ApiTags('auth')
 @Controller('auth')
@@ -20,17 +23,31 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @SkipCsrf()
   @Post('login')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @UsePipes(new ZodValidationPipe(AuthLoginSchema))
-  async login(@Body() dto: AuthLoginDto): Promise<{
+  async login(
+    @Body() dto: AuthLoginDto,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<{
     accessToken: string
-    refreshToken: string
+    csrfToken: string
     user: JwtPayload
     permissions: string[]
     tenants: Array<{ id: string; name: string; slug: string; role: string }>
   }> {
-    return this.authService.login(dto.email, dto.password)
+    const session = await this.authService.login(dto.email, dto.password)
+    setAuthCookies(response, session.accessToken, session.refreshToken)
+    const csrfToken = issueCsrfToken(response)
+
+    return {
+      accessToken: session.accessToken,
+      csrfToken,
+      user: session.user,
+      permissions: session.permissions,
+      tenants: session.tenants,
+    }
   }
 
   @ApiBearerAuth()
@@ -52,39 +69,50 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 8, ttl: 60_000 } })
   @UsePipes(new ZodValidationPipe(AuthRefreshSchema))
   async refresh(
-    @Body() dto: AuthRefreshDto
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    return this.authService.refreshTokens(dto.refreshToken)
+    @Req() request: Request,
+    @Body() dto: AuthRefreshDto,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<{ accessToken: string; csrfToken: string }> {
+    const refreshToken = this.extractRefreshToken(request, dto.refreshToken)
+    const requestedTenantId = this.getSingleHeaderValue(request.headers['x-tenant-id'])
+    const session = await this.authService.refreshTokens(refreshToken, requestedTenantId)
+    setAuthCookies(response, session.accessToken, session.refreshToken)
+    const csrfToken = issueCsrfToken(response)
+
+    return {
+      accessToken: session.accessToken,
+      csrfToken,
+    }
   }
 
-  /**
-   * POST /auth/end-impersonation
-   * Ends the current impersonation session by blacklisting the impersonation
-   * tokens and issuing fresh tokens for the original admin user.
-   */
   @ApiBearerAuth()
   @Post('end-impersonation')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async endImpersonation(
-    @CurrentUser() user: JwtPayload
-  ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
-    return this.authService.endImpersonation(user)
+    @CurrentUser() user: JwtPayload,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<{ accessToken: string; csrfToken: string; user: JwtPayload }> {
+    const session = await this.authService.endImpersonation(user)
+    setAuthCookies(response, session.accessToken, session.refreshToken)
+    const csrfToken = issueCsrfToken(response)
+
+    return {
+      accessToken: session.accessToken,
+      csrfToken,
+      user: session.user,
+    }
   }
 
-  /**
-   * POST /auth/logout
-   * Blacklists both access and refresh tokens in Redis so they cannot be reused.
-   * The client should also discard its stored tokens.
-   */
   @ApiBearerAuth()
   @Post('logout')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async logout(
     @Req() request: AuthenticatedRequest,
-    @Body(new ZodValidationPipe(AuthLogoutSchema)) dto: AuthLogoutDto
+    @Body(new ZodValidationPipe(AuthLogoutSchema)) dto: AuthLogoutDto,
+    @Res({ passthrough: true }) response: Response
   ): Promise<{ loggedOut: boolean }> {
     const accessUser = request.user
     if (!accessUser?.jti || !accessUser?.exp) {
@@ -95,7 +123,8 @@ export class AuthController {
       )
     }
 
-    const refreshPayload = await this.authService.verifyRefreshToken(dto.refreshToken)
+    const refreshToken = this.extractRefreshToken(request, dto.refreshToken)
+    const refreshPayload = await this.authService.verifyRefreshToken(refreshToken)
     if (!refreshPayload.jti || !refreshPayload.exp) {
       throw new BusinessException(
         401,
@@ -116,9 +145,34 @@ export class AuthController {
       accessUser.jti,
       refreshPayload.jti,
       accessUser.exp,
-      refreshPayload.exp
+      refreshPayload.exp,
+      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined
     )
+    clearAuthCookies(response)
 
     return { loggedOut: true }
+  }
+
+  private extractRefreshToken(request: Request, bodyToken?: string): string {
+    const cookieToken = request.cookies?.['refresh_token'] as string | undefined
+    const refreshToken = bodyToken ?? cookieToken
+
+    if (!refreshToken) {
+      throw new BusinessException(
+        400,
+        'Refresh token is required',
+        'errors.auth.refreshTokenRequired'
+      )
+    }
+
+    return refreshToken
+  }
+
+  private getSingleHeaderValue(value: string | string[] | undefined): string | undefined {
+    if (typeof value === 'string') {
+      return value
+    }
+
+    return value?.[0]
   }
 }

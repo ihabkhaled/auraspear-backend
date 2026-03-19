@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NestFactory } from '@nestjs/core'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
+import cookieParser from 'cookie-parser'
 import * as express from 'express'
 import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
@@ -56,6 +57,31 @@ async function bootstrap(): Promise<void> {
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     })
   )
+
+  // Cache-Control — prevent caching of authenticated API responses
+  app.use(
+    (
+      req: { headers: Record<string, string | undefined> },
+      res: { setHeader: (name: string, value: string) => void },
+      next: () => void
+    ) => {
+      const cookieHeader = req.headers.cookie ?? ''
+      const hasAuthCookies =
+        cookieHeader.includes('access_token=') || cookieHeader.includes('refresh_token=')
+
+      if (req.headers.authorization || hasAuthCookies) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+        res.setHeader('Pragma', 'no-cache')
+        res.setHeader('Expires', '0')
+      } else {
+        res.setHeader('Vary', 'Authorization, Cookie')
+      }
+      next()
+    }
+  )
+
+  // Cookie parsing (required for HttpOnly auth cookies)
+  app.use(cookieParser())
 
   // CORS — validate origins
   const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')

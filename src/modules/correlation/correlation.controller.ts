@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler'
 import { CorrelationService } from './correlation.service'
 import { type CreateRuleDto, CreateRuleSchema } from './dto/create-rule.dto'
 import { ListRulesQuerySchema } from './dto/list-rules-query.dto'
+import { type ToggleRuleDto, ToggleRuleSchema } from './dto/toggle-rule.dto'
 import { type UpdateRuleDto, UpdateRuleSchema } from './dto/update-rule.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
@@ -84,6 +85,16 @@ export class CorrelationController {
     @CurrentUser() user: JwtPayload
   ): Promise<RuleRecord> {
     return this.correlationService.updateRule(id, dto, user)
+  }
+
+  @Patch(':id/toggle')
+  @RequirePermission(Permission.CORRELATION_TOGGLE)
+  async toggleRule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(ToggleRuleSchema)) dto: ToggleRuleDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<RuleRecord> {
+    return this.correlationService.toggleRule(id, dto.enabled, user)
   }
 
   @Delete(':id')

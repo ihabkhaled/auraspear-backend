@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { RolePermission, UserRole } from '@prisma/client'
 
@@ -80,6 +81,24 @@ export class RoleSettingsRepository {
       select: { id: true },
     })
     return tenants.map(t => t.id)
+  }
+
+  async findActiveUserIdsByRoles(tenantId: string, roles: UserRole[]): Promise<string[]> {
+    if (roles.length === 0) {
+      return []
+    }
+
+    const memberships = await this.prisma.tenantMembership.findMany({
+      where: {
+        tenantId,
+        role: { in: roles },
+        status: MembershipStatus.ACTIVE,
+      },
+      select: { userId: true },
+      distinct: ['userId'],
+    })
+
+    return memberships.map(membership => membership.userId)
   }
 
   /**

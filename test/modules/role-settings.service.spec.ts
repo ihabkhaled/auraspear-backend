@@ -9,6 +9,7 @@ function createMockRepository() {
   return {
     findPermissionsByTenant: jest.fn(),
     findPermissionsByTenantAndRole: jest.fn(),
+    findActiveUserIdsByRoles: jest.fn(),
     bulkUpsertPermissions: jest.fn(),
     deleteAllByTenant: jest.fn(),
     countByTenant: jest.fn(),
@@ -34,6 +35,10 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
+const mockNotificationsService = {
+  emitPermissionsUpdatedToUsers: jest.fn(),
+}
+
 describe('RoleSettingsService', () => {
   let service: RoleSettingsService
   let repository: ReturnType<typeof createMockRepository>
@@ -42,7 +47,13 @@ describe('RoleSettingsService', () => {
   beforeEach(() => {
     repository = createMockRepository()
     cache = createMockCache()
-    service = new RoleSettingsService(repository as never, cache as never, mockAppLogger as never)
+    mockNotificationsService.emitPermissionsUpdatedToUsers.mockReset()
+    service = new RoleSettingsService(
+      repository as never,
+      cache as never,
+      mockAppLogger as never,
+      mockNotificationsService as never
+    )
   })
 
   /* ---------------------------------------------------------------- */
@@ -84,6 +95,56 @@ describe('RoleSettingsService', () => {
       for (const role of CONFIGURABLE_ROLES) {
         expect(matrix[role]).toEqual([])
       }
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /* getPermissionDefinitions                                           */
+  /* ---------------------------------------------------------------- */
+
+  describe('getPermissionDefinitions', () => {
+    it('should hide the role settings module for TENANT_ADMIN', async () => {
+      repository.findPermissionDefinitions.mockResolvedValue([
+        {
+          key: Permission.ALERTS_VIEW,
+          module: 'alerts',
+          labelKey: 'roleSettings.permissions.alerts.view',
+          sortOrder: 100,
+        },
+        {
+          key: Permission.ROLE_SETTINGS_UPDATE,
+          module: 'roleSettings',
+          labelKey: 'roleSettings.permissions.roleSettings.update',
+          sortOrder: 2501,
+        },
+      ])
+
+      const definitions = await service.getPermissionDefinitions(TENANT_ID, UserRole.TENANT_ADMIN)
+
+      expect(definitions).toEqual([
+        {
+          key: Permission.ALERTS_VIEW,
+          module: 'alerts',
+          labelKey: 'roleSettings.permissions.alerts.view',
+          sortOrder: 100,
+        },
+      ])
+    })
+
+    it('should keep the role settings module visible for GLOBAL_ADMIN', async () => {
+      repository.findPermissionDefinitions.mockResolvedValue([
+        {
+          key: Permission.ROLE_SETTINGS_UPDATE,
+          module: 'roleSettings',
+          labelKey: 'roleSettings.permissions.roleSettings.update',
+          sortOrder: 2501,
+        },
+      ])
+
+      const definitions = await service.getPermissionDefinitions(TENANT_ID, UserRole.GLOBAL_ADMIN)
+
+      expect(definitions).toHaveLength(1)
+      expect(definitions[0]?.module).toBe('roleSettings')
     })
   })
 
@@ -189,12 +250,101 @@ describe('RoleSettingsService', () => {
       repository.deleteAllByTenant.mockResolvedValue({ count: 10 })
       repository.bulkUpsertPermissions.mockResolvedValue(undefined)
       repository.findPermissionsByTenant.mockResolvedValue([])
+      repository.findActiveUserIdsByRoles.mockResolvedValue(['user-001'])
 
-      await service.resetToDefaults(TENANT_ID, 'admin@test.com', 'admin-001')
+      await service.resetToDefaults(TENANT_ID, 'admin@test.com', 'admin-001', UserRole.GLOBAL_ADMIN)
 
       expect(repository.deleteAllByTenant).toHaveBeenCalledWith(TENANT_ID)
       expect(repository.bulkUpsertPermissions).toHaveBeenCalled()
       expect(cache.invalidate).toHaveBeenCalledWith(TENANT_ID)
+      expect(mockNotificationsService.emitPermissionsUpdatedToUsers).toHaveBeenCalledWith(
+        TENANT_ID,
+        ['user-001'],
+        'role-matrix-updated'
+      )
+    })
+
+    it('should block TENANT_ADMIN from resetting defaults', async () => {
+      await expect(
+        service.resetToDefaults(
+          TENANT_ID,
+          'tenant-admin@test.com',
+          'admin-001',
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.auth.insufficientPermissions',
+      })
+
+      expect(repository.deleteAllByTenant).not.toHaveBeenCalled()
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /* updatePermissionMatrix                                             */
+  /* ---------------------------------------------------------------- */
+
+  describe('updatePermissionMatrix', () => {
+    it('should block TENANT_ADMIN from changing role settings permissions in the matrix', async () => {
+      repository.findPermissionsByTenant.mockResolvedValue([
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.ROLE_SETTINGS_VIEW },
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.ROLE_SETTINGS_UPDATE },
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.ALERTS_VIEW },
+      ])
+      repository.findPermissionsByTenantAndRole.mockResolvedValue([
+        { permissionKey: Permission.ROLE_SETTINGS_VIEW },
+        { permissionKey: Permission.ROLE_SETTINGS_UPDATE },
+        { permissionKey: Permission.ALERTS_VIEW },
+      ])
+
+      const matrix = {
+        [UserRole.TENANT_ADMIN]: [Permission.ROLE_SETTINGS_VIEW, Permission.ALERTS_VIEW],
+      }
+
+      await expect(
+        service.updatePermissionMatrix(
+          TENANT_ID,
+          matrix,
+          'tenant-admin@test.com',
+          'tenant-admin-001',
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.auth.insufficientPermissions',
+      })
+
+      expect(repository.bulkUpsertPermissions).not.toHaveBeenCalled()
+    })
+
+    it('should emit permission refresh events for impacted roles after update', async () => {
+      repository.findPermissionsByTenant.mockResolvedValue([
+        { role: UserRole.SOC_ANALYST_L1, permissionKey: Permission.ALERTS_VIEW },
+      ])
+      repository.findPermissionsByTenantAndRole.mockResolvedValue([
+        { permissionKey: Permission.ALERTS_VIEW },
+        { permissionKey: Permission.CASES_VIEW },
+      ])
+      repository.bulkUpsertPermissions.mockResolvedValue(undefined)
+      repository.findActiveUserIdsByRoles.mockResolvedValue(['user-101', 'user-202'])
+
+      await service.updatePermissionMatrix(
+        TENANT_ID,
+        {
+          [UserRole.SOC_ANALYST_L1]: [Permission.ALERTS_VIEW, Permission.CASES_VIEW],
+        },
+        'admin@test.com',
+        'admin-001',
+        UserRole.GLOBAL_ADMIN
+      )
+
+      expect(repository.findActiveUserIdsByRoles).toHaveBeenCalledWith(TENANT_ID, [
+        UserRole.SOC_ANALYST_L1,
+      ])
+      expect(mockNotificationsService.emitPermissionsUpdatedToUsers).toHaveBeenCalledWith(
+        TENANT_ID,
+        ['user-101', 'user-202'],
+        'role-matrix-updated'
+      )
     })
   })
 

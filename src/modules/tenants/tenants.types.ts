@@ -46,6 +46,12 @@ export interface TenantMember {
   email: string
 }
 
+/** Privacy-safe user info for non-admin users — omits sensitive fields like email. */
+export interface TenantMemberLimited {
+  id: string
+  name: string
+}
+
 export interface FindOrCreateUserFields {
   id: string
   email: string
@@ -67,10 +73,29 @@ export interface FindOrCreateUserResult {
   isExisting: boolean
 }
 
+export interface ImpersonationSessionResult {
+  accessToken: string
+  refreshToken: string
+  user: {
+    sub: string
+    email: string
+    tenantId: string
+    tenantSlug: string
+    role: string
+  }
+  impersonator: {
+    sub: string
+    email: string
+    role: string
+    tenantId: string
+    tenantSlug: string
+  }
+}
+
 /** Response returned by the impersonate-user endpoint. */
 export interface ImpersonateUserResponse {
   accessToken: string
-  refreshToken: string
+  csrfToken: string
   user: {
     sub: string
     email: string

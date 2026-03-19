@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common'
+import { RefreshTokenFamilyStatus, RefreshTokenRotationStatus } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
-import type { TenantMembership, User, UserRole as PrismaUserRole } from '@prisma/client'
+import type {
+  RefreshTokenFamily,
+  RefreshTokenRotation,
+  TenantMembership,
+  User,
+  UserRole as PrismaUserRole,
+} from '@prisma/client'
 
 @Injectable()
 export class AuthRepository {
@@ -94,6 +101,15 @@ export class AuthRepository {
     })
   }
 
+  async findTenantById(
+    tenantId: string
+  ): Promise<{ id: string; name: string; slug: string } | null> {
+    return this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true, name: true, slug: true },
+    })
+  }
+
   async findUserByIdWithAllActiveMemberships(
     userId: string,
     membershipStatus: MembershipStatus
@@ -131,6 +147,170 @@ export class AuthRepository {
       where: { userId_tenantId: { userId, tenantId } },
       update: {},
       create: { userId, tenantId, role: defaultRole },
+    })
+  }
+
+  async createRefreshTokenFamily(data: {
+    id: string
+    userId: string
+    tenantId: string
+    currentGeneration: number
+    expiresAt: Date
+  }): Promise<RefreshTokenFamily> {
+    return this.prisma.refreshTokenFamily.create({
+      data: {
+        id: data.id,
+        userId: data.userId,
+        tenantId: data.tenantId,
+        currentGeneration: data.currentGeneration,
+        expiresAt: data.expiresAt,
+      },
+    })
+  }
+
+  async createRefreshTokenRotation(data: {
+    familyId: string
+    generation: number
+    jtiHash: string
+    expiresAt: Date
+    parentRotationId?: string
+  }): Promise<RefreshTokenRotation> {
+    return this.prisma.refreshTokenRotation.create({
+      data: {
+        familyId: data.familyId,
+        generation: data.generation,
+        jtiHash: data.jtiHash,
+        expiresAt: data.expiresAt,
+        parentRotationId: data.parentRotationId,
+      },
+    })
+  }
+
+  async findRefreshTokenRotationByHash(
+    jtiHash: string
+  ): Promise<(RefreshTokenRotation & { family: RefreshTokenFamily }) | null> {
+    return this.prisma.refreshTokenRotation.findUnique({
+      where: { jtiHash },
+      include: { family: true },
+    })
+  }
+
+  async findRefreshTokenFamilyById(id: string): Promise<RefreshTokenFamily | null> {
+    return this.prisma.refreshTokenFamily.findUnique({
+      where: { id },
+    })
+  }
+
+  async rotateRefreshTokenFamily(data: {
+    familyId: string
+    expectedGeneration: number
+    previousRotationId: string
+    nextJtiHash: string
+    nextExpiresAt: Date
+    nextGeneration: number
+    rotatedAt: Date
+  }): Promise<{
+    familyAdvanceCount: number
+    newRotation: RefreshTokenRotation | null
+  }> {
+    return this.prisma.$transaction(async tx => {
+      const familyAdvance = await tx.refreshTokenFamily.updateMany({
+        where: {
+          id: data.familyId,
+          status: RefreshTokenFamilyStatus.active,
+          currentGeneration: data.expectedGeneration,
+        },
+        data: {
+          currentGeneration: data.nextGeneration,
+          expiresAt: data.nextExpiresAt,
+        },
+      })
+
+      if (familyAdvance.count > 0) {
+        await tx.refreshTokenRotation.update({
+          where: { id: data.previousRotationId },
+          data: {
+            status: RefreshTokenRotationStatus.used,
+            usedAt: data.rotatedAt,
+            replacedAt: data.rotatedAt,
+          },
+        })
+
+        const newRotation = await tx.refreshTokenRotation.create({
+          data: {
+            familyId: data.familyId,
+            generation: data.nextGeneration,
+            jtiHash: data.nextJtiHash,
+            expiresAt: data.nextExpiresAt,
+            parentRotationId: data.previousRotationId,
+          },
+        })
+
+        return {
+          familyAdvanceCount: familyAdvance.count,
+          newRotation,
+        }
+      }
+
+      return {
+        familyAdvanceCount: familyAdvance.count,
+        newRotation: null,
+      }
+    })
+  }
+
+  async revokeRefreshTokenFamily(
+    familyId: string,
+    revokedReason: string,
+    revokedAt: Date,
+    replayedRotationId?: string
+  ): Promise<void> {
+    await this.prisma.$transaction(async tx => {
+      await tx.refreshTokenFamily.updateMany({
+        where: {
+          id: familyId,
+          status: RefreshTokenFamilyStatus.active,
+        },
+        data: {
+          status: RefreshTokenFamilyStatus.revoked,
+          revokedAt,
+          revokedReason,
+        },
+      })
+
+      await tx.refreshTokenRotation.updateMany({
+        where: {
+          familyId,
+          status: {
+            in: [RefreshTokenRotationStatus.active, RefreshTokenRotationStatus.used],
+          },
+        },
+        data: {
+          status: RefreshTokenRotationStatus.revoked,
+        },
+      })
+
+      if (replayedRotationId !== undefined) {
+        await tx.refreshTokenRotation.update({
+          where: { id: replayedRotationId },
+          data: {
+            status: RefreshTokenRotationStatus.replayed,
+            replayedAt: revokedAt,
+          },
+        })
+      }
+    })
+  }
+
+  async expireRefreshTokenFamily(familyId: string): Promise<void> {
+    await this.prisma.refreshTokenFamily.updateMany({
+      where: {
+        id: familyId,
+        status: RefreshTokenFamilyStatus.active,
+      },
+      data: {
+        status: RefreshTokenFamilyStatus.expired,
+      },
     })
   }
 }

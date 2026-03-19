@@ -20,7 +20,8 @@ export class MispService {
       return { ok: false, details: 'MISP URL not configured' }
     }
 
-    const authKey = (config.authKey ?? config.apiKey) as string | undefined
+    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
+    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string | undefined
     if (!authKey) {
       return { ok: false, details: 'MISP auth key not configured' }
     }
@@ -80,7 +81,8 @@ export class MispService {
    */
   async getEvents(config: Record<string, unknown>, limit: number = 20): Promise<unknown[]> {
     const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    const authKey = (config.authKey ?? config.apiKey) as string
+    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
+    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
     const res = await connectorFetch(
       `${baseUrl}/events/index?limit=${limit}&sort=date&direction=desc`,
@@ -129,7 +131,8 @@ export class MispService {
     searchParameters: Record<string, unknown>
   ): Promise<unknown[]> {
     const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    const authKey = (config.authKey ?? config.apiKey) as string
+    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
+    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
     const res = await connectorFetch(`${baseUrl}/attributes/restSearch`, {
       method: 'POST',
@@ -177,7 +180,8 @@ export class MispService {
    */
   async getEvent(config: Record<string, unknown>, eventId: string): Promise<unknown> {
     const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    const authKey = (config.authKey ?? config.apiKey) as string
+    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
+    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
     // Validate eventId to prevent path traversal
     if (!/^\d+$/.test(eventId)) {
