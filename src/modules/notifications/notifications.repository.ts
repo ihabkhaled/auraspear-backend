@@ -1,31 +1,21 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma, Notification, User, Case, UserPreference } from '@prisma/client'
-
-type UserNameSelect = Pick<User, 'name'>
-type UserIdNameEmailSelect = Pick<User, 'id' | 'name' | 'email'>
-
-export type NotificationPreferenceSelect = Pick<
-  UserPreference,
-  | 'notificationsInApp'
-  | 'notifyCaseAssignments'
-  | 'notifyCaseComments'
-  | 'notifyCaseActivity'
-  | 'notifyCaseUpdates'
-  | 'notifyUserManagement'
->
-type CaseNumberSelect = Pick<Case, 'caseNumber'>
+import type {
+  CaseNumberSelect,
+  NotificationFindManyParameters,
+  NotificationPreferenceSelect,
+  UserIdNameEmailSelect,
+  UserNameSelect,
+} from './notifications.types'
+import type { Notification, Prisma } from '@prisma/client'
 
 @Injectable()
 export class NotificationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findManyAndCount(params: {
-    where: Prisma.NotificationWhereInput
-    orderBy: Prisma.NotificationOrderByWithRelationInput
-    skip: number
-    take: number
-  }): Promise<[Notification[], number]> {
+  async findManyAndCount(
+    params: NotificationFindManyParameters
+  ): Promise<[Notification[], number]> {
     return Promise.all([
       this.prisma.notification.findMany(params),
       this.prisma.notification.count({ where: params.where }),

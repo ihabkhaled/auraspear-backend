@@ -1,50 +1,14 @@
 import { Injectable } from '@nestjs/common'
+import { SortOrder } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { HuntSessionRecord } from './hunts.types'
-import type { HuntSession, HuntEvent, HuntSessionStatus, Prisma } from '@prisma/client'
-
-interface CreateSessionInput {
-  tenantId: string
-  query: string
-  status: HuntSessionStatus
-  startedBy: string
-  timeRange: string
-  reasoning: string[]
-}
-
-interface UpdateSessionStatusInput {
-  id: string
-  tenantId: string
-  status: HuntSessionStatus
-  completedAt: Date
-  reasoning: string[]
-}
-
-interface UpdateSessionCompletedInput {
-  id: string
-  tenantId: string
-  status: HuntSessionStatus
-  completedAt: Date
-  eventsFound: number
-  uniqueIps: number
-  threatScore: number
-  mitreTactics: string[]
-  mitreTechniques: string[]
-  timeRange: string
-  executedQuery: Prisma.InputJsonValue
-  reasoning: string[]
-  aiAnalysis: string
-}
-
-interface CreateEventInput {
-  huntSessionId: string
-  timestamp: Date
-  severity: string
-  eventId: string
-  sourceIp: string | null
-  user: string | null
-  description: string
-}
+import type {
+  CreateEventInput,
+  CreateSessionInput,
+  HuntSessionRecord,
+  UpdateSessionCompletedInput,
+  UpdateSessionStatusInput,
+} from './hunts.types'
+import type { HuntEvent, HuntSession } from '@prisma/client'
 
 @Injectable()
 export class HuntsRepository {
@@ -111,7 +75,7 @@ export class HuntsRepository {
   ): Promise<HuntSession[]> {
     return this.prisma.huntSession.findMany({
       where: { tenantId },
-      orderBy: { startedAt: 'desc' },
+      orderBy: { startedAt: SortOrder.DESC },
       skip,
       take,
     })
@@ -145,7 +109,7 @@ export class HuntsRepository {
   ): Promise<HuntEvent[]> {
     return this.prisma.huntEvent.findMany({
       where: { huntSessionId },
-      orderBy: { timestamp: 'desc' },
+      orderBy: { timestamp: SortOrder.DESC },
       skip,
       take,
     })

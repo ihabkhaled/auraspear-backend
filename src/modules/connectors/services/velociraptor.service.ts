@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import {
   basicAuth,
   connectorFetch,
   type ConnectorHttpOptions,
 } from '../../../common/utils/connector-http.utility'
-import type { TestResult } from '../connectors.types'
+import type { TestResult, VelociraptorAuthOptions } from '../connectors.types'
 
 /**
  * Resolves the Velociraptor base URL from config.
@@ -23,10 +29,7 @@ function resolveBaseUrl(config: Record<string, unknown>): string | undefined {
  * 1. **mTLS** (preferred for API port 8001) — uses `clientCert` + `clientKey`
  * 2. **Basic auth** (GUI port 8889) — uses `username` + `password`
  */
-function buildAuthOptions(config: Record<string, unknown>): {
-  headers: Record<string, string>
-  httpOptions: Partial<ConnectorHttpOptions>
-} {
+function buildAuthOptions(config: Record<string, unknown>): VelociraptorAuthOptions {
   const clientCert = config.clientCert as string | undefined
   const clientKey = config.clientKey as string | undefined
   const caCert = config.caCert as string | undefined
@@ -99,7 +102,7 @@ export class VelociraptorService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'VelociraptorService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'velociraptor' },
+        metadata: { connectorType: ConnectorType.VELOCIRAPTOR },
       })
 
       return {
@@ -117,7 +120,7 @@ export class VelociraptorService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'VelociraptorService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'velociraptor' },
+        metadata: { connectorType: ConnectorType.VELOCIRAPTOR },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -136,7 +139,7 @@ export class VelociraptorService {
     const { headers, httpOptions } = buildAuthOptions(config)
 
     const res = await connectorFetch(`${baseUrl}/api/v1/CreateNotebook`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers,
       ...httpOptions,
       body: { query: vql },
@@ -168,7 +171,7 @@ export class VelociraptorService {
       className: 'VelociraptorService',
       functionName: 'runVQL',
       metadata: {
-        connectorType: 'velociraptor',
+        connectorType: ConnectorType.VELOCIRAPTOR,
         rowCount: rows.length,
         columnCount: columns.length,
       },
@@ -213,7 +216,7 @@ export class VelociraptorService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'VelociraptorService',
       functionName: 'getClients',
-      metadata: { connectorType: 'velociraptor', count: clients.length },
+      metadata: { connectorType: ConnectorType.VELOCIRAPTOR, count: clients.length },
     })
 
     return clients

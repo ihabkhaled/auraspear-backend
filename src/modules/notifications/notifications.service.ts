@@ -1,4 +1,5 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common'
+import { PermissionUpdateReason } from './notifications.enums'
 import { NotificationsGateway } from './notifications.gateway'
 import { NotificationsRepository } from './notifications.repository'
 import {
@@ -20,22 +21,12 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import type { NotificationResponse, PaginatedNotifications } from './notifications.types'
+import type {
+  CreateNotificationParameters,
+  NotificationResponse,
+  PaginatedNotifications,
+} from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-
-interface CreateNotificationParameters {
-  tenantId: string
-  type: NotificationType
-  actorUserId: string
-  actorEmail: string
-  recipientUserId: string
-  title: string
-  message: string
-  entityType: NotificationEntityType
-  entityId: string
-  caseId?: string | null
-  caseCommentId?: string | null
-}
 
 @Injectable()
 export class NotificationsService {
@@ -61,7 +52,11 @@ export class NotificationsService {
     type?: string,
     isRead?: string
   ): Promise<PaginatedNotifications> {
-    const where = buildNotificationWhereClause(tenantId, recipientUserId, { query, type, isRead })
+    const where = buildNotificationWhereClause(tenantId, recipientUserId, {
+      query,
+      type: type as NotificationType | undefined,
+      isRead,
+    })
     const orderBy = buildNotificationOrderBy(sortBy, sortOrder)
     const [notifications, total] = await this.notificationsRepository.findManyAndCount({
       where,
@@ -316,18 +311,14 @@ export class NotificationsService {
     })
   }
 
-  emitPermissionsUpdated(
-    tenantId: string,
-    userId: string,
-    reason: 'role-updated' | 'role-matrix-updated' | 'membership-status-updated'
-  ): void {
+  emitPermissionsUpdated(tenantId: string, userId: string, reason: PermissionUpdateReason): void {
     this.gateway.emitPermissionsUpdated(tenantId, userId, reason)
   }
 
   emitPermissionsUpdatedToUsers(
     tenantId: string,
     userIds: string[],
-    reason: 'role-updated' | 'role-matrix-updated' | 'membership-status-updated'
+    reason: PermissionUpdateReason
   ): void {
     const uniqueUserIds = [...new Set(userIds.filter(userId => userId.trim().length > 0))]
 
@@ -354,24 +345,26 @@ export class NotificationsService {
     const caseRecord = await this.notificationsRepository.findCaseById(caseId, tenantId)
     const caseNumber = caseRecord?.caseNumber ?? caseId
 
-    for (const recipientUserId of recipientIds) {
-      await this.createAndEmitNotification({
-        tenantId,
-        type: NotificationType.MENTION,
-        actorUserId: actor.sub,
-        actorEmail: actor.email,
-        recipientUserId,
-        title: getNotificationTitle(NotificationType.MENTION),
-        message: JSON.stringify({
-          key: 'mentionMessage',
-          params: { actorName, caseRef: caseNumber },
-        }),
-        entityType: NotificationEntityType.CASE_COMMENT,
-        entityId: commentId,
-        caseId,
-        caseCommentId: commentId,
-      })
-    }
+    await Promise.all(
+      recipientIds.map(async recipientUserId =>
+        this.createAndEmitNotification({
+          tenantId,
+          type: NotificationType.MENTION,
+          actorUserId: actor.sub,
+          actorEmail: actor.email,
+          recipientUserId,
+          title: getNotificationTitle(NotificationType.MENTION),
+          message: JSON.stringify({
+            key: 'mentionMessage',
+            params: { actorName, caseRef: caseNumber },
+          }),
+          entityType: NotificationEntityType.CASE_COMMENT,
+          entityId: commentId,
+          caseId,
+          caseCommentId: commentId,
+        })
+      )
+    )
   }
 
   /* ---------------------------------------------------------------- */

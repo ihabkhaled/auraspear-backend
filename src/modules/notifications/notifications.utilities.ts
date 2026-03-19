@@ -1,66 +1,42 @@
-import { NotificationType } from '../../common/enums'
+import {
+  NOTIFICATION_PREFERENCE_BY_TYPE,
+  NOTIFICATION_TITLE_BY_TYPE,
+} from './notifications.constants'
+import {
+  NotificationPreferenceField,
+  NotificationReadFilter,
+  NotificationSortField,
+  NotificationTitle,
+} from './notifications.enums'
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { NotificationPreferenceSelect } from './notifications.repository'
-import type { NotificationResponse } from './notifications.types'
-import type { NotificationEntityType } from '../../common/enums'
+import type {
+  NotificationActorRecord,
+  NotificationActorMap,
+  NotificationListFilters,
+  NotificationPreferenceSelect,
+  NotificationResponse,
+  NotificationRow,
+} from './notifications.types'
+import type { NotificationEntityType, NotificationType } from '../../common/enums'
 import type { Prisma } from '@prisma/client'
 
-/* ---------------------------------------------------------------- */
-/* NOTIFICATION TITLE MAP                                            */
-/* ---------------------------------------------------------------- */
-
-const NOTIFICATION_TITLE_MAP: Record<NotificationType, string> = {
-  [NotificationType.CASE_ASSIGNED]: 'Case Assigned',
-  [NotificationType.CASE_UNASSIGNED]: 'Case Unassigned',
-  [NotificationType.CASE_COMMENT_ADDED]: 'Comment Added',
-  [NotificationType.CASE_TASK_ADDED]: 'Task Added',
-  [NotificationType.CASE_ARTIFACT_ADDED]: 'Artifact Added',
-  [NotificationType.CASE_STATUS_CHANGED]: 'Status Changed',
-  [NotificationType.CASE_UPDATED]: 'Case Updated',
-  [NotificationType.MENTION]: 'Mentioned in Comment',
-  [NotificationType.TENANT_ASSIGNED]: 'Added to Tenant',
-  [NotificationType.ROLE_CHANGED]: 'Role Changed',
-  [NotificationType.USER_BLOCKED]: 'Account Suspended',
-  [NotificationType.USER_UNBLOCKED]: 'Account Reactivated',
-  [NotificationType.USER_REMOVED]: 'Removed from Tenant',
-  [NotificationType.USER_RESTORED]: 'Account Restored',
-}
-
 export function getNotificationTitle(type: NotificationType): string {
-  return NOTIFICATION_TITLE_MAP[type]
-}
-
-/* ---------------------------------------------------------------- */
-/* NOTIFICATION RESPONSE MAPPING                                     */
-/* ---------------------------------------------------------------- */
-
-interface NotificationRow {
-  id: string
-  type: string
-  actorUserId: string
-  title: string
-  message: string
-  entityType: string
-  entityId: string
-  caseId: string | null
-  caseCommentId: string | null
-  readAt: Date | null
-  createdAt: Date
+  return NOTIFICATION_TITLE_BY_TYPE.get(type) ?? NotificationTitle.MENTION
 }
 
 export function mapNotificationToResponse(
   n: NotificationRow,
-  actorMap: Map<string, { name: string; email: string }>
+  actorMap: NotificationActorMap
 ): NotificationResponse {
   const actor = actorMap.get(n.actorUserId)
   return {
     id: n.id,
-    type: n.type,
+    type: n.type as NotificationType,
     actorName: actor?.name ?? 'Unknown',
     actorEmail: actor?.email ?? '',
     title: n.title,
     message: n.message,
-    entityType: n.entityType,
+    entityType: n.entityType as NotificationEntityType,
     entityId: n.entityId,
     caseId: n.caseId,
     caseCommentId: n.caseCommentId,
@@ -69,9 +45,7 @@ export function mapNotificationToResponse(
   }
 }
 
-export function buildActorMap(
-  actors: Array<{ id: string; name: string; email: string }>
-): Map<string, { name: string; email: string }> {
+export function buildActorMap(actors: NotificationActorRecord[]): NotificationActorMap {
   return new Map(actors.map(a => [a.id, { name: a.name, email: a.email }]))
 }
 
@@ -114,21 +88,17 @@ export function buildNotificationPayload(
 export function buildNotificationWhereClause(
   tenantId: string,
   recipientUserId: string,
-  filters: {
-    query?: string
-    type?: string
-    isRead?: string
-  }
+  filters: NotificationListFilters
 ): Prisma.NotificationWhereInput {
   const where: Prisma.NotificationWhereInput = { tenantId, recipientUserId }
 
   if (filters.type) {
-    where.type = filters.type
+    where.type = filters.type as NotificationType
   }
 
-  if (filters.isRead === 'true') {
+  if (filters.isRead === NotificationReadFilter.READ) {
     where.readAt = { not: null }
-  } else if (filters.isRead === 'false') {
+  } else if (filters.isRead === NotificationReadFilter.UNREAD) {
     where.readAt = null
   }
 
@@ -148,39 +118,16 @@ export function buildNotificationOrderBy(
 ): Prisma.NotificationOrderByWithRelationInput {
   const order = toSortOrder(sortOrder)
   switch (sortBy) {
-    case 'type':
+    case NotificationSortField.TYPE:
       return { type: order }
-    case 'title':
+    case NotificationSortField.TITLE:
       return { title: order }
-    case 'isRead':
+    case NotificationSortField.IS_READ:
       return { readAt: order }
     default:
       return { createdAt: order }
   }
 }
-
-/* ---------------------------------------------------------------- */
-/* NOTIFICATION PREFERENCE CHECK                                     */
-/* ---------------------------------------------------------------- */
-
-type PreferenceField = keyof Omit<NotificationPreferenceSelect, 'notificationsInApp'>
-
-const NOTIFICATION_TYPE_TO_PREFERENCE = new Map<NotificationType, PreferenceField>([
-  [NotificationType.CASE_ASSIGNED, 'notifyCaseAssignments'],
-  [NotificationType.CASE_UNASSIGNED, 'notifyCaseAssignments'],
-  [NotificationType.CASE_COMMENT_ADDED, 'notifyCaseComments'],
-  [NotificationType.CASE_TASK_ADDED, 'notifyCaseActivity'],
-  [NotificationType.CASE_ARTIFACT_ADDED, 'notifyCaseActivity'],
-  [NotificationType.CASE_STATUS_CHANGED, 'notifyCaseActivity'],
-  [NotificationType.CASE_UPDATED, 'notifyCaseUpdates'],
-  [NotificationType.MENTION, 'notifyCaseComments'],
-  [NotificationType.TENANT_ASSIGNED, 'notifyUserManagement'],
-  [NotificationType.ROLE_CHANGED, 'notifyUserManagement'],
-  [NotificationType.USER_BLOCKED, 'notifyUserManagement'],
-  [NotificationType.USER_UNBLOCKED, 'notifyUserManagement'],
-  [NotificationType.USER_REMOVED, 'notifyUserManagement'],
-  [NotificationType.USER_RESTORED, 'notifyUserManagement'],
-])
 
 /**
  * Checks whether a notification should be sent based on user preferences.
@@ -199,8 +146,21 @@ export function isNotificationAllowedByPreference(
   if (!preferences.notificationsInApp) return false
 
   // Check category-specific preference
-  const preferenceField = NOTIFICATION_TYPE_TO_PREFERENCE.get(notificationType)
+  const preferenceField = NOTIFICATION_PREFERENCE_BY_TYPE.get(notificationType)
   if (preferenceField === undefined) return true
 
-  return preferences[preferenceField]
+  switch (preferenceField) {
+    case NotificationPreferenceField.CASE_ASSIGNMENTS:
+      return preferences.notifyCaseAssignments
+    case NotificationPreferenceField.CASE_COMMENTS:
+      return preferences.notifyCaseComments
+    case NotificationPreferenceField.CASE_ACTIVITY:
+      return preferences.notifyCaseActivity
+    case NotificationPreferenceField.CASE_UPDATES:
+      return preferences.notifyCaseUpdates
+    case NotificationPreferenceField.USER_MANAGEMENT:
+      return preferences.notifyUserManagement
+    default:
+      return true
+  }
 }

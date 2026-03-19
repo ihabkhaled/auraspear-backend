@@ -7,6 +7,7 @@ import {
   buildAgentUpdateData,
 } from './ai-agents.utilities'
 import {
+  AiAgentSessionStatus,
   AiAgentStatus,
   AppLogFeature,
   AppLogOutcome,
@@ -389,7 +390,7 @@ export class AiAgentsService {
     const session = await this.repository.createSession({
       agentId: id,
       input: dto.prompt,
-      status: 'running',
+      status: AiAgentSessionStatus.RUNNING,
     })
 
     const job = await this.jobService.enqueue({

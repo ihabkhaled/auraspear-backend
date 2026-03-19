@@ -1,20 +1,15 @@
 import { JobStatus } from './enums/job.enums'
+import { BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS, STALE_RUNNING_WINDOW_MS } from './jobs.constants'
+import { JobHandlerType } from './jobs.types'
+import type { JobStatsInput, JobRuntimeStats } from './jobs.types'
+import type { Job } from '@prisma/client'
 
-const BASE_RETRY_DELAY_MS = 30_000
-const MAX_RETRY_DELAY_MS = 15 * 60_000
-const STALE_RUNNING_WINDOW_MS = 30 * 60_000
-
-export interface JobRuntimeStats {
-  total: number
-  pending: number
-  running: number
-  retrying: number
-  failed: number
-  completed: number
-  cancelled: number
-  delayed: number
-  staleRunning: number
-  typeBreakdown: Array<{ type: string; count: number }>
+export async function placeholderJobHandler(job: Job): Promise<Record<string, unknown>> {
+  return {
+    handled: true,
+    handlerType: JobHandlerType.DEFAULT,
+    jobId: job.id,
+  }
 }
 
 export function computeRetryScheduledAt(nextAttempt: number): Date {
@@ -31,17 +26,7 @@ export function getStaleRunningThreshold(): Date {
   return new Date(Date.now() - STALE_RUNNING_WINDOW_MS)
 }
 
-export function buildJobStats(params: {
-  pending: number
-  running: number
-  retrying: number
-  failed: number
-  completed: number
-  cancelled: number
-  delayed: number
-  staleRunning: number
-  typeBreakdown: Array<{ type: string; count: number }>
-}): JobRuntimeStats {
+export function buildJobStats(params: JobStatsInput): JobRuntimeStats {
   const total =
     params.pending +
     params.running +

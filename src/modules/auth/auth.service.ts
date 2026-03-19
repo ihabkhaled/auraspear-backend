@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { RefreshTokenFamilyStatus, RefreshTokenRotationStatus } from '@prisma/client'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
+import { DUMMY_BCRYPT_HASH, JWT_CLOCK_TOLERANCE_SECONDS } from './auth.constants'
+import { RefreshTokenFamilyRevocationReason } from './auth.enums'
 import { AuthRepository } from './auth.repository'
 import {
   buildPayloadFromMembership,
@@ -19,42 +22,15 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { RoleSettingsService } from '../role-settings/role-settings.service'
-import type { TenantMembershipInfo } from './auth.utilities'
-import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type {
-  RefreshTokenFamily,
-  RefreshTokenRotation,
-  TenantMembership,
-  User,
-} from '@prisma/client'
-
-const DUMMY_BCRYPT_HASH = '$2b$12$mffuEnbgz2XglaCwSv1EFOwnXT8DaW5/CIE60E5/07DiN4b6Ncvxi'
-
-type MembershipWithTenant = TenantMembership & {
-  tenant: { id: string; name: string; slug: string }
-}
-
-type UserWithMemberships = User & {
-  memberships: MembershipWithTenant[]
-}
-
-type RefreshRotationWithFamily = RefreshTokenRotation & {
-  family: RefreshTokenFamily
-}
-
-interface IssuedRefreshToken {
-  refreshToken: string
-  family: string
-  generation: number
-  jti: string
-  expiresAt: Date
-}
-
-interface AuthorizedTenantContext {
-  tenantId: string
-  tenantSlug: string
-  role: UserRole
-}
+  AuthorizedTenantContext,
+  IssuedRefreshToken,
+  MembershipWithTenant,
+  RefreshRotationWithFamily,
+  TenantMembershipInfo,
+  UserWithMemberships,
+} from './auth.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Injectable()
 export class AuthService {
@@ -260,7 +236,11 @@ export class AuthService {
 
     if (family) {
       blacklistTasks.push(
-        this.authRepository.revokeRefreshTokenFamily(family, 'logout', new Date())
+        this.authRepository.revokeRefreshTokenFamily(
+          family,
+          RefreshTokenFamilyRevocationReason.LOGOUT,
+          new Date()
+        )
       )
     }
 
@@ -373,7 +353,7 @@ export class AuthService {
     if (caller.family) {
       await this.authRepository.revokeRefreshTokenFamily(
         caller.family,
-        'impersonation_ended',
+        RefreshTokenFamilyRevocationReason.IMPERSONATION_ENDED,
         new Date()
       )
     }
@@ -561,7 +541,7 @@ export class AuthService {
       )
     }
 
-    if (rotation.family.status === 'revoked') {
+    if (rotation.family.status === RefreshTokenFamilyStatus.revoked) {
       throw new BusinessException(
         401,
         'Refresh token family has been revoked',
@@ -570,7 +550,7 @@ export class AuthService {
     }
 
     if (
-      rotation.family.status === 'expired' ||
+      rotation.family.status === RefreshTokenFamilyStatus.expired ||
       rotation.expiresAt <= now ||
       rotation.family.expiresAt <= now
     ) {
@@ -582,7 +562,10 @@ export class AuthService {
       )
     }
 
-    if (rotation.status !== 'active' || rotation.generation !== rotation.family.currentGeneration) {
+    if (
+      rotation.status !== RefreshTokenRotationStatus.active ||
+      rotation.generation !== rotation.family.currentGeneration
+    ) {
       await this.handleRefreshReplay(rotation)
     }
   }
@@ -609,7 +592,7 @@ export class AuthService {
   private async handleRefreshReplay(rotation: RefreshRotationWithFamily): Promise<never> {
     await this.authRepository.revokeRefreshTokenFamily(
       rotation.family.id,
-      'replay_detected',
+      RefreshTokenFamilyRevocationReason.REPLAY_DETECTED,
       new Date(),
       rotation.id
     )
@@ -663,7 +646,7 @@ export class AuthService {
     try {
       const decoded = jwt.verify(token, this.jwtSecret, {
         algorithms: ['HS256'],
-        clockTolerance: 30,
+        clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
       }) as JwtPayload & { tokenType?: string }
 
       if (decoded.tokenType !== expectedType) {

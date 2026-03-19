@@ -1,5 +1,6 @@
 import { NotificationType, NotificationEntityType } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { NotificationsService } from '../../src/modules/notifications/notifications.service'
 
 const TENANT_ID = 'tenant-001'
@@ -582,12 +583,12 @@ describe('NotificationsService', () => {
 
   describe('emitPermissionsUpdated', () => {
     it('should emit a realtime permission refresh event to one user', () => {
-      service.emitPermissionsUpdated(TENANT_ID, RECIPIENT_ID, 'role-updated')
+      service.emitPermissionsUpdated(TENANT_ID, RECIPIENT_ID, PermissionUpdateReason.ROLE_UPDATED)
 
       expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         RECIPIENT_ID,
-        'role-updated'
+        PermissionUpdateReason.ROLE_UPDATED
       )
     })
 
@@ -595,19 +596,19 @@ describe('NotificationsService', () => {
       service.emitPermissionsUpdatedToUsers(
         TENANT_ID,
         [RECIPIENT_ID, RECIPIENT_ID, 'user-002'],
-        'role-matrix-updated'
+        PermissionUpdateReason.ROLE_MATRIX_UPDATED
       )
 
       expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledTimes(2)
       expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         RECIPIENT_ID,
-        'role-matrix-updated'
+        PermissionUpdateReason.ROLE_MATRIX_UPDATED
       )
       expect(mockGateway.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         'user-002',
-        'role-matrix-updated'
+        PermissionUpdateReason.ROLE_MATRIX_UPDATED
       )
     })
   })

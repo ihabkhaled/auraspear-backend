@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
@@ -50,7 +56,7 @@ export class MispService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'MispService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'misp', version: version ?? 'unknown' },
+        metadata: { connectorType: ConnectorType.MISP, version: version ?? 'unknown' },
       })
 
       return {
@@ -68,7 +74,7 @@ export class MispService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'MispService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'misp' },
+        metadata: { connectorType: ConnectorType.MISP },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -117,7 +123,7 @@ export class MispService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'MispService',
       functionName: 'getEvents',
-      metadata: { connectorType: 'misp', limit, count: events.length },
+      metadata: { connectorType: ConnectorType.MISP, limit, count: events.length },
     })
 
     return events
@@ -135,7 +141,7 @@ export class MispService {
     const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
     const res = await connectorFetch(`${baseUrl}/attributes/restSearch`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: {
         Authorization: authKey,
         Accept: 'application/json',
@@ -169,7 +175,7 @@ export class MispService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'MispService',
       functionName: 'searchAttributes',
-      metadata: { connectorType: 'misp', resultCount: results.length },
+      metadata: { connectorType: ConnectorType.MISP, resultCount: results.length },
     })
 
     return results
@@ -226,7 +232,7 @@ export class MispService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'MispService',
       functionName: 'getEvent',
-      metadata: { connectorType: 'misp', eventId },
+      metadata: { connectorType: ConnectorType.MISP, eventId },
     })
 
     return body.Event ?? body

@@ -1,11 +1,12 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as bcrypt from 'bcryptjs'
+import {
+  AUTH_BCRYPT_SALT_ROUNDS,
+  PLATFORM_ADMIN_EMAIL,
+  PLATFORM_ADMIN_NAME,
+} from './auth.constants'
 import { PlatformAdminBootstrapRepository } from './platform-admin-bootstrap.repository'
-
-const PLATFORM_ADMIN_EMAIL = 'platform-admin@auraspear.io'
-const PLATFORM_ADMIN_NAME = 'Platform Administrator'
-const BCRYPT_SALT_ROUNDS = 12
 
 @Injectable()
 export class PlatformAdminBootstrapService implements OnModuleInit {
@@ -30,15 +31,20 @@ export class PlatformAdminBootstrapService implements OnModuleInit {
     }
 
     const existingAdmin = await this.repository.findPlatformAdminByEmail(PLATFORM_ADMIN_EMAIL)
-    const shouldSyncPassword =
-      existingAdmin === null ||
-      existingAdmin.passwordHash === null ||
-      !(await bcrypt.compare(configuredPassword, existingAdmin.passwordHash))
+    const existingPasswordHash = existingAdmin?.passwordHash
+    let passwordHash: string
 
-    const passwordHash =
-      shouldSyncPassword || existingAdmin === null || existingAdmin.passwordHash === null
-        ? await bcrypt.hash(configuredPassword, BCRYPT_SALT_ROUNDS)
-        : existingAdmin.passwordHash
+    if (existingPasswordHash === undefined || existingPasswordHash === null) {
+      passwordHash = await bcrypt.hash(configuredPassword, AUTH_BCRYPT_SALT_ROUNDS)
+    } else {
+      const matchesConfiguredPassword = await bcrypt.compare(
+        configuredPassword,
+        existingPasswordHash
+      )
+      passwordHash = matchesConfiguredPassword
+        ? existingPasswordHash
+        : await bcrypt.hash(configuredPassword, AUTH_BCRYPT_SALT_ROUNDS)
+    }
 
     const platformAdmin = await this.repository.upsertPlatformAdmin({
       email: PLATFORM_ADMIN_EMAIL,

@@ -30,3 +30,11 @@ export interface AiAgentStats {
 export type AiAgentSessionRecord = AiAgentSession
 
 export type AiAgentToolRecord = AiAgentTool
+
+export interface AgentTaskPayload {
+  agentId?: string
+  sessionId?: string
+  prompt?: string
+  actorUserId?: string
+  actorEmail?: string
+}

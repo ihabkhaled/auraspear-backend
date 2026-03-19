@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { JobStatus } from './enums/job.enums'
+import { SortOrder } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import type { JobTypeCount, ListJobsOptions } from './jobs.types'
 import type { Job } from '@prisma/client'
 
 @Injectable()
@@ -26,10 +28,18 @@ export class JobRepository {
     })
   }
 
-  async updateStatus(id: string, data: Prisma.JobUncheckedUpdateInput): Promise<Job> {
-    return this.prisma.job.update({
-      where: { id },
+  async updateStatus(
+    id: string,
+    tenantId: string,
+    data: Prisma.JobUncheckedUpdateInput
+  ): Promise<Job> {
+    await this.prisma.job.updateMany({
+      where: { id, tenantId },
       data,
+    })
+
+    return this.prisma.job.findFirstOrThrow({
+      where: { id, tenantId },
     })
   }
 
@@ -43,17 +53,17 @@ export class JobRepository {
   async findPendingJobs(limit: number = 10): Promise<Job[]> {
     return this.prisma.job.findMany({
       where: {
-        status: { in: ['pending', 'retrying'] },
+        status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
         OR: [{ scheduledAt: null }, { scheduledAt: { lte: new Date() } }],
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: SortOrder.ASC },
       take: limit,
     })
   }
 
   async listByTenant(
     tenantId: string,
-    options?: { type?: string; status?: string; page?: number; limit?: number }
+    options?: ListJobsOptions
   ): Promise<{ data: Job[]; total: number; page: number; limit: number }> {
     const page = options?.page ?? 1
     const limit = options?.limit ?? 20
@@ -69,7 +79,7 @@ export class JobRepository {
     const [data, total] = await Promise.all([
       this.prisma.job.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: SortOrder.DESC },
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -105,7 +115,7 @@ export class JobRepository {
     })
   }
 
-  async groupTypeCounts(tenantId: string): Promise<Array<{ type: string; count: number }>> {
+  async groupTypeCounts(tenantId: string): Promise<JobTypeCount[]> {
     const results = await this.prisma.job.groupBy({
       by: ['type'],
       where: { tenantId },
@@ -123,9 +133,9 @@ export class JobRepository {
       where: {
         id,
         tenantId,
-        status: { in: ['pending', 'retrying'] },
+        status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
       },
-      data: { status: 'cancelled' },
+      data: { status: JobStatus.CANCELLED },
     })
   }
 

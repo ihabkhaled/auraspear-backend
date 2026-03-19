@@ -1,12 +1,13 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
+import {
+  REFRESH_FAMILY_PREFIX,
+  REFRESH_FAMILY_REVOKED_PREFIX,
+  TOKEN_BLACKLIST_PREFIX,
+} from './auth.constants'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-
-const TOKEN_BLACKLIST_PREFIX = 'token:blacklist:'
-const REFRESH_FAMILY_PREFIX = 'rf:'
-const REFRESH_FAMILY_REVOKED_PREFIX = 'rf:revoked:'
 
 @Injectable()
 export class TokenBlacklistService implements OnModuleDestroy {

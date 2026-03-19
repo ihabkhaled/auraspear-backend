@@ -1,5 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
-import { JobStatus } from '../../src/modules/jobs/enums/job.enums'
+import { JobStatus, JobType } from '../../src/modules/jobs/enums/job.enums'
 import { JobService } from '../../src/modules/jobs/jobs.service'
 
 function createMockRepository() {
@@ -34,10 +34,11 @@ describe('JobService', () => {
   it('schedules a retry with backoff when the next attempt is still allowed', async () => {
     repository.updateStatus.mockResolvedValue({ id: JOB_ID })
 
-    await service.markFailed(JOB_ID, 'boom', 0, 3)
+    await service.markFailed(JOB_ID, TENANT_ID, 'boom', 0, 3)
 
     expect(repository.updateStatus).toHaveBeenCalledWith(
       JOB_ID,
+      TENANT_ID,
       expect.objectContaining({
         status: JobStatus.RETRYING,
         attempts: 1,
@@ -50,10 +51,11 @@ describe('JobService', () => {
   it('marks the job failed permanently on the final attempt', async () => {
     repository.updateStatus.mockResolvedValue({ id: JOB_ID })
 
-    await service.markFailed(JOB_ID, 'boom', 2, 3)
+    await service.markFailed(JOB_ID, TENANT_ID, 'boom', 2, 3)
 
     expect(repository.updateStatus).toHaveBeenCalledWith(
       JOB_ID,
+      TENANT_ID,
       expect.objectContaining({
         status: JobStatus.FAILED,
         attempts: 3,
@@ -73,7 +75,7 @@ describe('JobService', () => {
       .mockResolvedValueOnce(1)
     repository.countScheduled.mockResolvedValue(2)
     repository.countStaleRunning.mockResolvedValue(1)
-    repository.groupTypeCounts.mockResolvedValue([{ type: 'ai_agent_task', count: 3 }])
+    repository.groupTypeCounts.mockResolvedValue([{ type: JobType.AI_AGENT_TASK, count: 3 }])
 
     const stats = await service.getStats(TENANT_ID)
 
@@ -87,24 +89,28 @@ describe('JobService', () => {
       cancelled: 1,
       delayed: 2,
       staleRunning: 1,
-      typeBreakdown: [{ type: 'ai_agent_task', count: 3 }],
+      typeBreakdown: [{ type: JobType.AI_AGENT_TASK, count: 3 }],
     })
   })
 
   it('retries failed jobs by resetting them to pending', async () => {
     repository.findById
-      .mockResolvedValueOnce({ id: JOB_ID, tenantId: TENANT_ID, status: 'failed' })
-      .mockResolvedValueOnce({ id: JOB_ID, tenantId: TENANT_ID, status: 'pending' })
+      .mockResolvedValueOnce({ id: JOB_ID, tenantId: TENANT_ID, status: JobStatus.FAILED })
+      .mockResolvedValueOnce({ id: JOB_ID, tenantId: TENANT_ID, status: JobStatus.PENDING })
     repository.retryJob.mockResolvedValue({ count: 1 })
 
     const result = await service.retryJob(JOB_ID, TENANT_ID)
 
     expect(repository.retryJob).toHaveBeenCalledWith(JOB_ID, TENANT_ID, expect.any(Date))
-    expect(result.status).toBe('pending')
+    expect(result.status).toBe(JobStatus.PENDING)
   })
 
   it('blocks retries for non-terminal jobs', async () => {
-    repository.findById.mockResolvedValue({ id: JOB_ID, tenantId: TENANT_ID, status: 'running' })
+    repository.findById.mockResolvedValue({
+      id: JOB_ID,
+      tenantId: TENANT_ID,
+      status: JobStatus.RUNNING,
+    })
 
     await expect(service.retryJob(JOB_ID, TENANT_ID)).rejects.toBeInstanceOf(BusinessException)
   })

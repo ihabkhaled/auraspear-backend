@@ -3,30 +3,19 @@ import { ConfigService } from '@nestjs/config'
 import { Interval } from '@nestjs/schedule'
 import Redis from 'ioredis'
 import { JobType } from './enums/job.enums'
+import { JOB_LOCK_PREFIX, JOB_LOCK_TTL_SECONDS } from './jobs.constants'
 import { JobRepository } from './jobs.repository'
 import { JobService } from './jobs.service'
+import { placeholderJobHandler } from './jobs.utilities'
+import { RedisResponse } from '../../common/enums'
+import type { JobHandler } from './jobs.types'
 import type { Job } from '@prisma/client'
-
-const LOCK_PREFIX = 'job:lock:'
-const LOCK_TTL_SECONDS = 300
-
-/**
- * Registry entry for a job handler function.
- * Each handler receives the job and returns a result payload.
- */
-type JobHandler = (job: Job) => Promise<Record<string, unknown>>
-
-const placeholderHandler: JobHandler = async (job: Job): Promise<Record<string, unknown>> => ({
-  handled: true,
-  handlerType: 'default',
-  jobId: job.id,
-})
 
 @Injectable()
 export class JobProcessorService implements OnModuleDestroy {
   private readonly logger = new Logger(JobProcessorService.name)
   private readonly redis: Redis
-  private readonly handlers = new Map<string, JobHandler>()
+  private readonly handlers = new Map<JobType, JobHandler>()
   private readonly concurrency: number
   private activeJobs = 0
   private shuttingDown = false
@@ -61,7 +50,7 @@ export class JobProcessorService implements OnModuleDestroy {
   /**
    * Register a job handler for a specific job type.
    */
-  registerHandler(type: string, handler: JobHandler): void {
+  registerHandler(type: JobType, handler: JobHandler): void {
     this.handlers.set(type, handler)
     this.logger.log(`Registered handler for job type: ${type}`)
   }
@@ -77,12 +66,16 @@ export class JobProcessorService implements OnModuleDestroy {
     try {
       const availableSlots = this.concurrency - this.activeJobs
       const pendingJobs = await this.jobRepository.findPendingJobs(availableSlots)
+      const lockResults = await Promise.all(
+        pendingJobs.map(async job => ({
+          job,
+          acquired: await this.acquireLock(job.id),
+        }))
+      )
 
-      for (const job of pendingJobs) {
+      for (const { job, acquired } of lockResults) {
         if (this.activeJobs >= this.concurrency) break
         if (this.shuttingDown) break
-
-        const acquired = await this.acquireLock(job.id)
         if (!acquired) continue
 
         this.activeJobs += 1
@@ -102,27 +95,38 @@ export class JobProcessorService implements OnModuleDestroy {
    * Process a single job: mark running, execute handler, mark completed/failed.
    */
   private async processJob(job: Job): Promise<void> {
-    const handler = this.handlers.get(job.type)
+    const handler = this.handlers.get(job.type as JobType)
     if (!handler) {
       const errorMessage = `No handler registered for job type: ${job.type}`
       this.logger.error(`${errorMessage}. Marking job ${job.id} as failed`)
-      await this.jobService.markUnrecoverableFailure(job.id, errorMessage, job.attempts + 1)
+      await this.jobService.markUnrecoverableFailure(
+        job.id,
+        job.tenantId,
+        errorMessage,
+        job.attempts + 1
+      )
       return
     }
 
     try {
-      await this.jobService.markRunning(job.id)
+      await this.jobService.markRunning(job.id, job.tenantId)
       this.logger.log(`Processing job ${job.id} (type=${job.type}, tenant=${job.tenantId})`)
 
       const result = await handler(job)
-      await this.jobService.markCompleted(job.id, result)
+      await this.jobService.markCompleted(job.id, job.tenantId, result)
 
       this.logger.log(`Job ${job.id} completed successfully`)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.error(`Job ${job.id} failed: ${errorMessage}`)
 
-      await this.jobService.markFailed(job.id, errorMessage, job.attempts, job.maxAttempts)
+      await this.jobService.markFailed(
+        job.id,
+        job.tenantId,
+        errorMessage,
+        job.attempts,
+        job.maxAttempts
+      )
     }
   }
 
@@ -131,9 +135,9 @@ export class JobProcessorService implements OnModuleDestroy {
    */
   private async acquireLock(jobId: string): Promise<boolean> {
     try {
-      const key = `${LOCK_PREFIX}${jobId}`
-      const result = await this.redis.set(key, '1', 'EX', LOCK_TTL_SECONDS, 'NX')
-      return result === 'OK'
+      const key = `${JOB_LOCK_PREFIX}${jobId}`
+      const result = await this.redis.set(key, '1', 'EX', JOB_LOCK_TTL_SECONDS, 'NX')
+      return result === RedisResponse.OK
     } catch {
       return false
     }
@@ -141,7 +145,7 @@ export class JobProcessorService implements OnModuleDestroy {
 
   private async releaseLock(jobId: string): Promise<void> {
     try {
-      const key = `${LOCK_PREFIX}${jobId}`
+      const key = `${JOB_LOCK_PREFIX}${jobId}`
       await this.redis.del(key)
     } catch {
       // Lock will expire via TTL
@@ -155,7 +159,7 @@ export class JobProcessorService implements OnModuleDestroy {
   private registerDefaultHandlers(): void {
     const jobTypes = Object.values(JobType)
     for (const type of jobTypes) {
-      this.handlers.set(type, placeholderHandler)
+      this.handlers.set(type, placeholderJobHandler)
     }
   }
 

@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
@@ -45,7 +51,7 @@ export class InfluxDBService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'InfluxDBService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'influxdb', version },
+        metadata: { connectorType: ConnectorType.INFLUXDB, version },
       })
 
       return {
@@ -63,7 +69,7 @@ export class InfluxDBService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'InfluxDBService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'influxdb' },
+        metadata: { connectorType: ConnectorType.INFLUXDB },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -80,7 +86,7 @@ export class InfluxDBService {
     const org = (config.org ?? config.organization ?? '') as string
 
     const res = await connectorFetch(`${baseUrl}/api/v2/query?org=${encodeURIComponent(org)}`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: {
         Authorization: `Token ${token}`,
         'Content-Type': 'application/vnd.flux',
@@ -110,7 +116,7 @@ export class InfluxDBService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'InfluxDBService',
       functionName: 'query',
-      metadata: { connectorType: 'influxdb', org },
+      metadata: { connectorType: ConnectorType.INFLUXDB, org },
     })
 
     return res.data as string
@@ -151,7 +157,7 @@ export class InfluxDBService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'InfluxDBService',
       functionName: 'getBuckets',
-      metadata: { connectorType: 'influxdb', count: buckets.length },
+      metadata: { connectorType: ConnectorType.INFLUXDB, count: buckets.length },
     })
 
     return buckets

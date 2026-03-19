@@ -6,8 +6,17 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
+import {
+  NotificationAuthorizationPrefix,
+  NotificationGatewayEvent,
+  NotificationGatewayNamespace,
+  NotificationSocketAuthField,
+  NotificationSocketDataKey,
+  PermissionUpdateReason,
+} from './notifications.enums'
+import { UrlProtocol } from '../../common/enums'
 import { AuthService } from '../auth/auth.service'
-import type { NotificationResponse } from './notifications.types'
+import type { NotificationHandshakeAuth, NotificationResponse } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @WebSocketGateway({
@@ -18,14 +27,14 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
       .filter(o => {
         try {
           const url = new URL(o)
-          return url.protocol === 'http:' || url.protocol === 'https:'
+          return url.protocol === UrlProtocol.HTTP || url.protocol === UrlProtocol.HTTPS
         } catch {
           return false
         }
       }),
     credentials: true,
   },
-  namespace: '/notifications',
+  namespace: NotificationGatewayNamespace.NOTIFICATIONS,
 })
 export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -40,9 +49,10 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   async handleConnection(client: Socket): Promise<void> {
     try {
-      const handshakeAuth = client.handshake.auth as Record<string, string>
+      const handshakeAuth = client.handshake.auth as NotificationHandshakeAuth
       const token =
-        handshakeAuth['token'] ?? client.handshake.headers.authorization?.replace('Bearer ', '')
+        handshakeAuth[NotificationSocketAuthField.TOKEN] ??
+        client.handshake.headers.authorization?.replace(NotificationAuthorizationPrefix.BEARER, '')
 
       if (!token) {
         client.disconnect()
@@ -50,7 +60,9 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
       }
 
       const payload = await this.authService.verifyAccessToken(token)
-      const requestedTenantId = this.readRequestedTenantId(handshakeAuth['tenantId'])
+      const requestedTenantId = this.readRequestedTenantId(
+        handshakeAuth[NotificationSocketAuthField.TENANT_ID]
+      )
       const authorizedContext = await this.authService.resolveAuthorizedTenantContext(
         payload,
         requestedTenantId
@@ -63,8 +75,8 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
       }
 
       // Store user info on socket
-      client.data['user'] = currentUser
-      client.data['tenantId'] = currentUser.tenantId
+      client.data[NotificationSocketDataKey.USER] = currentUser
+      client.data[NotificationSocketDataKey.TENANT_ID] = currentUser.tenantId
 
       // Join user-specific room: tenant:userId
       const room = `${currentUser.tenantId}:${currentUser.sub}`
@@ -77,7 +89,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   handleDisconnect(client: Socket): void {
-    const user = client.data['user'] as { email?: string } | undefined
+    const user = client.data[NotificationSocketDataKey.USER] as JwtPayload | undefined
     if (user?.email) {
       this.logger.log(`Client disconnected: ${user.email}`)
     }
@@ -88,7 +100,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
    */
   emitToUser(tenantId: string, recipientUserId: string, notification: NotificationResponse): void {
     const room = `${tenantId}:${recipientUserId}`
-    this.server.to(room).emit('notification', notification)
+    this.server.to(room).emit(NotificationGatewayEvent.NOTIFICATION, notification)
   }
 
   /**
@@ -96,16 +108,16 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
    */
   emitUnreadCount(tenantId: string, recipientUserId: string, count: number): void {
     const room = `${tenantId}:${recipientUserId}`
-    this.server.to(room).emit('unread-count', { count })
+    this.server.to(room).emit(NotificationGatewayEvent.UNREAD_COUNT, { count })
   }
 
   emitPermissionsUpdated(
     tenantId: string,
     recipientUserId: string,
-    reason: 'role-updated' | 'role-matrix-updated' | 'membership-status-updated'
+    reason: PermissionUpdateReason
   ): void {
     const room = `${tenantId}:${recipientUserId}`
-    this.server.to(room).emit('permissions-updated', {
+    this.server.to(room).emit(NotificationGatewayEvent.PERMISSIONS_UPDATED, {
       tenantId,
       reason,
       changedAt: new Date().toISOString(),

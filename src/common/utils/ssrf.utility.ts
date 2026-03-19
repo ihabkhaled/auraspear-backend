@@ -1,29 +1,7 @@
 import { promises as dns } from 'node:dns'
-import { NodeEnvironment } from '../enums'
+import { NodeEnvironment, UrlProtocol } from '../enums'
+import { PRIVATE_HOST_PATTERNS } from './ssrf.constants'
 import { BusinessException } from '../exceptions/business.exception'
-
-const PRIVATE_RANGES = [
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^0\./,
-  /^169\.254\./,
-  /^fc00:/i,
-  /^fd/i,
-  /^fe80:/i,
-  /^::1$/,
-  /^::$/,
-  /^::ffff:127\./i,
-  /^::ffff:10\./i,
-  /^::ffff:172\.(1[6-9]|2\d|3[01])\./i,
-  /^::ffff:192\.168\./i,
-  /^::ffff:169\.254\./i,
-  /^::ffff:0\./i,
-  /^\[::1\]$/,
-  /^\[::ffff:/i,
-  /^localhost$/i,
-]
 
 export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   let parsed: URL
@@ -34,7 +12,7 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   }
 
   // Only allow HTTPS in production
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+  if (parsed.protocol !== UrlProtocol.HTTPS && parsed.protocol !== UrlProtocol.HTTP) {
     throw new BusinessException(
       400,
       'Only HTTP(S) URLs are allowed',
@@ -46,7 +24,7 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
   const { hostname } = parsed
   if (isProduction) {
-    for (const pattern of PRIVATE_RANGES) {
+    for (const pattern of PRIVATE_HOST_PATTERNS) {
       if (pattern.test(hostname)) {
         throw new BusinessException(
           400,
@@ -75,7 +53,7 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
 }
 
 export function isPrivateHost(hostname: string): boolean {
-  return PRIVATE_RANGES.some(pattern => pattern.test(hostname))
+  return PRIVATE_HOST_PATTERNS.some(pattern => pattern.test(hostname))
 }
 
 /**

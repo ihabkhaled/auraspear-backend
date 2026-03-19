@@ -1,25 +1,8 @@
 import { createHash } from 'node:crypto'
-import {
-  type UserRole,
-  type JwtPayload,
-} from '../../common/interfaces/authenticated-request.interface'
-
-/* ---------------------------------------------------------------- */
-/* TENANT MEMBERSHIP MAPPING                                         */
-/* ---------------------------------------------------------------- */
-
-interface MembershipWithTenant {
-  tenantId: string
-  role: string
-  tenant: { id: string; name: string; slug: string }
-}
-
-export interface TenantMembershipInfo {
-  id: string
-  name: string
-  slug: string
-  role: UserRole
-}
+import { DEFAULT_REFRESH_EXPIRY_SECONDS } from './auth.constants'
+import { AuthExpiryUnit } from './auth.enums'
+import type { AuthUserIdentity, MembershipWithTenant, TenantMembershipInfo } from './auth.types'
+import type { JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
 
 export function mapMembershipsToTenantInfos(
   memberships: MembershipWithTenant[]
@@ -37,7 +20,7 @@ export function mapMembershipsToTenantInfos(
 /* ---------------------------------------------------------------- */
 
 export function buildPayloadFromMembership(
-  user: { id: string; email: string },
+  user: AuthUserIdentity,
   membership: MembershipWithTenant
 ): JwtPayload {
   return {
@@ -78,14 +61,6 @@ export function hashTokenIdentifier(identifier: string): string {
 /* EXPIRY PARSING                                                    */
 /* ---------------------------------------------------------------- */
 
-const EXPIRY_UNITS: Record<string, number> = {
-  s: 1,
-  m: 60,
-  h: 3600,
-  d: 86400,
-  w: 604800,
-}
-
 /**
  * Parse a JWT expiry string (e.g., '7d', '15m', '1h') into seconds.
  * Returns a default of 604800 (7 days) if parsing fails.
@@ -93,13 +68,28 @@ const EXPIRY_UNITS: Record<string, number> = {
 export function parseExpiryToSeconds(expiry: string): number {
   const match = /^(\d+)([smhdw])$/i.exec(expiry)
   if (!match) {
-    return 604800 // default 7 days
+    return DEFAULT_REFRESH_EXPIRY_SECONDS
   }
-  const value = Number.parseInt(match[1] ?? '7', 10)
-  const unit = (match[2] ?? 'd').toLowerCase()
-  const multiplier = EXPIRY_UNITS[unit]
-  if (multiplier === undefined) {
-    return 604800
+
+  const valuePart = match[1]
+  const unitPart = match[2]?.toLowerCase()
+  if (valuePart === undefined || unitPart === undefined) {
+    return DEFAULT_REFRESH_EXPIRY_SECONDS
   }
-  return value * multiplier
+
+  const value = Number.parseInt(valuePart, 10)
+  switch (unitPart) {
+    case AuthExpiryUnit.SECOND:
+      return value
+    case AuthExpiryUnit.MINUTE:
+      return value * 60
+    case AuthExpiryUnit.HOUR:
+      return value * 3600
+    case AuthExpiryUnit.DAY:
+      return value * 86400
+    case AuthExpiryUnit.WEEK:
+      return value * DEFAULT_REFRESH_EXPIRY_SECONDS
+    default:
+      return DEFAULT_REFRESH_EXPIRY_SECONDS
+  }
 }

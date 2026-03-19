@@ -1,5 +1,6 @@
 import { ALL_PERMISSIONS, Permission } from '../../src/common/enums/permission.enum'
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
+import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { CONFIGURABLE_ROLES } from '../../src/modules/role-settings/constants/default-permissions'
 import { RoleSettingsService } from '../../src/modules/role-settings/role-settings.service'
 
@@ -260,7 +261,7 @@ describe('RoleSettingsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdatedToUsers).toHaveBeenCalledWith(
         TENANT_ID,
         ['user-001'],
-        'role-matrix-updated'
+        PermissionUpdateReason.ROLE_MATRIX_UPDATED
       )
     })
 
@@ -343,7 +344,7 @@ describe('RoleSettingsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdatedToUsers).toHaveBeenCalledWith(
         TENANT_ID,
         ['user-101', 'user-202'],
-        'role-matrix-updated'
+        PermissionUpdateReason.ROLE_MATRIX_UPDATED
       )
     })
   })

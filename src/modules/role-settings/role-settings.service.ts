@@ -1,6 +1,10 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common'
 import { CONFIGURABLE_ROLES, DEFAULT_PERMISSIONS } from './constants/default-permissions'
 import { PERMISSION_DEFINITIONS } from './constants/permission-definitions'
+import {
+  ROLE_SETTINGS_MODULE,
+  TENANT_ADMIN_PROTECTED_PERMISSIONS,
+} from './constants/role-settings.constants'
 import { PermissionCacheService } from './permission-cache.service'
 import { RoleSettingsRepository } from './role-settings.repository'
 import {
@@ -13,14 +17,9 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole as UserRoleEnum } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { PermissionUpdateReason } from '../notifications/notifications.enums'
 import { NotificationsService } from '../notifications/notifications.service'
 import type { UserRole } from '@prisma/client'
-
-const ROLE_SETTINGS_MODULE = 'roleSettings'
-const TENANT_ADMIN_PROTECTED_PERMISSIONS = new Set<string>([
-  Permission.ROLE_SETTINGS_VIEW,
-  Permission.ROLE_SETTINGS_UPDATE,
-])
 
 @Injectable()
 export class RoleSettingsService {
@@ -38,17 +37,25 @@ export class RoleSettingsService {
     return [...permissions].sort((left, right) => left.localeCompare(right))
   }
 
+  private toPermissionMatrixMap(matrix: Record<string, string[]>): Map<string, string[]> {
+    return new Map(Object.entries(matrix))
+  }
+
   private getImpactedRoles(
     currentMatrix: Record<string, string[]>,
     nextMatrix: Record<string, string[]>
   ): UserRole[] {
     const impactedRoles: UserRole[] = []
+    const currentMatrixMap = this.toPermissionMatrixMap(currentMatrix)
+    const nextMatrixMap = this.toPermissionMatrixMap(nextMatrix)
 
     for (const role of CONFIGURABLE_ROLES) {
       const currentPermissions = JSON.stringify(
-        this.normalizePermissions(currentMatrix[role] ?? [])
+        this.normalizePermissions(currentMatrixMap.get(role) ?? [])
       )
-      const nextPermissions = JSON.stringify(this.normalizePermissions(nextMatrix[role] ?? []))
+      const nextPermissions = JSON.stringify(
+        this.normalizePermissions(nextMatrixMap.get(role) ?? [])
+      )
 
       if (currentPermissions !== nextPermissions) {
         impactedRoles.push(role as UserRole)
@@ -70,7 +77,7 @@ export class RoleSettingsService {
     this.notificationsService.emitPermissionsUpdatedToUsers(
       tenantId,
       userIds,
-      'role-matrix-updated'
+      PermissionUpdateReason.ROLE_MATRIX_UPDATED
     )
   }
 
@@ -84,10 +91,12 @@ export class RoleSettingsService {
     }
 
     const currentMatrix = await this.getPermissionMatrix(tenantId)
+    const currentMatrixMap = this.toPermissionMatrixMap(currentMatrix)
+    const requestedMatrixMap = this.toPermissionMatrixMap(matrix)
 
     for (const role of CONFIGURABLE_ROLES) {
-      const currentPermissions = new Set(currentMatrix[role] ?? [])
-      const requestedPermissions = new Set(matrix[role] ?? [])
+      const currentPermissions = new Set(currentMatrixMap.get(role) ?? [])
+      const requestedPermissions = new Set(requestedMatrixMap.get(role) ?? [])
 
       for (const permission of TENANT_ADMIN_PROTECTED_PERMISSIONS) {
         if (currentPermissions.has(permission) !== requestedPermissions.has(permission)) {

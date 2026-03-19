@@ -2,12 +2,12 @@ import { Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@
 import { Throttle } from '@nestjs/throttler'
 import { ListJobsQuerySchema } from './dto/list-jobs-query.dto'
 import { JobService } from './jobs.service'
-import { type JobRuntimeStats } from './jobs.utilities'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
+import type { JobRuntimeStats } from './jobs.types'
 import type { Job } from '@prisma/client'
 
 @Controller('jobs')

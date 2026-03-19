@@ -8,6 +8,7 @@ import {
   MembershipStatus,
   UserRole,
 } from '../../src/common/interfaces/authenticated-request.interface'
+import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { TenantsService } from '../../src/modules/tenants/tenants.service'
 
 const mockAppLogger = {
@@ -674,7 +675,7 @@ describe('TenantsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
-        'role-updated'
+        PermissionUpdateReason.ROLE_UPDATED
       )
     })
 
@@ -851,7 +852,7 @@ describe('TenantsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
-        'membership-status-updated'
+        PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
       )
     })
 
@@ -940,7 +941,7 @@ describe('TenantsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
-        'membership-status-updated'
+        PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
       )
     })
 
@@ -1042,7 +1043,7 @@ describe('TenantsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
-        'membership-status-updated'
+        PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
       )
     })
 
@@ -1143,7 +1144,7 @@ describe('TenantsService', () => {
       expect(mockNotificationsService.emitPermissionsUpdated).toHaveBeenCalledWith(
         TENANT_ID,
         USER_ID,
-        'membership-status-updated'
+        PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
       )
     })
 

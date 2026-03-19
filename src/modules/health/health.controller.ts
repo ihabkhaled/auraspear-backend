@@ -1,10 +1,11 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common'
+import { Controller, Get } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { HealthService } from './health.service'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { Public } from '../../common/decorators/public.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { Permission } from '../../common/enums'
+import { HealthStatus, Permission } from '../../common/enums'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import type { OverallHealth, ServiceHealthResult } from './health.types'
 
 @ApiTags('health')
@@ -21,11 +22,8 @@ export class HealthController {
   async getOverallHealth(): Promise<OverallHealth> {
     const health = await this.healthService.getOverallHealth()
 
-    if (health.status === 'down') {
-      throw new ServiceUnavailableException({
-        message: 'System is down',
-        messageKey: 'errors.health.serviceUnavailable',
-      })
+    if (health.status === HealthStatus.DOWN) {
+      throw new BusinessException(503, 'System is down', 'errors.health.serviceUnavailable')
     }
 
     return health

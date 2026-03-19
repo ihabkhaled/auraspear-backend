@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
@@ -50,7 +56,7 @@ export class GraylogService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'GraylogService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'graylog', nodes },
+        metadata: { connectorType: ConnectorType.GRAYLOG, nodes },
       })
 
       return {
@@ -68,7 +74,7 @@ export class GraylogService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'GraylogService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'graylog' },
+        metadata: { connectorType: ConnectorType.GRAYLOG },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -88,7 +94,7 @@ export class GraylogService {
     const password = config.password as string
 
     const res = await connectorFetch(`${baseUrl}/api/events/search`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: {
         Authorization: basicAuth(username, password),
         'X-Requested-By': 'AuraSpear',
@@ -121,7 +127,7 @@ export class GraylogService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'GraylogService',
       functionName: 'searchEvents',
-      metadata: { connectorType: 'graylog', resultCount: events.length, total },
+      metadata: { connectorType: ConnectorType.GRAYLOG, resultCount: events.length, total },
     })
 
     return { events, total }
@@ -166,7 +172,7 @@ export class GraylogService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'GraylogService',
       functionName: 'getEventDefinitions',
-      metadata: { connectorType: 'graylog', count: definitions.length },
+      metadata: { connectorType: ConnectorType.GRAYLOG, count: definitions.length },
     })
 
     return definitions

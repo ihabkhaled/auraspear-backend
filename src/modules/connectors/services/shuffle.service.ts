@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch } from '../../../common/utils/connector-http.utility'
 import type { TestResult } from '../connectors.types'
@@ -44,7 +50,7 @@ export class ShuffleService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'ShuffleService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'shuffle' },
+        metadata: { connectorType: ConnectorType.SHUFFLE },
       })
 
       return {
@@ -62,7 +68,7 @@ export class ShuffleService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'ShuffleService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'shuffle' },
+        metadata: { connectorType: ConnectorType.SHUFFLE },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -105,7 +111,7 @@ export class ShuffleService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'ShuffleService',
       functionName: 'getWorkflows',
-      metadata: { connectorType: 'shuffle', count: workflows.length },
+      metadata: { connectorType: ConnectorType.SHUFFLE, count: workflows.length },
     })
 
     return workflows
@@ -137,7 +143,7 @@ export class ShuffleService {
     }
 
     const res = await connectorFetch(`${baseUrl}/api/v1/workflows/${workflowId}/execute`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: { Authorization: `Bearer ${apiKey}` },
       body: data,
       rejectUnauthorized: config.verifyTls !== false,
@@ -166,7 +172,7 @@ export class ShuffleService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'ShuffleService',
       functionName: 'executeWorkflow',
-      metadata: { connectorType: 'shuffle', workflowId, executionId },
+      metadata: { connectorType: ConnectorType.SHUFFLE, workflowId, executionId },
     })
 
     return { executionId }

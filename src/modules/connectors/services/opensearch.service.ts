@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, HttpMethod } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
+import { ConnectorServiceName } from '../connectors.enums'
 import type { TestResult } from '../connectors.types'
 
 /**
@@ -52,7 +53,7 @@ export class OpenSearchService {
         className: 'OpenSearchService',
         functionName: 'testConnection',
         metadata: {
-          connectorType: 'opensearch',
+          connectorType: ConnectorServiceName.OPENSEARCH,
           clusterName: health.cluster_name,
           clusterStatus: health.status,
         },
@@ -73,7 +74,7 @@ export class OpenSearchService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'OpenSearchService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'opensearch' },
+        metadata: { connectorType: ConnectorServiceName.OPENSEARCH },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -99,7 +100,7 @@ export class OpenSearchService {
     }
 
     const res = await connectorFetch(`${baseUrl}/${index}/_search`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers,
       body: query,
       rejectUnauthorized: config.verifyTls !== false,
@@ -132,7 +133,12 @@ export class OpenSearchService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'OpenSearchService',
       functionName: 'search',
-      metadata: { connectorType: 'opensearch', index, resultCount: hitItems.length, total },
+      metadata: {
+        connectorType: ConnectorServiceName.OPENSEARCH,
+        index,
+        resultCount: hitItems.length,
+        total,
+      },
     })
 
     return { hits: hitItems, total }

@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
+import {
+  AI_BEDROCK_MAX_TOKENS,
+  AI_DEFAULT_MODEL,
+  AI_EXPLAIN_LATENCY_OFFSET_MS,
+  AI_EXPLAIN_REASONING,
+} from './ai.constants'
 import { AiRepository } from './ai.repository'
 import {
   buildHuntPrompt,
@@ -27,41 +33,13 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { BedrockService } from '../connectors/services/bedrock.service'
-import type { AiResponse } from './ai.types'
+import type { AgentTaskExecutionInput, AiAuditRecord, AiResponse } from './ai.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Alert, Prisma } from '@prisma/client'
-
-interface AiAuditRecord {
-  id: string
-  tenantId: string
-  userId: string
-  action: string
-  model: string
-  inputTokens: number
-  outputTokens: number
-  latencyMs: number
-  status: AiAuditStatus
-  createdAt: string
-  prompt?: string
-  response?: string
-}
-
-interface AgentTaskExecutionInput {
-  tenantId: string
-  actorUserId: string
-  actorEmail: string
-  agentId: string
-  agentName: string
-  model: string
-  prompt: string
-  soulMd?: string | null
-  tools: Array<{ name: string; description: string }>
-}
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name)
-  private readonly MODEL = 'anthropic.claude-3-sonnet'
 
   constructor(
     private readonly aiRepository: AiRepository,
@@ -160,25 +138,19 @@ export class AiService {
 
     const response: AiResponse = {
       result: generateExplainResponse(body.prompt),
-      reasoning: [
-        'Parsing the security concept or finding to explain',
-        'Breaking down technical details into analyst-friendly language',
-        'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
-        'Providing contextual examples relevant to the environment',
-        'Including remediation guidance and best practices',
-      ],
+      reasoning: [...AI_EXPLAIN_REASONING],
       confidence: 0.95,
-      model: this.MODEL,
+      model: AI_DEFAULT_MODEL,
       tokensUsed: { input: 892, output: 1654 },
     }
 
-    const latencyMs = Date.now() - startTime + 900
+    const latencyMs = Date.now() - startTime + AI_EXPLAIN_LATENCY_OFFSET_MS
     await this.logAudit(
       this.buildAuditRecord(user, AiAuditAction.EXPLAIN, response, latencyMs, body.prompt)
     )
 
     this.logAction('aiExplain', user, 'AiExplain', undefined, {
-      model: this.MODEL,
+      model: AI_DEFAULT_MODEL,
       confidence: response.confidence,
       latencyMs,
     })
@@ -254,11 +226,11 @@ export class AiService {
   ): Promise<AiResponse | undefined> {
     try {
       const prompt = buildHuntPrompt(dto.query, dto.context)
-      const aiResult = await this.bedrockService.invoke(config, prompt, 2048)
+      const aiResult = await this.bedrockService.invoke(config, prompt, AI_BEDROCK_MAX_TOKENS)
       return buildBedrockHuntResponse(
         aiResult.text,
         dto.query,
-        (config.modelId as string) ?? this.MODEL,
+        (config.modelId as string) ?? AI_DEFAULT_MODEL,
         aiResult.inputTokens,
         aiResult.outputTokens
       )
@@ -290,14 +262,14 @@ export class AiService {
   ): Promise<AiResponse | undefined> {
     try {
       const prompt = buildInvestigationPrompt(alert, relatedAlerts)
-      const aiResult = await this.bedrockService.invoke(config, prompt, 2048)
+      const aiResult = await this.bedrockService.invoke(config, prompt, AI_BEDROCK_MAX_TOKENS)
       return buildBedrockInvestigateResponse(
         aiResult.text,
         alertId,
         relatedAlerts.length,
         alert,
         relatedAlerts,
-        (config.modelId as string) ?? this.MODEL,
+        (config.modelId as string) ?? AI_DEFAULT_MODEL,
         aiResult.inputTokens,
         aiResult.outputTokens
       )
@@ -333,7 +305,7 @@ export class AiService {
         soulMd: input.soulMd,
         tools: input.tools,
       })
-      const aiResult = await this.bedrockService.invoke(config, prompt, 2048)
+      const aiResult = await this.bedrockService.invoke(config, prompt, AI_BEDROCK_MAX_TOKENS)
       return buildBedrockAgentTaskResponse(
         aiResult.text,
         input.agentName,

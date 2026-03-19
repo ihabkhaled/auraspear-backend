@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto'
+import { ACCESS_COOKIE_MAX_AGE_MS, REFRESH_COOKIE_MAX_AGE_MS } from './auth.constants'
+import { AuthCookieName, AuthCookiePath, AuthCookieSameSite } from './auth.enums'
+import { NodeEnvironment } from '../../common/enums'
 import type { CookieOptions, Response } from 'express'
 
-export const ACCESS_COOKIE_MAX_AGE_MS = 15 * 60 * 1000
-export const REFRESH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-
 function isProduction(): boolean {
-  return process.env['NODE_ENV'] === 'production'
+  return process.env['NODE_ENV'] === NodeEnvironment.PRODUCTION
 }
 
 function buildBaseCookieOptions(): Pick<CookieOptions, 'secure'> {
@@ -21,38 +21,38 @@ export function setAuthCookies(
 ): void {
   const baseOptions = buildBaseCookieOptions()
 
-  response.cookie('access_token', accessToken, {
+  response.cookie(AuthCookieName.ACCESS, accessToken, {
     ...baseOptions,
     httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
+    sameSite: AuthCookieSameSite.LAX,
+    path: AuthCookiePath.ROOT,
     maxAge: ACCESS_COOKIE_MAX_AGE_MS,
   })
 
-  response.cookie('refresh_token', refreshToken, {
+  response.cookie(AuthCookieName.REFRESH, refreshToken, {
     ...baseOptions,
     httpOnly: true,
-    sameSite: 'strict',
-    path: '/api/v1/auth',
+    sameSite: AuthCookieSameSite.STRICT,
+    path: AuthCookiePath.AUTH,
     maxAge: REFRESH_COOKIE_MAX_AGE_MS,
   })
 }
 
 export function clearAuthCookies(response: Response): void {
-  response.clearCookie('access_token', { path: '/' })
-  response.clearCookie('refresh_token', { path: '/api/v1/auth' })
-  response.clearCookie('csrf_token', { path: '/' })
+  response.clearCookie(AuthCookieName.ACCESS, { path: AuthCookiePath.ROOT })
+  response.clearCookie(AuthCookieName.REFRESH, { path: AuthCookiePath.AUTH })
+  response.clearCookie(AuthCookieName.CSRF, { path: AuthCookiePath.ROOT })
 }
 
 export function issueCsrfToken(response: Response): string {
   const csrfToken = randomBytes(32).toString('hex')
   const baseOptions = buildBaseCookieOptions()
 
-  response.cookie('csrf_token', csrfToken, {
+  response.cookie(AuthCookieName.CSRF, csrfToken, {
     ...baseOptions,
     httpOnly: false,
-    sameSite: 'strict',
-    path: '/',
+    sameSite: AuthCookieSameSite.STRICT,
+    path: AuthCookiePath.ROOT,
     maxAge: ACCESS_COOKIE_MAX_AGE_MS,
   })
 

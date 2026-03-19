@@ -1,3 +1,5 @@
+import type { ConnectorHttpOptions } from '../../common/utils/connector-http.types'
+
 export interface ConnectorResponse {
   type: string
   name: string
@@ -39,4 +41,14 @@ export interface ScrollCollectionParameters {
   allHits: unknown[]
   total: number
   maxEvents: number
+}
+
+export interface WazuhTokenCache {
+  token: string
+  expiresAt: number
+}
+
+export interface VelociraptorAuthOptions {
+  headers: Record<string, string>
+  httpOptions: Partial<ConnectorHttpOptions>
 }

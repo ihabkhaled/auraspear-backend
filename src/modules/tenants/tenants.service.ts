@@ -27,7 +27,9 @@ import {
   UserRole,
 } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { AUTH_BCRYPT_SALT_ROUNDS } from '../auth/auth.constants'
 import { AuthService } from '../auth/auth.service'
+import { PermissionUpdateReason } from '../notifications/notifications.enums'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
   CreateTenantDto,
@@ -46,8 +48,6 @@ import type {
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { TenantMembership, User } from '@prisma/client'
-
-const BCRYPT_SALT_ROUNDS = 12
 
 @Injectable()
 export class TenantsService {
@@ -248,7 +248,7 @@ export class TenantsService {
       this.guardNewUserFields('assignUser', tenantId, dto, Boolean(existingUser))
 
       const passwordHash = dto.password
-        ? await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+        ? await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
         : undefined
       const result = await this.tenantsRepository.findOrCreateUserWithMembership(
         tenantId,
@@ -277,7 +277,7 @@ export class TenantsService {
 
   async addUser(tenantId: string, dto: AddUserDto, callerRole: UserRole): Promise<UserRecord> {
     this.guardGlobalAdminAssignment('addUser', tenantId, dto.role, callerRole, dto.email)
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+    const passwordHash = await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
 
     try {
       const { user: existingUser, membership: existingMembership } =
@@ -342,7 +342,11 @@ export class TenantsService {
         callerId,
         callerEmail
       )
-      this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'role-updated')
+      this.notificationsService.emitPermissionsUpdated(
+        tenantId,
+        userId,
+        PermissionUpdateReason.ROLE_UPDATED
+      )
     }
     return mapMembershipToUserRecord(updated)
   }
@@ -373,7 +377,11 @@ export class TenantsService {
     await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
     this.logSuccess('removeUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRemoved(tenantId, userId, callerId, callerEmail)
-    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
+    this.notificationsService.emitPermissionsUpdated(
+      tenantId,
+      userId,
+      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+    )
     return { deleted: true }
   }
 
@@ -403,7 +411,11 @@ export class TenantsService {
     )
     this.logSuccess('restoreUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserRestored(tenantId, userId, callerId, callerEmail)
-    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
+    this.notificationsService.emitPermissionsUpdated(
+      tenantId,
+      userId,
+      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+    )
     return mapMembershipToUserRecord(updated)
   }
 
@@ -446,7 +458,11 @@ export class TenantsService {
     )
     this.logSuccess('blockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
-    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
+    this.notificationsService.emitPermissionsUpdated(
+      tenantId,
+      userId,
+      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+    )
     return mapMembershipToUserRecord(updated)
   }
 
@@ -476,7 +492,11 @@ export class TenantsService {
     )
     this.logSuccess('unblockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserUnblocked(tenantId, userId, callerId, callerEmail)
-    this.notificationsService.emitPermissionsUpdated(tenantId, userId, 'membership-status-updated')
+    this.notificationsService.emitPermissionsUpdated(
+      tenantId,
+      userId,
+      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+    )
     return mapMembershipToUserRecord(updated)
   }
 
@@ -831,7 +851,7 @@ export class TenantsService {
       userUpdateData.name = dto.name
     }
     if (dto.password !== undefined) {
-      userUpdateData.passwordHash = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS)
+      userUpdateData.passwordHash = await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
     }
     if (Object.keys(userUpdateData).length > 0) {
       await this.tenantsRepository.updateUser(userId, userUpdateData)

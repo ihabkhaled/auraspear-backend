@@ -1,15 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AiAgentsRepository } from './ai-agents.repository'
 import { AiService } from '../ai/ai.service'
+import type { AgentTaskPayload } from './ai-agents.types'
 import type { Job } from '@prisma/client'
-
-interface AgentTaskPayload {
-  agentId?: string
-  sessionId?: string
-  prompt?: string
-  actorUserId?: string
-  actorEmail?: string
-}
 
 @Injectable()
 export class AiAgentTaskHandler {

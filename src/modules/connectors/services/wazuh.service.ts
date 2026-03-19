@@ -1,13 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ConnectorType,
+  HttpMethod,
+} from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
-import type { ScrollCollectionParameters, TestResult } from '../connectors.types'
-
-interface WazuhTokenCache {
-  token: string
-  expiresAt: number
-}
+import type { ScrollCollectionParameters, TestResult, WazuhTokenCache } from '../connectors.types'
 
 @Injectable()
 export class WazuhService {
@@ -57,7 +58,7 @@ export class WazuhService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'WazuhService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'wazuh', version },
+        metadata: { connectorType: ConnectorType.WAZUH, version },
       })
 
       return {
@@ -75,7 +76,7 @@ export class WazuhService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'WazuhService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'wazuh' },
+        metadata: { connectorType: ConnectorType.WAZUH },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -100,7 +101,7 @@ export class WazuhService {
     }
 
     const res = await connectorFetch(`${managerUrl}/security/user/authenticate`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: { Authorization: basicAuth(username, password) },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
@@ -147,7 +148,7 @@ export class WazuhService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'WazuhService',
       functionName: 'authenticate',
-      metadata: { connectorType: 'wazuh' },
+      metadata: { connectorType: ConnectorType.WAZUH },
     })
 
     return token
@@ -194,7 +195,7 @@ export class WazuhService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'WazuhService',
       functionName: 'getAgents',
-      metadata: { connectorType: 'wazuh', count: agents.length },
+      metadata: { connectorType: ConnectorType.WAZUH, count: agents.length },
     })
 
     return agents
@@ -238,7 +239,7 @@ export class WazuhService {
     }
 
     const res = await connectorFetch(`${indexerUrl}/${index}/_search`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: {
         Authorization: basicAuth(username as string, password as string),
       },
@@ -273,7 +274,7 @@ export class WazuhService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'WazuhService',
       functionName: 'searchAlerts',
-      metadata: { connectorType: 'wazuh', index, resultCount: hitItems.length, total },
+      metadata: { connectorType: ConnectorType.WAZUH, index, resultCount: hitItems.length, total },
     })
 
     return { hits: hitItems, total }
@@ -309,7 +310,7 @@ export class WazuhService {
     // Initial search with scroll context (1 minute TTL)
     const scrollQuery = { ...query, size: scrollBatchSize }
     const initialResponse = await connectorFetch(`${indexerUrl}/${index}/_search?scroll=1m`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: { Authorization: authHeader },
       body: scrollQuery,
       rejectUnauthorized: tlsOption,
@@ -343,7 +344,7 @@ export class WazuhService {
     // Clean up scroll context (fire and forget)
     if (scrollId) {
       connectorFetch(`${indexerUrl}/_search/scroll`, {
-        method: 'DELETE',
+        method: HttpMethod.DELETE,
         headers: { Authorization: authHeader },
         body: { scroll_id: [scrollId] },
         rejectUnauthorized: tlsOption,
@@ -360,7 +361,7 @@ export class WazuhService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'WazuhService',
       functionName: 'searchAllAlerts',
-      metadata: { connectorType: 'wazuh', index, resultCount: allHits.length, total },
+      metadata: { connectorType: ConnectorType.WAZUH, index, resultCount: allHits.length, total },
     })
 
     return { hits: allHits, total }
@@ -381,7 +382,7 @@ export class WazuhService {
     }
 
     const scrollResponse = await connectorFetch(`${indexerUrl}/_search/scroll`, {
-      method: 'POST',
+      method: HttpMethod.POST,
       headers: { Authorization: authHeader },
       body: { scroll: '1m', scroll_id: scrollId },
       rejectUnauthorized: tlsOption,

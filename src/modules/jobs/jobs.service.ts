@@ -6,20 +6,10 @@ import {
   computeRetryScheduledAt,
   getStaleRunningThreshold,
   shouldRetryJob,
-  type JobRuntimeStats,
 } from './jobs.utilities'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import type { EnqueueParameters, JobRuntimeStats, ListJobsOptions } from './jobs.types'
 import type { Job, Prisma } from '@prisma/client'
-
-interface EnqueueParameters {
-  tenantId: string
-  type: string
-  payload?: Record<string, unknown>
-  maxAttempts?: number
-  idempotencyKey?: string
-  scheduledAt?: Date
-  createdBy?: string
-}
 
 @Injectable()
 export class JobService {
@@ -44,7 +34,7 @@ export class JobService {
 
     const job = await this.jobRepository.create({
       tenantId: params.tenantId,
-      type: params.type as never,
+      type: params.type,
       payload: (params.payload ?? {}) as Prisma.InputJsonValue,
       maxAttempts: params.maxAttempts ?? 3,
       idempotencyKey: params.idempotencyKey,
@@ -72,13 +62,13 @@ export class JobService {
 
   async listJobs(
     tenantId: string,
-    options?: { type?: string; status?: string; page?: number; limit?: number }
+    options?: ListJobsOptions
   ): Promise<{ data: Job[]; total: number; page: number; limit: number }> {
     return this.jobRepository.listByTenant(tenantId, options)
   }
 
-  async markRunning(jobId: string): Promise<Job> {
-    return this.jobRepository.updateStatus(jobId, {
+  async markRunning(jobId: string, tenantId: string): Promise<Job> {
+    return this.jobRepository.updateStatus(jobId, tenantId, {
       status: JobStatus.RUNNING,
       error: null,
       scheduledAt: null,
@@ -86,8 +76,12 @@ export class JobService {
     })
   }
 
-  async markCompleted(jobId: string, result?: Record<string, unknown>): Promise<Job> {
-    return this.jobRepository.updateStatus(jobId, {
+  async markCompleted(
+    jobId: string,
+    tenantId: string,
+    result?: Record<string, unknown>
+  ): Promise<Job> {
+    return this.jobRepository.updateStatus(jobId, tenantId, {
       status: JobStatus.COMPLETED,
       result: (result as Prisma.InputJsonValue) ?? undefined,
       error: null,
@@ -98,6 +92,7 @@ export class JobService {
 
   async markFailed(
     jobId: string,
+    tenantId: string,
     error: string,
     currentAttempts: number,
     maxAttempts: number
@@ -106,7 +101,7 @@ export class JobService {
     const retrying = shouldRetryJob(nextAttempt, maxAttempts)
     const newStatus = retrying ? JobStatus.RETRYING : JobStatus.FAILED
 
-    await this.jobRepository.updateStatus(jobId, {
+    await this.jobRepository.updateStatus(jobId, tenantId, {
       status: newStatus,
       error,
       attempts: nextAttempt,
@@ -123,8 +118,13 @@ export class JobService {
     return { retrying }
   }
 
-  async markUnrecoverableFailure(jobId: string, error: string, attempts: number): Promise<Job> {
-    return this.jobRepository.updateStatus(jobId, {
+  async markUnrecoverableFailure(
+    jobId: string,
+    tenantId: string,
+    error: string,
+    attempts: number
+  ): Promise<Job> {
+    return this.jobRepository.updateStatus(jobId, tenantId, {
       status: JobStatus.FAILED,
       error,
       attempts,

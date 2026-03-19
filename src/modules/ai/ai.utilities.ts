@@ -1,5 +1,6 @@
+import { AiResponseModel } from './ai.enums'
 import { AlertSeverity } from '../../common/enums'
-import type { AiResponse } from './ai.types'
+import type { AgentTaskPromptParameters, AgentTaskResponseParameters, AiResponse } from './ai.types'
 import type { Alert } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -75,12 +76,7 @@ Provide your investigation report in markdown with these sections:
 Be specific and grounded in the actual alert data. Do not fabricate indicators not present in the data.`
 }
 
-export function buildAgentTaskPrompt(params: {
-  agentName: string
-  prompt: string
-  soulMd?: string | null
-  tools: Array<{ name: string; description: string }>
-}): string {
+export function buildAgentTaskPrompt(params: AgentTaskPromptParameters): string {
   const safePrompt = sanitizeForMarkdown(params.prompt)
   const toolSummary =
     params.tools.length > 0
@@ -356,11 +352,7 @@ This security finding involves indicators of potential adversary activity within
 - NIST SP 800-61r2: Incident handling guidance for this type of activity`
 }
 
-export function generateAgentTaskResponse(params: {
-  agentName: string
-  prompt: string
-  tools: Array<{ name: string; description: string }>
-}): string {
+export function generateAgentTaskResponse(params: AgentTaskResponseParameters): string {
   const safePrompt = sanitizeForMarkdown(params.prompt)
   const availableTools =
     params.tools.length > 0
@@ -425,7 +417,7 @@ export function buildFallbackHuntResponse(query: string): AiResponse {
       'Generating rule-based hunt analysis (AI model not available)',
     ],
     confidence: 0.87,
-    model: 'rule-based',
+    model: AiResponseModel.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }
@@ -469,7 +461,7 @@ export function buildFallbackInvestigateResponse(
       'Generating rule-based investigation report (AI model not available)',
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
-    model: 'rule-based',
+    model: AiResponseModel.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }
@@ -494,11 +486,7 @@ export function buildBedrockAgentTaskResponse(
   }
 }
 
-export function buildFallbackAgentTaskResponse(params: {
-  agentName: string
-  prompt: string
-  tools: Array<{ name: string; description: string }>
-}): AiResponse {
+export function buildFallbackAgentTaskResponse(params: AgentTaskResponseParameters): AiResponse {
   return {
     result: generateAgentTaskResponse(params),
     reasoning: [
@@ -507,7 +495,7 @@ export function buildFallbackAgentTaskResponse(params: {
       'Generating a deterministic fallback response because the AI connector is unavailable',
     ],
     confidence: 0.7,
-    model: 'rule-based',
+    model: AiResponseModel.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }

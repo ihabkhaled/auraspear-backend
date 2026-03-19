@@ -1,31 +1,11 @@
 import { promises as dns } from 'node:dns'
 import * as http from 'node:http'
 import * as https from 'node:https'
-import { NodeEnvironment } from '../enums'
+import { HttpMethod, NodeEnvironment, UrlProtocol } from '../enums'
 import { isPrivateHost } from './ssrf.utility'
+import type { ConnectorHttpOptions, ConnectorHttpResponse } from './connector-http.types'
 
-export interface ConnectorHttpOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  headers?: Record<string, string>
-  body?: unknown
-  timeoutMs?: number
-  rejectUnauthorized?: boolean
-  /** Allow private/internal network targets. Defaults to false — only set to true for known internal connector services. */
-  allowPrivateNetwork?: boolean
-  /** PEM-encoded client certificate for mTLS authentication. */
-  clientCert?: string
-  /** PEM-encoded client private key for mTLS authentication. */
-  clientKey?: string
-  /** PEM-encoded CA certificate to trust for the connection. */
-  caCert?: string
-}
-
-export interface ConnectorHttpResponse {
-  status: number
-  data: unknown
-  headers: Record<string, string>
-  latencyMs: number
-}
+export type { ConnectorHttpOptions, ConnectorHttpResponse } from './connector-http.types'
 
 /**
  * HTTP client for connector integrations.
@@ -39,7 +19,7 @@ export async function connectorFetch(
 ): Promise<ConnectorHttpResponse> {
   const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
   const {
-    method = 'GET',
+    method = HttpMethod.GET,
     headers = {},
     body,
     timeoutMs = 15_000,
@@ -50,28 +30,21 @@ export async function connectorFetch(
     caCert,
   } = options
 
-  // In non-production, always accept self-signed certificates for local testing
   const rejectUnauthorized = isProduction ? callerRejectUnauthorized : false
-
   const parsed = new URL(url)
 
-  // Only allow HTTP(S) protocols
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+  if (parsed.protocol !== UrlProtocol.HTTPS && parsed.protocol !== UrlProtocol.HTTP) {
     throw new Error('Only HTTP(S) URLs are allowed')
   }
 
-  // Enforce HTTPS in production to prevent credential leakage over plain HTTP
-  if (isProduction && parsed.protocol !== 'https:') {
+  if (isProduction && parsed.protocol !== UrlProtocol.HTTPS) {
     throw new Error('Only HTTPS URLs are allowed in production')
   }
 
-  // Block private network targets when not explicitly allowed (skip in non-production)
   if (isProduction && !allowPrivateNetwork && isPrivateHost(parsed.hostname)) {
     throw new Error('URLs pointing to private/internal networks are not allowed')
   }
 
-  // DNS-aware SSRF defense: resolve hostname and verify resolved IP is not private.
-  // This prevents DNS rebinding attacks where a domain resolves to a private IP.
   if (isProduction && !allowPrivateNetwork) {
     try {
       const { address } = await dns.lookup(parsed.hostname)
@@ -84,6 +57,7 @@ export async function connectorFetch(
       if (dnsError instanceof Error && dnsError.message.includes('SSRF blocked')) {
         throw dnsError
       }
+
       throw new Error(
         `DNS resolution failed for '${parsed.hostname}': ${dnsError instanceof Error ? dnsError.message : 'unknown error'}`
       )
@@ -91,9 +65,8 @@ export async function connectorFetch(
   }
 
   const start = Date.now()
-  const isHttps = parsed.protocol === 'https:'
+  const isHttps = parsed.protocol === UrlProtocol.HTTPS
 
-  // L14: Warn when TLS verification is disabled
   if (isHttps && !rejectUnauthorized) {
     console.warn(`[connector-http] TLS verification disabled for ${parsed.hostname}`)
   }
@@ -116,7 +89,7 @@ export async function connectorFetch(
       ...(caCert ? { ca: caCert } : {}),
     }
 
-    const maxResponseBytes = 10 * 1024 * 1024 // 10 MB limit
+    const maxResponseBytes = 10 * 1024 * 1024
     const transport = isHttps ? https : http
     const req = transport.request(requestOptions, res => {
       const chunks: Buffer[] = []
@@ -129,6 +102,7 @@ export async function connectorFetch(
           reject(new Error('Response body exceeded 10 MB limit'))
           return
         }
+
         chunks.push(chunk)
       })
 
@@ -140,7 +114,7 @@ export async function connectorFetch(
         try {
           data = JSON.parse(rawBody)
         } catch {
-          // Not JSON, keep as string
+          // Not JSON, keep as string.
         }
 
         const responseHeaders: Record<string, string> = Object.fromEntries(
@@ -175,7 +149,6 @@ export async function connectorFetch(
   })
 }
 
-/** Build Basic auth header value. */
 export function basicAuth(username: string, password: string): string {
   return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
 }
