@@ -5630,12 +5630,16 @@ async function main(): Promise<void> {
       ]
 
       for (const userDef of userDefs) {
-        const isProtected =
-          userDef.role === UserRole.GLOBAL_ADMIN || userDef.role === UserRole.TENANT_ADMIN
+        const isProtected = userDef.role === UserRole.TENANT_ADMIN
 
         const createdUser = await prisma.user.upsert({
           where: { email: userDef.email },
-          update: {},
+          update: {
+            name: userDef.name,
+            oidcSub: userDef.oidcSub,
+            passwordHash,
+            isProtected,
+          },
           create: {
             email: userDef.email,
             name: userDef.name,
@@ -5647,7 +5651,10 @@ async function main(): Promise<void> {
 
         await prisma.tenantMembership.upsert({
           where: { userId_tenantId: { userId: createdUser.id, tenantId } },
-          update: {},
+          update: {
+            role: userDef.role,
+            status: 'active',
+          },
           create: {
             userId: createdUser.id,
             tenantId,

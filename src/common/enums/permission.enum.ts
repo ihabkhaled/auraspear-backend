@@ -94,9 +94,17 @@ export enum Permission {
 
   // AI Agents
   AI_AGENTS_VIEW = 'aiAgents.view',
+  AI_AGENTS_EXECUTE = 'aiAgents.execute',
   AI_AGENTS_CREATE = 'aiAgents.create',
   AI_AGENTS_UPDATE = 'aiAgents.update',
   AI_AGENTS_DELETE = 'aiAgents.delete',
+
+  // Jobs / Runtime
+  JOBS_VIEW = 'jobs.view',
+  JOBS_MANAGE = 'jobs.manage',
+
+  // System Health
+  SYSTEM_HEALTH_VIEW = 'systemHealth.view',
 
   // Cloud Security
   CLOUD_SECURITY_VIEW = 'cloudSecurity.view',

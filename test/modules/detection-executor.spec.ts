@@ -22,6 +22,7 @@ describe('DetectionRulesExecutor', () => {
 
     const result = await executor.evaluateRule(rule, events)
     expect(result.status).toBe('matched')
+    expect(result.engine).toBe('field_match')
     expect(result.matchCount).toBe(1)
     expect(result.matches).toHaveLength(1)
     expect(result.matches[0]?.ruleId).toBe('rule-1')
@@ -65,6 +66,142 @@ describe('DetectionRulesExecutor', () => {
 
     const result = await executor.evaluateRule(rule, events)
     expect(result.status).toBe('matched')
+  })
+
+  it('evaluates Sigma selector conditions with nested fields and not logic', async () => {
+    const rule = {
+      id: 'rule-sigma-1',
+      name: 'Suspicious PowerShell',
+      severity: 'high',
+      conditions: {
+        sigma: `
+title: Suspicious PowerShell
+detection:
+  selection:
+    event.action|contains: powershell
+    user.name|startswith: admin
+  filter:
+    process.command_line|contains: benign
+  condition: selection and not filter
+`,
+      },
+    }
+
+    const events = [
+      {
+        event: { action: 'PowerShell Execution' },
+        user: { name: 'administrator' },
+        process: { command_line: 'powershell -enc SQBtAGFs' },
+      },
+      {
+        event: { action: 'powershell execution' },
+        user: { name: 'admin-user' },
+        process: { command_line: 'benign powershell script' },
+      },
+    ]
+
+    const result = await executor.evaluateRule(rule, events)
+
+    expect(result.status).toBe('matched')
+    expect(result.engine).toBe('sigma')
+    expect(result.matchCount).toBe(1)
+    expect(result.matches[0]?.description).toContain('Sigma')
+  })
+
+  it('evaluates YARA-L logical groups and numeric comparisons', async () => {
+    const rule = {
+      id: 'rule-yaral-1',
+      name: 'High Volume Admin Authentication',
+      severity: 'medium',
+      conditions: {
+        yaral: {
+          title: 'High Volume Admin Authentication',
+          match: {
+            all: [
+              { field: 'event.category', equals: 'authentication' },
+              {
+                any: [
+                  { field: 'source.ip', in: ['10.0.0.5', '10.0.0.8'] },
+                  { field: 'user.name', contains: 'admin' },
+                ],
+              },
+              {
+                not: {
+                  field: 'process.name',
+                  contains: 'healthcheck',
+                },
+              },
+              { field: 'event.count', greaterThan: 5 },
+            ],
+          },
+        },
+      },
+    }
+
+    const events = [
+      {
+        event: { category: 'authentication', count: 9 },
+        source: { ip: '10.0.0.5' },
+        user: { name: 'svc-auth-admin' },
+        process: { name: 'powershell.exe' },
+      },
+      {
+        event: { category: 'authentication', count: 3 },
+        source: { ip: '10.0.0.10' },
+        user: { name: 'user-a' },
+        process: { name: 'healthcheck-runner' },
+      },
+    ]
+
+    const result = await executor.evaluateRule(rule, events)
+
+    expect(result.status).toBe('matched')
+    expect(result.engine).toBe('yaral')
+    expect(result.matchCount).toBe(1)
+    expect(result.matches[0]?.description).toContain('YARA-L')
+  })
+
+  it('returns error for invalid Sigma definitions', async () => {
+    const rule = {
+      id: 'rule-sigma-invalid',
+      name: 'Broken Sigma',
+      severity: 'high',
+      conditions: {
+        sigma: `
+title: Broken Sigma
+detection:
+  condition: selection
+`,
+      },
+    }
+
+    const result = await executor.evaluateRule(rule, [{ event: { action: 'test' } }])
+
+    expect(result.status).toBe('error')
+    expect(result.engine).toBe('unknown')
+    expect(result.error).toContain('at least one selector')
+  })
+
+  it('returns error for invalid YARA-L definitions', async () => {
+    const rule = {
+      id: 'rule-yaral-invalid',
+      name: 'Broken YARA-L',
+      severity: 'high',
+      conditions: {
+        yaral: {
+          title: 'Broken YARA-L',
+          match: {
+            field: 'event.action',
+          },
+        },
+      },
+    }
+
+    const result = await executor.evaluateRule(rule, [{ event: { action: 'test' } }])
+
+    expect(result.status).toBe('error')
+    expect(result.engine).toBe('unknown')
+    expect(result.error).toContain('supported comparator')
   })
 
   it('returns error status on evaluation failure', async () => {

@@ -32,6 +32,7 @@ import { WazuhService } from './services/wazuh.service'
     BedrockService,
   ],
   exports: [
+    ConnectorsRepository,
     ConnectorsService,
     WazuhService,
     GraylogService,

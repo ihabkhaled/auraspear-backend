@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { PrismaService } from '../../../prisma/prisma.service'
+import { SoarRepository } from '../../soar/soar.repository'
 import type { Job } from '@prisma/client'
 
 @Injectable()
 export class SoarPlaybookHandler {
   private readonly logger = new Logger(SoarPlaybookHandler.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly soarRepository: SoarRepository) {}
 
   async handle(job: Job): Promise<Record<string, unknown>> {
     const payload = job.payload as Record<string, unknown> | null
@@ -17,9 +17,7 @@ export class SoarPlaybookHandler {
       throw new Error('executionId and playbookId are required in job payload')
     }
 
-    const playbook = await this.prisma.soarPlaybook.findFirst({
-      where: { id: playbookId, tenantId: job.tenantId },
-    })
+    const playbook = await this.soarRepository.findPlaybookByIdAndTenant(playbookId, job.tenantId)
 
     if (!playbook) {
       throw new Error(`SOAR playbook ${playbookId} not found for tenant ${job.tenantId}`)
@@ -30,12 +28,9 @@ export class SoarPlaybookHandler {
     )
 
     // Update execution status
-    await this.prisma.soarExecution.update({
-      where: { id: executionId },
-      data: {
-        status: 'completed',
-        completedAt: new Date(),
-      },
+    await this.soarRepository.updateExecutionById(executionId, {
+      status: 'completed',
+      completedAt: new Date(),
     })
 
     return {

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ConnectorsRepository } from './connectors.repository'
 import {
+  buildConnectorStats,
   buildConnectorUpdateData,
   extractUrlFields,
   mapConnectorToResponse,
@@ -25,7 +26,11 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt, decrypt } from '../../common/utils/encryption.utility'
 import { maskSecrets } from '../../common/utils/mask.utility'
 import { resolveAndValidateUrl } from '../../common/utils/ssrf.utility'
-import type { ConnectorResponse, ConnectorTestResult as TestResult } from './connectors.types'
+import type {
+  ConnectorResponse,
+  ConnectorStats,
+  ConnectorTestResult as TestResult,
+} from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 import type { ConnectorConfig } from '@prisma/client'
 
@@ -94,6 +99,14 @@ export class ConnectorsService {
     const config = await this.findConnectorOrThrow(tenantId, type, 'findByType')
     this.logSuccess('findByType', tenantId, type)
     return mapConnectorToResponse(config, e => this.decryptConfig(e), maskSecrets)
+  }
+
+  async getStats(tenantId: string): Promise<ConnectorStats> {
+    const connectors = await this.connectorsRepository.findAllByTenant(tenantId)
+    const stats = buildConnectorStats(connectors)
+
+    this.logSuccess('getStats', tenantId, undefined, { ...stats })
+    return stats
   }
 
   /* ---------------------------------------------------------------- */

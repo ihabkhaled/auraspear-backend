@@ -26,6 +26,7 @@ export enum AppLogFeature {
   SOAR = 'Soar',
   COMPLIANCE = 'Compliance',
   REPORTS = 'Reports',
+  JOBS = 'Jobs',
   SYSTEM_HEALTH = 'SystemHealth',
   NORMALIZATION = 'Normalization',
   DETECTION_RULES = 'DetectionRules',

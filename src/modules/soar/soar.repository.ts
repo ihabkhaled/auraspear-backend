@@ -44,6 +44,12 @@ export class SoarRepository {
     })
   }
 
+  async findPlaybookByIdAndTenant(id: string, tenantId: string): Promise<SoarPlaybook | null> {
+    return this.prisma.soarPlaybook.findFirst({
+      where: { id, tenantId },
+    })
+  }
+
   async createPlaybookWithTenant(
     data: Prisma.SoarPlaybookUncheckedCreateInput
   ): Promise<PlaybookWithTenant> {
@@ -86,6 +92,16 @@ export class SoarRepository {
 
   async countExecutions(where: Prisma.SoarExecutionWhereInput): Promise<number> {
     return this.prisma.soarExecution.count({ where })
+  }
+
+  async updateExecutionById(
+    id: string,
+    data: Prisma.SoarExecutionUpdateInput
+  ): Promise<SoarExecution> {
+    return this.prisma.soarExecution.update({
+      where: { id },
+      data,
+    })
   }
 
   async getAvgExecutionTimeMs(tenantId: string): Promise<number | null> {

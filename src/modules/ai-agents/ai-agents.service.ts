@@ -16,9 +16,12 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { JobType } from '../jobs/enums/job.enums'
+import { JobService } from '../jobs/jobs.service'
 import type { AiAgentRecord, AiAgentStats, PaginatedAgents } from './ai-agents.types'
 import type { AgentWithRelations } from './ai-agents.utilities'
 import type { CreateAgentDto } from './dto/create-agent.dto'
+import type { ExecuteAgentDto } from './dto/execute-agent.dto'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
 import type { UpdateSoulDto } from './dto/update-soul.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -31,7 +34,8 @@ export class AiAgentsService {
 
   constructor(
     private readonly repository: AiAgentsRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly jobService: JobService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -369,5 +373,59 @@ export class AiAgentsService {
     })
 
     return buildAgentRecord(updated as unknown as AgentWithRelations)
+  }
+
+  async runAgent(
+    id: string,
+    dto: ExecuteAgentDto,
+    user: JwtPayload
+  ): Promise<{ queued: boolean; jobId: string; sessionId: string }> {
+    const agent = await this.getAgentById(id, user.tenantId)
+
+    if (agent.status === AiAgentStatus.OFFLINE) {
+      throw new BusinessException(409, 'Agent is offline', 'errors.aiAgents.offline')
+    }
+
+    const session = await this.repository.createSession({
+      agentId: id,
+      input: dto.prompt,
+      status: 'running',
+    })
+
+    const job = await this.jobService.enqueue({
+      tenantId: user.tenantId,
+      type: JobType.AI_AGENT_TASK,
+      payload: {
+        agentId: id,
+        sessionId: session.id,
+        prompt: dto.prompt,
+        actorUserId: user.sub,
+        actorEmail: user.email,
+      },
+      maxAttempts: 2,
+      idempotencyKey: `ai-agent:${id}:${session.id}`,
+      createdBy: user.email,
+    })
+
+    this.appLogger.info('AI Agent execution queued', {
+      feature: AppLogFeature.AI_AGENTS,
+      action: 'runAgent',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'AiAgent',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiAgentsService',
+      functionName: 'runAgent',
+      metadata: { sessionId: session.id, jobId: job.id },
+    })
+
+    return {
+      queued: true,
+      jobId: job.id,
+      sessionId: session.id,
+    }
   }
 }

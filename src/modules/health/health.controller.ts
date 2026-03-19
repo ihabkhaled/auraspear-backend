@@ -37,7 +37,7 @@ export class HealthController {
    */
   @Get('services')
   @ApiBearerAuth()
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async getServicesHealth(@TenantId() tenantId: string): Promise<ServiceHealthResult[]> {
     return this.healthService.getAllServiceHealth(tenantId)
   }

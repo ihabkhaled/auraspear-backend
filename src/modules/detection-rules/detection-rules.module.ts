@@ -10,6 +10,6 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
   imports: [AppLogsModule],
   controllers: [DetectionRulesController, RulesEngineController],
   providers: [DetectionRulesRepository, DetectionRulesService, DetectionRulesExecutor],
-  exports: [DetectionRulesService, DetectionRulesExecutor],
+  exports: [DetectionRulesRepository, DetectionRulesService, DetectionRulesExecutor],
 })
 export class DetectionRulesModule {}

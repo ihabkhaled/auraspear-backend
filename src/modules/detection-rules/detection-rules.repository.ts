@@ -31,6 +31,12 @@ export class DetectionRulesRepository {
     return this.prisma.detectionRule.findFirst(params)
   }
 
+  async findByIdAndTenant(id: string, tenantId: string): Promise<DetectionRule | null> {
+    return this.prisma.detectionRule.findFirst({
+      where: { id, tenantId },
+    })
+  }
+
   /* ---------------------------------------------------------------- */
   /* COUNT / AGGREGATE                                                 */
   /* ---------------------------------------------------------------- */

@@ -199,4 +199,77 @@ export class AiAgentsRepository {
   async countSessions(where: Prisma.AiAgentSessionWhereInput): Promise<number> {
     return this.prisma.aiAgentSession.count({ where })
   }
+
+  async findFirstSession(where: Prisma.AiAgentSessionWhereInput): Promise<AiAgentSession | null> {
+    return this.prisma.aiAgentSession.findFirst({ where })
+  }
+
+  async createSession(data: Prisma.AiAgentSessionUncheckedCreateInput): Promise<AiAgentSession> {
+    return this.prisma.aiAgentSession.create({ data })
+  }
+
+  async markSessionCompleted(params: {
+    sessionId: string
+    agentId: string
+    tenantId: string
+    output: string
+    tokensUsed: number
+    cost: number
+    durationMs: number
+  }): Promise<void> {
+    await this.prisma.$transaction(async tx => {
+      await tx.aiAgentSession.update({
+        where: { id: params.sessionId },
+        data: {
+          status: 'completed',
+          output: params.output,
+          tokensUsed: params.tokensUsed,
+          cost: params.cost,
+          durationMs: params.durationMs,
+          completedAt: new Date(),
+        },
+      })
+
+      const agent = await tx.aiAgent.findFirst({
+        where: { id: params.agentId, tenantId: params.tenantId },
+        select: { totalTasks: true, avgTimeMs: true },
+      })
+
+      if (!agent) {
+        throw new Error(`AiAgent ${params.agentId} not found while recording execution`)
+      }
+
+      const nextTotalTasks = agent.totalTasks + 1
+      const nextAvgTimeMs =
+        agent.totalTasks === 0
+          ? params.durationMs
+          : Math.round((agent.avgTimeMs * agent.totalTasks + params.durationMs) / nextTotalTasks)
+
+      await tx.aiAgent.update({
+        where: { id: params.agentId },
+        data: {
+          totalTasks: { increment: 1 },
+          totalTokens: { increment: params.tokensUsed },
+          totalCost: { increment: params.cost },
+          avgTimeMs: nextAvgTimeMs,
+        },
+      })
+    })
+  }
+
+  async markSessionFailed(params: {
+    sessionId: string
+    errorMessage: string
+    durationMs: number
+  }): Promise<void> {
+    await this.prisma.aiAgentSession.update({
+      where: { id: params.sessionId },
+      data: {
+        status: 'failed',
+        output: params.errorMessage,
+        durationMs: params.durationMs,
+        completedAt: new Date(),
+      },
+    })
+  }
 }

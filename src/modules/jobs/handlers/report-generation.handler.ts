@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { PrismaService } from '../../../prisma/prisma.service'
+import { ReportsRepository } from '../../reports/reports.repository'
 import type { Job } from '@prisma/client'
 
 @Injectable()
 export class ReportGenerationHandler {
   private readonly logger = new Logger(ReportGenerationHandler.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly reportsRepository: ReportsRepository) {}
 
   async handle(job: Job): Promise<Record<string, unknown>> {
     const payload = job.payload as Record<string, unknown> | null
@@ -16,9 +16,7 @@ export class ReportGenerationHandler {
       throw new Error('reportId is required in job payload')
     }
 
-    const report = await this.prisma.report.findFirst({
-      where: { id: reportId, tenantId: job.tenantId },
-    })
+    const report = await this.reportsRepository.findReportByIdAndTenant(reportId, job.tenantId)
 
     if (!report) {
       throw new Error(`Report ${reportId} not found for tenant ${job.tenantId}`)
@@ -29,9 +27,9 @@ export class ReportGenerationHandler {
     )
 
     // Mark report as completed
-    await this.prisma.report.update({
-      where: { id: reportId },
-      data: { status: 'completed', generatedAt: new Date() },
+    await this.reportsRepository.updateReportById(reportId, {
+      status: 'completed',
+      generatedAt: new Date(),
     })
 
     return {

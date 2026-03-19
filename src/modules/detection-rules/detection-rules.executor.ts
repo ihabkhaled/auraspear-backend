@@ -1,58 +1,39 @@
 import { Injectable, Logger } from '@nestjs/common'
-
-export interface DetectionRuleMatch {
-  ruleId: string
-  ruleName: string
-  severity: string
-  matchedEvent: Record<string, unknown>
-  matchedAt: string
-  description: string
-}
-
-export interface DetectionExecutionResult {
-  ruleId: string
-  status: 'matched' | 'no_match' | 'error'
-  matchCount: number
-  matches: DetectionRuleMatch[]
-  executedAt: string
-  durationMs: number
-  error?: string
-}
-
-interface EvaluatableRule {
-  id: string
-  name: string
-  severity: string
-  conditions: Record<string, unknown>
-}
+import { DetectionExecutionEngine } from './detection-rules.constants'
+import {
+  buildDetectionMatchDescription,
+  compileDetectionConditions,
+  evaluateDetectionProgram,
+} from './detection-rules.utilities'
+import type {
+  DetectionExecutionResult,
+  DetectionRuleMatch,
+  EvaluatableDetectionRule,
+} from './detection-rules.types'
 
 @Injectable()
 export class DetectionRulesExecutor {
   private readonly logger = new Logger(DetectionRulesExecutor.name)
 
-  /**
-   * Evaluates a single detection rule against a batch of events.
-   * This is a foundation — actual Sigma/YARA-L parsing would plug in here.
-   */
   async evaluateRule(
-    rule: EvaluatableRule,
+    rule: EvaluatableDetectionRule,
     events: Record<string, unknown>[]
   ): Promise<DetectionExecutionResult> {
     const startTime = Date.now()
 
     try {
       const matches: DetectionRuleMatch[] = []
-      const { conditions } = rule
+      const detectionProgram = compileDetectionConditions(rule.conditions)
 
       for (const event of events) {
-        if (this.matchesConditions(event, conditions)) {
+        if (evaluateDetectionProgram(detectionProgram, event)) {
           matches.push({
             ruleId: rule.id,
             ruleName: rule.name,
             severity: rule.severity,
             matchedEvent: event,
             matchedAt: new Date().toISOString(),
-            description: `Rule "${rule.name}" matched event`,
+            description: buildDetectionMatchDescription(rule.name, detectionProgram.engine),
           })
         }
       }
@@ -69,6 +50,7 @@ export class DetectionRulesExecutor {
         matches,
         executedAt: new Date().toISOString(),
         durationMs,
+        engine: detectionProgram.engine,
       }
     } catch (error: unknown) {
       const durationMs = Date.now() - startTime
@@ -82,40 +64,9 @@ export class DetectionRulesExecutor {
         matches: [],
         executedAt: new Date().toISOString(),
         durationMs,
+        engine: DetectionExecutionEngine.UNKNOWN,
         error: errorMessage,
       }
     }
-  }
-
-  /**
-   * Simple field-match condition evaluator.
-   * Checks if event fields match the rule's conditions.
-   * This is intentionally simple — a real implementation would parse
-   * Sigma YAML or YARA-L syntax.
-   */
-  private matchesConditions(
-    event: Record<string, unknown>,
-    conditions: Record<string, unknown>
-  ): boolean {
-    const fieldConditions =
-      (conditions['fields'] as Record<string, unknown> | undefined) ?? conditions
-
-    for (const [key, expectedValue] of Object.entries(fieldConditions)) {
-      const eventValue = event[key]
-
-      if (eventValue === undefined) {
-        return false
-      }
-
-      if (typeof expectedValue === 'string' && typeof eventValue === 'string') {
-        if (!eventValue.toLowerCase().includes(expectedValue.toLowerCase())) {
-          return false
-        }
-      } else if (eventValue !== expectedValue) {
-        return false
-      }
-    }
-
-    return true
   }
 }

@@ -75,6 +75,44 @@ Provide your investigation report in markdown with these sections:
 Be specific and grounded in the actual alert data. Do not fabricate indicators not present in the data.`
 }
 
+export function buildAgentTaskPrompt(params: {
+  agentName: string
+  prompt: string
+  soulMd?: string | null
+  tools: Array<{ name: string; description: string }>
+}): string {
+  const safePrompt = sanitizeForMarkdown(params.prompt)
+  const toolSummary =
+    params.tools.length > 0
+      ? params.tools
+          .slice(0, 10)
+          .map(
+            tool => `- ${sanitizeForMarkdown(tool.name)}: ${sanitizeForMarkdown(tool.description)}`
+          )
+          .join('\n')
+      : '- No tools configured'
+  const soulSnippet = params.soulMd ? sanitizeForMarkdown(params.soulMd).slice(0, 3000) : 'N/A'
+
+  return `You are the AuraSpear SOC AI agent "${sanitizeForMarkdown(params.agentName)}".
+
+Agent operating guidance (SOUL.md excerpt):
+${soulSnippet}
+
+Available tools (informational only, do not claim execution unless the user explicitly asked for a draft):
+${toolSummary}
+
+User request:
+${safePrompt}
+
+Respond in markdown with these sections:
+1. **Summary** - concise answer to the request
+2. **Findings** - numbered findings grounded in the request
+3. **Recommended Next Steps** - safe, human-reviewable actions only
+4. **Approvals Needed** - explicitly call out anything that should require human approval
+
+Do not claim you executed external actions unless the prompt explicitly includes execution results. Prefer safe triage, drafting, summarization, and investigation support over automation theater.`
+}
+
 /* ---------------------------------------------------------------- */
 /* CONFIDENCE COMPUTATION                                            */
 /* ---------------------------------------------------------------- */
@@ -318,6 +356,39 @@ This security finding involves indicators of potential adversary activity within
 - NIST SP 800-61r2: Incident handling guidance for this type of activity`
 }
 
+export function generateAgentTaskResponse(params: {
+  agentName: string
+  prompt: string
+  tools: Array<{ name: string; description: string }>
+}): string {
+  const safePrompt = sanitizeForMarkdown(params.prompt)
+  const availableTools =
+    params.tools.length > 0
+      ? params.tools
+          .slice(0, 5)
+          .map(tool => tool.name)
+          .join(', ')
+      : 'no configured tools'
+
+  return `## ${sanitizeForMarkdown(params.agentName)} Response
+
+**Summary**
+The agent reviewed the request and prepared a safe analyst-facing response.
+
+**Findings**
+1. Request received: "${safePrompt}"
+2. The agent is operating in assistive mode and did not autonomously execute external actions.
+3. Available supporting tools: ${sanitizeForMarkdown(availableTools)}.
+
+**Recommended Next Steps**
+1. Review the request and decide whether enrichment, triage, or a workflow draft is the right next action.
+2. If execution is required, route the task through an approved SOAR playbook or analyst action.
+3. Capture the final analyst decision in the relevant case, incident, or report.
+
+**Approvals Needed**
+- Human approval is required before any containment, notification, or automation action is performed.`
+}
+
 /* ---------------------------------------------------------------- */
 /* RESPONSE BUILDERS                                                 */
 /* ---------------------------------------------------------------- */
@@ -398,6 +469,44 @@ export function buildFallbackInvestigateResponse(
       'Generating rule-based investigation report (AI model not available)',
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
+    model: 'rule-based',
+    tokensUsed: { input: 0, output: 0 },
+  }
+}
+
+export function buildBedrockAgentTaskResponse(
+  aiText: string,
+  agentName: string,
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Loading AI agent "${agentName}" execution context`,
+      'Applying agent SOUL and configured tools as guidance boundaries',
+      'Generating an assistive response through the configured Bedrock model',
+    ],
+    confidence: 0.82,
+    model: modelId,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildFallbackAgentTaskResponse(params: {
+  agentName: string
+  prompt: string
+  tools: Array<{ name: string; description: string }>
+}): AiResponse {
+  return {
+    result: generateAgentTaskResponse(params),
+    reasoning: [
+      `Loading AI agent "${params.agentName}" execution context`,
+      'Applying safe assistive execution boundaries',
+      'Generating a deterministic fallback response because the AI connector is unavailable',
+    ],
+    confidence: 0.7,
     model: 'rule-based',
     tokensUsed: { input: 0, output: 0 },
   }

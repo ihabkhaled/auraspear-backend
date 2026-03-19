@@ -13,6 +13,7 @@ import {
 import { Throttle } from '@nestjs/throttler'
 import { AiAgentsService } from './ai-agents.service'
 import { type CreateAgentDto, CreateAgentSchema } from './dto/create-agent.dto'
+import { type ExecuteAgentDto, ExecuteAgentSchema } from './dto/execute-agent.dto'
 import { ListAgentsQuerySchema } from './dto/list-agents-query.dto'
 import { type UpdateAgentDto, UpdateAgentSchema } from './dto/update-agent.dto'
 import { type UpdateSoulDto, UpdateSoulSchema } from './dto/update-soul.dto'
@@ -127,6 +128,17 @@ export class AiAgentsController {
     @CurrentUser() user: JwtPayload
   ): Promise<AiAgentRecord> {
     return this.aiAgentsService.stopAgent(id, tenantId, user.email)
+  }
+
+  @Post(':id/run')
+  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async runAgent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(ExecuteAgentSchema)) dto: ExecuteAgentDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ queued: boolean; jobId: string; sessionId: string }> {
+    return this.aiAgentsService.runAgent(id, dto, user)
   }
 
   @Get(':id/sessions')

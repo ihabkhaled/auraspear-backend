@@ -1,16 +1,28 @@
 import { Module, type OnModuleInit } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
+import { ConnectorsModule } from '../connectors/connectors.module'
+import { DetectionRulesModule } from '../detection-rules/detection-rules.module'
+import { ReportsModule } from '../reports/reports.module'
+import { SoarModule } from '../soar/soar.module'
 import { JobType } from './enums/job.enums'
 import { ConnectorSyncHandler } from './handlers/connector-sync.handler'
 import { DetectionExecutionHandler } from './handlers/detection-execution.handler'
 import { ReportGenerationHandler } from './handlers/report-generation.handler'
 import { SoarPlaybookHandler } from './handlers/soar-playbook.handler'
 import { JobProcessorService } from './job-processor.service'
+import { JobsController } from './jobs.controller'
 import { JobRepository } from './jobs.repository'
 import { JobService } from './jobs.service'
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  imports: [
+    ScheduleModule.forRoot(),
+    ConnectorsModule,
+    DetectionRulesModule,
+    ReportsModule,
+    SoarModule,
+  ],
+  controllers: [JobsController],
   providers: [
     JobRepository,
     JobService,
@@ -20,7 +32,7 @@ import { JobService } from './jobs.service'
     ReportGenerationHandler,
     SoarPlaybookHandler,
   ],
-  exports: [JobService],
+  exports: [JobService, JobProcessorService],
 })
 export class JobsModule implements OnModuleInit {
   constructor(

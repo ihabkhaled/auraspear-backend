@@ -19,6 +19,12 @@ export class ConnectorsRepository {
     })
   }
 
+  async findByIdAndTenant(id: string, tenantId: string): Promise<ConnectorConfig | null> {
+    return this.prisma.connectorConfig.findFirst({
+      where: { id, tenantId },
+    })
+  }
+
   async findEnabledStatus(tenantId: string, type: string): Promise<{ enabled: boolean } | null> {
     return this.prisma.connectorConfig.findUnique({
       where: { tenantId_type: { tenantId, type: type as never } },
@@ -45,6 +51,13 @@ export class ConnectorsRepository {
   ): Promise<ConnectorConfig> {
     return this.prisma.connectorConfig.update({
       where: { tenantId_type: { tenantId, type: type as never } },
+      data,
+    })
+  }
+
+  async updateById(id: string, data: Prisma.ConnectorConfigUpdateInput): Promise<ConnectorConfig> {
+    return this.prisma.connectorConfig.update({
+      where: { id },
       data,
     })
   }

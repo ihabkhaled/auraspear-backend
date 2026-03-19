@@ -8,6 +8,6 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
   imports: [AppLogsModule],
   controllers: [SoarController],
   providers: [SoarRepository, SoarService],
-  exports: [SoarService],
+  exports: [SoarRepository, SoarService],
 })
 export class SoarModule {}

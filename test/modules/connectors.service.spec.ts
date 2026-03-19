@@ -205,6 +205,44 @@ describe('ConnectorsService', () => {
   })
 
   /* ------------------------------------------------------------------ */
+  /* getStats                                                             */
+  /* ------------------------------------------------------------------ */
+
+  describe('getStats', () => {
+    it('should aggregate connector health counts for a tenant', async () => {
+      repository.findAllByTenant.mockResolvedValue([
+        {
+          enabled: true,
+          lastTestOk: true,
+        },
+        {
+          enabled: true,
+          lastTestOk: false,
+        },
+        {
+          enabled: false,
+          lastTestOk: null,
+        },
+        {
+          enabled: false,
+          lastTestOk: true,
+        },
+      ])
+
+      const result = await service.getStats(TENANT_ID)
+
+      expect(repository.findAllByTenant).toHaveBeenCalledWith(TENANT_ID)
+      expect(result).toEqual({
+        totalConnectors: 4,
+        enabledConnectors: 2,
+        healthyConnectors: 2,
+        failingConnectors: 1,
+        untestedConnectors: 1,
+      })
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
   /* create                                                               */
   /* ------------------------------------------------------------------ */
 

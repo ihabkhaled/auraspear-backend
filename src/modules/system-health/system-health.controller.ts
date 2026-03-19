@@ -20,13 +20,13 @@ export class SystemHealthController {
   constructor(private readonly systemHealthService: SystemHealthService) {}
 
   @Get()
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async getSystemHealthOverview(@TenantId() tenantId: string): Promise<SystemHealthStats> {
     return this.systemHealthService.getSystemHealthStats(tenantId)
   }
 
   @Get('checks')
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async listHealthChecks(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -45,13 +45,13 @@ export class SystemHealthController {
   }
 
   @Get('checks/latest')
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async getLatestHealthChecks(@TenantId() tenantId: string): Promise<HealthCheckRecord[]> {
     return this.systemHealthService.getLatestHealthChecks(tenantId)
   }
 
   @Get('metrics')
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async listMetrics(
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
@@ -70,7 +70,7 @@ export class SystemHealthController {
   }
 
   @Get('stats')
-  @RequirePermission(Permission.CONNECTORS_VIEW)
+  @RequirePermission(Permission.SYSTEM_HEALTH_VIEW)
   async getSystemHealthStats(@TenantId() tenantId: string): Promise<SystemHealthStats> {
     return this.systemHealthService.getSystemHealthStats(tenantId)
   }

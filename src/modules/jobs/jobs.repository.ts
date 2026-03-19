@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
+import { JobStatus } from './enums/job.enums'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma, Job } from '@prisma/client'
+import type { Job } from '@prisma/client'
 
 @Injectable()
 export class JobRepository {
@@ -29,6 +31,13 @@ export class JobRepository {
       where: { id },
       data,
     })
+  }
+
+  async updateMany(params: {
+    where: Prisma.JobWhereInput
+    data: Prisma.JobUncheckedUpdateManyInput
+  }): Promise<Prisma.BatchPayload> {
+    return this.prisma.job.updateMany(params)
   }
 
   async findPendingJobs(limit: number = 10): Promise<Job[]> {
@@ -70,6 +79,45 @@ export class JobRepository {
     return { data, total, page, limit }
   }
 
+  async countByTenantAndStatus(tenantId: string, status: JobStatus): Promise<number> {
+    return this.prisma.job.count({
+      where: { tenantId, status },
+    })
+  }
+
+  async countScheduled(tenantId: string, scheduledAfter: Date): Promise<number> {
+    return this.prisma.job.count({
+      where: {
+        tenantId,
+        status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
+        scheduledAt: { gt: scheduledAfter },
+      },
+    })
+  }
+
+  async countStaleRunning(tenantId: string, startedBefore: Date): Promise<number> {
+    return this.prisma.job.count({
+      where: {
+        tenantId,
+        status: JobStatus.RUNNING,
+        startedAt: { lt: startedBefore },
+      },
+    })
+  }
+
+  async groupTypeCounts(tenantId: string): Promise<Array<{ type: string; count: number }>> {
+    const results = await this.prisma.job.groupBy({
+      by: ['type'],
+      where: { tenantId },
+      _count: { _all: true },
+    })
+
+    return results.map(result => ({
+      type: result.type,
+      count: result._count._all,
+    }))
+  }
+
   async cancelJob(id: string, tenantId: string): Promise<Prisma.BatchPayload> {
     return this.prisma.job.updateMany({
       where: {
@@ -78,6 +126,25 @@ export class JobRepository {
         status: { in: ['pending', 'retrying'] },
       },
       data: { status: 'cancelled' },
+    })
+  }
+
+  async retryJob(id: string, tenantId: string, scheduledAt: Date): Promise<Prisma.BatchPayload> {
+    return this.prisma.job.updateMany({
+      where: {
+        id,
+        tenantId,
+        status: { in: [JobStatus.FAILED, JobStatus.CANCELLED] },
+      },
+      data: {
+        status: JobStatus.PENDING,
+        attempts: 0,
+        error: null,
+        result: Prisma.DbNull,
+        startedAt: null,
+        completedAt: null,
+        scheduledAt,
+      },
     })
   }
 }

@@ -1,5 +1,6 @@
 import { REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
-import type { ConnectorResponse } from './connectors.types'
+import type { ConnectorResponse, ConnectorStats } from './connectors.types'
+import type { ConnectorConfig } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
 /* CONNECTOR → RESPONSE MAPPING                                      */
@@ -30,6 +31,39 @@ export function mapConnectorToResponse(
     lastTestAt: row.lastTestAt,
     lastTestOk: row.lastTestOk,
     lastError: row.lastError,
+  }
+}
+
+export function buildConnectorStats(connectors: ConnectorConfig[]): ConnectorStats {
+  let enabledConnectors = 0
+  let healthyConnectors = 0
+  let failingConnectors = 0
+  let untestedConnectors = 0
+
+  for (const connector of connectors) {
+    if (connector.enabled) {
+      enabledConnectors += 1
+    }
+
+    if (connector.lastTestOk === true) {
+      healthyConnectors += 1
+      continue
+    }
+
+    if (connector.lastTestOk === false) {
+      failingConnectors += 1
+      continue
+    }
+
+    untestedConnectors += 1
+  }
+
+  return {
+    totalConnectors: connectors.length,
+    enabledConnectors,
+    healthyConnectors,
+    failingConnectors,
+    untestedConnectors,
   }
 }
 

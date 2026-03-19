@@ -16,6 +16,12 @@ const LOCK_TTL_SECONDS = 300
  */
 type JobHandler = (job: Job) => Promise<Record<string, unknown>>
 
+const placeholderHandler: JobHandler = async (job: Job): Promise<Record<string, unknown>> => ({
+  handled: true,
+  handlerType: 'default',
+  jobId: job.id,
+})
+
 @Injectable()
 export class JobProcessorService implements OnModuleDestroy {
   private readonly logger = new Logger(JobProcessorService.name)
@@ -98,7 +104,9 @@ export class JobProcessorService implements OnModuleDestroy {
   private async processJob(job: Job): Promise<void> {
     const handler = this.handlers.get(job.type)
     if (!handler) {
-      this.logger.warn(`No handler registered for job type: ${job.type}, skipping job ${job.id}`)
+      const errorMessage = `No handler registered for job type: ${job.type}`
+      this.logger.error(`${errorMessage}. Marking job ${job.id} as failed`)
+      await this.jobService.markUnrecoverableFailure(job.id, errorMessage, job.attempts + 1)
       return
     }
 
@@ -145,11 +153,6 @@ export class JobProcessorService implements OnModuleDestroy {
    * Real implementations will override these via registerHandler().
    */
   private registerDefaultHandlers(): void {
-    const placeholderHandler = async (job: Job): Promise<Record<string, unknown>> => {
-      this.logger.log(`Default handler executing for job ${job.id} (type=${job.type})`)
-      return { handled: true, handlerType: 'default' }
-    }
-
     const jobTypes = Object.values(JobType)
     for (const type of jobTypes) {
       this.handlers.set(type, placeholderHandler)

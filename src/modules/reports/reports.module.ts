@@ -8,6 +8,6 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
   imports: [AppLogsModule],
   controllers: [ReportsController],
   providers: [ReportsRepository, ReportsService],
-  exports: [ReportsService],
+  exports: [ReportsRepository, ReportsService],
 })
 export class ReportsModule {}

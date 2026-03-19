@@ -25,7 +25,7 @@ export class AiController {
    * a Bedrock connector with aiEnabled=true.
    */
   @Post('hunt')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
   async aiHunt(
     @Body(new ZodValidationPipe(AiHuntSchema)) dto: AiHuntDto,
     @CurrentUser() user: JwtPayload
@@ -39,7 +39,7 @@ export class AiController {
    * to have a Bedrock connector with aiEnabled=true.
    */
   @Post('investigate')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
   async aiInvestigate(
     @Body(new ZodValidationPipe(AiInvestigateSchema)) dto: AiInvestigateDto,
     @CurrentUser() user: JwtPayload
@@ -54,7 +54,7 @@ export class AiController {
    * connector with aiEnabled=true.
    */
   @Post('explain')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
   async aiExplain(
     @Body(new ZodValidationPipe(AiExplainSchema)) dto: AiExplainDto,
     @CurrentUser() user: JwtPayload

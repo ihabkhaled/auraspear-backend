@@ -9,6 +9,14 @@ export interface ConnectorResponse {
   lastError: string | null
 }
 
+export interface ConnectorStats {
+  totalConnectors: number
+  enabledConnectors: number
+  healthyConnectors: number
+  failingConnectors: number
+  untestedConnectors: number
+}
+
 /** Base test result returned by individual connector adapters. */
 export interface TestResult {
   ok: boolean

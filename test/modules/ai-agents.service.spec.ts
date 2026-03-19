@@ -24,6 +24,13 @@ function createMockRepository() {
     aggregate: jest.fn(),
     findManySessions: jest.fn(),
     countSessions: jest.fn(),
+    createSession: jest.fn(),
+  }
+}
+
+function createMockJobService() {
+  return {
+    enqueue: jest.fn(),
   }
 }
 
@@ -87,12 +94,14 @@ function buildMockSession(overrides: Record<string, unknown> = {}) {
 describe('AiAgentsService', () => {
   let service: AiAgentsService
   let repository: ReturnType<typeof createMockRepository>
+  let jobService: ReturnType<typeof createMockJobService>
 
   beforeEach(() => {
     repository = createMockRepository()
+    jobService = createMockJobService()
     jest.clearAllMocks()
 
-    service = new AiAgentsService(repository as never, mockAppLogger as never)
+    service = new AiAgentsService(repository as never, mockAppLogger as never, jobService as never)
   })
 
   // ---------------------------------------------------------------------------
@@ -753,6 +762,53 @@ describe('AiAgentsService', () => {
           metadata: expect.objectContaining({ previousStatus: 'online' }),
         })
       )
+    })
+  })
+
+  describe('runAgent', () => {
+    it('queues an execution job and creates a running session', async () => {
+      repository.findFirstWithDetails.mockResolvedValue(
+        buildMockAgentWithCounts({ status: 'online' })
+      )
+      repository.createSession.mockResolvedValue({ id: 'session-123' })
+      jobService.enqueue.mockResolvedValue({ id: 'job-123' })
+
+      const result = await service.runAgent(
+        AGENT_ID,
+        { prompt: 'Summarize the latest critical alerts' },
+        buildMockUser()
+      )
+
+      expect(repository.createSession).toHaveBeenCalledWith({
+        agentId: AGENT_ID,
+        input: 'Summarize the latest critical alerts',
+        status: 'running',
+      })
+      expect(jobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: TENANT_ID,
+          type: 'ai_agent_task',
+          createdBy: USER_EMAIL,
+        })
+      )
+      expect(result).toEqual({
+        queued: true,
+        jobId: 'job-123',
+        sessionId: 'session-123',
+      })
+    })
+
+    it('blocks execution for offline agents', async () => {
+      repository.findFirstWithDetails.mockResolvedValue(
+        buildMockAgentWithCounts({ status: 'offline' })
+      )
+
+      await expect(
+        service.runAgent(AGENT_ID, { prompt: 'Help me investigate this case' }, buildMockUser())
+      ).rejects.toBeInstanceOf(BusinessException)
+
+      expect(repository.createSession).not.toHaveBeenCalled()
+      expect(jobService.enqueue).not.toHaveBeenCalled()
     })
   })
 })

@@ -13,7 +13,7 @@ import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../common/enums'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { ConnectorResponse, ConnectorTestResult } from './connectors.types'
+import type { ConnectorResponse, ConnectorStats, ConnectorTestResult } from './connectors.types'
 
 @ApiTags('connectors')
 @ApiBearerAuth()
@@ -25,6 +25,12 @@ export class ConnectorsController {
   @RequirePermission(Permission.CONNECTORS_VIEW)
   async list(@TenantId() tenantId: string): Promise<ConnectorResponse[]> {
     return this.connectorsService.findAll(tenantId)
+  }
+
+  @Get('stats')
+  @RequirePermission(Permission.CONNECTORS_VIEW)
+  async getStats(@TenantId() tenantId: string): Promise<ConnectorStats> {
+    return this.connectorsService.getStats(tenantId)
   }
 
   @Get(':type')

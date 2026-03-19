@@ -203,6 +203,12 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.connectors.sync',
     sortOrder: 405,
   },
+  {
+    key: Permission.SYSTEM_HEALTH_VIEW,
+    module: 'systemHealth',
+    labelKey: 'roleSettings.permissions.systemHealth.view',
+    sortOrder: 406,
+  },
 
   // ─── Correlation ───
   {
@@ -468,6 +474,24 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     module: 'aiAgents',
     labelKey: 'roleSettings.permissions.aiAgents.delete',
     sortOrder: 1403,
+  },
+  {
+    key: Permission.AI_AGENTS_EXECUTE,
+    module: 'aiAgents',
+    labelKey: 'roleSettings.permissions.aiAgents.execute',
+    sortOrder: 1404,
+  },
+  {
+    key: Permission.JOBS_VIEW,
+    module: 'jobs',
+    labelKey: 'roleSettings.permissions.jobs.view',
+    sortOrder: 1450,
+  },
+  {
+    key: Permission.JOBS_MANAGE,
+    module: 'jobs',
+    labelKey: 'roleSettings.permissions.jobs.manage',
+    sortOrder: 1451,
   },
 
   // ─── Cloud Security ───

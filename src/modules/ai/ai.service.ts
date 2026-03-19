@@ -8,6 +8,9 @@ import {
   buildFallbackHuntResponse,
   buildBedrockInvestigateResponse,
   buildFallbackInvestigateResponse,
+  buildAgentTaskPrompt,
+  buildBedrockAgentTaskResponse,
+  buildFallbackAgentTaskResponse,
   generateExplainResponse,
 } from './ai.utilities'
 import { AiHuntDto } from './dto/ai-hunt.dto'
@@ -41,6 +44,18 @@ interface AiAuditRecord {
   createdAt: string
   prompt?: string
   response?: string
+}
+
+interface AgentTaskExecutionInput {
+  tenantId: string
+  actorUserId: string
+  actorEmail: string
+  agentId: string
+  agentName: string
+  model: string
+  prompt: string
+  soulMd?: string | null
+  tools: Array<{ name: string; description: string }>
 }
 
 @Injectable()
@@ -170,6 +185,64 @@ export class AiService {
     return response
   }
 
+  async runAgentTask(input: AgentTaskExecutionInput): Promise<AiResponse> {
+    await this.ensureAiEnabled(input.tenantId)
+
+    const startTime = Date.now()
+    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
+      input.tenantId,
+      ConnectorType.BEDROCK
+    )
+
+    let response: AiResponse | undefined
+    if (bedrockConfig) {
+      response = await this.tryBedrockAgentTask(bedrockConfig, input)
+    }
+
+    response ??= buildFallbackAgentTaskResponse({
+      agentName: input.agentName,
+      prompt: input.prompt,
+      tools: input.tools,
+    })
+
+    const latencyMs = Date.now() - startTime
+    await this.logAudit({
+      id: randomUUID(),
+      tenantId: input.tenantId,
+      userId: input.actorUserId,
+      action: AiAuditAction.EXPLAIN,
+      model: response.model,
+      inputTokens: response.tokensUsed.input,
+      outputTokens: response.tokensUsed.output,
+      latencyMs,
+      status: AiAuditStatus.SUCCESS,
+      createdAt: new Date().toISOString(),
+      prompt: input.prompt,
+      response: response.result,
+    })
+
+    this.appLogger.info('AI agent task executed', {
+      feature: AppLogFeature.AI_AGENTS,
+      action: 'runAgentTask',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: input.tenantId,
+      actorEmail: input.actorEmail,
+      actorUserId: input.actorUserId,
+      targetResource: 'AiAgent',
+      targetResourceId: input.agentId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'runAgentTask',
+      metadata: {
+        agentName: input.agentName,
+        model: response.model,
+        latencyMs,
+      },
+    })
+
+    return response
+  }
+
   /* ---------------------------------------------------------------- */
   /* PRIVATE: Bedrock Attempt Helpers                                   */
   /* ---------------------------------------------------------------- */
@@ -243,6 +316,47 @@ export class AiService {
         functionName: 'aiInvestigate',
         targetResource: 'Alert',
         targetResourceId: alertId,
+        metadata: { error: error instanceof Error ? error.message : 'Unknown' },
+      })
+      return undefined
+    }
+  }
+
+  private async tryBedrockAgentTask(
+    config: Record<string, unknown>,
+    input: AgentTaskExecutionInput
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildAgentTaskPrompt({
+        agentName: input.agentName,
+        prompt: input.prompt,
+        soulMd: input.soulMd,
+        tools: input.tools,
+      })
+      const aiResult = await this.bedrockService.invoke(config, prompt, 2048)
+      return buildBedrockAgentTaskResponse(
+        aiResult.text,
+        input.agentName,
+        (config.modelId as string) ?? input.model,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Bedrock AI agent task failed, falling back: ${error instanceof Error ? error.message : 'Unknown'}`
+      )
+      this.appLogger.warn('Bedrock AI agent execution failed, using fallback response', {
+        feature: AppLogFeature.AI_AGENTS,
+        action: 'runAgentTask',
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: input.tenantId,
+        actorEmail: input.actorEmail,
+        actorUserId: input.actorUserId,
+        targetResource: 'AiAgent',
+        targetResourceId: input.agentId,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'runAgentTask',
         metadata: { error: error instanceof Error ? error.message : 'Unknown' },
       })
       return undefined

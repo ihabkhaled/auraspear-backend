@@ -29,6 +29,12 @@ export class ReportsRepository {
     return this.prisma.report.findFirst(params) as Promise<ReportWithTenant | null>
   }
 
+  async findReportByIdAndTenant(id: string, tenantId: string): Promise<Report | null> {
+    return this.prisma.report.findFirst({
+      where: { id, tenantId },
+    })
+  }
+
   async createReport(params: {
     data: Prisma.ReportUncheckedCreateInput
     include?: Prisma.ReportInclude
@@ -41,6 +47,13 @@ export class ReportsRepository {
     data: Prisma.ReportUpdateManyMutationInput | Record<string, unknown>
   }): Promise<Prisma.BatchPayload> {
     return this.prisma.report.updateMany(params)
+  }
+
+  async updateReportById(id: string, data: Prisma.ReportUpdateInput): Promise<Report> {
+    return this.prisma.report.update({
+      where: { id },
+      data,
+    })
   }
 
   async deleteManyReports(params: {

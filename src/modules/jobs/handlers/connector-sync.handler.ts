@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { PrismaService } from '../../../prisma/prisma.service'
+import { ConnectorsRepository } from '../../connectors/connectors.repository'
 import type { Job } from '@prisma/client'
 
 @Injectable()
 export class ConnectorSyncHandler {
   private readonly logger = new Logger(ConnectorSyncHandler.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly connectorsRepository: ConnectorsRepository) {}
 
   async handle(job: Job): Promise<Record<string, unknown>> {
     const payload = job.payload as Record<string, unknown> | null
@@ -16,9 +16,7 @@ export class ConnectorSyncHandler {
       throw new Error('connectorId is required in job payload')
     }
 
-    const connector = await this.prisma.connectorConfig.findFirst({
-      where: { id: connectorId, tenantId: job.tenantId },
-    })
+    const connector = await this.connectorsRepository.findByIdAndTenant(connectorId, job.tenantId)
 
     if (!connector) {
       throw new Error(`Connector ${connectorId} not found for tenant ${job.tenantId}`)
@@ -30,9 +28,8 @@ export class ConnectorSyncHandler {
 
     // Actual sync logic would be connector-type-specific
     // For now, update the lastSyncedAt timestamp
-    await this.prisma.connectorConfig.update({
-      where: { id: connectorId },
-      data: { lastSyncAt: new Date() },
+    await this.connectorsRepository.updateById(connectorId, {
+      lastSyncAt: new Date(),
     })
 
     return {
