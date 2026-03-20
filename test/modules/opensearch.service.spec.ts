@@ -1,10 +1,10 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { OpenSearchService } from '../../src/modules/connectors/services/opensearch.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -14,7 +14,7 @@ const mockAppLogger = {
 }
 
 function createService(): OpenSearchService {
-  return new OpenSearchService(mockAppLogger as never)
+  return new OpenSearchService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
 function buildConnectorResponse(overrides: {
@@ -44,7 +44,7 @@ describe('OpenSearchService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     service = createService()
-    mockedBasicAuth.mockReturnValue('Basic bW9jay1hdXRo')
+    mockAxiosService.basicAuth.mockReturnValue('Basic bW9jay1hdXRo')
   })
 
   /* ------------------------------------------------------------------ */
@@ -53,7 +53,7 @@ describe('OpenSearchService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true with cluster health details', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             cluster_name: 'auraspear-cluster',
@@ -69,7 +69,7 @@ describe('OpenSearchService', () => {
       expect(result.details).toContain('auraspear-cluster')
       expect(result.details).toContain('green')
       expect(result.details).toContain('3')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://opensearch.local:9200/_cluster/health',
         expect.objectContaining({
           allowPrivateNetwork: true,
@@ -85,11 +85,13 @@ describe('OpenSearchService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('OpenSearch base URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when cluster health returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ status: 401, data: {} }))
+      mockAxiosService.fetch.mockResolvedValueOnce(
+        buildConnectorResponse({ status: 401, data: {} })
+      )
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -97,8 +99,8 @@ describe('OpenSearchService', () => {
       expect(result.details).toContain('401')
     })
 
-    it('should return ok: false when connectorFetch throws', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('SSL handshake failed'))
+    it('should return ok: false when fetch throws', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('SSL handshake failed'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -108,7 +110,7 @@ describe('OpenSearchService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(42)
+      mockAxiosService.fetch.mockRejectedValueOnce(42)
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -118,7 +120,7 @@ describe('OpenSearchService', () => {
 
     it('should work without credentials (anonymous access)', async () => {
       const config = { baseUrl: 'https://opensearch.local:9200' }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             cluster_name: 'open-cluster',
@@ -131,8 +133,8 @@ describe('OpenSearchService', () => {
       const result = await service.testConnection(config)
 
       expect(result.ok).toBe(true)
-      expect(mockedBasicAuth).not.toHaveBeenCalled()
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.basicAuth).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           headers: {},
@@ -141,7 +143,7 @@ describe('OpenSearchService', () => {
     })
 
     it('should include Authorization header when credentials are provided', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { cluster_name: 'test', status: 'green', number_of_nodes: 1 },
         })
@@ -149,8 +151,8 @@ describe('OpenSearchService', () => {
 
       await service.testConnection(VALID_CONFIG)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'os-secret')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'os-secret')
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           headers: { Authorization: 'Basic bW9jay1hdXRo' },
@@ -160,7 +162,7 @@ describe('OpenSearchService', () => {
 
     it('should pass verifyTls config to rejectUnauthorized', async () => {
       const config = { ...VALID_CONFIG, verifyTls: false }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { cluster_name: 'test', status: 'green', number_of_nodes: 1 },
         })
@@ -168,7 +170,7 @@ describe('OpenSearchService', () => {
 
       await service.testConnection(config)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ rejectUnauthorized: false })
       )
@@ -189,7 +191,7 @@ describe('OpenSearchService', () => {
         { _id: 'doc-2', _source: { message: 'login failed' } },
         { _id: 'doc-3', _source: { message: 'logout' } },
       ]
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -205,7 +207,7 @@ describe('OpenSearchService', () => {
       expect(result.total).toBe(150)
       expect(result.hits).toHaveLength(3)
       expect(result.hits[0]).toEqual(hitItems[0])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://opensearch.local:9200/logs-2024-*/_search',
         expect.objectContaining({
           method: 'POST',
@@ -217,7 +219,7 @@ describe('OpenSearchService', () => {
     })
 
     it('should handle numeric total (ES 6 format)', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -235,7 +237,7 @@ describe('OpenSearchService', () => {
     })
 
     it('should return empty hits when hits.hits is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -252,33 +254,35 @@ describe('OpenSearchService', () => {
     })
 
     it('should throw when search returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 400, data: { error: 'parsing_exception' } })
       )
 
       await expect(service.search(VALID_CONFIG, index, dslQuery)).rejects.toThrow(
-        'OpenSearch search failed: status 400'
+        'OpenSearch returned status 400: parsing_exception'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should throw on 500 server error', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ status: 500, data: {} }))
+      mockAxiosService.fetch.mockResolvedValueOnce(
+        buildConnectorResponse({ status: 500, data: {} })
+      )
 
       await expect(service.search(VALID_CONFIG, index, dslQuery)).rejects.toThrow(
-        'OpenSearch search failed: status 500'
+        'OpenSearch returned status 500'
       )
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('ECONNREFUSED'))
 
       await expect(service.search(VALID_CONFIG, index, dslQuery)).rejects.toThrow('ECONNREFUSED')
     })
 
     it('should work without credentials (anonymous access)', async () => {
       const config = { baseUrl: 'https://opensearch.local:9200' }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -291,8 +295,8 @@ describe('OpenSearchService', () => {
 
       await service.search(config, index, dslQuery)
 
-      expect(mockedBasicAuth).not.toHaveBeenCalled()
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.basicAuth).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           headers: {},
@@ -301,7 +305,7 @@ describe('OpenSearchService', () => {
     })
 
     it('should include Authorization header when credentials are provided', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: { total: { value: 0 }, hits: [] },
@@ -311,12 +315,12 @@ describe('OpenSearchService', () => {
 
       await service.search(VALID_CONFIG, index, dslQuery)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'os-secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'os-secret')
     })
 
     it('should pass verifyTls config to rejectUnauthorized', async () => {
       const config = { ...VALID_CONFIG, verifyTls: false }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -324,14 +328,14 @@ describe('OpenSearchService', () => {
 
       await service.search(config, index, dslQuery)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ rejectUnauthorized: false })
       )
     })
 
     it('should construct the correct URL with index name', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -339,13 +343,13 @@ describe('OpenSearchService', () => {
 
       await service.search(VALID_CONFIG, 'my-custom-index', dslQuery)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://opensearch.local:9200/my-custom-index/_search',
         expect.objectContaining({})
       )
     })
 
-    it('should pass the query body to connectorFetch', async () => {
+    it('should pass the query body to fetch', async () => {
       const complexQuery = {
         query: {
           bool: {
@@ -356,7 +360,7 @@ describe('OpenSearchService', () => {
         size: 50,
         sort: [{ '@timestamp': { order: 'desc' } }],
       }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 10 }, hits: [] } },
         })
@@ -364,7 +368,7 @@ describe('OpenSearchService', () => {
 
       await service.search(VALID_CONFIG, index, complexQuery)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ body: complexQuery })
       )

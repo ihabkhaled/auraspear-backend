@@ -184,3 +184,114 @@ export function sanitizeErrorDetails(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : 'Connection test failed'
   return rawMessage.replaceAll(/\/[\w./-]+/g, '[path]').slice(0, 500)
 }
+
+/* ---------------------------------------------------------------- */
+/* REMOTE ERROR EXTRACTION                                           */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Maximum length for extracted remote error messages.
+ * Prevents oversized third-party responses from bloating logs or API responses.
+ */
+const MAX_REMOTE_ERROR_LENGTH = 300
+
+/**
+ * Extracts a human-readable error message from a third-party service response body.
+ *
+ * Supports common error response formats:
+ * - `{ error: "message" }` or `{ error: { message: "..." } }`
+ * - `{ message: "..." }`
+ * - `{ detail: "..." }` or `{ details: "..." }`
+ * - `{ title: "...", detail: "..." }` (RFC 7807 / Wazuh style)
+ * - `{ reason: "..." }`
+ * - Plain string responses
+ *
+ * Returns an empty string if no meaningful message can be extracted.
+ */
+export function extractRemoteErrorMessage(data: unknown): string {
+  if (typeof data === 'string') {
+    return data.trim().slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+
+  if (typeof data !== 'object' || data === null) {
+    return ''
+  }
+
+  const body = data as Record<string, unknown>
+
+  // Try { error: "message" } or { error: { message: "..." } }
+  if (body.error !== undefined) {
+    if (typeof body.error === 'string') {
+      return body.error.slice(0, MAX_REMOTE_ERROR_LENGTH)
+    }
+    if (typeof body.error === 'object' && body.error !== null) {
+      const nested = body.error as Record<string, unknown>
+      if (typeof nested.message === 'string') {
+        return nested.message.slice(0, MAX_REMOTE_ERROR_LENGTH)
+      }
+    }
+  }
+
+  // Try { message: "..." }
+  if (typeof body.message === 'string') {
+    return body.message.slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+
+  // Try { title: "...", detail: "..." } (RFC 7807)
+  if (typeof body.title === 'string' && typeof body.detail === 'string') {
+    return `${body.title}: ${body.detail}`.slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+
+  // Try { detail: "..." } or { details: "..." }
+  if (typeof body.detail === 'string') {
+    return body.detail.slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+  if (typeof body.details === 'string') {
+    return body.details.slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+
+  // Try { reason: "..." }
+  if (typeof body.reason === 'string') {
+    return body.reason.slice(0, MAX_REMOTE_ERROR_LENGTH)
+  }
+
+  return ''
+}
+
+/**
+ * Formats a standardised error string for when a third-party connector returns a non-success status.
+ * Includes the HTTP status and any error message extracted from the response body.
+ *
+ * Example outputs:
+ * - `Wazuh Manager returned status 401: Invalid credentials`
+ * - `MISP returned status 403`
+ */
+export function formatRemoteError(serviceName: string, status: number, data: unknown): string {
+  const remoteMessage = extractRemoteErrorMessage(data)
+  const base = `${serviceName} returned status ${status}`
+  return remoteMessage ? `${base}: ${remoteMessage}` : base
+}
+
+/* ---------------------------------------------------------------- */
+/* TIMEOUT NORMALIZATION                                             */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Minimum allowed timeout in milliseconds.
+ * Prevents accidental sub-second timeouts from breaking connections.
+ */
+const MINIMUM_TIMEOUT_MS = 5000
+
+/**
+ * Normalizes a user-configured timeout value to milliseconds.
+ *
+ * Users often configure timeout as seconds (e.g., `timeout: 60` for 60 seconds).
+ * If the value is below 1000, it is assumed to be in seconds and converted to ms.
+ * Values at or above 1000 are assumed to already be in milliseconds.
+ *
+ * A floor of 5000ms (5 seconds) is enforced to prevent impossibly short timeouts.
+ */
+export function normalizeTimeoutMs(value: number): number {
+  const ms = value < 1000 ? value * 1000 : value
+  return Math.max(ms, MINIMUM_TIMEOUT_MS)
+}

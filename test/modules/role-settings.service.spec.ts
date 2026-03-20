@@ -2,6 +2,7 @@ import { ALL_PERMISSIONS, Permission } from '../../src/common/enums/permission.e
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
 import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { CONFIGURABLE_ROLES } from '../../src/modules/role-settings/constants/default-permissions'
+import { PERMISSION_DEFINITIONS } from '../../src/modules/role-settings/constants/permission-definitions'
 import { RoleSettingsService } from '../../src/modules/role-settings/role-settings.service'
 
 const TENANT_ID = 'tenant-001'
@@ -10,13 +11,16 @@ function createMockRepository() {
   return {
     findPermissionsByTenant: jest.fn(),
     findPermissionsByTenantAndRole: jest.fn(),
+    hasPermissionByTenantAndRole: jest.fn(),
     findActiveUserIdsByRoles: jest.fn(),
     bulkUpsertPermissions: jest.fn(),
+    bulkCreatePermissions: jest.fn(),
     deleteAllByTenant: jest.fn(),
     countByTenant: jest.fn(),
     findAllTenantIds: jest.fn(),
     upsertPermissionDefinition: jest.fn(),
     findPermissionDefinitions: jest.fn(),
+    hasPermissionDefinition: jest.fn(),
   }
 }
 
@@ -55,6 +59,9 @@ describe('RoleSettingsService', () => {
       mockAppLogger as never,
       mockNotificationsService as never
     )
+    repository.hasPermissionByTenantAndRole.mockResolvedValue(true)
+    repository.hasPermissionDefinition.mockResolvedValue(true)
+    repository.bulkCreatePermissions.mockResolvedValue(undefined)
   })
 
   /* ---------------------------------------------------------------- */
@@ -96,6 +103,28 @@ describe('RoleSettingsService', () => {
       for (const role of CONFIGURABLE_ROLES) {
         expect(matrix[role]).toEqual([])
       }
+    })
+
+    it('should backfill missing default permissions for legacy tenants', async () => {
+      repository.hasPermissionByTenantAndRole.mockResolvedValue(false)
+      repository.findPermissionsByTenant.mockResolvedValue([
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.USERS_CONTROL_VIEW },
+      ])
+
+      const matrix = await service.getPermissionMatrix(TENANT_ID)
+
+      expect(repository.bulkCreatePermissions).toHaveBeenCalledWith(
+        TENANT_ID,
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: UserRole.TENANT_ADMIN,
+            permissionKey: Permission.USERS_CONTROL_VIEW,
+            allowed: true,
+          }),
+        ])
+      )
+      expect(matrix[UserRole.TENANT_ADMIN]).toContain(Permission.USERS_CONTROL_VIEW)
+      expect(cache.invalidate).toHaveBeenCalledWith(TENANT_ID)
     })
   })
 
@@ -146,6 +175,42 @@ describe('RoleSettingsService', () => {
 
       expect(definitions).toHaveLength(1)
       expect(definitions[0]?.module).toBe('roleSettings')
+    })
+
+    it('should keep the users control module visible for TENANT_ADMIN', async () => {
+      repository.findPermissionDefinitions.mockResolvedValue([
+        {
+          key: Permission.USERS_CONTROL_VIEW,
+          module: 'usersControl',
+          labelKey: 'roleSettings.permissions.usersControl.view',
+          sortOrder: 2601,
+        },
+      ])
+
+      const definitions = await service.getPermissionDefinitions(TENANT_ID, UserRole.TENANT_ADMIN)
+
+      expect(definitions).toHaveLength(1)
+      expect(definitions[0]?.module).toBe('usersControl')
+    })
+
+    it('should seed missing permission definitions for legacy databases', async () => {
+      repository.hasPermissionDefinition.mockResolvedValue(false)
+      repository.upsertPermissionDefinition.mockResolvedValue(undefined)
+      repository.findPermissionDefinitions.mockResolvedValue([
+        {
+          key: Permission.USERS_CONTROL_VIEW,
+          module: 'usersControl',
+          labelKey: 'roleSettings.permissions.usersControl.view',
+          sortOrder: 2600,
+        },
+      ])
+
+      const definitions = await service.getPermissionDefinitions(TENANT_ID, UserRole.GLOBAL_ADMIN)
+
+      expect(repository.upsertPermissionDefinition).toHaveBeenCalledTimes(
+        PERMISSION_DEFINITIONS.length
+      )
+      expect(definitions[0]?.module).toBe('usersControl')
     })
   })
 
@@ -315,6 +380,88 @@ describe('RoleSettingsService', () => {
       })
 
       expect(repository.bulkUpsertPermissions).not.toHaveBeenCalled()
+    })
+
+    it('should block TENANT_ADMIN from changing users control permissions in the matrix', async () => {
+      repository.findPermissionsByTenant.mockResolvedValue([
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.USERS_CONTROL_VIEW },
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.USERS_CONTROL_VIEW_SESSIONS },
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.USERS_CONTROL_FORCE_LOGOUT },
+        { role: UserRole.TENANT_ADMIN, permissionKey: Permission.USERS_CONTROL_FORCE_LOGOUT_ALL },
+      ])
+      repository.findPermissionsByTenantAndRole.mockResolvedValue([
+        { permissionKey: Permission.USERS_CONTROL_VIEW },
+        { permissionKey: Permission.USERS_CONTROL_VIEW_SESSIONS },
+        { permissionKey: Permission.USERS_CONTROL_FORCE_LOGOUT },
+        { permissionKey: Permission.USERS_CONTROL_FORCE_LOGOUT_ALL },
+      ])
+
+      const matrix = {
+        [UserRole.TENANT_ADMIN]: [
+          Permission.USERS_CONTROL_VIEW,
+          Permission.USERS_CONTROL_VIEW_SESSIONS,
+          Permission.USERS_CONTROL_FORCE_LOGOUT,
+        ],
+      }
+
+      await expect(
+        service.updatePermissionMatrix(
+          TENANT_ID,
+          matrix,
+          'tenant-admin@test.com',
+          'tenant-admin-001',
+          UserRole.TENANT_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.auth.insufficientPermissions',
+      })
+
+      expect(repository.bulkUpsertPermissions).not.toHaveBeenCalled()
+    })
+
+    it('should reject assigning users control permissions to non-tenant-admin roles', async () => {
+      repository.findPermissionsByTenant.mockResolvedValue([])
+
+      await expect(
+        service.updatePermissionMatrix(
+          TENANT_ID,
+          {
+            [UserRole.SOC_ANALYST_L1]: [Permission.USERS_CONTROL_VIEW],
+          },
+          'admin@test.com',
+          'admin-001',
+          UserRole.GLOBAL_ADMIN
+        )
+      ).rejects.toMatchObject({
+        messageKey: 'errors.roleSettings.usersControlRestrictedRole',
+      })
+
+      expect(repository.bulkUpsertPermissions).not.toHaveBeenCalled()
+    })
+
+    it('should allow global admins to keep users control permissions on tenant admin roles', async () => {
+      repository.findPermissionsByTenant.mockResolvedValue([])
+      repository.bulkUpsertPermissions.mockResolvedValue(undefined)
+      repository.findActiveUserIdsByRoles.mockResolvedValue([])
+
+      await expect(
+        service.updatePermissionMatrix(
+          TENANT_ID,
+          {
+            [UserRole.TENANT_ADMIN]: [
+              Permission.USERS_CONTROL_VIEW,
+              Permission.USERS_CONTROL_VIEW_SESSIONS,
+              Permission.USERS_CONTROL_FORCE_LOGOUT,
+              Permission.USERS_CONTROL_FORCE_LOGOUT_ALL,
+            ],
+          },
+          'admin@test.com',
+          'admin-001',
+          UserRole.GLOBAL_ADMIN
+        )
+      ).resolves.toBeDefined()
+
+      expect(repository.bulkUpsertPermissions).toHaveBeenCalled()
     })
 
     it('should emit permission refresh events for impacted roles after update', async () => {

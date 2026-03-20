@@ -4,6 +4,7 @@ jest.mock('bcryptjs', () => ({
 }))
 
 import * as bcrypt from 'bcryptjs'
+import { DashboardDensity, DashboardPanelKey } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { UsersService } from '../../src/modules/users/users.service'
 
@@ -43,10 +44,57 @@ const mockPreference = {
   userId: USER_ID,
   theme: 'dark',
   language: 'en',
+  dashboardDensity: DashboardDensity.COMFORTABLE,
+  collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
   notificationsEmail: true,
   notificationsInApp: false,
   createdAt: new Date('2025-01-01'),
   updatedAt: new Date('2025-01-01'),
+}
+
+const expectedDefaultPreferences = {
+  userId: USER_ID,
+  theme: 'system',
+  language: 'en',
+  dashboardDensity: DashboardDensity.COMFORTABLE,
+  collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
+  notificationsEmail: true,
+  notificationsInApp: true,
+  notifyCriticalAlerts: true,
+  notifyHighAlerts: true,
+  notifyCaseAssignments: true,
+  notifyIncidentUpdates: true,
+  notifyComplianceAlerts: true,
+  notifyCaseUpdates: true,
+  notifyCaseComments: true,
+  notifyCaseActivity: true,
+  notifyUserManagement: true,
+  retentionAlerts: '90',
+  retentionLogs: '90',
+  retentionIncidents: '365',
+  retentionAuditLogs: '365',
+}
+
+const expectedDefaultPreferenceData = {
+  theme: 'system',
+  language: 'en',
+  dashboardDensity: DashboardDensity.COMFORTABLE,
+  collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
+  notificationsEmail: true,
+  notificationsInApp: true,
+  notifyCriticalAlerts: true,
+  notifyHighAlerts: true,
+  notifyCaseAssignments: true,
+  notifyIncidentUpdates: true,
+  notifyComplianceAlerts: true,
+  notifyCaseUpdates: true,
+  notifyCaseComments: true,
+  notifyCaseActivity: true,
+  notifyUserManagement: true,
+  retentionAlerts: '90',
+  retentionLogs: '90',
+  retentionIncidents: '365',
+  retentionAuditLogs: '365',
 }
 
 const mockUserWithMemberships = {
@@ -359,26 +407,7 @@ describe('UsersService', () => {
 
       const result = await service.getPreferences(USER_ID)
 
-      expect(result).toEqual({
-        userId: USER_ID,
-        theme: 'system',
-        language: 'en',
-        notificationsEmail: true,
-        notificationsInApp: true,
-        notifyCriticalAlerts: true,
-        notifyHighAlerts: true,
-        notifyCaseAssignments: true,
-        notifyIncidentUpdates: true,
-        notifyComplianceAlerts: true,
-        notifyCaseUpdates: true,
-        notifyCaseComments: true,
-        notifyCaseActivity: true,
-        notifyUserManagement: true,
-        retentionAlerts: '90',
-        retentionLogs: '90',
-        retentionIncidents: '365',
-        retentionAuditLogs: '365',
-      })
+      expect(result).toEqual(expectedDefaultPreferences)
     })
 
     it('should throw 404 when user is not found', async () => {
@@ -442,23 +471,11 @@ describe('UsersService', () => {
           notificationsInApp: true,
         },
         {
+          ...expectedDefaultPreferenceData,
           theme: 'dark',
           language: 'fr',
           notificationsEmail: false,
           notificationsInApp: true,
-          notifyCriticalAlerts: true,
-          notifyHighAlerts: true,
-          notifyCaseAssignments: true,
-          notifyIncidentUpdates: true,
-          notifyComplianceAlerts: true,
-          notifyCaseUpdates: true,
-          notifyCaseComments: true,
-          notifyCaseActivity: true,
-          notifyUserManagement: true,
-          retentionAlerts: '90',
-          retentionLogs: '90',
-          retentionIncidents: '365',
-          retentionAuditLogs: '365',
         }
       )
     })
@@ -488,23 +505,8 @@ describe('UsersService', () => {
           theme: 'light',
         },
         {
+          ...expectedDefaultPreferenceData,
           theme: 'light',
-          language: 'en',
-          notificationsEmail: true,
-          notificationsInApp: true,
-          notifyCriticalAlerts: true,
-          notifyHighAlerts: true,
-          notifyCaseAssignments: true,
-          notifyIncidentUpdates: true,
-          notifyComplianceAlerts: true,
-          notifyCaseUpdates: true,
-          notifyCaseComments: true,
-          notifyCaseActivity: true,
-          notifyUserManagement: true,
-          retentionAlerts: '90',
-          retentionLogs: '90',
-          retentionIncidents: '365',
-          retentionAuditLogs: '365',
         }
       )
     })
@@ -525,23 +527,8 @@ describe('UsersService', () => {
           language: 'ar',
         },
         {
-          theme: 'system',
+          ...expectedDefaultPreferenceData,
           language: 'ar',
-          notificationsEmail: true,
-          notificationsInApp: true,
-          notifyCriticalAlerts: true,
-          notifyHighAlerts: true,
-          notifyCaseAssignments: true,
-          notifyIncidentUpdates: true,
-          notifyComplianceAlerts: true,
-          notifyCaseUpdates: true,
-          notifyCaseComments: true,
-          notifyCaseActivity: true,
-          notifyUserManagement: true,
-          retentionAlerts: '90',
-          retentionLogs: '90',
-          retentionIncidents: '365',
-          retentionAuditLogs: '365',
         }
       )
     })
@@ -562,23 +549,8 @@ describe('UsersService', () => {
           notificationsEmail: false,
         },
         {
-          theme: 'system',
-          language: 'en',
+          ...expectedDefaultPreferenceData,
           notificationsEmail: false,
-          notificationsInApp: true,
-          notifyCriticalAlerts: true,
-          notifyHighAlerts: true,
-          notifyCaseAssignments: true,
-          notifyIncidentUpdates: true,
-          notifyComplianceAlerts: true,
-          notifyCaseUpdates: true,
-          notifyCaseComments: true,
-          notifyCaseActivity: true,
-          notifyUserManagement: true,
-          retentionAlerts: '90',
-          retentionLogs: '90',
-          retentionIncidents: '365',
-          retentionAuditLogs: '365',
         }
       )
     })
@@ -593,25 +565,7 @@ describe('UsersService', () => {
       expect(repository.upsertPreference).toHaveBeenCalledWith(
         USER_ID,
         {},
-        {
-          theme: 'system',
-          language: 'en',
-          notificationsEmail: true,
-          notificationsInApp: true,
-          notifyCriticalAlerts: true,
-          notifyHighAlerts: true,
-          notifyCaseAssignments: true,
-          notifyIncidentUpdates: true,
-          notifyComplianceAlerts: true,
-          notifyCaseUpdates: true,
-          notifyCaseComments: true,
-          notifyCaseActivity: true,
-          notifyUserManagement: true,
-          retentionAlerts: '90',
-          retentionLogs: '90',
-          retentionIncidents: '365',
-          retentionAuditLogs: '365',
-        }
+        expectedDefaultPreferenceData
       )
     })
 

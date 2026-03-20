@@ -111,6 +111,14 @@ describe('Permission Definitions', () => {
     }
   })
 
+  it('should group users control permissions under the usersControl module', () => {
+    const usersControlDefs = PERMISSION_DEFINITIONS.filter(d => d.key.startsWith('usersControl.'))
+    expect(usersControlDefs.length).toBeGreaterThan(0)
+    for (const definition of usersControlDefs) {
+      expect(definition.module).toBe('usersControl')
+    }
+  })
+
   /* ---------------------------------------------------------------- */
   /* Every definition has valid fields                                  */
   /* ---------------------------------------------------------------- */

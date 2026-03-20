@@ -6,15 +6,19 @@ import {
   ConnectorType,
   HttpMethod,
 } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class ShuffleService {
   private readonly logger = new Logger(ShuffleService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test Shuffle SOAR connection.
@@ -33,14 +37,27 @@ export class ShuffleService {
     }
 
     try {
-      const res = await connectorFetch(`${baseUrl}/api/v1/apps/authentication`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/api/v1/apps/authentication`, {
         headers: { Authorization: `Bearer ${apiKey}` },
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `Shuffle returned status ${res.status}` }
+        const remoteError = formatRemoteError('Shuffle', res.status, res.data)
+        this.appLogger.warn('Shuffle connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'ShuffleService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorType.SHUFFLE,
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       this.appLogger.info('Shuffle connection test succeeded', {
@@ -68,7 +85,7 @@ export class ShuffleService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'ShuffleService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.SHUFFLE },
+        metadata: { connectorType: ConnectorType.SHUFFLE, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -84,22 +101,23 @@ export class ShuffleService {
     // apiKey is the canonical key; shuffleApiKey is a legacy fallback
     const apiKey = (config.apiKey ?? config.shuffleApiKey) as string
 
-    const res = await connectorFetch(`${baseUrl}/api/v1/workflows`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/v1/workflows`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Failed to fetch Shuffle workflows', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getWorkflows',
         className: 'ShuffleService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Failed to fetch workflows: status ${res.status}`)
+      throw new Error(formatRemoteError('Shuffle', res.status, res.data))
     }
 
     const workflows = (res.data ?? []) as unknown[]
@@ -142,7 +160,7 @@ export class ShuffleService {
       throw new Error('Invalid workflow ID')
     }
 
-    const res = await connectorFetch(`${baseUrl}/api/v1/workflows/${workflowId}/execute`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/v1/workflows/${workflowId}/execute`, {
       method: HttpMethod.POST,
       headers: { Authorization: `Bearer ${apiKey}` },
       body: data,
@@ -151,15 +169,16 @@ export class ShuffleService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Shuffle workflow execution failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'executeWorkflow',
         className: 'ShuffleService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, workflowId },
+        metadata: { status: res.status, workflowId, remoteError: remoteMessage },
       })
-      throw new Error(`Workflow execution failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Shuffle', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>

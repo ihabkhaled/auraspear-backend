@@ -1,3 +1,4 @@
+import { DashboardDensity, DashboardPanelKey } from '../../common/enums'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { Tenant, User, UserPreference } from '@prisma/client'
 
@@ -8,6 +9,8 @@ import type { Tenant, User, UserPreference } from '@prisma/client'
 export const DEFAULT_PREFERENCES = {
   theme: 'system',
   language: 'en',
+  dashboardDensity: DashboardDensity.COMFORTABLE,
+  collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
   notificationsEmail: true,
   notificationsInApp: true,
   notifyCriticalAlerts: true,
@@ -57,6 +60,10 @@ export function buildPreferenceUpdateData(dto: UpdatePreferencesDto): Record<str
   const data: Record<string, unknown> = {}
   if (dto.theme !== undefined) data['theme'] = dto.theme
   if (dto.language !== undefined) data['language'] = dto.language
+  if (dto.dashboardDensity !== undefined) data['dashboardDensity'] = dto.dashboardDensity
+  if (dto.collapsedDashboardPanels !== undefined) {
+    data['collapsedDashboardPanels'] = dto.collapsedDashboardPanels
+  }
   if (dto.notificationsEmail !== undefined) data['notificationsEmail'] = dto.notificationsEmail
   if (dto.notificationsInApp !== undefined) data['notificationsInApp'] = dto.notificationsInApp
   if (dto.notifyCriticalAlerts !== undefined) {
@@ -89,6 +96,9 @@ export function buildPreferenceCreateData(dto: UpdatePreferencesDto): typeof DEF
   return {
     theme: dto.theme ?? DEFAULT_PREFERENCES.theme,
     language: dto.language ?? DEFAULT_PREFERENCES.language,
+    dashboardDensity: dto.dashboardDensity ?? DEFAULT_PREFERENCES.dashboardDensity,
+    collapsedDashboardPanels:
+      dto.collapsedDashboardPanels ?? DEFAULT_PREFERENCES.collapsedDashboardPanels,
     notificationsEmail: dto.notificationsEmail ?? DEFAULT_PREFERENCES.notificationsEmail,
     notificationsInApp: dto.notificationsInApp ?? DEFAULT_PREFERENCES.notificationsInApp,
     notifyCriticalAlerts: dto.notifyCriticalAlerts ?? DEFAULT_PREFERENCES.notifyCriticalAlerts,

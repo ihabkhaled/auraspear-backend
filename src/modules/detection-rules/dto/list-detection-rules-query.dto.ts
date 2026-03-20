@@ -15,6 +15,7 @@ export const ListDetectionRulesQuerySchema = z.object({
       'ruleType',
       'hitCount',
       'falsePositiveCount',
+      'lastTriggeredAt',
     ])
     .default('createdAt'),
   sortOrder: z.nativeEnum(SortOrder).default(SortOrder.DESC),

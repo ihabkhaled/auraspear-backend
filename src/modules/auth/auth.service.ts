@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { RefreshTokenFamilyStatus, RefreshTokenRotationStatus } from '@prisma/client'
 import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
+import { createDefaultAuthSessionContext } from './auth-session.utilities'
 import { DUMMY_BCRYPT_HASH, JWT_CLOCK_TOLERANCE_SECONDS } from './auth.constants'
 import { RefreshTokenFamilyRevocationReason } from './auth.enums'
 import { AuthRepository } from './auth.repository'
@@ -11,22 +12,33 @@ import {
   buildPayloadFromMembership,
   buildExpiryDateFromSeconds,
   computeRemainingTtl,
+  computeRemainingTtlFromDate,
   hashTokenIdentifier,
   mapMembershipsToTenantInfos,
   parseExpiryToSeconds,
   preserveImpersonationClaims,
 } from './auth.utilities'
 import { TokenBlacklistService } from './token-blacklist.service'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, TokenType } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  TokenType,
+  UserSessionStatus,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { RoleSettingsService } from '../role-settings/role-settings.service'
 import type {
+  AuthSessionContext,
   AuthorizedTenantContext,
+  IssuedAccessToken,
   IssuedRefreshToken,
+  IssuedSessionTokens,
   MembershipWithTenant,
   RefreshRotationWithFamily,
+  SessionRevocationTarget,
   TenantMembershipInfo,
   UserWithMemberships,
 } from './auth.types'
@@ -64,7 +76,8 @@ export class AuthService {
 
   async login(
     email: string,
-    password: string
+    password: string,
+    sessionContext?: AuthSessionContext
   ): Promise<{
     accessToken: string
     refreshToken: string
@@ -96,7 +109,12 @@ export class AuthService {
       firstMembership.tenantId,
       firstMembership.role
     )
-    const session = await this.issueSession(user.id, firstMembership.tenantId, payload)
+    const session = await this.issueSession(
+      user.id,
+      firstMembership.tenantId,
+      payload,
+      sessionContext
+    )
 
     this.logSuccess('login', {
       actorEmail: user.email,
@@ -120,19 +138,30 @@ export class AuthService {
   async issueSession(
     userId: string,
     tenantId: string,
-    payload: JwtPayload
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    const accessToken = this.issueAccessToken(payload)
-    const refreshToken = await this.createRefreshSession(userId, tenantId, payload)
+    payload: JwtPayload,
+    sessionContext?: AuthSessionContext
+  ): Promise<IssuedSessionTokens> {
+    const issuedRefresh = this.issueRefreshToken(payload)
+    const issuedAccess = this.issueAccessTokenBundle({
+      ...payload,
+      family: issuedRefresh.family,
+    })
+    await this.createRefreshSession(
+      userId,
+      tenantId,
+      issuedRefresh,
+      issuedAccess,
+      sessionContext ?? createDefaultAuthSessionContext()
+    )
 
     return {
-      accessToken,
-      refreshToken: refreshToken.refreshToken,
+      accessToken: issuedAccess.accessToken,
+      refreshToken: issuedRefresh.refreshToken,
     }
   }
 
   signAccessToken(payload: JwtPayload): string {
-    return this.issueAccessToken(payload)
+    return this.issueAccessTokenBundle(payload).accessToken
   }
 
   signRefreshToken(payload: JwtPayload, family?: string, generation?: number): string {
@@ -161,8 +190,9 @@ export class AuthService {
 
   async refreshTokens(
     refreshToken: string,
-    requestedTenantId?: string
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+    requestedTenantId?: string,
+    sessionContext?: AuthSessionContext
+  ): Promise<IssuedSessionTokens> {
     const payload = await this.verifyRefreshToken(refreshToken)
     const rotation = await this.getRefreshRotationOrThrow(payload)
     await this.assertRefreshRotationCurrent(payload, rotation)
@@ -189,6 +219,10 @@ export class AuthService {
       rotation.family.id,
       rotation.generation + 1
     )
+    const issuedAccess = this.issueAccessTokenBundle({
+      ...nextPayload,
+      family: rotation.family.id,
+    })
     const rotateResult = await this.authRepository.rotateRefreshTokenFamily({
       familyId: rotation.family.id,
       expectedGeneration: rotation.generation,
@@ -197,6 +231,10 @@ export class AuthService {
       nextExpiresAt: issuedRefresh.expiresAt,
       nextGeneration: issuedRefresh.generation,
       rotatedAt: new Date(),
+      tenantId: membership.tenantId,
+      currentAccessJti: issuedAccess.jti,
+      currentAccessExpiresAt: issuedAccess.expiresAt,
+      context: sessionContext ?? createDefaultAuthSessionContext(),
     })
 
     if (rotateResult.familyAdvanceCount === 0 || rotateResult.newRotation === null) {
@@ -217,7 +255,7 @@ export class AuthService {
     })
 
     return {
-      accessToken: this.issueAccessToken(nextPayload),
+      accessToken: issuedAccess.accessToken,
       refreshToken: issuedRefresh.refreshToken,
     }
   }
@@ -227,7 +265,8 @@ export class AuthService {
     refreshJti: string,
     accessExp: number,
     refreshExp: number,
-    family?: string
+    family?: string,
+    actorUserId?: string
   ): Promise<void> {
     const blacklistTasks: Promise<void>[] = [
       this.tokenBlacklistService.blacklist(accessJti, computeRemainingTtl(accessExp)),
@@ -239,7 +278,9 @@ export class AuthService {
         this.authRepository.revokeRefreshTokenFamily(
           family,
           RefreshTokenFamilyRevocationReason.LOGOUT,
-          new Date()
+          new Date(),
+          undefined,
+          actorUserId
         )
       )
     }
@@ -337,7 +378,8 @@ export class AuthService {
   }
 
   async endImpersonation(
-    caller: JwtPayload
+    caller: JwtPayload,
+    sessionContext?: AuthSessionContext
   ): Promise<{ accessToken: string; refreshToken: string; user: JwtPayload }> {
     if (caller.isImpersonated !== true || !caller.impersonatorSub) {
       this.logDenied('endImpersonation', { actorUserId: caller.sub, actorEmail: caller.email })
@@ -354,7 +396,9 @@ export class AuthService {
       await this.authRepository.revokeRefreshTokenFamily(
         caller.family,
         RefreshTokenFamilyRevocationReason.IMPERSONATION_ENDED,
-        new Date()
+        new Date(),
+        undefined,
+        caller.impersonatorSub
       )
     }
 
@@ -373,7 +417,12 @@ export class AuthService {
 
     const firstMembership = this.getFirstMembershipOrThrow(admin, 'endImpersonation')
     const adminPayload = buildPayloadFromMembership(admin, firstMembership)
-    const session = await this.issueSession(admin.id, firstMembership.tenantId, adminPayload)
+    const session = await this.issueSession(
+      admin.id,
+      firstMembership.tenantId,
+      adminPayload,
+      sessionContext
+    )
 
     this.logSuccess('endImpersonation', {
       actorEmail: admin.email,
@@ -417,20 +466,23 @@ export class AuthService {
     }
   }
 
-  private issueAccessToken(payload: JwtPayload): string {
-    const {
-      iat: _iat,
-      exp: _exp,
-      jti: _jti,
-      family: _family,
-      generation: _generation,
-      ...clean
-    } = payload
+  private issueAccessTokenBundle(payload: JwtPayload): IssuedAccessToken {
+    const { iat: _iat, exp: _exp, jti: _jti, generation: _generation, ...clean } = payload
 
-    return jwt.sign({ ...clean, jti: randomUUID(), tokenType: TokenType.ACCESS }, this.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: this.accessExpiry,
-    })
+    const tokenJti = randomUUID()
+
+    return {
+      accessToken: jwt.sign(
+        { ...clean, jti: tokenJti, tokenType: TokenType.ACCESS },
+        this.jwtSecret,
+        {
+          algorithm: 'HS256',
+          expiresIn: this.accessExpiry,
+        }
+      ),
+      jti: tokenJti,
+      expiresAt: buildExpiryDateFromSeconds(parseExpiryToSeconds(String(this.accessExpiry))),
+    }
   }
 
   private issueRefreshToken(
@@ -475,25 +527,103 @@ export class AuthService {
   private async createRefreshSession(
     userId: string,
     tenantId: string,
-    payload: JwtPayload
-  ): Promise<IssuedRefreshToken> {
-    const issuedRefresh = this.issueRefreshToken(payload)
+    refreshToken: IssuedRefreshToken,
+    accessToken: IssuedAccessToken,
+    sessionContext: AuthSessionContext
+  ): Promise<void> {
+    const issuedAt = new Date()
 
     await this.authRepository.createRefreshTokenFamily({
-      id: issuedRefresh.family,
+      id: refreshToken.family,
       userId,
       tenantId,
-      currentGeneration: issuedRefresh.generation,
-      expiresAt: issuedRefresh.expiresAt,
+      currentGeneration: refreshToken.generation,
+      expiresAt: refreshToken.expiresAt,
     })
     await this.authRepository.createRefreshTokenRotation({
-      familyId: issuedRefresh.family,
-      generation: issuedRefresh.generation,
-      jtiHash: hashTokenIdentifier(issuedRefresh.jti),
-      expiresAt: issuedRefresh.expiresAt,
+      familyId: refreshToken.family,
+      generation: refreshToken.generation,
+      jtiHash: hashTokenIdentifier(refreshToken.jti),
+      expiresAt: refreshToken.expiresAt,
+    })
+    await this.authRepository.createUserSession({
+      familyId: refreshToken.family,
+      userId,
+      tenantId,
+      lastLoginAt: issuedAt,
+      currentAccessJti: accessToken.jti,
+      currentAccessExpiresAt: accessToken.expiresAt,
+      context: sessionContext,
+    })
+  }
+
+  async touchSessionActivity(
+    payload: JwtPayload,
+    tenantId: string,
+    sessionContext: AuthSessionContext
+  ): Promise<void> {
+    if (typeof payload.family !== 'string') {
+      return
+    }
+
+    const updatedCount = await this.authRepository.touchUserSession({
+      familyId: payload.family,
+      tenantId,
+      touchedAt: new Date(),
+      currentAccessJti: payload.jti,
+      currentAccessExpiresAt: payload.exp === undefined ? undefined : new Date(payload.exp * 1000),
+      context: sessionContext,
     })
 
-    return issuedRefresh
+    if (updatedCount > 0) {
+      return
+    }
+
+    const session = await this.authRepository.findUserSessionByFamilyId(payload.family)
+    if (!session) {
+      return
+    }
+
+    if (session.status !== UserSessionStatus.ACTIVE) {
+      throw new BusinessException(401, 'Session has been revoked', 'errors.auth.sessionRevoked')
+    }
+  }
+
+  async revokeSessionTargets(
+    targets: SessionRevocationTarget[],
+    reason: RefreshTokenFamilyRevocationReason,
+    revokedByUserId?: string
+  ): Promise<number> {
+    if (targets.length === 0) {
+      return 0
+    }
+
+    const tasks: Promise<void>[] = []
+
+    for (const target of targets) {
+      if (target.currentAccessJti && target.currentAccessExpiresAt) {
+        tasks.push(
+          this.tokenBlacklistService.blacklist(
+            target.currentAccessJti,
+            computeRemainingTtlFromDate(target.currentAccessExpiresAt)
+          )
+        )
+      }
+
+      tasks.push(
+        this.authRepository.revokeRefreshTokenFamily(
+          target.familyId,
+          reason,
+          new Date(),
+          undefined,
+          revokedByUserId
+        )
+      )
+    }
+
+    await Promise.all(tasks)
+
+    return targets.length
   }
 
   private async getRefreshRotationOrThrow(payload: JwtPayload): Promise<RefreshRotationWithFamily> {

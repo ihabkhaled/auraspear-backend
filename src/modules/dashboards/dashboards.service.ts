@@ -1,14 +1,57 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import {
+  DASHBOARD_ANALYTICS_WINDOW_DAYS,
+  DASHBOARD_CASE_CRITICAL_DAYS,
+  DASHBOARD_CASE_WARNING_DAYS,
+  DASHBOARD_REPORTS_WINDOW_DAYS,
+  DASHBOARD_TOP_DETECTION_RULES_LIMIT,
+  DASHBOARD_TOP_FAILING_CONNECTORS_LIMIT,
+  DASHBOARD_TOP_TARGETED_ASSETS_LIMIT,
+  DASHBOARD_TOP_TECHNIQUES_LIMIT,
+  DASHBOARD_STALE_RUNNING_JOB_HOURS,
+  QUEUED_JOB_STATUSES,
+} from './dashboards.constants'
 import { DashboardsRepository } from './dashboards.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import {
+  buildAiSessionStatusCounts,
+  buildAlertTrend,
+  buildAnalyticsOverview,
+  buildAutomationQuality,
+  buildConnectorSyncStatusCounts,
+  buildConnectorSyncSummary,
+  buildMitreTechniques,
+  buildOperationsOverview,
+  buildPipelineEntries,
+  buildRecentActivityItems,
+  buildRulePerformanceSummary,
+  buildSeverityDistribution,
+  buildSoarStatusCounts,
+  buildTopTargetedAssets,
+  calculateComplianceScore,
+  calculateTrend,
+} from './dashboards.utilities'
+import {
+  AiAgentStatus,
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  AttackPathStatus,
+  CloudFindingSeverity,
+  CloudFindingStatus,
+  ComplianceControlStatus,
+  VulnerabilitySeverity,
+} from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
+import { JobStatus, JobType } from '../jobs/enums/job.enums'
 import type {
   AlertTrend,
-  AlertTrendEntry,
+  DashboardAnalyticsOverview,
+  DashboardOperationsOverview,
   DashboardSummary,
   MitreTopTechniques,
   PipelineHealth,
+  RecentActivityItem,
   RecentActivityResponse,
   SeverityDistribution,
   TopTargetedAssets,
@@ -16,35 +59,37 @@ import type {
 
 @Injectable()
 export class DashboardsService {
-  private readonly logger = new Logger(DashboardsService.name)
-
   constructor(
     private readonly dashboardsRepository: DashboardsRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly appLogger: AppLoggerService
   ) {}
 
-  private calculateTrend(currentValue: number, previousValue: number): number {
-    if (previousValue === 0) {
-      return currentValue > 0 ? 100 : 0
-    }
-    return Math.round(((currentValue - previousValue) / previousValue) * 1000) / 10
-  }
-
-  async getSummary(tenantId: string): Promise<DashboardSummary> {
-    this.appLogger.debug('Fetching dashboard summary', {
+  private logDashboardAction(
+    action: string,
+    tenantId: string,
+    metadata?: Record<string, number | string>
+  ): void {
+    this.appLogger.debug(`Fetching ${action}`, {
       feature: AppLogFeature.DASHBOARD,
-      action: 'getSummary',
+      action,
       outcome: AppLogOutcome.SUCCESS,
       tenantId,
       sourceType: AppLogSourceType.SERVICE,
       className: 'DashboardsService',
-      functionName: 'getSummary',
+      functionName: action,
+      metadata,
     })
+  }
+
+  async getSummary(tenantId: string): Promise<DashboardSummary> {
+    this.logDashboardAction('getSummary', tenantId)
 
     const now = new Date()
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const oneWeekAgo = new Date(
+      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    )
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
     const [
@@ -52,12 +97,10 @@ export class DashboardsService {
       alertsLast24h,
       resolvedLast24h,
       avgResolutionTime,
-      // Current week counts
       alertsCurrentWeek,
       criticalCurrentWeek,
       casesCurrentWeek,
       mttrCurrentWeek,
-      // Previous week counts
       alertsPreviousWeek,
       criticalPreviousWeek,
       casesPreviousWeek,
@@ -67,12 +110,10 @@ export class DashboardsService {
       this.dashboardsRepository.countAlertsSince(tenantId, twentyFourHoursAgo),
       this.dashboardsRepository.countResolvedAlertsSince(tenantId, twentyFourHoursAgo),
       this.dashboardsRepository.getAvgResolutionMsSince(tenantId, oneWeekAgo),
-      // Current week
       this.dashboardsRepository.countAlertsBetween(tenantId, oneWeekAgo, now),
       this.dashboardsRepository.countCriticalAlertsBetween(tenantId, oneWeekAgo, now),
       this.dashboardsRepository.countCasesCreatedBetween(tenantId, oneWeekAgo, now),
       this.dashboardsRepository.getAvgResolutionMsBetween(tenantId, oneWeekAgo, now),
-      // Previous week
       this.dashboardsRepository.countAlertsBetweenExclusiveEnd(tenantId, twoWeeksAgo, oneWeekAgo),
       this.dashboardsRepository.countCriticalAlertsBetweenExclusiveEnd(
         tenantId,
@@ -93,10 +134,8 @@ export class DashboardsService {
 
     const avgMs = avgResolutionTime[0]?.avg_ms ?? 0
     const mttrMinutes = Math.round(avgMs / 60_000)
-
     const mttrCurrentMs = mttrCurrentWeek[0]?.avg_ms ?? 0
     const mttrPreviousMs = mttrPreviousWeek[0]?.avg_ms ?? 0
-
     const enabledConnectors = await this.connectorsService.getEnabledConnectors(tenantId)
 
     return {
@@ -108,217 +147,410 @@ export class DashboardsService {
       resolvedLast24h,
       meanTimeToRespond: mttrMinutes > 0 ? `${mttrMinutes}m` : 'N/A',
       connectedSources: enabledConnectors.length,
-      totalAlertsTrend: this.calculateTrend(alertsCurrentWeek, alertsPreviousWeek),
-      criticalAlertsTrend: this.calculateTrend(criticalCurrentWeek, criticalPreviousWeek),
-      openCasesTrend: this.calculateTrend(casesCurrentWeek, casesPreviousWeek),
-      mttrTrend: this.calculateTrend(mttrCurrentMs, mttrPreviousMs),
+      totalAlertsTrend: calculateTrend(alertsCurrentWeek, alertsPreviousWeek),
+      criticalAlertsTrend: calculateTrend(criticalCurrentWeek, criticalPreviousWeek),
+      openCasesTrend: calculateTrend(casesCurrentWeek, casesPreviousWeek),
+      mttrTrend: calculateTrend(mttrCurrentMs, mttrPreviousMs),
     }
   }
 
   async getAlertTrend(tenantId: string, days: number): Promise<AlertTrend> {
-    this.appLogger.debug('Fetching alert trend data', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getAlertTrend',
-      outcome: AppLogOutcome.SUCCESS,
+    this.logDashboardAction('getAlertTrend', tenantId, { days })
+
+    const todayUtc = new Date()
+    todayUtc.setUTCHours(0, 0, 0, 0)
+
+    const sinceUtc = new Date(todayUtc)
+    sinceUtc.setUTCDate(sinceUtc.getUTCDate() - (days - 1))
+
+    const untilUtc = new Date(todayUtc)
+    untilUtc.setUTCDate(untilUtc.getUTCDate() + 1)
+
+    const results = await this.dashboardsRepository.getAlertCountsByDateAndSeverity(
       tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getAlertTrend',
-      metadata: { days },
-    })
+      sinceUtc,
+      untilUtc
+    )
 
-    const since = new Date()
-    since.setDate(since.getDate() - days)
-
-    const results = await this.dashboardsRepository.getAlertCountsByDateAndSeverity(tenantId, since)
-
-    // Pivot into { date, critical, high, medium, low, info }
-    const trendMap = new Map<string, AlertTrendEntry>()
-
-    for (const r of results) {
-      if (!trendMap.has(r.date)) {
-        trendMap.set(r.date, { date: r.date, critical: 0, high: 0, medium: 0, low: 0, info: 0 })
-      }
-      const entry = trendMap.get(r.date)
-      if (entry) {
-        const count = Number(r.count)
-        switch (r.severity) {
-          case 'critical':
-            entry.critical = count
-            break
-          case 'high':
-            entry.high = count
-            break
-          case 'medium':
-            entry.medium = count
-            break
-          case 'low':
-            entry.low = count
-            break
-          case 'info':
-            entry.info = count
-            break
-        }
-      }
-    }
-
-    return { tenantId, days, trend: [...trendMap.values()] }
+    return buildAlertTrend(tenantId, days, results, sinceUtc, todayUtc)
   }
 
   async getSeverityDistribution(tenantId: string): Promise<SeverityDistribution> {
-    this.appLogger.debug('Fetching severity distribution', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getSeverityDistribution',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getSeverityDistribution',
-    })
+    this.logDashboardAction('getSeverityDistribution', tenantId)
 
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
+    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
     const counts = await this.dashboardsRepository.groupAlertsBySeveritySince(tenantId, since)
 
-    const total = counts.reduce((sum, c) => sum + c._count, 0)
-
-    const distribution = counts.map(c => ({
-      severity: c.severity,
-      count: c._count,
-      percentage: total > 0 ? Math.round((c._count / total) * 1000) / 10 : 0,
-    }))
-
-    return { tenantId, distribution }
+    return buildSeverityDistribution(tenantId, counts)
   }
 
   async getMitreTopTechniques(tenantId: string): Promise<MitreTopTechniques> {
-    this.appLogger.debug('Fetching MITRE top techniques', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getMitreTopTechniques',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getMitreTopTechniques',
-    })
+    this.logDashboardAction('getMitreTopTechniques', tenantId)
 
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
+    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
     const results = await this.dashboardsRepository.getTopMitreTechniques(tenantId, since)
 
     return {
       tenantId,
-      techniques: results.map(r => ({
-        id: r.technique,
-        count: Number(r.count),
-      })),
+      techniques: buildMitreTechniques(results).slice(0, DASHBOARD_TOP_TECHNIQUES_LIMIT),
     }
   }
 
   async getTopTargetedAssets(tenantId: string): Promise<TopTargetedAssets> {
-    this.appLogger.debug('Fetching top targeted assets', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getTopTargetedAssets',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getTopTargetedAssets',
-    })
+    this.logDashboardAction('getTopTargetedAssets', tenantId)
 
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
+    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
     const results = await this.dashboardsRepository.getTopTargetedAssets(tenantId, since)
 
     return {
       tenantId,
-      assets: results.map(r => ({
-        hostname: r.hostname,
-        alertCount: Number(r.alert_count),
-        criticalCount: Number(r.critical_count),
-        lastSeen: r.last_seen,
-      })),
+      assets: buildTopTargetedAssets(results).slice(0, DASHBOARD_TOP_TARGETED_ASSETS_LIMIT),
     }
   }
 
   async getRecentActivity(tenantId: string, limit: number): Promise<RecentActivityResponse> {
-    this.appLogger.debug('Fetching recent activity', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getRecentActivity',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getRecentActivity',
-    })
+    this.logDashboardAction('getRecentActivity', tenantId, { limit })
 
     const [notifications, total] = await Promise.all([
       this.dashboardsRepository.findRecentNotifications(tenantId, limit),
       this.dashboardsRepository.countNotifications(tenantId),
     ])
 
-    const actorIds = [...new Set(notifications.map(n => n.actorUserId))]
+    const actorIds = [...new Set(notifications.map(notification => notification.actorUserId))]
     const actors =
       actorIds.length > 0 ? await this.dashboardsRepository.findUsersByIds(actorIds) : []
-    const actorMap = new Map(actors.map(a => [a.id, a]))
+    const actorMap = new Map(actors.map(actor => [actor.id, actor]))
 
-    const data = notifications.map(n => {
-      const actor = actorMap.get(n.actorUserId)
+    const data: RecentActivityItem[] = notifications.map(notification => {
+      const actor = actorMap.get(notification.actorUserId)
+
       return {
-        id: n.id,
-        type: n.type,
+        id: notification.id,
+        type: notification.type,
         actorName: actor?.name ?? 'Unknown',
-        title: n.title,
-        message: n.message,
-        createdAt: n.createdAt,
-        isRead: n.readAt !== null,
+        title: notification.title,
+        message: notification.message,
+        createdAt: notification.createdAt,
+        isRead: notification.readAt !== null,
       }
     })
 
     const totalPages = Math.ceil(total / limit)
 
-    return {
-      data,
-      pagination: {
-        page: 1,
-        limit,
-        total,
-        totalPages,
-        hasNext: totalPages > 1,
-        hasPrev: false,
-      },
-    }
+    return buildRecentActivityItems(data, {
+      page: 1,
+      limit,
+      total,
+      totalPages,
+      hasNext: totalPages > 1,
+      hasPrev: false,
+    })
   }
 
   async getPipelineHealth(tenantId: string): Promise<PipelineHealth> {
-    this.appLogger.debug('Fetching pipeline health status', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'getPipelineHealth',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DashboardsService',
-      functionName: 'getPipelineHealth',
-    })
+    this.logDashboardAction('getPipelineHealth', tenantId)
 
     const connectors = await this.dashboardsRepository.findEnabledConnectors(tenantId)
 
-    const pipelines = connectors.map(c => {
-      let status = 'unknown'
-      if (c.lastTestOk === true) {
-        status = 'healthy'
-      } else if (c.lastTestOk === false) {
-        status = 'down'
-      }
-      return {
-        name: c.name,
-        type: c.type,
-        status,
-        lastChecked: c.lastTestAt,
-        lastError: c.lastError,
-      }
-    })
+    return {
+      tenantId,
+      pipelines: buildPipelineEntries(connectors),
+    }
+  }
 
-    return { tenantId, pipelines }
+  async getAnalyticsOverview(tenantId: string): Promise<DashboardAnalyticsOverview> {
+    this.logDashboardAction('getAnalyticsOverview', tenantId)
+
+    const now = new Date()
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    const sevenDaysAgo = new Date(
+      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    )
+    const thirtyDaysAgo = new Date(
+      now.getTime() - DASHBOARD_REPORTS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    )
+
+    const [
+      alertsLast24h,
+      resolvedLast24h,
+      openCases,
+      openIncidents,
+      criticalVulnerabilities,
+      highVulnerabilities,
+      activeAttackPaths,
+      onlineAgents,
+      aiSessions24h,
+      pendingJobs,
+      runningJobs,
+      failedJobs,
+      totalJobs,
+      delayedJobs,
+      totalFrameworks,
+      passedControls,
+      failedControls,
+      notAssessedControls,
+      completedReports,
+      generatedReports30d,
+      availableTemplates,
+      totalAlerts7d,
+      criticalAlerts7d,
+      enabledConnectors,
+    ] = await Promise.all([
+      this.dashboardsRepository.countAlertsSince(tenantId, twentyFourHoursAgo),
+      this.dashboardsRepository.countResolvedAlertsSince(tenantId, twentyFourHoursAgo),
+      this.dashboardsRepository.countOpenCases(tenantId),
+      this.dashboardsRepository.countOpenIncidents(tenantId),
+      this.dashboardsRepository.countVulnerabilitiesBySeverity(
+        tenantId,
+        VulnerabilitySeverity.CRITICAL
+      ),
+      this.dashboardsRepository.countVulnerabilitiesBySeverity(
+        tenantId,
+        VulnerabilitySeverity.HIGH
+      ),
+      this.dashboardsRepository.countAttackPathsByStatus(tenantId, AttackPathStatus.ACTIVE),
+      this.dashboardsRepository.countAiAgentsByStatus(tenantId, AiAgentStatus.ONLINE),
+      this.dashboardsRepository.countAiAgentSessionsSince(tenantId, twentyFourHoursAgo),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.PENDING),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.RUNNING),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.FAILED),
+      this.dashboardsRepository.countJobs(tenantId),
+      this.dashboardsRepository.countDelayedJobs(tenantId, now),
+      this.dashboardsRepository.countComplianceFrameworks(tenantId),
+      this.dashboardsRepository.countComplianceControlsByStatus(
+        tenantId,
+        ComplianceControlStatus.PASSED
+      ),
+      this.dashboardsRepository.countComplianceControlsByStatus(
+        tenantId,
+        ComplianceControlStatus.FAILED
+      ),
+      this.dashboardsRepository.countComplianceControlsByStatus(
+        tenantId,
+        ComplianceControlStatus.NOT_ASSESSED
+      ),
+      this.dashboardsRepository.countCompletedReports(tenantId),
+      this.dashboardsRepository.countCompletedReportsSince(tenantId, thirtyDaysAgo),
+      this.dashboardsRepository.countAvailableReportTemplates(tenantId),
+      this.dashboardsRepository.countAlertsBetween(tenantId, sevenDaysAgo, now),
+      this.dashboardsRepository.countCriticalAlertsBetween(tenantId, sevenDaysAgo, now),
+      this.dashboardsRepository.findEnabledConnectors(tenantId),
+    ])
+
+    const healthyConnectors = enabledConnectors.filter(
+      connector => connector.lastTestOk === true
+    ).length
+    const failingConnectors = enabledConnectors.filter(
+      connector => connector.lastTestOk === false
+    ).length
+    const complianceScore = calculateComplianceScore(
+      passedControls,
+      failedControls,
+      notAssessedControls
+    )
+
+    return buildAnalyticsOverview({
+      tenantId,
+      overview: {
+        alertsLast24h,
+        resolvedLast24h,
+        openCases,
+        openIncidents,
+        criticalVulnerabilities,
+        connectedSources: enabledConnectors.length,
+        completedReports,
+      },
+      threatOperations: {
+        totalAlerts7d,
+        criticalAlerts7d,
+        openCases,
+        openIncidents,
+        criticalVulnerabilities,
+        highVulnerabilities,
+        activeAttackPaths,
+      },
+      automation: {
+        onlineAgents,
+        aiSessions24h,
+        pendingJobs,
+        runningJobs,
+        failedJobs,
+        healthyConnectors,
+        failingConnectors,
+      },
+      governance: {
+        totalFrameworks,
+        passedControls,
+        failedControls,
+        notAssessedControls,
+        complianceScore,
+        availableTemplates,
+      },
+      infrastructure: {
+        enabledConnectors: enabledConnectors.length,
+        healthyConnectors,
+        failingConnectors,
+        totalJobs,
+        delayedJobs,
+        generatedReports30d,
+      },
+    })
+  }
+
+  async getOperationsOverview(tenantId: string): Promise<DashboardOperationsOverview> {
+    this.logDashboardAction('getOperationsOverview', tenantId)
+
+    const now = new Date()
+    const sevenDaysAgo = new Date(
+      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    )
+    const thirtyDaysAgo = new Date(
+      now.getTime() - DASHBOARD_REPORTS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    )
+    const caseWarningThreshold = new Date(
+      now.getTime() - DASHBOARD_CASE_WARNING_DAYS * 24 * 60 * 60 * 1000
+    )
+    const caseCriticalThreshold = new Date(
+      now.getTime() - DASHBOARD_CASE_CRITICAL_DAYS * 24 * 60 * 60 * 1000
+    )
+    const staleRunningThreshold = new Date(
+      now.getTime() - DASHBOARD_STALE_RUNNING_JOB_HOURS * 60 * 60 * 1000
+    )
+
+    const [
+      incidentStatusRows,
+      openCases,
+      unassignedCases,
+      agedOverSevenDays,
+      agedOverFourteenDays,
+      averageOpenCaseAge,
+      activeRules,
+      topRules,
+      noisyRules,
+      connectorSyncStatusRows,
+      topFailingConnectors,
+      pendingJobs,
+      retryingJobs,
+      failedJobs,
+      staleRunningJobs,
+      queuedConnectorSyncJobs,
+      queuedReportJobs,
+      aiSessionStatusRows,
+      averageAiDuration,
+      soarStatusRows,
+      averageSoarCompletionRate,
+      criticalVulnerabilities,
+      exploitAvailableVulnerabilities,
+      openCloudFindings,
+      criticalCloudFindings,
+      passedControls,
+      failedControls,
+    ] = await Promise.all([
+      this.dashboardsRepository.groupIncidentsByStatus(tenantId),
+      this.dashboardsRepository.countOpenCases(tenantId),
+      this.dashboardsRepository.countUnassignedOpenCases(tenantId),
+      this.dashboardsRepository.countOpenCasesOlderThan(tenantId, caseWarningThreshold),
+      this.dashboardsRepository.countOpenCasesOlderThan(tenantId, caseCriticalThreshold),
+      this.dashboardsRepository.getAverageOpenCaseAgeHours(tenantId),
+      this.dashboardsRepository.countActiveDetectionRules(tenantId),
+      this.dashboardsRepository.findTopDetectionRules(
+        tenantId,
+        DASHBOARD_TOP_DETECTION_RULES_LIMIT
+      ),
+      this.dashboardsRepository.findTopNoisyDetectionRules(
+        tenantId,
+        DASHBOARD_TOP_DETECTION_RULES_LIMIT
+      ),
+      this.dashboardsRepository.groupConnectorSyncJobsByStatusSince(tenantId, sevenDaysAgo),
+      this.dashboardsRepository.getTopFailingConnectorTypes(
+        tenantId,
+        sevenDaysAgo,
+        DASHBOARD_TOP_FAILING_CONNECTORS_LIMIT
+      ),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.PENDING),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.RETRYING),
+      this.dashboardsRepository.countJobsByStatus(tenantId, JobStatus.FAILED),
+      this.dashboardsRepository.countStaleRunningJobs(tenantId, staleRunningThreshold),
+      this.dashboardsRepository.countJobsByTypeAndStatuses(tenantId, JobType.CONNECTOR_SYNC, [
+        ...QUEUED_JOB_STATUSES,
+      ]),
+      this.dashboardsRepository.countJobsByTypeAndStatuses(tenantId, JobType.REPORT_GENERATION, [
+        ...QUEUED_JOB_STATUSES,
+      ]),
+      this.dashboardsRepository.groupAiAgentSessionsByStatusSince(tenantId, sevenDaysAgo),
+      this.dashboardsRepository.getAverageAiSessionDurationMsSince(tenantId, sevenDaysAgo),
+      this.dashboardsRepository.groupSoarExecutionsByStatusSince(tenantId, thirtyDaysAgo),
+      this.dashboardsRepository.getAverageSoarCompletionRateSince(tenantId, thirtyDaysAgo),
+      this.dashboardsRepository.countVulnerabilitiesBySeverity(
+        tenantId,
+        VulnerabilitySeverity.CRITICAL
+      ),
+      this.dashboardsRepository.countExploitAvailableVulnerabilities(tenantId),
+      this.dashboardsRepository.countCloudFindingsByStatus(tenantId, CloudFindingStatus.OPEN),
+      this.dashboardsRepository.countCloudFindingsBySeverity(
+        tenantId,
+        CloudFindingSeverity.CRITICAL
+      ),
+      this.dashboardsRepository.countComplianceControlsByStatus(
+        tenantId,
+        ComplianceControlStatus.PASSED
+      ),
+      this.dashboardsRepository.countComplianceControlsByStatus(
+        tenantId,
+        ComplianceControlStatus.FAILED
+      ),
+    ])
+
+    const incidentStatus = incidentStatusRows.map(row => ({
+      status: row.status,
+      count: row._count,
+    }))
+    const connectorSyncStatusCounts = buildConnectorSyncStatusCounts(connectorSyncStatusRows)
+    const aiSessionStatusCounts = buildAiSessionStatusCounts(aiSessionStatusRows)
+    const soarStatusCounts = buildSoarStatusCounts(soarStatusRows)
+
+    return buildOperationsOverview({
+      tenantId,
+      incidentStatus,
+      caseAging: {
+        openCases,
+        unassignedCases,
+        agedOverSevenDays,
+        agedOverFourteenDays,
+        meanOpenAgeHours: Math.round(averageOpenCaseAge[0]?.avg_hours ?? 0),
+      },
+      rulePerformance: buildRulePerformanceSummary({
+        activeRules,
+        topRules,
+        noisyRules,
+      }),
+      connectorSync: buildConnectorSyncSummary({
+        statusCounts: connectorSyncStatusCounts,
+        topFailingConnectors,
+      }),
+      runtimeBacklog: {
+        pendingJobs,
+        retryingJobs,
+        failedJobs,
+        staleRunningJobs,
+        queuedConnectorSyncJobs,
+        queuedReportJobs,
+      },
+      automationQuality: buildAutomationQuality({
+        aiStatusCounts: aiSessionStatusCounts,
+        averageAiDurationSeconds: Math.round((averageAiDuration[0]?.avg_ms ?? 0) / 100) / 10,
+        soarStatusCounts,
+        averageSoarCompletionRate:
+          Math.round((averageSoarCompletionRate[0]?.avg_percentage ?? 0) * 10) / 10,
+      }),
+      exposureSummary: {
+        criticalVulnerabilities,
+        exploitAvailableVulnerabilities,
+        openCloudFindings,
+        criticalCloudFindings,
+        passedControls,
+        failedControls,
+      },
+    })
   }
 }

@@ -1,4 +1,4 @@
-import type { ConnectorHttpOptions } from '../../common/utils/connector-http.types'
+import type { AxiosRequestOptions } from '../../common/modules/axios'
 
 export interface ConnectorResponse {
   type: string
@@ -50,5 +50,66 @@ export interface WazuhTokenCache {
 
 export interface VelociraptorAuthOptions {
   headers: Record<string, string>
-  httpOptions: Partial<ConnectorHttpOptions>
+  httpOptions: Partial<AxiosRequestOptions>
+}
+
+/* ---------------------------------------------------------------- */
+/* LLM APIs (OpenAI-compatible)                                      */
+/* ---------------------------------------------------------------- */
+
+export interface ChatCompletionMessage {
+  role: string
+  content: string
+}
+
+export interface ChatCompletionChoice {
+  index: number
+  message: ChatCompletionMessage
+  finish_reason: string
+}
+
+export interface ChatCompletionUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface ChatCompletionResponse {
+  id: string
+  object: string
+  choices: ChatCompletionChoice[]
+  usage: ChatCompletionUsage
+}
+
+export interface ModelEntry {
+  id: string
+  object: string
+}
+
+export interface ModelsListResponse {
+  data: ModelEntry[]
+  object: string
+}
+
+/* ---------------------------------------------------------------- */
+/* OpenClaw Gateway                                                  */
+/* ---------------------------------------------------------------- */
+
+export interface OpenClawTaskResult {
+  text: string
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+  }
+}
+
+export interface OpenClawTaskResponse {
+  taskId: string
+  status: string
+  result?: OpenClawTaskResult
+}
+
+export interface OpenClawHealthResponse {
+  status: string
+  version?: string
 }

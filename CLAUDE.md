@@ -778,6 +778,8 @@ Subject max length: 100 characters. No sentence-case, start-case, PascalCase, or
 ### Database Indexes
 
 26. **Every FK field and every field used in `where` filters must have an `@@index`** — Especially `tenantId` on high-traffic tables. `@unique` fields already have implicit indexes.
+27. **Dashboard analytics MUST stay query-driven and reusable** — Extend shared dashboard contracts and module utilities before adding endpoint-specific shaping in controllers or services.
+28. **Operational metrics changes MUST ship with tests and docs** — New dashboards, reports, session controls, or role-aware admin flows must include validation coverage plus README/INSTALL/docs updates when contributor workflows or product behavior change.
 
 ---
 

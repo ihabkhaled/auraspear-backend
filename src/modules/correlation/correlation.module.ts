@@ -9,6 +9,6 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
   imports: [AppLogsModule],
   controllers: [CorrelationController],
   providers: [CorrelationRepository, CorrelationService, CorrelationExecutor],
-  exports: [CorrelationService, CorrelationExecutor],
+  exports: [CorrelationRepository, CorrelationService, CorrelationExecutor],
 })
 export class CorrelationModule {}

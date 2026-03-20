@@ -50,6 +50,13 @@ describe('Default Permissions', () => {
       expect(tenantAdminPerms.has(Permission.ROLE_SETTINGS_UPDATE)).toBe(true)
     })
 
+    it('should have all users control permissions', () => {
+      expect(tenantAdminPerms.has(Permission.USERS_CONTROL_VIEW)).toBe(true)
+      expect(tenantAdminPerms.has(Permission.USERS_CONTROL_VIEW_SESSIONS)).toBe(true)
+      expect(tenantAdminPerms.has(Permission.USERS_CONTROL_FORCE_LOGOUT)).toBe(true)
+      expect(tenantAdminPerms.has(Permission.USERS_CONTROL_FORCE_LOGOUT_ALL)).toBe(true)
+    })
+
     it('should have DASHBOARD_VIEW', () => {
       expect(tenantAdminPerms.has(Permission.DASHBOARD_VIEW)).toBe(true)
     })

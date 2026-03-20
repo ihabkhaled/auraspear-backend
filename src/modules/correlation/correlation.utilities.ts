@@ -1,5 +1,5 @@
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { CorrelationStats } from './correlation.types'
+import type { CorrelationRuleInput, CorrelationStats } from './correlation.types'
 import type { UpdateRuleDto } from './dto/update-rule.dto'
 import type { Prisma } from '@prisma/client'
 
@@ -87,6 +87,50 @@ export function buildRuleUpdateData(dto: UpdateRuleDto): Record<string, unknown>
   if (dto.mitreTechniques !== undefined) data['mitreTechniques'] = dto.mitreTechniques
 
   return data
+}
+
+/* ---------------------------------------------------------------- */
+/* RULE INPUT EXTRACTION                                             */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts a CorrelationRuleInput from a RuleRecord for executor evaluation.
+ * Reads eventTypes, threshold, timeWindowMinutes, and groupBy from the
+ * rule's conditions JSON or provides sensible defaults.
+ */
+export function extractCorrelationRuleInput(rule: {
+  id: string
+  title: string
+  conditions: unknown
+}): CorrelationRuleInput {
+  const conditions =
+    typeof rule.conditions === 'object' && rule.conditions !== null
+      ? (rule.conditions as Record<string, unknown>)
+      : {}
+
+  const rawEventTypes = Reflect.get(conditions, 'eventTypes')
+  const eventTypes = Array.isArray(rawEventTypes)
+    ? rawEventTypes.filter((t): t is string => typeof t === 'string')
+    : []
+
+  const rawThreshold = Reflect.get(conditions, 'threshold')
+  const threshold = typeof rawThreshold === 'number' && rawThreshold > 0 ? rawThreshold : 1
+
+  const rawTimeWindow = Reflect.get(conditions, 'timeWindowMinutes')
+  const timeWindowMinutes =
+    typeof rawTimeWindow === 'number' && rawTimeWindow > 0 ? rawTimeWindow : 60
+
+  const rawGroupBy = Reflect.get(conditions, 'groupBy')
+  const groupBy = typeof rawGroupBy === 'string' ? rawGroupBy : undefined
+
+  return {
+    id: rule.id,
+    name: rule.title,
+    eventTypes,
+    threshold,
+    timeWindowMinutes,
+    groupBy,
+  }
 }
 
 /* ---------------------------------------------------------------- */

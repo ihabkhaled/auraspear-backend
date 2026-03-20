@@ -35,9 +35,7 @@ Thank you for your interest in contributing to AuraSpear SOC.
 2. Make your changes following the code standards above
 3. Run the full validation pipeline before pushing:
    ```bash
-   npm run validate    # typecheck + lint:strict + format:check
-   npm run test        # run tests
-   npm run build       # ensure production build succeeds
+   npm run validate:full
    ```
 4. Push your branch and open a pull request against `main`
 5. Fill in the PR template with a summary and test plan
@@ -69,6 +67,14 @@ Run tests with: `npm test`
 - Every `BusinessException` must use a `messageKey` following the `errors.<module>.<key>` pattern
 - The corresponding translation key must exist in **all 6 frontend locale files**
 - When adding a new backend error, coordinate with the frontend repo to add translations
+
+## Contributor Docs
+
+- [`docs/migrations-and-seeds.md`](./docs/migrations-and-seeds.md)
+- [`docs/permissions-and-roles.md`](./docs/permissions-and-roles.md)
+- [`docs/adding-connectors.md`](./docs/adding-connectors.md)
+- [`docs/ai-agent-safety.md`](./docs/ai-agent-safety.md)
+- [`INSTALL.md`](./INSTALL.md)
 
 ## Commit Messages
 

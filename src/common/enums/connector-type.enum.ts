@@ -8,4 +8,6 @@ export enum ConnectorType {
   MISP = 'misp',
   SHUFFLE = 'shuffle',
   BEDROCK = 'bedrock',
+  LLM_APIS = 'llm_apis',
+  OPENCLAW_GATEWAY = 'openclaw_gateway',
 }

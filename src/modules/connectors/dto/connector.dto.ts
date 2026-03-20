@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LlmMaxTokensParameter } from '../connectors.enums'
 
 // --- Config normalization helpers ---
 // These ensure backward compatibility with existing encrypted configs that may
@@ -189,6 +190,28 @@ export const BedrockConfigSchema = z
   })
   .passthrough()
 
+export const LlmApisConfigSchema = z
+  .object({
+    baseUrl: z.string().max(500),
+    apiKey: z.string().max(500),
+    defaultModel: z.string().max(255).optional(),
+    organizationId: z.string().max(255).optional(),
+    timeout: z.number().int().positive().optional(),
+    maxTokensParameter: z
+      .nativeEnum(LlmMaxTokensParameter)
+      .optional()
+      .default(LlmMaxTokensParameter.MAX_TOKENS),
+  })
+  .passthrough()
+
+export const OpenClawGatewayConfigSchema = z
+  .object({
+    baseUrl: z.string().max(500),
+    apiKey: z.string().max(500),
+    timeout: z.number().int().positive().optional(),
+  })
+  .passthrough()
+
 const connectorConfigSchemas = new Map<string, z.ZodType<Record<string, unknown>>>([
   ['wazuh', WazuhConfigSchema],
   ['graylog', GraylogConfigSchema],
@@ -199,6 +222,8 @@ const connectorConfigSchemas = new Map<string, z.ZodType<Record<string, unknown>
   ['misp', MispConfigSchema],
   ['shuffle', ShuffleConfigSchema],
   ['bedrock', BedrockConfigSchema],
+  ['llm_apis', LlmApisConfigSchema],
+  ['openclaw_gateway', OpenClawGatewayConfigSchema],
 ])
 
 /**
@@ -232,6 +257,8 @@ export const ConnectorTypeEnum = z.enum([
   'misp',
   'shuffle',
   'bedrock',
+  'llm_apis',
+  'openclaw_gateway',
 ])
 
 export const CreateConnectorSchema = z.object({

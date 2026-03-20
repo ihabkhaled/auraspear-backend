@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CreateAiAuditLogData } from './ai.types'
-import type { Alert, ConnectorConfig, Prisma } from '@prisma/client'
+import type { Alert, ConnectorConfig, ConnectorType, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AiRepository {
@@ -15,6 +15,19 @@ export class AiRepository {
       where: {
         tenantId,
         type: type as Prisma.EnumConnectorTypeFilter,
+        enabled: true,
+      },
+    })
+  }
+
+  async findEnabledConnectorByTypes(
+    tenantId: string,
+    types: ConnectorType[]
+  ): Promise<ConnectorConfig[]> {
+    return this.prisma.connectorConfig.findMany({
+      where: {
+        tenantId,
+        type: { in: types },
         enabled: true,
       },
     })

@@ -118,6 +118,8 @@ export function buildRuleOrderBy(
       return { hitCount: order }
     case 'falsePositiveCount':
       return { falsePositiveCount: order }
+    case 'lastTriggeredAt':
+      return { lastTriggeredAt: order }
     case 'updatedAt':
       return { updatedAt: order }
     case 'createdAt':
@@ -244,7 +246,7 @@ function findEmbeddedRuleSource(
   keys: readonly string[]
 ): unknown {
   for (const key of keys) {
-    const source = conditions[key]
+    const source = Reflect.get(conditions, key)
     if (source !== undefined) {
       return source
     }
@@ -255,8 +257,11 @@ function findEmbeddedRuleSource(
 
 function parseSigmaRuleDefinition(source: unknown): ParsedSigmaRule {
   const ruleObject = parseStructuredRuleSource(source, DetectionExecutionEngine.SIGMA)
-  const detection = asRecord(ruleObject[SIGMA_DETECTION_KEY], 'Sigma detection block is required')
-  const rawCondition = detection[SIGMA_CONDITION_KEY]
+  const detection = asRecord(
+    Reflect.get(ruleObject, SIGMA_DETECTION_KEY),
+    'Sigma detection block is required'
+  )
+  const rawCondition = Reflect.get(detection, SIGMA_CONDITION_KEY)
 
   if (typeof rawCondition !== 'string' || rawCondition.trim().length === 0) {
     throw new Error('Sigma detection.condition must be a non-empty string')
@@ -268,7 +273,7 @@ function parseSigmaRuleDefinition(source: unknown): ParsedSigmaRule {
       continue
     }
 
-    selectorGroups[key] = parseSigmaSelectorGroups(key, value)
+    Reflect.set(selectorGroups, key, parseSigmaSelectorGroups(key, value))
   }
 
   const selectorNames = Object.keys(selectorGroups)
@@ -288,7 +293,7 @@ function parseYaraLRuleDefinition(source: unknown): ParsedYaraLRule {
 
   return {
     title: toNonEmptyString(ruleObject['title']) ?? 'YARA-L Rule',
-    match: parseYaraLNode(ruleObject[YARAL_MATCH_KEY]),
+    match: parseYaraLNode(Reflect.get(ruleObject, YARAL_MATCH_KEY)),
   }
 }
 
@@ -382,7 +387,7 @@ function parseSigmaCondition(conditionText: string, selectorNames: string[]): Si
   function parseOrExpression(): SigmaConditionNode {
     let node = parseAndExpression()
 
-    while (normalizeConditionToken(tokens[tokenIndex]) === SigmaConditionOperator.OR) {
+    while (normalizeConditionToken(tokens.at(tokenIndex)) === SigmaConditionOperator.OR) {
       tokenIndex += 1
       node = {
         operator: SigmaConditionOperator.OR,
@@ -397,7 +402,7 @@ function parseSigmaCondition(conditionText: string, selectorNames: string[]): Si
   function parseAndExpression(): SigmaConditionNode {
     let node = parseNotExpression()
 
-    while (normalizeConditionToken(tokens[tokenIndex]) === SigmaConditionOperator.AND) {
+    while (normalizeConditionToken(tokens.at(tokenIndex)) === SigmaConditionOperator.AND) {
       tokenIndex += 1
       node = {
         operator: SigmaConditionOperator.AND,
@@ -410,7 +415,7 @@ function parseSigmaCondition(conditionText: string, selectorNames: string[]): Si
   }
 
   function parseNotExpression(): SigmaConditionNode {
-    if (normalizeConditionToken(tokens[tokenIndex]) === SigmaConditionOperator.NOT) {
+    if (normalizeConditionToken(tokens.at(tokenIndex)) === SigmaConditionOperator.NOT) {
       tokenIndex += 1
       return {
         operator: SigmaConditionOperator.NOT,
@@ -422,12 +427,12 @@ function parseSigmaCondition(conditionText: string, selectorNames: string[]): Si
   }
 
   function parsePrimaryExpression(): SigmaConditionNode {
-    const currentToken = tokens[tokenIndex]
+    const currentToken = tokens.at(tokenIndex)
 
     if (currentToken === '(') {
       tokenIndex += 1
       const expression = parseExpression()
-      const nextToken = tokens[tokenIndex]
+      const nextToken = tokens.at(tokenIndex)
 
       if (nextToken !== ')') {
         throw new Error('Sigma condition contains an unclosed parenthesis')
@@ -450,7 +455,7 @@ function parseSigmaCondition(conditionText: string, selectorNames: string[]): Si
 
   const condition = parseExpression()
   if (tokenIndex < tokens.length) {
-    throw new Error(`Unexpected Sigma condition token "${tokens[tokenIndex] ?? ''}"`)
+    throw new Error(`Unexpected Sigma condition token "${tokens.at(tokenIndex) ?? ''}"`)
   }
 
   return condition
@@ -522,7 +527,7 @@ function parseYaraLClause(rawClause: Record<string, unknown>): YaraLClause {
       return {
         fieldPath,
         comparator,
-        value: rawClause[comparator],
+        value: Reflect.get(rawClause, comparator),
       }
     }
   }
@@ -558,7 +563,7 @@ function parseYaraLComparator(rawComparator: string): YaraLComparator {
 function normalizeFieldMatchConditions(
   conditions: Record<string, unknown>
 ): Record<string, unknown> {
-  const fields = conditions['fields']
+  const { fields } = conditions
 
   if (isRecord(fields)) {
     return fields
@@ -914,7 +919,7 @@ function getValueByPath(source: Record<string, unknown>, fieldPath: string): unk
       return undefined
     }
 
-    currentValue = currentValue[segment]
+    currentValue = Reflect.get(currentValue, segment)
   }
 
   return currentValue

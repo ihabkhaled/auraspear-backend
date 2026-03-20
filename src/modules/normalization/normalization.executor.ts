@@ -1,34 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
-
-export interface NormalizationStep {
-  type: 'rename' | 'map' | 'extract' | 'drop' | 'default'
-  sourceField: string
-  targetField?: string
-  mapping?: Record<string, string>
-  pattern?: string
-  defaultValue?: unknown
-}
-
-export interface NormalizationResult {
-  pipelineId: string
-  status: 'success' | 'partial' | 'error'
-  inputCount: number
-  outputCount: number
-  droppedCount: number
-  durationMs: number
-  errors: string[]
-}
-
-interface NormalizationPipelineInput {
-  id: string
-  name: string
-  steps: NormalizationStep[]
-}
-
-export interface NormalizationOutput {
-  result: NormalizationResult
-  normalizedEvents: Record<string, unknown>[]
-}
+import type {
+  NormalizationOutput,
+  NormalizationPipelineInput,
+  NormalizationStep,
+} from './normalization.types'
 
 @Injectable()
 export class NormalizationExecutor {
@@ -120,11 +95,15 @@ export class NormalizationExecutor {
     result: Record<string, unknown>,
     step: NormalizationStep
   ): Record<string, unknown> {
-    if (step.targetField && result[step.sourceField] !== undefined) {
-      result[step.targetField] = result[step.sourceField]
-      const { [step.sourceField]: _, ...rest } = result
-      return rest as Record<string, unknown>
+    const sourceValue = Reflect.get(result, step.sourceField)
+
+    if (step.targetField && sourceValue !== undefined) {
+      Reflect.set(result, step.targetField, sourceValue)
+      return Object.fromEntries(
+        Object.entries(result).filter(([key]) => key !== step.sourceField)
+      ) as Record<string, unknown>
     }
+
     return result
   }
 
@@ -132,13 +111,15 @@ export class NormalizationExecutor {
     result: Record<string, unknown>,
     step: NormalizationStep
   ): Record<string, unknown> {
-    if (step.mapping && typeof result[step.sourceField] === 'string' && step.targetField) {
-      const sourceValue = result[step.sourceField] as string
-      const mappedValue = step.mapping[sourceValue]
+    const sourceValue = Reflect.get(result, step.sourceField)
+
+    if (step.mapping && typeof sourceValue === 'string' && step.targetField) {
+      const mappedValue = Reflect.get(step.mapping, sourceValue)
       if (mappedValue !== undefined) {
-        result[step.targetField] = mappedValue
+        Reflect.set(result, step.targetField, mappedValue)
       }
     }
+
     return result
   }
 
@@ -146,21 +127,26 @@ export class NormalizationExecutor {
     result: Record<string, unknown>,
     step: NormalizationStep
   ): Record<string, unknown> {
-    if (step.pattern && typeof result[step.sourceField] === 'string' && step.targetField) {
+    const sourceValue = Reflect.get(result, step.sourceField)
+
+    if (step.pattern && typeof sourceValue === 'string' && step.targetField) {
       if (step.pattern.length > 1000) {
         throw new Error('Regex pattern exceeds maximum allowed length of 1000 characters')
       }
+
       let regex: RegExp
       try {
         regex = new RegExp(step.pattern)
       } catch {
         throw new Error(`Invalid regex pattern: ${step.pattern}`)
       }
-      const match = regex.exec(result[step.sourceField] as string)
+
+      const match = regex.exec(sourceValue)
       if (match?.[1]) {
-        result[step.targetField] = match[1]
+        Reflect.set(result, step.targetField, match[1])
       }
     }
+
     return result
   }
 
@@ -168,9 +154,10 @@ export class NormalizationExecutor {
     result: Record<string, unknown>,
     step: NormalizationStep
   ): Record<string, unknown> | null {
-    if (result[step.sourceField] !== undefined) {
+    if (Reflect.get(result, step.sourceField) !== undefined) {
       return null // Drop the entire event
     }
+
     return result
   }
 
@@ -178,10 +165,11 @@ export class NormalizationExecutor {
     result: Record<string, unknown>,
     step: NormalizationStep
   ): Record<string, unknown> {
-    if (result[step.sourceField] === undefined) {
+    if (Reflect.get(result, step.sourceField) === undefined) {
       const targetKey = step.targetField ?? step.sourceField
-      result[targetKey] = step.defaultValue
+      Reflect.set(result, targetKey, step.defaultValue)
     }
+
     return result
   }
 }

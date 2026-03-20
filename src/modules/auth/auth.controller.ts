@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Req, Res, UsePipes } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { clearAuthCookies, issueCsrfToken, setAuthCookies } from './auth-cookie.utility'
+import { buildAuthSessionContext } from './auth-session.utilities'
 import { AuthService } from './auth.service'
 import { AuthLoginSchema, type AuthLoginDto } from './dto/auth-login.dto'
 import { AuthLogoutSchema, type AuthLogoutDto } from './dto/auth-logout.dto'
@@ -29,6 +30,7 @@ export class AuthController {
   @UsePipes(new ZodValidationPipe(AuthLoginSchema))
   async login(
     @Body() dto: AuthLoginDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response
   ): Promise<{
     accessToken: string
@@ -37,7 +39,11 @@ export class AuthController {
     permissions: string[]
     tenants: Array<{ id: string; name: string; slug: string; role: string }>
   }> {
-    const session = await this.authService.login(dto.email, dto.password)
+    const session = await this.authService.login(
+      dto.email,
+      dto.password,
+      buildAuthSessionContext(request)
+    )
     setAuthCookies(response, session.accessToken, session.refreshToken)
     const csrfToken = issueCsrfToken(response)
 
@@ -68,6 +74,7 @@ export class AuthController {
   }
 
   @Public()
+  @SkipCsrf()
   @Post('refresh')
   @Throttle({ default: { limit: 8, ttl: 60_000 } })
   @UsePipes(new ZodValidationPipe(AuthRefreshSchema))
@@ -78,7 +85,11 @@ export class AuthController {
   ): Promise<{ accessToken: string; csrfToken: string }> {
     const refreshToken = this.extractRefreshToken(request, dto.refreshToken)
     const requestedTenantId = this.getSingleHeaderValue(request.headers['x-tenant-id'])
-    const session = await this.authService.refreshTokens(refreshToken, requestedTenantId)
+    const session = await this.authService.refreshTokens(
+      refreshToken,
+      requestedTenantId,
+      buildAuthSessionContext(request)
+    )
     setAuthCookies(response, session.accessToken, session.refreshToken)
     const csrfToken = issueCsrfToken(response)
 
@@ -93,9 +104,10 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async endImpersonation(
     @CurrentUser() user: JwtPayload,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response
   ): Promise<{ accessToken: string; csrfToken: string; user: JwtPayload }> {
-    const session = await this.authService.endImpersonation(user)
+    const session = await this.authService.endImpersonation(user, buildAuthSessionContext(request))
     setAuthCookies(response, session.accessToken, session.refreshToken)
     const csrfToken = issueCsrfToken(response)
 
@@ -146,7 +158,8 @@ export class AuthController {
       refreshPayload.jti,
       accessUser.exp,
       refreshPayload.exp,
-      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined
+      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined,
+      accessUser.sub
     )
     clearAuthCookies(response)
 

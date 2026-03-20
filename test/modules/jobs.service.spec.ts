@@ -18,16 +18,27 @@ function createMockRepository() {
   }
 }
 
+function createMockAppLogger() {
+  return {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  }
+}
+
 describe('JobService', () => {
   const TENANT_ID = 'tenant-001'
   const JOB_ID = 'job-001'
 
   let repository: ReturnType<typeof createMockRepository>
+  let appLogger: ReturnType<typeof createMockAppLogger>
   let service: JobService
 
   beforeEach(() => {
     repository = createMockRepository()
-    service = new JobService(repository as never)
+    appLogger = createMockAppLogger()
+    service = new JobService(repository as never, appLogger as never)
     jest.clearAllMocks()
   })
 

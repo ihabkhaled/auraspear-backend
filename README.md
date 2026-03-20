@@ -1,6 +1,7 @@
 # AuraSpear SOC Backend
 
 A multi-tenant **Security Information and Event Management (SIEM) Backend-for-Frontend** API built with NestJS 11. Powers the AuraSpear SOC dashboard with alert management, case tracking, threat hunting, threat intelligence, connector integrations, and AI-assisted analysis — all scoped to isolated tenants.
+Operational dashboard contracts in this repo stay query-driven and reusable so the frontend can build executive and operator views from real backend aggregates rather than page-local placeholder math.
 
 ---
 
@@ -436,6 +437,7 @@ npm start                  # Migrations + seed + production server
 
 # Validation (run before committing)
 npm run validate           # typecheck + lint:strict + format:check
+npm run validate:full      # validate + tests + production build
 npm run validate:fix       # lint:fix + format
 
 # Database
@@ -448,6 +450,15 @@ npm test                   # Unit tests
 npm run test:cov           # With coverage
 npm run test:e2e           # End-to-end tests
 ```
+
+## Contributor Guides
+
+- Migrations and seeds: [`docs/migrations-and-seeds.md`](./docs/migrations-and-seeds.md)
+- Permissions and roles: [`docs/permissions-and-roles.md`](./docs/permissions-and-roles.md)
+- Adding connectors: [`docs/adding-connectors.md`](./docs/adding-connectors.md)
+- AI agent safety: [`docs/ai-agent-safety.md`](./docs/ai-agent-safety.md)
+- Contribution workflow: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- Install and local environment: [`INSTALL.md`](./INSTALL.md)
 
 ---
 

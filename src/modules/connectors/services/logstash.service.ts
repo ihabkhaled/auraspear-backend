@@ -1,14 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class LogstashService {
   private readonly logger = new Logger(LogstashService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test Logstash connection via the Monitoring API.
@@ -27,17 +31,30 @@ export class LogstashService {
       const username = config.username as string | undefined
       const password = config.password as string | undefined
       if (username && password) {
-        headers.Authorization = basicAuth(username, password)
+        headers.Authorization = this.httpClient.basicAuth(username, password)
       }
 
-      const res = await connectorFetch(`${baseUrl}/`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `Logstash returned status ${res.status}` }
+        const remoteError = formatRemoteError('Logstash', res.status, res.data)
+        this.appLogger.warn('Logstash connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'LogstashService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: 'logstash',
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const body = res.data as Record<string, unknown>
@@ -69,7 +86,7 @@ export class LogstashService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'LogstashService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'logstash' },
+        metadata: { connectorType: 'logstash', error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -89,25 +106,26 @@ export class LogstashService {
     const username = config.username as string | undefined
     const password = config.password as string | undefined
     if (username && password) {
-      headers.Authorization = basicAuth(username, password)
+      headers.Authorization = this.httpClient.basicAuth(username, password)
     }
 
-    const res = await connectorFetch(`${baseUrl}/_node/pipelines`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/_node/pipelines`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Logstash pipelines request failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getPipelines',
         className: 'LogstashService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Logstash pipelines request failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Logstash', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -138,25 +156,26 @@ export class LogstashService {
     const username = config.username as string | undefined
     const password = config.password as string | undefined
     if (username && password) {
-      headers.Authorization = basicAuth(username, password)
+      headers.Authorization = this.httpClient.basicAuth(username, password)
     }
 
-    const res = await connectorFetch(`${baseUrl}/_node/stats/pipelines`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/_node/stats/pipelines`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Logstash pipeline stats request failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getPipelineStats',
         className: 'LogstashService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Logstash pipeline stats request failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Logstash', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -185,25 +204,26 @@ export class LogstashService {
     const username = config.username as string | undefined
     const password = config.password as string | undefined
     if (username && password) {
-      headers.Authorization = basicAuth(username, password)
+      headers.Authorization = this.httpClient.basicAuth(username, password)
     }
 
-    const res = await connectorFetch(`${baseUrl}/_node/hot_threads?human=true`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/_node/hot_threads?human=true`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Logstash hot threads request failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getHotThreads',
         className: 'LogstashService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Logstash hot threads request failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Logstash', res.status, res.data))
     }
 
     this.appLogger.info('Logstash hot threads retrieved', {

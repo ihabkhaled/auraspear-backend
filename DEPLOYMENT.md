@@ -95,8 +95,7 @@ CONFIG_ENCRYPTION_KEY=      # paste 64 hex chars
 # Seed admin account (required)
 SEED_DEFAULT_PASSWORD=      # 12+ character password
 
-# AI (optional)
-BEDROCK_MOCK=true
+# AI (optional — configure a Bedrock, LLM APIs, or OpenClaw Gateway connector)
 ```
 
 ## Step 5 — Start

@@ -1,10 +1,10 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { WazuhService } from '../../src/modules/connectors/services/wazuh.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -14,7 +14,7 @@ const mockAppLogger = {
 }
 
 function createService(): WazuhService {
-  return new WazuhService(mockAppLogger as never)
+  return new WazuhService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
 function buildConnectorResponse(overrides: {
@@ -47,7 +47,7 @@ describe('WazuhService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     service = createService()
-    mockedBasicAuth.mockReturnValue('Basic bW9jay1hdXRo')
+    mockAxiosService.basicAuth.mockReturnValue('Basic bW9jay1hdXRo')
   })
 
   /* ------------------------------------------------------------------ */
@@ -57,13 +57,13 @@ describe('WazuhService', () => {
   describe('testConnection', () => {
     it('should return ok: true when authentication and manager info succeed', async () => {
       // First call: authenticate
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { data: { token: 'jwt-token-123' } },
         })
       )
       // Second call: manager info
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { data: { api_version: '4.9.0' } },
         })
@@ -80,17 +80,17 @@ describe('WazuhService', () => {
     it('should use baseUrl when managerUrl is not provided', async () => {
       const config = { ...VALID_CONFIG, managerUrl: undefined, baseUrl: 'https://fallback.local' }
 
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { api_version: '4.8.0' } } })
       )
 
       const result = await service.testConnection(config)
 
       expect(result.ok).toBe(true)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://fallback.local/security/user/authenticate',
         expect.objectContaining({ method: 'POST' })
       )
@@ -103,7 +103,7 @@ describe('WazuhService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Wazuh Manager URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when username is missing', async () => {
@@ -125,10 +125,10 @@ describe('WazuhService', () => {
     })
 
     it('should return ok: false when manager info returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 403, data: { error: 'forbidden' } })
       )
 
@@ -138,8 +138,8 @@ describe('WazuhService', () => {
       expect(result.details).toContain('403')
     })
 
-    it('should return ok: false when connectorFetch throws', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('Connection refused'))
+    it('should return ok: false when fetch throws', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('Connection refused'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -149,7 +149,7 @@ describe('WazuhService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce('string-error')
+      mockAxiosService.fetch.mockRejectedValueOnce('string-error')
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -158,10 +158,10 @@ describe('WazuhService', () => {
     })
 
     it('should use version from top-level data when nested data is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { version: '4.7.0' } })
       )
 
@@ -178,14 +178,14 @@ describe('WazuhService', () => {
 
   describe('authenticate', () => {
     it('should return a JWT token on successful authentication', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token-abc' } } })
       )
 
       const token = await service.authenticate('https://wazuh.local:55000', 'admin', 'secret')
 
       expect(token).toBe('jwt-token-abc')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://wazuh.local:55000/security/user/authenticate',
         expect.objectContaining({
           method: 'POST',
@@ -196,7 +196,7 @@ describe('WazuhService', () => {
     })
 
     it('should extract token from top-level body when data.token is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { token: 'top-level-token' } })
       )
 
@@ -206,19 +206,19 @@ describe('WazuhService', () => {
     })
 
     it('should throw when authentication returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 401, data: { error: 'unauthorized' } })
       )
 
       await expect(
         service.authenticate('https://wazuh.local:55000', 'admin', 'wrong')
-      ).rejects.toThrow('Wazuh authentication failed with status 401')
+      ).rejects.toThrow('Wazuh Manager returned status 401')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should throw when response contains no token', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: { data: {} } }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: { data: {} } }))
 
       await expect(
         service.authenticate('https://wazuh.local:55000', 'admin', 'secret')
@@ -228,7 +228,7 @@ describe('WazuhService', () => {
     })
 
     it('should cache the token and reuse it on subsequent calls', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'cached-token' } } })
       )
 
@@ -237,15 +237,15 @@ describe('WazuhService', () => {
 
       expect(token1).toBe('cached-token')
       expect(token2).toBe('cached-token')
-      // connectorFetch should only have been called once due to caching
-      expect(mockedConnectorFetch).toHaveBeenCalledTimes(1)
+      // fetch should only have been called once due to caching
+      expect(mockAxiosService.fetch).toHaveBeenCalledTimes(1)
     })
 
     it('should use different cache keys for different manager URLs', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'token-a' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'token-b' } } })
       )
 
@@ -254,14 +254,14 @@ describe('WazuhService', () => {
 
       expect(tokenA).toBe('token-a')
       expect(tokenB).toBe('token-b')
-      expect(mockedConnectorFetch).toHaveBeenCalledTimes(2)
+      expect(mockAxiosService.fetch).toHaveBeenCalledTimes(2)
     })
 
     it('should use different cache keys for different usernames', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'token-user1' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'token-user2' } } })
       )
 
@@ -270,11 +270,11 @@ describe('WazuhService', () => {
 
       expect(token1).toBe('token-user1')
       expect(token2).toBe('token-user2')
-      expect(mockedConnectorFetch).toHaveBeenCalledTimes(2)
+      expect(mockAxiosService.fetch).toHaveBeenCalledTimes(2)
     })
 
     it('should pass verifyTls config to rejectUnauthorized', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'tok' } } })
       )
 
@@ -282,7 +282,7 @@ describe('WazuhService', () => {
         verifyTls: false,
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ rejectUnauthorized: false })
       )
@@ -296,7 +296,7 @@ describe('WazuhService', () => {
   describe('getAgents', () => {
     it('should return agent list on success', async () => {
       // authenticate call
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
       // getAgents call
@@ -304,7 +304,7 @@ describe('WazuhService', () => {
         { id: '001', name: 'agent-1', status: 'active' },
         { id: '002', name: 'agent-2', status: 'active' },
       ]
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { affected_items: agents } } })
       )
 
@@ -312,7 +312,7 @@ describe('WazuhService', () => {
 
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual({ id: '001', name: 'agent-1', status: 'active' })
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/agents?status=active&limit=500'),
         expect.objectContaining({
           headers: { Authorization: 'Bearer jwt-token' },
@@ -322,10 +322,10 @@ describe('WazuhService', () => {
     })
 
     it('should return empty array when no agents found', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: { data: {} } }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: { data: {} } }))
 
       const result = await service.getAgents(VALID_CONFIG)
 
@@ -333,24 +333,26 @@ describe('WazuhService', () => {
     })
 
     it('should throw when agents endpoint returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { data: { token: 'jwt-token' } } })
       )
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 500, data: { error: 'internal' } })
       )
 
       await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow(
-        'Failed to fetch agents: status 500'
+        'Wazuh Manager returned status 500: internal'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should propagate authentication errors', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ status: 401, data: {} }))
+      mockAxiosService.fetch.mockResolvedValueOnce(
+        buildConnectorResponse({ status: 401, data: {} })
+      )
 
       await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow(
-        'Wazuh authentication failed with status 401'
+        'Wazuh Manager returned status 401'
       )
     })
   })
@@ -367,7 +369,7 @@ describe('WazuhService', () => {
         { _id: '1', _source: { rule: { level: 12 } } },
         { _id: '2', _source: { rule: { level: 5 } } },
       ]
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -383,7 +385,7 @@ describe('WazuhService', () => {
       expect(result.total).toBe(42)
       expect(result.hits).toHaveLength(2)
       expect(result.hits[0]).toEqual(hitItems[0])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://wazuh-indexer.local:9200/wazuh-alerts-*/_search',
         expect.objectContaining({
           method: 'POST',
@@ -394,7 +396,7 @@ describe('WazuhService', () => {
     })
 
     it('should handle numeric total value', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: {
             hits: {
@@ -412,7 +414,7 @@ describe('WazuhService', () => {
     })
 
     it('should use custom index name', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -420,14 +422,14 @@ describe('WazuhService', () => {
 
       await service.searchAlerts(VALID_CONFIG, dslQuery, 'custom-index-*')
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://wazuh-indexer.local:9200/custom-index-*/_search',
         expect.objectContaining({ method: 'POST' })
       )
     })
 
     it('should use default index wazuh-alerts-* when not specified', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -435,7 +437,7 @@ describe('WazuhService', () => {
 
       await service.searchAlerts(VALID_CONFIG, dslQuery)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('wazuh-alerts-*/_search'),
         expect.objectContaining({})
       )
@@ -456,7 +458,7 @@ describe('WazuhService', () => {
         indexerUrl: undefined,
         opensearchUrl: 'https://opensearch.local:9200',
       }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -464,7 +466,7 @@ describe('WazuhService', () => {
 
       await service.searchAlerts(config, dslQuery)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://opensearch.local:9200/wazuh-alerts-*/_search',
         expect.objectContaining({})
       )
@@ -478,18 +480,18 @@ describe('WazuhService', () => {
     })
 
     it('should throw when search returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 400, data: { error: 'bad request' } })
       )
 
       await expect(service.searchAlerts(VALID_CONFIG, dslQuery)).rejects.toThrow(
-        'Wazuh Indexer search failed: status 400'
+        'Wazuh Indexer returned status 400: bad request'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should use indexerUsername/indexerPassword for basic auth', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -497,7 +499,7 @@ describe('WazuhService', () => {
 
       await service.searchAlerts(VALID_CONFIG, dslQuery)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('indexer-admin', 'indexer-secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('indexer-admin', 'indexer-secret')
     })
 
     it('should fall back to username/password when indexer credentials are absent', async () => {
@@ -506,7 +508,7 @@ describe('WazuhService', () => {
         indexerUsername: undefined,
         indexerPassword: undefined,
       }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 }, hits: [] } },
         })
@@ -514,11 +516,11 @@ describe('WazuhService', () => {
 
       await service.searchAlerts(config, dslQuery)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'secret')
     })
 
     it('should return empty hits array when hits.hits is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { hits: { total: { value: 0 } } },
         })
@@ -530,8 +532,8 @@ describe('WazuhService', () => {
       expect(result.total).toBe(0)
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('Network error'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('Network error'))
 
       await expect(service.searchAlerts(VALID_CONFIG, dslQuery)).rejects.toThrow('Network error')
     })

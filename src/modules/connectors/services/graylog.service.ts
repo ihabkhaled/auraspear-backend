@@ -6,15 +6,19 @@ import {
   ConnectorType,
   HttpMethod,
 } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class GraylogService {
   private readonly logger = new Logger(GraylogService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test Graylog connection.
@@ -33,9 +37,9 @@ export class GraylogService {
     }
 
     try {
-      const res = await connectorFetch(`${baseUrl}/api/system/cluster/nodes`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/api/system/cluster/nodes`, {
         headers: {
-          Authorization: basicAuth(username, password),
+          Authorization: this.httpClient.basicAuth(username, password),
           'X-Requested-By': 'AuraSpear',
         },
         rejectUnauthorized: config.verifyTls !== false,
@@ -43,7 +47,20 @@ export class GraylogService {
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `Graylog returned status ${res.status}` }
+        const remoteError = formatRemoteError('Graylog', res.status, res.data)
+        this.appLogger.warn('Graylog connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'GraylogService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorType.GRAYLOG,
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const body = res.data as Record<string, unknown>
@@ -74,7 +91,7 @@ export class GraylogService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'GraylogService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.GRAYLOG },
+        metadata: { connectorType: ConnectorType.GRAYLOG, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -93,10 +110,10 @@ export class GraylogService {
     const username = config.username as string
     const password = config.password as string
 
-    const res = await connectorFetch(`${baseUrl}/api/events/search`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/events/search`, {
       method: HttpMethod.POST,
       headers: {
-        Authorization: basicAuth(username, password),
+        Authorization: this.httpClient.basicAuth(username, password),
         'X-Requested-By': 'AuraSpear',
       },
       body: filter,
@@ -105,15 +122,16 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Graylog events search failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'searchEvents',
         className: 'GraylogService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Graylog events search failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Graylog', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -141,9 +159,9 @@ export class GraylogService {
     const username = config.username as string
     const password = config.password as string
 
-    const res = await connectorFetch(`${baseUrl}/api/events/definitions`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/events/definitions`, {
       headers: {
-        Authorization: basicAuth(username, password),
+        Authorization: this.httpClient.basicAuth(username, password),
         'X-Requested-By': 'AuraSpear',
       },
       rejectUnauthorized: config.verifyTls !== false,
@@ -151,15 +169,16 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Graylog event definitions fetch failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getEventDefinitions',
         className: 'GraylogService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Graylog event definitions failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Graylog', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>

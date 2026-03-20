@@ -1,11 +1,11 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { LogstashService } from '../../src/modules/connectors/services/logstash.service'
-import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.utility'
+import type { AxiosResponseData } from '../../src/common/modules/axios'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -15,10 +15,10 @@ const mockAppLogger = {
 }
 
 function createService(): LogstashService {
-  return new LogstashService(mockAppLogger as never)
+  return new LogstashService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
-function buildResponse(overrides: Partial<ConnectorHttpResponse> = {}): ConnectorHttpResponse {
+function buildResponse(overrides: Partial<AxiosResponseData> = {}): AxiosResponseData {
   return {
     status: 200,
     data: {},
@@ -33,7 +33,7 @@ describe('LogstashService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    mockedBasicAuth.mockImplementation(
+    mockAxiosService.basicAuth.mockImplementation(
       (username: string, password: string) =>
         `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
     )
@@ -46,7 +46,7 @@ describe('LogstashService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true with version and status when root endpoint succeeds', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({
           status: 200,
           data: {
@@ -66,7 +66,7 @@ describe('LogstashService', () => {
       expect(result.details).toContain('Logstash reachable at http://logstash.local:9600')
       expect(result.details).toContain('Version: 8.12.1')
       expect(result.details).toContain('Status: green')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/',
         expect.objectContaining({
           headers: {},
@@ -81,11 +81,11 @@ describe('LogstashService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Logstash base URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when root endpoint returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 500 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 500 }))
 
       const result = await service.testConnection({
         baseUrl: 'http://logstash.local:9600',
@@ -95,8 +95,8 @@ describe('LogstashService', () => {
       expect(result.details).toBe('Logstash returned status 500')
     })
 
-    it('should return ok: false when connectorFetch throws', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ECONNREFUSED'))
+    it('should return ok: false when fetch throws', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('ECONNREFUSED'))
 
       const result = await service.testConnection({
         baseUrl: 'http://logstash.local:9600',
@@ -108,7 +108,7 @@ describe('LogstashService', () => {
     })
 
     it('should return "Connection failed" when non-Error is thrown', async () => {
-      mockedConnectorFetch.mockRejectedValue(42)
+      mockAxiosService.fetch.mockRejectedValue(42)
 
       const result = await service.testConnection({
         baseUrl: 'http://logstash.local:9600',
@@ -119,7 +119,7 @@ describe('LogstashService', () => {
     })
 
     it('should use "unknown" for version and status when fields are absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { host: 'node-1' } })
       )
 
@@ -133,7 +133,7 @@ describe('LogstashService', () => {
     })
 
     it('should include basic auth headers when username and password are provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '8.12.1', status: 'green' } })
       )
 
@@ -144,7 +144,7 @@ describe('LogstashService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('elastic:changeme').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/',
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
@@ -153,7 +153,7 @@ describe('LogstashService', () => {
     })
 
     it('should not include auth headers when only username is provided (no password)', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '8.12.1', status: 'green' } })
       )
 
@@ -162,7 +162,7 @@ describe('LogstashService', () => {
         username: 'elastic',
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/',
         expect.objectContaining({
           headers: {},
@@ -171,7 +171,7 @@ describe('LogstashService', () => {
     })
 
     it('should respect verifyTls setting', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '8.12.1', status: 'green' } })
       )
 
@@ -180,7 +180,7 @@ describe('LogstashService', () => {
         verifyTls: false,
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://logstash.local:9600/',
         expect.objectContaining({
           rejectUnauthorized: false,
@@ -207,7 +207,7 @@ describe('LogstashService', () => {
           batch_delay: 50,
         },
       }
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: { pipelines } }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: { pipelines } }))
 
       const result = await service.getPipelines({
         baseUrl: 'http://logstash.local:9600',
@@ -215,7 +215,7 @@ describe('LogstashService', () => {
 
       expect(result.pipelines).toEqual(pipelines)
       expect(Object.keys(result.pipelines)).toHaveLength(2)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/pipelines',
         expect.objectContaining({
           headers: {},
@@ -226,7 +226,7 @@ describe('LogstashService', () => {
     })
 
     it('should return empty pipelines object when pipelines field is absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { host: 'node-1' } })
       )
 
@@ -238,19 +238,19 @@ describe('LogstashService', () => {
     })
 
     it('should throw when API returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 503 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 503 }))
 
       await expect(
         service.getPipelines({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash pipelines request failed: status 503')
+      ).rejects.toThrow('Logstash returned status 503')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('Connection timed out'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('Connection timed out'))
 
       await expect(
         service.getPipelines({
@@ -260,7 +260,7 @@ describe('LogstashService', () => {
     })
 
     it('should include auth headers when credentials are provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { pipelines: {} } })
       )
 
@@ -271,7 +271,7 @@ describe('LogstashService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('elastic:changeme').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/pipelines',
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
@@ -292,14 +292,14 @@ describe('LogstashService', () => {
           queue: { type: 'memory', events_count: 10 },
         },
       }
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: { pipelines } }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: { pipelines } }))
 
       const result = await service.getPipelineStats({
         baseUrl: 'http://logstash.local:9600',
       })
 
       expect(result.pipelines).toEqual(pipelines)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/stats/pipelines',
         expect.objectContaining({
           headers: {},
@@ -310,7 +310,7 @@ describe('LogstashService', () => {
     })
 
     it('should return empty pipelines object when pipelines field is absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: {} }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: {} }))
 
       const result = await service.getPipelineStats({
         baseUrl: 'http://logstash.local:9600',
@@ -320,19 +320,19 @@ describe('LogstashService', () => {
     })
 
     it('should throw when API returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 500 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 500 }))
 
       await expect(
         service.getPipelineStats({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash pipeline stats request failed: status 500')
+      ).rejects.toThrow('Logstash returned status 500')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('EHOSTUNREACH'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('EHOSTUNREACH'))
 
       await expect(
         service.getPipelineStats({
@@ -342,7 +342,7 @@ describe('LogstashService', () => {
     })
 
     it('should include auth headers when credentials are provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { pipelines: {} } })
       )
 
@@ -353,7 +353,7 @@ describe('LogstashService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('admin:secret').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/stats/pipelines',
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
@@ -382,14 +382,14 @@ describe('LogstashService', () => {
           ],
         },
       }
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: hotThreadsData }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: hotThreadsData }))
 
       const result = await service.getHotThreads({
         baseUrl: 'http://logstash.local:9600',
       })
 
       expect(result).toEqual(hotThreadsData)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/hot_threads?human=true',
         expect.objectContaining({
           headers: {},
@@ -400,19 +400,19 @@ describe('LogstashService', () => {
     })
 
     it('should throw when API returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 503 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 503 }))
 
       await expect(
         service.getHotThreads({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash hot threads request failed: status 503')
+      ).rejects.toThrow('Logstash returned status 503')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('Socket hang up'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('Socket hang up'))
 
       await expect(
         service.getHotThreads({
@@ -422,7 +422,7 @@ describe('LogstashService', () => {
     })
 
     it('should include auth headers when credentials are provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { hot_threads: {} } })
       )
 
@@ -433,7 +433,7 @@ describe('LogstashService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('elastic:changeme').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'http://logstash.local:9600/_node/hot_threads?human=true',
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
@@ -443,7 +443,7 @@ describe('LogstashService', () => {
 
     it('should return string data when response is not JSON', async () => {
       const plainText = '::: {Logstash}\nHot threads at 2024-01-15\n   5.2% cpu usage'
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: plainText }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: plainText }))
 
       const result = await service.getHotThreads({
         baseUrl: 'http://logstash.local:9600',

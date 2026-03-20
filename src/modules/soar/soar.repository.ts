@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import type { SoarPlaybook, SoarExecution } from '@prisma/client'
 
 type PlaybookWithTenant = SoarPlaybook & { tenant: { name: string } }
-type ExecutionWithPlaybook = SoarExecution & { playbook: { name: string } }
+type ExecutionWithPlaybook = SoarExecution & { playbook: { name: string; triggerType: string } }
 
 @Injectable()
 export class SoarRepository {
@@ -75,7 +75,7 @@ export class SoarRepository {
   /* ---------------------------------------------------------------- */
 
   private static readonly EXECUTION_WITH_PLAYBOOK = {
-    playbook: { select: { name: true } },
+    playbook: { select: { name: true, triggerType: true } },
   } as const satisfies Prisma.SoarExecutionInclude
 
   async findManyExecutionsWithPlaybook(params: {

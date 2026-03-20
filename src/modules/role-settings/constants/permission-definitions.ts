@@ -719,4 +719,28 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.roleSettings.update',
     sortOrder: 2501,
   },
+  {
+    key: Permission.USERS_CONTROL_VIEW,
+    module: 'usersControl',
+    labelKey: 'roleSettings.permissions.usersControl.view',
+    sortOrder: 2600,
+  },
+  {
+    key: Permission.USERS_CONTROL_VIEW_SESSIONS,
+    module: 'usersControl',
+    labelKey: 'roleSettings.permissions.usersControl.viewSessions',
+    sortOrder: 2601,
+  },
+  {
+    key: Permission.USERS_CONTROL_FORCE_LOGOUT,
+    module: 'usersControl',
+    labelKey: 'roleSettings.permissions.usersControl.forceLogout',
+    sortOrder: 2602,
+  },
+  {
+    key: Permission.USERS_CONTROL_FORCE_LOGOUT_ALL,
+    module: 'usersControl',
+    labelKey: 'roleSettings.permissions.usersControl.forceLogoutAll',
+    sortOrder: 2603,
+  },
 ]

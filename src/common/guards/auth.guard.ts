@@ -7,6 +7,7 @@ import {
   forwardRef,
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
+import { buildAuthSessionContext } from '../../modules/auth/auth-session.utilities'
 import { AuthService } from '../../modules/auth/auth.service'
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator'
 import { BusinessException } from '../exceptions/business.exception'
@@ -53,6 +54,11 @@ export class AuthGuard implements CanActivate {
       request.user = await this.buildCurrentUserContext(
         decoded,
         this.getSingleHeaderValue(request.headers['x-tenant-id'])
+      )
+      await this.authService.touchSessionActivity(
+        decoded,
+        request.user.tenantId,
+        buildAuthSessionContext(request)
       )
 
       return true

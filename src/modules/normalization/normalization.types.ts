@@ -26,3 +26,37 @@ export interface NormalizationStats {
   totalEventsProcessed: string
   totalErrors: number
 }
+
+/* ---------------------------------------------------------------- */
+/* Normalization Executor                                            */
+/* ---------------------------------------------------------------- */
+
+export interface NormalizationStep {
+  type: 'rename' | 'map' | 'extract' | 'drop' | 'default'
+  sourceField: string
+  targetField?: string
+  mapping?: Record<string, string>
+  pattern?: string
+  defaultValue?: unknown
+}
+
+export interface NormalizationResult {
+  pipelineId: string
+  status: 'success' | 'partial' | 'error'
+  inputCount: number
+  outputCount: number
+  droppedCount: number
+  durationMs: number
+  errors: string[]
+}
+
+export interface NormalizationPipelineInput {
+  id: string
+  name: string
+  steps: NormalizationStep[]
+}
+
+export interface NormalizationOutput {
+  result: NormalizationResult
+  normalizedEvents: Record<string, unknown>[]
+}

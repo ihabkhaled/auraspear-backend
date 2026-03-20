@@ -1,29 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-
-export interface CorrelationEvent {
-  type: string
-  timestamp: string
-  data: Record<string, unknown>
-}
-
-export interface CorrelationResult {
-  ruleId: string
-  status: 'triggered' | 'not_triggered' | 'error'
-  eventsCorrelated: number
-  triggeredAt?: string
-  description?: string
-  durationMs: number
-  error?: string
-}
-
-interface CorrelationRuleInput {
-  id: string
-  name: string
-  eventTypes: string[]
-  threshold: number
-  timeWindowMinutes: number
-  groupBy?: string
-}
+import type { CorrelationEvent, CorrelationResult, CorrelationRuleInput } from './correlation.types'
 
 @Injectable()
 export class CorrelationExecutor {
@@ -104,7 +80,7 @@ export class CorrelationExecutor {
 
     const groups = new Map<string, number>()
     for (const event of relevantEvents) {
-      const groupValue = String(event.data[groupByField] ?? 'unknown')
+      const groupValue = String(Reflect.get(event.data, groupByField) ?? 'unknown')
       groups.set(groupValue, (groups.get(groupValue) ?? 0) + 1)
     }
 

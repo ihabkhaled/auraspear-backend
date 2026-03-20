@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { Prisma } from '@prisma/client'
+import type { DashboardDensity, DashboardPanelKey, Prisma } from '@prisma/client'
 
 @Injectable()
 export class UsersRepository {
@@ -90,6 +90,8 @@ export class UsersRepository {
     updateData: {
       theme?: string
       language?: string
+      dashboardDensity?: DashboardDensity
+      collapsedDashboardPanels?: DashboardPanelKey[]
       notificationsEmail?: boolean
       notificationsInApp?: boolean
       notifyCriticalAlerts?: boolean
@@ -109,6 +111,8 @@ export class UsersRepository {
     createData: {
       theme: string
       language: string
+      dashboardDensity: DashboardDensity
+      collapsedDashboardPanels: DashboardPanelKey[]
       notificationsEmail: boolean
       notificationsInApp: boolean
       notifyCriticalAlerts: boolean

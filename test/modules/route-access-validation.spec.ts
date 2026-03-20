@@ -280,6 +280,19 @@ describe('Route Access Validation', () => {
       expect(perms.has(Permission.INCIDENTS_DELETE)).toBe(true)
     })
 
+    it('incident status changes should be granted only to operator roles that handle incidents', () => {
+      const allowedRoles = new Set<string>([
+        UserRole.TENANT_ADMIN,
+        UserRole.INCIDENT_RESPONDER,
+        UserRole.SOC_ANALYST_L2,
+      ])
+
+      for (const role of CONFIGURABLE_ROLES) {
+        const permissions = new Set(DEFAULT_PERMISSIONS[role] ?? [])
+        expect(permissions.has(Permission.INCIDENTS_CHANGE_STATUS)).toBe(allowedRoles.has(role))
+      }
+    })
+
     it('PLATFORM_OPERATOR should have full connectors CRUD but no SOC data write', () => {
       const perms = new Set(DEFAULT_PERMISSIONS[UserRole.PLATFORM_OPERATOR] ?? [])
       expect(perms.has(Permission.CONNECTORS_VIEW)).toBe(true)

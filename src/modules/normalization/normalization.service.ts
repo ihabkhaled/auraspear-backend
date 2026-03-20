@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { NormalizationExecutor } from './normalization.executor'
 import { NormalizationRepository } from './normalization.repository'
 import {
   buildPipelineListWhere,
@@ -6,6 +7,7 @@ import {
   buildPipelineUpdateData,
   buildPipelineRecord,
   buildNormalizationStats,
+  extractPipelineSteps,
 } from './normalization.utilities'
 import {
   AppLogFeature,
@@ -20,6 +22,7 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { CreatePipelineDto } from './dto/create-pipeline.dto'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
 import type {
+  NormalizationOutput,
   NormalizationPipelineRecord,
   NormalizationStats,
   PaginatedPipelines,
@@ -33,7 +36,8 @@ export class NormalizationService {
 
   constructor(
     private readonly repository: NormalizationRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly executor: NormalizationExecutor
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -230,5 +234,46 @@ export class NormalizationService {
     ])
 
     return buildNormalizationStats(total, active, inactive, errorPipelines, aggregates)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* DRY RUN                                                           */
+  /* ---------------------------------------------------------------- */
+
+  async dryRunPipeline(
+    id: string,
+    tenantId: string,
+    events: Record<string, unknown>[],
+    actorEmail: string
+  ): Promise<NormalizationOutput> {
+    const pipeline = await this.getPipelineById(id, tenantId)
+
+    const steps = extractPipelineSteps(pipeline.parserConfig, pipeline.fieldMappings)
+
+    const output = await this.executor.executePipeline(
+      { id: pipeline.id, name: pipeline.name, steps },
+      events
+    )
+
+    this.appLogger.info('Normalization pipeline dry-run executed', {
+      feature: AppLogFeature.NORMALIZATION,
+      action: 'dryRunPipeline',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail,
+      targetResource: 'NormalizationPipeline',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'NormalizationService',
+      functionName: 'dryRunPipeline',
+      metadata: {
+        inputCount: events.length,
+        outputCount: output.result.outputCount,
+        droppedCount: output.result.droppedCount,
+        durationMs: output.result.durationMs,
+      },
+    })
+
+    return output
   }
 }

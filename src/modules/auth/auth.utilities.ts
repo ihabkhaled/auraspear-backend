@@ -49,6 +49,10 @@ export function computeRemainingTtl(exp: number): number {
   return Math.max(exp - now, 0)
 }
 
+export function computeRemainingTtlFromDate(expiresAt: Date): number {
+  return Math.max(Math.ceil((expiresAt.getTime() - Date.now()) / 1000), 0)
+}
+
 export function buildExpiryDateFromSeconds(ttlSeconds: number): Date {
   return new Date(Date.now() + ttlSeconds * 1000)
 }

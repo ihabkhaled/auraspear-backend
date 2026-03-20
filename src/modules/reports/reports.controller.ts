@@ -8,10 +8,16 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
+import {
+  type CreateReportFromTemplateDto,
+  CreateReportFromTemplateSchema,
+} from './dto/create-report-from-template.dto'
 import { type CreateReportDto, CreateReportSchema } from './dto/create-report.dto'
+import { ListReportTemplatesQuerySchema } from './dto/list-report-templates-query.dto'
 import { ListReportsQuerySchema } from './dto/list-reports-query.dto'
 import { type UpdateReportDto, UpdateReportSchema } from './dto/update-report.dto'
 import { ReportsService } from './reports.service'
@@ -22,8 +28,14 @@ import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { ReportRecord, PaginatedReports, ReportStats } from './reports.types'
+import type {
+  PaginatedReports,
+  ReportRecord,
+  ReportStats,
+  ReportTemplateRecord,
+} from './reports.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type { Response } from 'express'
 
 @Controller('reports')
 @UseGuards(AuthGuard, TenantGuard)
@@ -37,7 +49,7 @@ export class ReportsController {
     @TenantId() tenantId: string,
     @Query() rawQuery: Record<string, string>
   ): Promise<PaginatedReports> {
-    const { page, limit, sortBy, sortOrder, type, status, query, format } =
+    const { page, limit, sortBy, sortOrder, type, module, status, query, format } =
       ListReportsQuerySchema.parse(rawQuery)
     return this.reportsService.listReports(
       tenantId,
@@ -46,16 +58,43 @@ export class ReportsController {
       sortBy,
       sortOrder,
       type,
+      module,
       status,
       query,
       format
     )
   }
 
+  @Get('templates')
+  @RequirePermission(Permission.REPORTS_VIEW)
+  async listReportTemplates(
+    @TenantId() tenantId: string,
+    @Query() rawQuery: Record<string, string>
+  ): Promise<ReportTemplateRecord[]> {
+    const { module } = ListReportTemplatesQuerySchema.parse(rawQuery)
+    return this.reportsService.listReportTemplates(tenantId, module)
+  }
+
   @Get('stats')
   @RequirePermission(Permission.REPORTS_VIEW)
   async getReportStats(@TenantId() tenantId: string): Promise<ReportStats> {
     return this.reportsService.getReportStats(tenantId)
+  }
+
+  @Get(':id/download')
+  @RequirePermission(Permission.REPORTS_VIEW)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async downloadReport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @TenantId() tenantId: string,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<void> {
+    const download = await this.reportsService.downloadReport(id, tenantId)
+
+    res.setHeader('Content-Type', download.contentType)
+    res.setHeader('Content-Disposition', `attachment; filename="${download.filename}"`)
+    res.setHeader('Content-Length', Buffer.byteLength(download.content, 'utf-8'))
+    res.send(download.content)
   }
 
   @Get(':id')
@@ -74,6 +113,15 @@ export class ReportsController {
     @CurrentUser() user: JwtPayload
   ): Promise<ReportRecord> {
     return this.reportsService.createReport(dto, user)
+  }
+
+  @Post('from-template')
+  @RequirePermission(Permission.REPORTS_CREATE)
+  async createReportFromTemplate(
+    @Body(new ZodValidationPipe(CreateReportFromTemplateSchema)) dto: CreateReportFromTemplateDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<ReportRecord> {
+    return this.reportsService.createReportFromTemplate(dto, user)
   }
 
   @Patch(':id')

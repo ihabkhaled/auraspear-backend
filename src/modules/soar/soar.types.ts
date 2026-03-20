@@ -29,6 +29,10 @@ export interface SoarExecutionRecord {
   status: string
   triggeredBy: string
   triggeredByName: string | null
+  triggerType: string
+  stepsCompleted: number
+  totalSteps: number
+  durationSeconds: number | null
   startedAt: Date
   completedAt: Date | null
   output: Record<string, unknown> | null

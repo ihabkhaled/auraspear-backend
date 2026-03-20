@@ -624,6 +624,39 @@ describe('IncidentsService', () => {
   })
 
   // ---------------------------------------------------------------------------
+  // changeStatus
+  // ---------------------------------------------------------------------------
+  describe('changeStatus', () => {
+    it('should update only the incident status through the dedicated flow', async () => {
+      const existing = buildMockIncident({ status: IncidentStatus.IN_PROGRESS })
+      repository.findFirstWithRelations.mockResolvedValue(existing)
+      repository.findUserById.mockResolvedValue(null)
+      repository.findUserByEmail.mockResolvedValue({ name: 'Test Analyst' })
+      repository.findUserNameById.mockResolvedValue({ name: 'Test Analyst' })
+
+      const updatedIncident = buildMockIncident({ status: IncidentStatus.RESOLVED })
+      repository.updateIncidentWithTimeline.mockResolvedValue(updatedIncident)
+
+      const result = await service.changeStatus(
+        INCIDENT_ID,
+        IncidentStatus.RESOLVED,
+        buildMockJwtPayload() as never
+      )
+
+      expect(result.status).toBe(IncidentStatus.RESOLVED)
+      expect(repository.updateIncidentWithTimeline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: INCIDENT_ID,
+          tenantId: TENANT_ID,
+          updateData: expect.objectContaining({
+            status: IncidentStatus.RESOLVED,
+          }),
+        })
+      )
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // deleteIncident
   // ---------------------------------------------------------------------------
   describe('deleteIncident', () => {

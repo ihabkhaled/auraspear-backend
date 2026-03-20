@@ -6,15 +6,19 @@ import {
   ConnectorType,
   HttpMethod,
 } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class MispService {
   private readonly logger = new Logger(MispService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test MISP connection.
@@ -33,7 +37,7 @@ export class MispService {
     }
 
     try {
-      const res = await connectorFetch(`${baseUrl}/servers/getPyMISPVersion.json`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/servers/getPyMISPVersion.json`, {
         headers: {
           Authorization: authKey,
           Accept: 'application/json',
@@ -43,7 +47,20 @@ export class MispService {
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `MISP returned status ${res.status}` }
+        const remoteError = formatRemoteError('MISP', res.status, res.data)
+        this.appLogger.warn('MISP connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'MispService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorType.MISP,
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const body = res.data as Record<string, unknown>
@@ -74,7 +91,7 @@ export class MispService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'MispService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.MISP },
+        metadata: { connectorType: ConnectorType.MISP, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -90,7 +107,7 @@ export class MispService {
     // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
     const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
-    const res = await connectorFetch(
+    const res = await this.httpClient.fetch(
       `${baseUrl}/events/index?limit=${limit}&sort=date&direction=desc`,
       {
         headers: {
@@ -103,15 +120,16 @@ export class MispService {
     )
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('MISP events fetch failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getEvents',
         className: 'MispService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, limit },
+        metadata: { status: res.status, limit, remoteError: remoteMessage },
       })
-      throw new Error(`MISP events fetch failed: status ${res.status}`)
+      throw new Error(formatRemoteError('MISP', res.status, res.data))
     }
 
     const events = (res.data ?? []) as unknown[]
@@ -140,7 +158,7 @@ export class MispService {
     // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
     const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
 
-    const res = await connectorFetch(`${baseUrl}/attributes/restSearch`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/attributes/restSearch`, {
       method: HttpMethod.POST,
       headers: {
         Authorization: authKey,
@@ -152,15 +170,16 @@ export class MispService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('MISP attribute search failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'searchAttributes',
         className: 'MispService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`MISP attribute search failed: status ${res.status}`)
+      throw new Error(formatRemoteError('MISP', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -202,7 +221,7 @@ export class MispService {
       throw new Error('Invalid MISP event ID')
     }
 
-    const res = await connectorFetch(`${baseUrl}/events/view/${eventId}`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/events/view/${eventId}`, {
       headers: {
         Authorization: authKey,
         Accept: 'application/json',
@@ -212,15 +231,16 @@ export class MispService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('MISP event fetch failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getEvent',
         className: 'MispService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, eventId },
+        metadata: { status: res.status, eventId, remoteError: remoteMessage },
       })
-      throw new Error(`MISP event fetch failed: status ${res.status}`)
+      throw new Error(formatRemoteError('MISP', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>

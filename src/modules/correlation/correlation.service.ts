@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
+import { CorrelationExecutor } from './correlation.executor'
 import { CorrelationRepository } from './correlation.repository'
 import {
   buildRuleListWhere,
   buildRuleOrderBy,
   buildRuleUpdateData,
   buildCorrelationStats,
+  extractCorrelationRuleInput,
 } from './correlation.utilities'
 import {
   AppLogFeature,
@@ -17,7 +19,13 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import type { CorrelationStats, PaginatedRules, RuleRecord } from './correlation.types'
+import type {
+  CorrelationEvent,
+  CorrelationResult,
+  CorrelationStats,
+  PaginatedRules,
+  RuleRecord,
+} from './correlation.types'
 import type { CreateRuleDto } from './dto/create-rule.dto'
 import type { UpdateRuleDto } from './dto/update-rule.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -28,7 +36,8 @@ export class CorrelationService {
 
   constructor(
     private readonly repository: CorrelationRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly executor: CorrelationExecutor
   ) {}
 
   /**
@@ -375,6 +384,56 @@ export class CorrelationService {
     })
 
     return buildCorrelationStats(correlationRules, sigmaRules, fired24hResult, linkedResult)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* TEST (dry-run)                                                      */
+  /* ---------------------------------------------------------------- */
+
+  async testRule(
+    id: string,
+    tenantId: string,
+    events: Record<string, unknown>[],
+    actorEmail: string
+  ): Promise<CorrelationResult> {
+    const rule = await this.getRuleById(id, tenantId)
+
+    const correlationEvents: CorrelationEvent[] = events.map(event => ({
+      type:
+        typeof Reflect.get(event, 'type') === 'string'
+          ? (Reflect.get(event, 'type') as string)
+          : 'unknown',
+      timestamp:
+        typeof Reflect.get(event, 'timestamp') === 'string'
+          ? (Reflect.get(event, 'timestamp') as string)
+          : new Date().toISOString(),
+      data: event,
+    }))
+
+    const ruleInput = extractCorrelationRuleInput(rule)
+
+    const result = await this.executor.evaluateRule(ruleInput, correlationEvents)
+
+    this.appLogger.info('Correlation rule test executed', {
+      feature: AppLogFeature.CORRELATION,
+      action: 'testRule',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail,
+      targetResource: 'CorrelationRule',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CorrelationService',
+      functionName: 'testRule',
+      metadata: {
+        inputCount: events.length,
+        status: result.status,
+        eventsCorrelated: result.eventsCorrelated,
+        durationMs: result.durationMs,
+      },
+    })
+
+    return result
   }
 
   /* ---------------------------------------------------------------- */

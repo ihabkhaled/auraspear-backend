@@ -620,6 +620,7 @@ Pre-configured with placeholder encrypted credentials:
 | `npm run typecheck`       | Full TypeScript check (`tsc --noEmit`)                |
 | `npm run typecheck:watch` | TypeScript in watch mode                              |
 | `npm run validate`        | Full pipeline: typecheck + lint:strict + format:check |
+| `npm run validate:full`   | Validate + tests + production build                   |
 | `npm run validate:fix`    | Auto-fix: lint:fix + format                           |
 
 ### Database

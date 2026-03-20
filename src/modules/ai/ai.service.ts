@@ -3,8 +3,8 @@ import { Injectable, Logger } from '@nestjs/common'
 import {
   AI_BEDROCK_MAX_TOKENS,
   AI_DEFAULT_MODEL,
-  AI_EXPLAIN_LATENCY_OFFSET_MS,
-  AI_EXPLAIN_REASONING,
+  AI_LLM_APIS_MAX_TOKENS,
+  AI_OPENCLAW_MAX_TOKENS,
 } from './ai.constants'
 import { AiRepository } from './ai.repository'
 import {
@@ -17,6 +17,15 @@ import {
   buildAgentTaskPrompt,
   buildBedrockAgentTaskResponse,
   buildFallbackAgentTaskResponse,
+  buildBedrockExplainResponse,
+  buildLlmApisHuntResponse,
+  buildLlmApisInvestigateResponse,
+  buildLlmApisAgentTaskResponse,
+  buildLlmApisExplainResponse,
+  buildOpenClawHuntResponse,
+  buildOpenClawInvestigateResponse,
+  buildOpenClawAgentTaskResponse,
+  buildOpenClawExplainResponse,
   generateExplainResponse,
 } from './ai.utilities'
 import { AiHuntDto } from './dto/ai-hunt.dto'
@@ -33,9 +42,23 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { BedrockService } from '../connectors/services/bedrock.service'
-import type { AgentTaskExecutionInput, AiAuditRecord, AiResponse } from './ai.types'
+import { LlmApisService } from '../connectors/services/llm-apis.service'
+import { OpenClawGatewayService } from '../connectors/services/openclaw-gateway.service'
+import type {
+  AgentTaskExecutionInput,
+  AiAuditRecord,
+  AiResponse,
+  ResolvedAiConnector,
+} from './ai.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Alert, Prisma } from '@prisma/client'
+
+/** Priority order for AI connector resolution. */
+const AI_CONNECTOR_PRIORITY: ConnectorType[] = [
+  ConnectorType.BEDROCK,
+  ConnectorType.LLM_APIS,
+  ConnectorType.OPENCLAW_GATEWAY,
+]
 
 @Injectable()
 export class AiService {
@@ -45,7 +68,9 @@ export class AiService {
     private readonly aiRepository: AiRepository,
     private readonly appLogger: AppLoggerService,
     private readonly connectorsService: ConnectorsService,
-    private readonly bedrockService: BedrockService
+    private readonly bedrockService: BedrockService,
+    private readonly llmApisService: LlmApisService,
+    private readonly openClawGatewayService: OpenClawGatewayService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -57,14 +82,11 @@ export class AiService {
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
-    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
-      user.tenantId,
-      ConnectorType.BEDROCK
-    )
+    const connector = await this.findAvailableAiConnector(user.tenantId)
 
     let response: AiResponse | undefined
-    if (bedrockConfig) {
-      response = await this.tryBedrockHunt(bedrockConfig, dto, user)
+    if (connector) {
+      response = await this.routeHunt(connector, dto, user)
     }
 
     response ??= buildFallbackHuntResponse(dto.query)
@@ -94,20 +116,11 @@ export class AiService {
     const relatedAlerts = await this.loadRelatedAlerts(fullAlert, user.tenantId)
 
     const startTime = Date.now()
-    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
-      user.tenantId,
-      ConnectorType.BEDROCK
-    )
+    const connector = await this.findAvailableAiConnector(user.tenantId)
 
     let response: AiResponse | undefined
-    if (bedrockConfig) {
-      response = await this.tryBedrockInvestigate(
-        bedrockConfig,
-        fullAlert,
-        relatedAlerts,
-        dto.alertId,
-        user
-      )
+    if (connector) {
+      response = await this.routeInvestigate(connector, fullAlert, relatedAlerts, dto.alertId, user)
     }
 
     response ??= buildFallbackInvestigateResponse(fullAlert, relatedAlerts, dto.alertId)
@@ -135,22 +148,22 @@ export class AiService {
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
+    const connector = await this.findAvailableAiConnector(user.tenantId)
 
-    const response: AiResponse = {
-      result: generateExplainResponse(body.prompt),
-      reasoning: [...AI_EXPLAIN_REASONING],
-      confidence: 0.95,
-      model: AI_DEFAULT_MODEL,
-      tokensUsed: { input: 892, output: 1654 },
+    let response: AiResponse | undefined
+    if (connector) {
+      response = await this.routeExplain(connector, body.prompt, user)
     }
 
-    const latencyMs = Date.now() - startTime + AI_EXPLAIN_LATENCY_OFFSET_MS
+    response ??= this.buildFallbackExplainResponse(body.prompt)
+
+    const latencyMs = Date.now() - startTime
     await this.logAudit(
       this.buildAuditRecord(user, AiAuditAction.EXPLAIN, response, latencyMs, body.prompt)
     )
 
     this.logAction('aiExplain', user, 'AiExplain', undefined, {
-      model: AI_DEFAULT_MODEL,
+      model: response.model,
       confidence: response.confidence,
       latencyMs,
     })
@@ -161,14 +174,11 @@ export class AiService {
     await this.ensureAiEnabled(input.tenantId)
 
     const startTime = Date.now()
-    const bedrockConfig = await this.connectorsService.getDecryptedConfig(
-      input.tenantId,
-      ConnectorType.BEDROCK
-    )
+    const connector = await this.findAvailableAiConnector(input.tenantId)
 
     let response: AiResponse | undefined
-    if (bedrockConfig) {
-      response = await this.tryBedrockAgentTask(bedrockConfig, input)
+    if (connector) {
+      response = await this.routeAgentTask(connector, input)
     }
 
     response ??= buildFallbackAgentTaskResponse({
@@ -216,6 +226,114 @@ export class AiService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* PRIVATE: Multi-Provider Connector Resolution                      */
+  /* ---------------------------------------------------------------- */
+
+  private async findAvailableAiConnector(
+    tenantId: string
+  ): Promise<ResolvedAiConnector | undefined> {
+    const configs = await Promise.all(
+      AI_CONNECTOR_PRIORITY.map(async connectorType => {
+        const config = await this.connectorsService.getDecryptedConfig(tenantId, connectorType)
+        return config ? { type: connectorType, config } : undefined
+      })
+    )
+
+    const resolved = configs.find((entry): entry is ResolvedAiConnector => entry !== undefined)
+
+    if (resolved) {
+      this.logger.log(`Resolved AI connector: ${resolved.type} for tenant ${tenantId}`)
+    }
+
+    return resolved
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Hunt Routing                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async routeHunt(
+    connector: ResolvedAiConnector,
+    dto: AiHuntDto,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    switch (connector.type) {
+      case ConnectorType.BEDROCK:
+        return this.tryBedrockHunt(connector.config, dto, user)
+      case ConnectorType.LLM_APIS:
+        return this.tryLlmApisHunt(connector.config, dto, user)
+      case ConnectorType.OPENCLAW_GATEWAY:
+        return this.tryOpenClawHunt(connector.config, dto, user)
+      default:
+        return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Investigate Routing                                      */
+  /* ---------------------------------------------------------------- */
+
+  private async routeInvestigate(
+    connector: ResolvedAiConnector,
+    alert: Alert,
+    relatedAlerts: Array<Pick<Alert, 'id' | 'title' | 'severity' | 'timestamp'>>,
+    alertId: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    switch (connector.type) {
+      case ConnectorType.BEDROCK:
+        return this.tryBedrockInvestigate(connector.config, alert, relatedAlerts, alertId, user)
+      case ConnectorType.LLM_APIS:
+        return this.tryLlmApisInvestigate(connector.config, alert, relatedAlerts, alertId, user)
+      case ConnectorType.OPENCLAW_GATEWAY:
+        return this.tryOpenClawInvestigate(connector.config, alert, relatedAlerts, alertId, user)
+      default:
+        return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Explain Routing                                          */
+  /* ---------------------------------------------------------------- */
+
+  private async routeExplain(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    switch (connector.type) {
+      case ConnectorType.BEDROCK:
+        return this.tryBedrockExplain(connector.config, prompt, user)
+      case ConnectorType.LLM_APIS:
+        return this.tryLlmApisExplain(connector.config, prompt, user)
+      case ConnectorType.OPENCLAW_GATEWAY:
+        return this.tryOpenClawExplain(connector.config, prompt, user)
+      default:
+        return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Agent Task Routing                                       */
+  /* ---------------------------------------------------------------- */
+
+  private async routeAgentTask(
+    connector: ResolvedAiConnector,
+    input: AgentTaskExecutionInput
+  ): Promise<AiResponse | undefined> {
+    switch (connector.type) {
+      case ConnectorType.BEDROCK:
+        return this.tryBedrockAgentTask(connector.config, input)
+      case ConnectorType.LLM_APIS:
+        return this.tryLlmApisAgentTask(connector.config, input)
+      case ConnectorType.OPENCLAW_GATEWAY:
+        return this.tryOpenClawAgentTask(connector.config, input)
+      default:
+        return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* PRIVATE: Bedrock Attempt Helpers                                   */
   /* ---------------------------------------------------------------- */
 
@@ -235,20 +353,7 @@ export class AiService {
         aiResult.outputTokens
       )
     } catch (error) {
-      this.logger.warn(
-        `Bedrock hunt failed, falling back: ${error instanceof Error ? error.message : 'Unknown'}`
-      )
-      this.appLogger.warn('Bedrock hunt invocation failed, using rule-based fallback', {
-        feature: AppLogFeature.AI,
-        action: 'aiHunt',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        actorUserId: user.sub,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AiService',
-        functionName: 'aiHunt',
-        metadata: { error: error instanceof Error ? error.message : 'Unknown' },
-      })
+      this.logProviderFailure('Bedrock', 'aiHunt', error, user.tenantId, user.sub)
       return undefined
     }
   }
@@ -274,21 +379,9 @@ export class AiService {
         aiResult.outputTokens
       )
     } catch (error) {
-      this.logger.warn(
-        `Bedrock investigation failed, falling back: ${error instanceof Error ? error.message : 'Unknown'}`
-      )
-      this.appLogger.warn('Bedrock investigation failed, using rule-based fallback', {
-        feature: AppLogFeature.AI,
-        action: 'aiInvestigate',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        actorUserId: user.sub,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AiService',
-        functionName: 'aiInvestigate',
+      this.logProviderFailure('Bedrock', 'aiInvestigate', error, user.tenantId, user.sub, {
         targetResource: 'Alert',
         targetResourceId: alertId,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown' },
       })
       return undefined
     }
@@ -314,24 +407,290 @@ export class AiService {
         aiResult.outputTokens
       )
     } catch (error) {
-      this.logger.warn(
-        `Bedrock AI agent task failed, falling back: ${error instanceof Error ? error.message : 'Unknown'}`
-      )
-      this.appLogger.warn('Bedrock AI agent execution failed, using fallback response', {
-        feature: AppLogFeature.AI_AGENTS,
-        action: 'runAgentTask',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: input.tenantId,
-        actorEmail: input.actorEmail,
-        actorUserId: input.actorUserId,
+      this.logProviderFailure('Bedrock', 'runAgentTask', error, input.tenantId, input.actorUserId, {
         targetResource: 'AiAgent',
         targetResourceId: input.agentId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AiService',
-        functionName: 'runAgentTask',
-        metadata: { error: error instanceof Error ? error.message : 'Unknown' },
+        feature: AppLogFeature.AI_AGENTS,
       })
       return undefined
+    }
+  }
+
+  private async tryBedrockExplain(
+    config: Record<string, unknown>,
+    prompt: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const aiResult = await this.bedrockService.invoke(config, prompt, AI_BEDROCK_MAX_TOKENS)
+      return buildBedrockExplainResponse(
+        aiResult.text,
+        (config.modelId as string) ?? AI_DEFAULT_MODEL,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('Bedrock', 'aiExplain', error, user.tenantId, user.sub)
+      return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: LLM APIs Attempt Helpers                                 */
+  /* ---------------------------------------------------------------- */
+
+  private async tryLlmApisHunt(
+    config: Record<string, unknown>,
+    dto: AiHuntDto,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildHuntPrompt(dto.query, dto.context)
+      const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
+      const modelId = (config.defaultModel as string) ?? 'gpt-4'
+      return buildLlmApisHuntResponse(
+        aiResult.text,
+        dto.query,
+        modelId,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('LLM APIs', 'aiHunt', error, user.tenantId, user.sub)
+      return undefined
+    }
+  }
+
+  private async tryLlmApisInvestigate(
+    config: Record<string, unknown>,
+    alert: Alert,
+    relatedAlerts: Array<Pick<Alert, 'id' | 'title' | 'severity' | 'timestamp'>>,
+    alertId: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildInvestigationPrompt(alert, relatedAlerts)
+      const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
+      const modelId = (config.defaultModel as string) ?? 'gpt-4'
+      return buildLlmApisInvestigateResponse(
+        aiResult.text,
+        alertId,
+        relatedAlerts.length,
+        alert,
+        relatedAlerts,
+        modelId,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('LLM APIs', 'aiInvestigate', error, user.tenantId, user.sub, {
+        targetResource: 'Alert',
+        targetResourceId: alertId,
+      })
+      return undefined
+    }
+  }
+
+  private async tryLlmApisAgentTask(
+    config: Record<string, unknown>,
+    input: AgentTaskExecutionInput
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildAgentTaskPrompt({
+        agentName: input.agentName,
+        prompt: input.prompt,
+        soulMd: input.soulMd,
+        tools: input.tools,
+      })
+      const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
+      const modelId = (config.defaultModel as string) ?? 'gpt-4'
+      return buildLlmApisAgentTaskResponse(
+        aiResult.text,
+        input.agentName,
+        modelId,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure(
+        'LLM APIs',
+        'runAgentTask',
+        error,
+        input.tenantId,
+        input.actorUserId,
+        {
+          targetResource: 'AiAgent',
+          targetResourceId: input.agentId,
+          feature: AppLogFeature.AI_AGENTS,
+        }
+      )
+      return undefined
+    }
+  }
+
+  private async tryLlmApisExplain(
+    config: Record<string, unknown>,
+    prompt: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
+      const modelId = (config.defaultModel as string) ?? 'gpt-4'
+      return buildLlmApisExplainResponse(
+        aiResult.text,
+        modelId,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('LLM APIs', 'aiExplain', error, user.tenantId, user.sub)
+      return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: OpenClaw Gateway Attempt Helpers                         */
+  /* ---------------------------------------------------------------- */
+
+  private async tryOpenClawHunt(
+    config: Record<string, unknown>,
+    dto: AiHuntDto,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildHuntPrompt(dto.query, dto.context)
+      const aiResult = await this.openClawGatewayService.invoke(
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'hunt'
+      )
+      return buildOpenClawHuntResponse(
+        aiResult.text,
+        dto.query,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('OpenClaw Gateway', 'aiHunt', error, user.tenantId, user.sub)
+      return undefined
+    }
+  }
+
+  private async tryOpenClawInvestigate(
+    config: Record<string, unknown>,
+    alert: Alert,
+    relatedAlerts: Array<Pick<Alert, 'id' | 'title' | 'severity' | 'timestamp'>>,
+    alertId: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildInvestigationPrompt(alert, relatedAlerts)
+      const aiResult = await this.openClawGatewayService.invoke(
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'investigate'
+      )
+      return buildOpenClawInvestigateResponse(
+        aiResult.text,
+        alertId,
+        relatedAlerts.length,
+        alert,
+        relatedAlerts,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('OpenClaw Gateway', 'aiInvestigate', error, user.tenantId, user.sub, {
+        targetResource: 'Alert',
+        targetResourceId: alertId,
+      })
+      return undefined
+    }
+  }
+
+  private async tryOpenClawAgentTask(
+    config: Record<string, unknown>,
+    input: AgentTaskExecutionInput
+  ): Promise<AiResponse | undefined> {
+    try {
+      const prompt = buildAgentTaskPrompt({
+        agentName: input.agentName,
+        prompt: input.prompt,
+        soulMd: input.soulMd,
+        tools: input.tools,
+      })
+      const aiResult = await this.openClawGatewayService.invoke(
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'agent_task'
+      )
+      return buildOpenClawAgentTaskResponse(
+        aiResult.text,
+        input.agentName,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure(
+        'OpenClaw Gateway',
+        'runAgentTask',
+        error,
+        input.tenantId,
+        input.actorUserId,
+        {
+          targetResource: 'AiAgent',
+          targetResourceId: input.agentId,
+          feature: AppLogFeature.AI_AGENTS,
+        }
+      )
+      return undefined
+    }
+  }
+
+  private async tryOpenClawExplain(
+    config: Record<string, unknown>,
+    prompt: string,
+    user: JwtPayload
+  ): Promise<AiResponse | undefined> {
+    try {
+      const aiResult = await this.openClawGatewayService.invoke(
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'explain'
+      )
+      return buildOpenClawExplainResponse(
+        aiResult.text,
+        aiResult.inputTokens,
+        aiResult.outputTokens
+      )
+    } catch (error) {
+      this.logProviderFailure('OpenClaw Gateway', 'aiExplain', error, user.tenantId, user.sub)
+      return undefined
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Fallback Explain (rule-based)                            */
+  /* ---------------------------------------------------------------- */
+
+  private buildFallbackExplainResponse(prompt: string): AiResponse {
+    return {
+      result: generateExplainResponse(prompt),
+      reasoning: [
+        'Parsing the security concept or finding to explain',
+        'Breaking down technical details into analyst-friendly language',
+        'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
+        'Providing contextual examples relevant to the environment',
+        'Including remediation guidance and best practices',
+        'Generating rule-based explanation (AI model not available)',
+      ],
+      confidence: 0.85,
+      model: 'rule-based',
+      tokensUsed: { input: 0, output: 0 },
     }
   }
 
@@ -368,12 +727,13 @@ export class AiService {
 
   private async ensureAiEnabled(tenantId: string): Promise<void> {
     try {
-      const connector = await this.aiRepository.findEnabledConnectorByType(
-        tenantId,
-        ConnectorType.BEDROCK
-      )
+      const enabledConnectors = await this.aiRepository.findEnabledConnectorByTypes(tenantId, [
+        ConnectorType.BEDROCK,
+        ConnectorType.LLM_APIS,
+        ConnectorType.OPENCLAW_GATEWAY,
+      ])
 
-      if (!connector) {
+      if (enabledConnectors.length === 0) {
         this.appLogger.warn('AI features not enabled for tenant', {
           feature: AppLogFeature.AI,
           action: 'ensureAiEnabled',
@@ -384,7 +744,7 @@ export class AiService {
         })
         throw new BusinessException(
           403,
-          'AI features are not enabled for this tenant. Configure a Bedrock connector with aiEnabled=true.',
+          'AI features are not enabled for this tenant. Configure an AI connector (Bedrock, LLM APIs, or OpenClaw Gateway).',
           'errors.ai.notEnabled'
         )
       }
@@ -495,6 +855,35 @@ export class AiService {
       targetResource,
       targetResourceId,
       metadata,
+    })
+  }
+
+  private logProviderFailure(
+    providerName: string,
+    action: string,
+    error: unknown,
+    tenantId: string,
+    actorUserId: string,
+    extra?: {
+      targetResource?: string
+      targetResourceId?: string
+      feature?: AppLogFeature
+    }
+  ): void {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown'
+    this.logger.warn(`${providerName} ${action} failed, falling back: ${errorMessage}`)
+    this.appLogger.warn(`${providerName} ${action} invocation failed, using fallback`, {
+      feature: extra?.feature ?? AppLogFeature.AI,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      actorUserId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: action,
+      targetResource: extra?.targetResource,
+      targetResourceId: extra?.targetResourceId,
+      metadata: { error: errorMessage, provider: providerName },
     })
   }
 }

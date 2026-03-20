@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AiAgentsRepository } from './ai-agents.repository'
+import { AI_COST_PER_1K_INPUT_TOKENS, AI_COST_PER_1K_OUTPUT_TOKENS } from '../ai/ai.constants'
 import { AiService } from '../ai/ai.service'
 import type { AgentTaskPayload } from './ai-agents.types'
 import type { Job } from '@prisma/client'
@@ -55,6 +56,9 @@ export class AiAgentTaskHandler {
 
       const durationMs = Date.now() - startedAt
       const tokensUsed = response.tokensUsed.input + response.tokensUsed.output
+      const estimatedCost =
+        (response.tokensUsed.input / 1000) * AI_COST_PER_1K_INPUT_TOKENS +
+        (response.tokensUsed.output / 1000) * AI_COST_PER_1K_OUTPUT_TOKENS
 
       await this.repository.markSessionCompleted({
         sessionId,
@@ -62,7 +66,7 @@ export class AiAgentTaskHandler {
         tenantId: job.tenantId,
         output: response.result,
         tokensUsed,
-        cost: 0,
+        cost: estimatedCost,
         durationMs,
       })
 
@@ -71,6 +75,7 @@ export class AiAgentTaskHandler {
         sessionId,
         model: response.model,
         tokensUsed,
+        estimatedCost,
         durationMs,
       }
     } catch (error) {

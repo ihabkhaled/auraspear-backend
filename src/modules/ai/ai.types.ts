@@ -1,4 +1,4 @@
-import type { AiAuditStatus } from '../../common/enums'
+import type { AiAuditStatus, ConnectorType } from '../../common/enums'
 
 export interface AiTokenUsage {
   input: number
@@ -11,6 +11,11 @@ export interface AiResponse {
   confidence: number
   model: string
   tokensUsed: AiTokenUsage
+}
+
+export interface ResolvedAiConnector {
+  type: ConnectorType
+  config: Record<string, unknown>
 }
 
 export interface AiToolSummary {

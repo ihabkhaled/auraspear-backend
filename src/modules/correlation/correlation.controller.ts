@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler'
 import { CorrelationService } from './correlation.service'
 import { type CreateRuleDto, CreateRuleSchema } from './dto/create-rule.dto'
 import { ListRulesQuerySchema } from './dto/list-rules-query.dto'
+import { type TestRuleDto, TestRuleSchema } from './dto/test-rule.dto'
 import { type ToggleRuleDto, ToggleRuleSchema } from './dto/toggle-rule.dto'
 import { type UpdateRuleDto, UpdateRuleSchema } from './dto/update-rule.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -23,7 +24,12 @@ import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
-import type { CorrelationStats, PaginatedRules, RuleRecord } from './correlation.types'
+import type {
+  CorrelationResult,
+  CorrelationStats,
+  PaginatedRules,
+  RuleRecord,
+} from './correlation.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 @Controller('correlation')
@@ -106,5 +112,17 @@ export class CorrelationController {
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
     return this.correlationService.deleteRule(id, tenantId, user.email)
+  }
+
+  @Post(':id/test')
+  @RequirePermission(Permission.CORRELATION_UPDATE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async testRule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(TestRuleSchema)) dto: TestRuleDto,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<CorrelationResult> {
+    return this.correlationService.testRule(id, tenantId, dto.events, user.email)
   }
 }

@@ -1,10 +1,11 @@
-import { connectorFetch } from '../../src/common/utils/connector-http.utility'
 import { InfluxDBService } from '../../src/modules/connectors/services/influxdb.service'
-import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.utility'
+import type { AxiosResponseData } from '../../src/common/modules/axios'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -14,10 +15,10 @@ const mockAppLogger = {
 }
 
 function createService(): InfluxDBService {
-  return new InfluxDBService(mockAppLogger as never)
+  return new InfluxDBService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
-function buildResponse(overrides: Partial<ConnectorHttpResponse> = {}): ConnectorHttpResponse {
+function buildResponse(overrides: Partial<AxiosResponseData> = {}): AxiosResponseData {
   return {
     status: 200,
     data: {},
@@ -41,7 +42,7 @@ describe('InfluxDBService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true with version from response headers (status 204)', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({
           status: 204,
           data: '',
@@ -57,7 +58,7 @@ describe('InfluxDBService', () => {
       expect(result.ok).toBe(true)
       expect(result.details).toContain('InfluxDB v2.7.1')
       expect(result.details).toContain('https://influxdb.local:8086')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/ping',
         expect.objectContaining({
           headers: { Authorization: 'Token my-secret-token' },
@@ -68,7 +69,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should return ok: true with version from response headers (status 200)', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({
           status: 200,
           data: '',
@@ -90,7 +91,7 @@ describe('InfluxDBService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('InfluxDB base URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when token is missing', async () => {
@@ -100,11 +101,11 @@ describe('InfluxDBService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('InfluxDB token not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when ping returns non-200/204', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 401 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 401 }))
 
       const result = await service.testConnection({
         baseUrl: 'https://influxdb.local:8086',
@@ -115,8 +116,8 @@ describe('InfluxDBService', () => {
       expect(result.details).toBe('InfluxDB returned status 401')
     })
 
-    it('should return ok: false when connectorFetch throws', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ECONNREFUSED'))
+    it('should return ok: false when fetch throws', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('ECONNREFUSED'))
 
       const result = await service.testConnection({
         baseUrl: 'https://influxdb.local:8086',
@@ -129,7 +130,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should return "Connection failed" when non-Error is thrown', async () => {
-      mockedConnectorFetch.mockRejectedValue({ code: 'UNKNOWN' })
+      mockAxiosService.fetch.mockRejectedValue({ code: 'UNKNOWN' })
 
       const result = await service.testConnection({
         baseUrl: 'https://influxdb.local:8086',
@@ -141,7 +142,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should use "unknown" version when header is absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 204, headers: {} }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 204, headers: {} }))
 
       const result = await service.testConnection({
         baseUrl: 'https://influxdb.local:8086',
@@ -153,7 +154,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should respect verifyTls setting', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 204 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 204 }))
 
       await service.testConnection({
         baseUrl: 'https://influxdb.local:8086',
@@ -161,7 +162,7 @@ describe('InfluxDBService', () => {
         verifyTls: false,
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/ping',
         expect.objectContaining({
           rejectUnauthorized: false,
@@ -177,7 +178,7 @@ describe('InfluxDBService', () => {
   describe('query', () => {
     it('should execute a Flux query and return CSV data', async () => {
       const csvData = ',result,table,_time,_value\n,,0,2024-01-01T00:00:00Z,42'
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: csvData }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: csvData }))
 
       const fluxQuery = 'from(bucket: "metrics") |> range(start: -1h)'
       const result = await service.query(
@@ -190,7 +191,7 @@ describe('InfluxDBService', () => {
       )
 
       expect(result).toBe(csvData)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/api/v2/query?org=my-org',
         expect.objectContaining({
           method: 'POST',
@@ -207,7 +208,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should use organization field when org is absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
 
       await service.query(
         {
@@ -218,14 +219,14 @@ describe('InfluxDBService', () => {
         'from(bucket: "b")'
       )
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/api/v2/query?org=alt-org',
         expect.objectContaining({ method: 'POST' })
       )
     })
 
     it('should use empty string for org when neither org nor organization is provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
 
       await service.query(
         {
@@ -235,14 +236,14 @@ describe('InfluxDBService', () => {
         'from(bucket: "b")'
       )
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/api/v2/query?org=',
         expect.objectContaining({ method: 'POST' })
       )
     })
 
     it('should throw when query returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 400 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 400 }))
 
       await expect(
         service.query(
@@ -253,13 +254,13 @@ describe('InfluxDBService', () => {
           },
           'invalid flux'
         )
-      ).rejects.toThrow('InfluxDB query failed: status 400')
+      ).rejects.toThrow('InfluxDB returned status 400')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('timeout'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('timeout'))
 
       await expect(
         service.query(
@@ -274,7 +275,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should URL-encode the org parameter', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: 'csv' }))
 
       await service.query(
         {
@@ -285,7 +286,7 @@ describe('InfluxDBService', () => {
         'from(bucket: "b")'
       )
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/api/v2/query?org=my%20org%2Fspecial',
         expect.objectContaining({ method: 'POST' })
       )
@@ -302,7 +303,7 @@ describe('InfluxDBService', () => {
         { id: '1', name: 'metrics', retentionRules: [] },
         { id: '2', name: 'logs', retentionRules: [] },
       ]
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: { buckets } }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: { buckets } }))
 
       const result = await service.getBuckets({
         baseUrl: 'https://influxdb.local:8086',
@@ -312,7 +313,7 @@ describe('InfluxDBService', () => {
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual(buckets[0])
       expect(result[1]).toEqual(buckets[1])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://influxdb.local:8086/api/v2/buckets',
         expect.objectContaining({
           headers: { Authorization: 'Token tok' },
@@ -323,7 +324,7 @@ describe('InfluxDBService', () => {
     })
 
     it('should return empty array when buckets field is absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: {} }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: {} }))
 
       const result = await service.getBuckets({
         baseUrl: 'https://influxdb.local:8086',
@@ -334,20 +335,20 @@ describe('InfluxDBService', () => {
     })
 
     it('should throw when API returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 403 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 403 }))
 
       await expect(
         service.getBuckets({
           baseUrl: 'https://influxdb.local:8086',
           token: 'bad-tok',
         })
-      ).rejects.toThrow('Failed to fetch buckets: status 403')
+      ).rejects.toThrow('InfluxDB returned status 403')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('DNS resolution failed'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('DNS resolution failed'))
 
       await expect(
         service.getBuckets({

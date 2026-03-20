@@ -7,6 +7,8 @@ import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../common/enums'
 import type {
   AlertTrend,
+  DashboardAnalyticsOverview,
+  DashboardOperationsOverview,
   DashboardSummary,
   MitreTopTechniques,
   PipelineHealth,
@@ -25,6 +27,18 @@ export class DashboardsController {
   @RequirePermission(Permission.DASHBOARD_VIEW)
   async getSummary(@TenantId() tenantId: string): Promise<DashboardSummary> {
     return this.dashboardsService.getSummary(tenantId)
+  }
+
+  @Get('analytics-overview')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
+  async getAnalyticsOverview(@TenantId() tenantId: string): Promise<DashboardAnalyticsOverview> {
+    return this.dashboardsService.getAnalyticsOverview(tenantId)
+  }
+
+  @Get('operations-overview')
+  @RequirePermission(Permission.DASHBOARD_VIEW)
+  async getOperationsOverview(@TenantId() tenantId: string): Promise<DashboardOperationsOverview> {
+    return this.dashboardsService.getOperationsOverview(tenantId)
   }
 
   @Get('alert-trend')

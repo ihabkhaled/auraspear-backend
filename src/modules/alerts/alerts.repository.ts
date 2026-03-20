@@ -113,6 +113,10 @@ export class AlertsRepository {
     })
   }
 
+  async create(data: Prisma.AlertUncheckedCreateInput): Promise<AlertRecord> {
+    return this.prisma.alert.create({ data })
+  }
+
   async countByTenantAndId(tenantId: string, id: string): Promise<number> {
     return this.prisma.alert.count({
       where: { id, tenantId },

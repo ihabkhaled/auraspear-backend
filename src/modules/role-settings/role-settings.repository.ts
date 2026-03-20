@@ -23,6 +23,18 @@ export class RoleSettingsRepository {
     })
   }
 
+  async hasPermissionByTenantAndRole(
+    tenantId: string,
+    role: UserRole,
+    permissionKey: string
+  ): Promise<boolean> {
+    const count = await this.prisma.rolePermission.count({
+      where: { tenantId, role, permissionKey },
+    })
+
+    return count > 0
+  }
+
   async upsertPermission(
     tenantId: string,
     role: UserRole,
@@ -68,6 +80,25 @@ export class RoleSettingsRepository {
         })
       )
     )
+  }
+
+  async bulkCreatePermissions(
+    tenantId: string,
+    entries: Array<{ role: UserRole; permissionKey: string; allowed: boolean }>
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return
+    }
+
+    await this.prisma.rolePermission.createMany({
+      data: entries.map(entry => ({
+        tenantId,
+        role: entry.role,
+        permissionKey: entry.permissionKey,
+        allowed: entry.allowed,
+      })),
+      skipDuplicates: true,
+    })
   }
 
   async countByTenant(tenantId: string): Promise<number> {
@@ -147,5 +178,13 @@ export class RoleSettingsRepository {
       : this.prisma.permissionDefinition.create({
           data: { tenantId, key, module, labelKey, sortOrder },
         }))
+  }
+
+  async hasPermissionDefinition(tenantId: string | null, key: string): Promise<boolean> {
+    const count = await this.prisma.permissionDefinition.count({
+      where: { tenantId, key },
+    })
+
+    return count > 0
   }
 }

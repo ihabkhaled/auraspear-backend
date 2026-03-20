@@ -1,12 +1,24 @@
 import { Injectable } from '@nestjs/common'
 import { RefreshTokenFamilyStatus, RefreshTokenRotationStatus } from '@prisma/client'
+import { RefreshTokenFamilyRevocationReason } from './auth.enums'
+import { UserSessionStatus } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import type {
+  CreateRefreshTokenFamilyInput,
+  CreateRefreshTokenRotationInput,
+  CreateUserSessionInput,
+  RefreshTokenFamilyWithSession,
+  RotateRefreshTokenFamilyInput,
+  TouchUserSessionInput,
+} from './auth.types'
 import type { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
 import type {
+  Prisma,
   RefreshTokenFamily,
   RefreshTokenRotation,
   TenantMembership,
   User,
+  UserSession,
   UserRole as PrismaUserRole,
 } from '@prisma/client'
 
@@ -150,13 +162,7 @@ export class AuthRepository {
     })
   }
 
-  async createRefreshTokenFamily(data: {
-    id: string
-    userId: string
-    tenantId: string
-    currentGeneration: number
-    expiresAt: Date
-  }): Promise<RefreshTokenFamily> {
+  async createRefreshTokenFamily(data: CreateRefreshTokenFamilyInput): Promise<RefreshTokenFamily> {
     return this.prisma.refreshTokenFamily.create({
       data: {
         id: data.id,
@@ -168,13 +174,9 @@ export class AuthRepository {
     })
   }
 
-  async createRefreshTokenRotation(data: {
-    familyId: string
-    generation: number
-    jtiHash: string
-    expiresAt: Date
-    parentRotationId?: string
-  }): Promise<RefreshTokenRotation> {
+  async createRefreshTokenRotation(
+    data: CreateRefreshTokenRotationInput
+  ): Promise<RefreshTokenRotation> {
     return this.prisma.refreshTokenRotation.create({
       data: {
         familyId: data.familyId,
@@ -201,15 +203,74 @@ export class AuthRepository {
     })
   }
 
-  async rotateRefreshTokenFamily(data: {
-    familyId: string
-    expectedGeneration: number
-    previousRotationId: string
-    nextJtiHash: string
-    nextExpiresAt: Date
-    nextGeneration: number
-    rotatedAt: Date
-  }): Promise<{
+  async findRefreshTokenFamilyWithSessionById(
+    id: string
+  ): Promise<RefreshTokenFamilyWithSession | null> {
+    return this.prisma.refreshTokenFamily.findUnique({
+      where: { id },
+      include: { session: true },
+    }) as Promise<RefreshTokenFamilyWithSession | null>
+  }
+
+  async createUserSession(data: CreateUserSessionInput): Promise<UserSession> {
+    return this.prisma.userSession.create({
+      data: {
+        familyId: data.familyId,
+        userId: data.userId,
+        tenantId: data.tenantId,
+        osFamily: data.context.osFamily,
+        clientType: data.context.clientType,
+        ipAddress: data.context.ipAddress,
+        userAgent: data.context.userAgent,
+        currentAccessJti: data.currentAccessJti,
+        currentAccessExpiresAt: data.currentAccessExpiresAt,
+        lastSeenAt: data.lastLoginAt,
+        lastLoginAt: data.lastLoginAt,
+      },
+    })
+  }
+
+  async findUserSessionByFamilyId(familyId: string): Promise<UserSession | null> {
+    return this.prisma.userSession.findUnique({
+      where: { familyId },
+    })
+  }
+
+  async touchUserSession(data: TouchUserSessionInput): Promise<number> {
+    const updateData: Prisma.UserSessionUpdateManyMutationInput = {
+      lastSeenAt: data.touchedAt,
+      osFamily: data.context.osFamily,
+      clientType: data.context.clientType,
+    }
+
+    if (data.context.ipAddress !== null) {
+      updateData.ipAddress = data.context.ipAddress
+    }
+
+    if (data.context.userAgent !== null) {
+      updateData.userAgent = data.context.userAgent
+    }
+
+    if (data.currentAccessJti !== undefined) {
+      updateData.currentAccessJti = data.currentAccessJti
+    }
+
+    if (data.currentAccessExpiresAt !== undefined) {
+      updateData.currentAccessExpiresAt = data.currentAccessExpiresAt
+    }
+
+    const result = await this.prisma.userSession.updateMany({
+      where: {
+        familyId: data.familyId,
+        status: UserSessionStatus.ACTIVE,
+      },
+      data: updateData,
+    })
+
+    return result.count
+  }
+
+  async rotateRefreshTokenFamily(data: RotateRefreshTokenFamilyInput): Promise<{
     familyAdvanceCount: number
     newRotation: RefreshTokenRotation | null
   }> {
@@ -223,6 +284,7 @@ export class AuthRepository {
         data: {
           currentGeneration: data.nextGeneration,
           expiresAt: data.nextExpiresAt,
+          tenantId: data.tenantId,
         },
       })
 
@@ -246,6 +308,22 @@ export class AuthRepository {
           },
         })
 
+        await tx.userSession.updateMany({
+          where: {
+            familyId: data.familyId,
+            status: UserSessionStatus.ACTIVE,
+          },
+          data: {
+            lastSeenAt: data.rotatedAt,
+            osFamily: data.context.osFamily,
+            clientType: data.context.clientType,
+            ipAddress: data.context.ipAddress,
+            userAgent: data.context.userAgent,
+            currentAccessJti: data.currentAccessJti,
+            currentAccessExpiresAt: data.currentAccessExpiresAt,
+          },
+        })
+
         return {
           familyAdvanceCount: familyAdvance.count,
           newRotation,
@@ -263,7 +341,8 @@ export class AuthRepository {
     familyId: string,
     revokedReason: string,
     revokedAt: Date,
-    replayedRotationId?: string
+    replayedRotationId?: string,
+    revokedByUserId?: string
   ): Promise<void> {
     await this.prisma.$transaction(async tx => {
       await tx.refreshTokenFamily.updateMany({
@@ -299,18 +378,50 @@ export class AuthRepository {
           },
         })
       }
+
+      const sessionData: Prisma.UserSessionUpdateManyMutationInput = {
+        status: UserSessionStatus.REVOKED,
+        revokedAt,
+        revokeReason: revokedReason,
+      }
+
+      if (revokedByUserId !== undefined) {
+        sessionData.revokedByUserId = revokedByUserId
+      }
+
+      await tx.userSession.updateMany({
+        where: {
+          familyId,
+          status: UserSessionStatus.ACTIVE,
+        },
+        data: sessionData,
+      })
     })
   }
 
   async expireRefreshTokenFamily(familyId: string): Promise<void> {
-    await this.prisma.refreshTokenFamily.updateMany({
-      where: {
-        id: familyId,
-        status: RefreshTokenFamilyStatus.active,
-      },
-      data: {
-        status: RefreshTokenFamilyStatus.expired,
-      },
+    await this.prisma.$transaction(async tx => {
+      await tx.refreshTokenFamily.updateMany({
+        where: {
+          id: familyId,
+          status: RefreshTokenFamilyStatus.active,
+        },
+        data: {
+          status: RefreshTokenFamilyStatus.expired,
+          revokedReason: RefreshTokenFamilyRevocationReason.EXPIRED,
+        },
+      })
+
+      await tx.userSession.updateMany({
+        where: {
+          familyId,
+          status: UserSessionStatus.ACTIVE,
+        },
+        data: {
+          status: UserSessionStatus.EXPIRED,
+          revokeReason: RefreshTokenFamilyRevocationReason.EXPIRED,
+        },
+      })
     })
   }
 }

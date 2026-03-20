@@ -27,9 +27,16 @@ import {
   SoarExecutionStatus,
   ComplianceStandard,
   ComplianceControlStatus,
+  DashboardDensity,
+  DashboardPanelKey,
+  UserSessionClientType,
+  UserSessionOsFamily,
+  UserSessionStatus,
   ReportType,
   ReportFormat,
+  ReportModule,
   ReportStatus,
+  ReportTemplateKey,
   ServiceType,
   ServiceStatus,
   MetricType,
@@ -55,7 +62,7 @@ import {
   CONFIGURABLE_ROLES,
 } from '../src/modules/role-settings/constants/default-permissions'
 import { PERMISSION_DEFINITIONS } from '../src/modules/role-settings/constants/permission-definitions'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import pino from 'pino'
 import { encrypt } from '../src/common/utils/encryption.utility'
 
@@ -78,6 +85,117 @@ function requireEnv(name: string): string {
 
 const DEFAULT_PASSWORD: string = requireEnv('SEED_DEFAULT_PASSWORD')
 const BCRYPT_ROUNDS = 12
+const DEFAULT_DASHBOARD_DENSITY = DashboardDensity.comfortable
+const DEFAULT_COLLAPSED_DASHBOARD_PANELS = [
+  DashboardPanelKey.mitre_techniques,
+  DashboardPanelKey.targeted_assets,
+]
+
+function buildDeterministicUuid(seed: string): string {
+  const hash = createHash('sha256').update(seed).digest('hex')
+
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+}
+
+function buildDeterministicJtiHash(seed: string): string {
+  return createHash('sha256').update(seed).digest('hex')
+}
+
+async function seedUserSession(
+  userId: string,
+  tenantId: string,
+  userKey: string,
+  sessionKey: string,
+  osFamily: UserSessionOsFamily,
+  clientType: UserSessionClientType,
+  ipAddress: string,
+  userAgent: string,
+  lastLoginAt: Date,
+  lastSeenAt: Date
+): Promise<void> {
+  const familyId = buildDeterministicUuid(`family:${tenantId}:${userId}:${sessionKey}`)
+  const currentAccessJti = buildDeterministicUuid(`access:${tenantId}:${userKey}:${sessionKey}`)
+  const currentAccessExpiresAt = new Date(lastSeenAt.getTime() + 15 * 60 * 1000)
+  const refreshExpiresAt = new Date(lastLoginAt.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const jtiHash = buildDeterministicJtiHash(`rotation:${tenantId}:${userKey}:${sessionKey}`)
+
+  await prisma.refreshTokenFamily.upsert({
+    where: { id: familyId },
+    update: {
+      userId,
+      tenantId,
+      currentGeneration: 0,
+      status: 'active',
+      revokedAt: null,
+      revokedReason: null,
+      expiresAt: refreshExpiresAt,
+    },
+    create: {
+      id: familyId,
+      userId,
+      tenantId,
+      currentGeneration: 0,
+      expiresAt: refreshExpiresAt,
+    },
+  })
+
+  await prisma.refreshTokenRotation.upsert({
+    where: {
+      familyId_generation: {
+        familyId,
+        generation: 0,
+      },
+    },
+    update: {
+      jtiHash,
+      status: 'active',
+      expiresAt: refreshExpiresAt,
+      usedAt: null,
+      replacedAt: null,
+      replayedAt: null,
+    },
+    create: {
+      familyId,
+      generation: 0,
+      jtiHash,
+      expiresAt: refreshExpiresAt,
+    },
+  })
+
+  await prisma.userSession.upsert({
+    where: { familyId },
+    update: {
+      userId,
+      tenantId,
+      status: UserSessionStatus.ACTIVE,
+      osFamily,
+      clientType,
+      ipAddress,
+      userAgent,
+      currentAccessJti,
+      currentAccessExpiresAt,
+      lastLoginAt,
+      lastSeenAt,
+      revokedAt: null,
+      revokedByUserId: null,
+      revokeReason: null,
+    },
+    create: {
+      familyId,
+      userId,
+      tenantId,
+      status: UserSessionStatus.ACTIVE,
+      osFamily,
+      clientType,
+      ipAddress,
+      userAgent,
+      currentAccessJti,
+      currentAccessExpiresAt,
+      lastLoginAt,
+      lastSeenAt,
+    },
+  })
+}
 
 // Connector credentials — read from environment variables with obviously-fake fallbacks.
 // In production, always set real values via environment variables.
@@ -4327,6 +4445,132 @@ async function seedCompliance(tenantId: string, tenantSlug: string): Promise<voi
 
 // ─── 9. Reports ───────────────────────────────────────────────
 
+async function seedReportTemplates(): Promise<void> {
+  const templates = [
+    {
+      id: '00000000-0000-4000-a000-000000000901',
+      key: ReportTemplateKey.executive_overview,
+      module: ReportModule.dashboard,
+      name: 'Executive Overview Pack',
+      description: 'Executive posture snapshot with weekly highlights and KPI rollups.',
+      type: ReportType.executive,
+      defaultFormat: ReportFormat.pdf,
+      parameters: {
+        timeWindow: 'last_30_days',
+        includeNarrative: true,
+        includeCharts: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000902',
+      key: ReportTemplateKey.incident_posture,
+      module: ReportModule.incidents,
+      name: 'Incident Posture Report',
+      description: 'Incident workload, containment progress, and responder throughput.',
+      type: ReportType.incident,
+      defaultFormat: ReportFormat.pdf,
+      parameters: {
+        timeWindow: 'last_14_days',
+        includeTimeline: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000903',
+      key: ReportTemplateKey.threat_exposure,
+      module: ReportModule.alerts,
+      name: 'Threat Exposure Report',
+      description: 'Alert severity mix, MITRE coverage, and targeted asset exposure.',
+      type: ReportType.threat,
+      defaultFormat: ReportFormat.pdf,
+      parameters: {
+        timeWindow: 'last_7_days',
+        includeMitreCoverage: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000904',
+      key: ReportTemplateKey.vulnerability_exposure,
+      module: ReportModule.vulnerabilities,
+      name: 'Vulnerability Exposure Report',
+      description: 'Critical and high severity exposure, patch posture, and exploit availability.',
+      type: ReportType.custom,
+      defaultFormat: ReportFormat.html,
+      parameters: {
+        includePatchStatus: true,
+        includeExploitAvailability: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000905',
+      key: ReportTemplateKey.compliance_posture,
+      module: ReportModule.compliance,
+      name: 'Compliance Posture Report',
+      description: 'Framework health, failed controls, and evidence readiness summary.',
+      type: ReportType.compliance,
+      defaultFormat: ReportFormat.pdf,
+      parameters: {
+        includeControlBreakdown: true,
+        includeEvidenceGaps: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000906',
+      key: ReportTemplateKey.automation_health,
+      module: ReportModule.soar,
+      name: 'Automation Health Report',
+      description: 'AI agents, SOAR activity, and job pipeline runtime status.',
+      type: ReportType.custom,
+      defaultFormat: ReportFormat.pdf,
+      parameters: {
+        includeAiSessions: true,
+        includeJobBacklog: true,
+      } as Prisma.InputJsonValue,
+    },
+    {
+      id: '00000000-0000-4000-a000-000000000907',
+      key: ReportTemplateKey.connector_health,
+      module: ReportModule.connectors,
+      name: 'Connector Health Report',
+      description: 'Connector runtime status, failures, and synchronization readiness.',
+      type: ReportType.custom,
+      defaultFormat: ReportFormat.csv,
+      parameters: {
+        includeLastCheck: true,
+        includeErrors: true,
+      } as Prisma.InputJsonValue,
+    },
+  ]
+
+  for (const template of templates) {
+    await prisma.reportTemplate.upsert({
+      where: { id: template.id },
+      update: {
+        key: template.key,
+        module: template.module,
+        name: template.name,
+        description: template.description,
+        type: template.type,
+        defaultFormat: template.defaultFormat,
+        parameters: template.parameters,
+        isSystem: true,
+      },
+      create: {
+        id: template.id,
+        key: template.key,
+        module: template.module,
+        name: template.name,
+        description: template.description,
+        type: template.type,
+        defaultFormat: template.defaultFormat,
+        parameters: template.parameters,
+        isSystem: true,
+      },
+    })
+  }
+
+  logger.info({ count: templates.length }, 'Seeded report templates')
+}
+
 async function seedReports(tenantId: string, tenantSlug: string): Promise<void> {
   try {
     const existingCount = await prisma.report.count({ where: { tenantId } })
@@ -4335,10 +4579,18 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       return
     }
 
+    const reportTemplates = await prisma.reportTemplate.findMany({
+      where: { tenantId: null, isSystem: true },
+      select: { id: true, key: true },
+    })
+    const reportTemplateMap = new Map(reportTemplates.map(template => [template.key, template.id]))
+
     const reports = [
       {
         name: 'Weekly Executive Summary — W10 2025',
         type: ReportType.executive,
+        module: ReportModule.dashboard,
+        templateKey: ReportTemplateKey.executive_overview,
         format: ReportFormat.pdf,
         status: ReportStatus.completed,
         fileSize: BigInt(245000),
@@ -4346,6 +4598,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Monthly Compliance Report — Feb 2025',
         type: ReportType.compliance,
+        module: ReportModule.compliance,
+        templateKey: ReportTemplateKey.compliance_posture,
         format: ReportFormat.pdf,
         status: ReportStatus.completed,
         fileSize: BigInt(1250000),
@@ -4353,6 +4607,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Incident Report — Ransomware INC-2025-0001',
         type: ReportType.incident,
+        module: ReportModule.incidents,
+        templateKey: ReportTemplateKey.incident_posture,
         format: ReportFormat.pdf,
         status: ReportStatus.completed,
         fileSize: BigInt(890000),
@@ -4360,6 +4616,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Quarterly Threat Landscape Q1 2025',
         type: ReportType.threat,
+        module: ReportModule.alerts,
+        templateKey: ReportTemplateKey.threat_exposure,
         format: ReportFormat.pdf,
         status: ReportStatus.completed,
         fileSize: BigInt(2100000),
@@ -4367,6 +4625,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Alert Export — March 2025',
         type: ReportType.custom,
+        module: ReportModule.connectors,
+        templateKey: ReportTemplateKey.connector_health,
         format: ReportFormat.csv,
         status: ReportStatus.completed,
         fileSize: BigInt(456000),
@@ -4374,6 +4634,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Vulnerability Assessment Report',
         type: ReportType.custom,
+        module: ReportModule.vulnerabilities,
+        templateKey: ReportTemplateKey.vulnerability_exposure,
         format: ReportFormat.html,
         status: ReportStatus.generating,
         fileSize: null,
@@ -4381,6 +4643,8 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
       {
         name: 'Weekly Executive Summary — W11 2025',
         type: ReportType.executive,
+        module: ReportModule.dashboard,
+        templateKey: ReportTemplateKey.executive_overview,
         format: ReportFormat.pdf,
         status: ReportStatus.failed,
         fileSize: null,
@@ -4401,13 +4665,21 @@ async function seedReports(tenantId: string, tenantSlug: string): Promise<void> 
         await prisma.report.create({
           data: {
             tenantId,
+            templateId: reportTemplateMap.get(r.templateKey) ?? null,
             name: r.name,
             description: `Auto-generated ${r.type} report for ${tenantSlug}.`,
             type: r.type,
+            module: r.module,
+            templateKey: r.templateKey,
             format: r.format,
             status: r.status,
             generatedBy: `admin@${tenantSlug}.io`,
             parameters: { dateRange: 'last_30_days', includeCharts: true } as Prisma.InputJsonValue,
+            filterSnapshot: {
+              tenant: tenantSlug,
+              module: r.module,
+              source: 'seed',
+            } as Prisma.InputJsonValue,
             fileUrl:
               r.status === ReportStatus.completed
                 ? `/reports/${tenantSlug}/${r.name.toLowerCase().split(' ').join('-')}.${r.format}`
@@ -4896,9 +5168,7 @@ async function seedDetectionRules(tenantId: string, tenantSlug: string): Promise
     ]
 
     for (let i = 0; i < rules.length; i++) {
-      globalDetectionRuleCounter++
       const r = rules[i]!
-      const ruleNumber = `DR-${year}-${String(globalDetectionRuleCounter).padStart(4, '0')}`
 
       const description = `Detection rule: ${r.name}. Type: ${r.ruleType}. Monitors for security events matching configured conditions.`
       const conditions =
@@ -4924,6 +5194,33 @@ async function seedDetectionRules(tenantId: string, tenantSlug: string): Promise
         channels: ['siem', 'slack'],
       } as Prisma.InputJsonValue
       const lastTriggeredAt = r.hitCount > 0 ? randomDate(3) : null
+
+      const existingRule = await prisma.detectionRule.findFirst({
+        where: { tenantId, name: r.name },
+        select: { id: true, ruleNumber: true },
+      })
+
+      if (existingRule) {
+        await prisma.detectionRule.update({
+          where: { id: existingRule.id },
+          data: {
+            description,
+            ruleType: r.ruleType,
+            severity: r.severity,
+            status: r.status,
+            conditions,
+            actions,
+            hitCount: r.hitCount,
+            falsePositiveCount: r.fpCount,
+            lastTriggeredAt,
+            createdBy: `analyst.l2@${tenantSlug}.io`,
+          },
+        })
+        continue
+      }
+
+      globalDetectionRuleCounter++
+      const ruleNumber = `DR-${year}-${String(globalDetectionRuleCounter).padStart(4, '0')}`
 
       await prisma.detectionRule.upsert({
         where: { ruleNumber },
@@ -5477,6 +5774,7 @@ async function main(): Promise<void> {
 
   // Seed permission definitions (global, not per-tenant)
   await seedPermissionDefinitions()
+  await seedReportTemplates()
 
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, BCRYPT_ROUNDS)
 
@@ -5499,10 +5797,25 @@ async function main(): Promise<void> {
       userId: platformAdmin.id,
       theme: 'system',
       language: 'en',
+      dashboardDensity: DEFAULT_DASHBOARD_DENSITY,
+      collapsedDashboardPanels: DEFAULT_COLLAPSED_DASHBOARD_PANELS,
       notificationsEmail: true,
       notificationsInApp: true,
     },
   })
+
+  await seedUserSession(
+    platformAdmin.id,
+    TENANT_PROFILES[0]?.id ?? '00000000-0000-4000-a000-000000000001',
+    'platform-admin',
+    'desktop',
+    UserSessionOsFamily.MACOS,
+    UserSessionClientType.DESKTOP,
+    '10.99.0.10',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
+    new Date(Date.now() - 15 * 60 * 1000),
+    new Date(Date.now() - 2 * 60 * 1000)
+  )
 
   // Create GLOBAL_ADMIN membership for every tenant
   for (const profile of TENANT_PROFILES) {
@@ -5629,8 +5942,9 @@ async function main(): Promise<void> {
         },
       ]
 
-      for (const userDef of userDefs) {
+      for (const [userIndex, userDef] of userDefs.entries()) {
         const isProtected = userDef.role === UserRole.TENANT_ADMIN
+        const seededLastLoginAt = new Date(Date.now() - (userIndex + 1) * 45 * 60 * 1000)
 
         const createdUser = await prisma.user.upsert({
           where: { email: userDef.email },
@@ -5639,6 +5953,7 @@ async function main(): Promise<void> {
             oidcSub: userDef.oidcSub,
             passwordHash,
             isProtected,
+            lastLoginAt: seededLastLoginAt,
           },
           create: {
             email: userDef.email,
@@ -5646,6 +5961,7 @@ async function main(): Promise<void> {
             oidcSub: userDef.oidcSub,
             passwordHash,
             isProtected,
+            lastLoginAt: seededLastLoginAt,
           },
         })
 
@@ -5669,6 +5985,8 @@ async function main(): Promise<void> {
             userId: createdUser.id,
             theme: 'system',
             language: 'en',
+            dashboardDensity: DEFAULT_DASHBOARD_DENSITY,
+            collapsedDashboardPanels: DEFAULT_COLLAPSED_DASHBOARD_PANELS,
             notificationsEmail: true,
             notificationsInApp: true,
           },
@@ -5678,6 +5996,34 @@ async function main(): Promise<void> {
           { tenant: profile.slug, email: userDef.email, role: userDef.role },
           'Seeded user'
         )
+
+        await seedUserSession(
+          createdUser.id,
+          tenantId,
+          userDef.oidcSub,
+          'desktop',
+          UserSessionOsFamily.WINDOWS,
+          UserSessionClientType.DESKTOP,
+          `10.10.${userIndex + 10}.15`,
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36',
+          seededLastLoginAt,
+          new Date(Date.now() - (userIndex + 1) * 6 * 60 * 1000)
+        )
+
+        if (userDef.role === UserRole.TENANT_ADMIN || userDef.role === UserRole.SOC_ANALYST_L2) {
+          await seedUserSession(
+            createdUser.id,
+            tenantId,
+            userDef.oidcSub,
+            'mobile',
+            UserSessionOsFamily.ANDROID,
+            UserSessionClientType.MOBILE,
+            `10.20.${userIndex + 20}.25`,
+            'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36',
+            new Date(seededLastLoginAt.getTime() - 2 * 60 * 60 * 1000),
+            new Date(Date.now() - (userIndex + 1) * 18 * 60 * 1000)
+          )
+        }
       }
 
       // Collect user IDs that can be assigned cases (analysts, hunters, admins — not execs)

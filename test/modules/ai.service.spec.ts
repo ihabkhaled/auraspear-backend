@@ -22,6 +22,14 @@ const mockBedrockService = {
   invoke: jest.fn(),
 }
 
+const mockLlmApisService = {
+  invoke: jest.fn(),
+}
+
+const mockOpenClawGatewayService = {
+  invoke: jest.fn(),
+}
+
 const mockUser: JwtPayload = {
   sub: 'user-1',
   tenantId: 'tenant-1',
@@ -30,9 +38,15 @@ const mockUser: JwtPayload = {
   tenantSlug: 'test-tenant',
 }
 
+const ENABLED_CONNECTOR = {
+  id: 'conn-1',
+  type: 'bedrock',
+  enabled: true,
+}
+
 function createMockRepository() {
   return {
-    findEnabledConnectorByType: jest.fn(),
+    findEnabledConnectorByTypes: jest.fn().mockResolvedValue([]),
     createAuditLog: jest.fn(),
     findAlertByIdAndTenant: jest.fn(),
     findRelatedAlerts: jest.fn().mockResolvedValue([]),
@@ -44,7 +58,9 @@ function createService(repository: ReturnType<typeof createMockRepository>) {
     repository as never,
     mockAppLogger as never,
     mockConnectorsService as never,
-    mockBedrockService as never
+    mockBedrockService as never,
+    mockLlmApisService as never,
+    mockOpenClawGatewayService as never
   )
 }
 
@@ -55,6 +71,8 @@ describe('AiService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockConnectorsService.getDecryptedConfig.mockResolvedValue(null)
+    mockLlmApisService.invoke.mockReset()
+    mockOpenClawGatewayService.invoke.mockReset()
     repository = createMockRepository()
     service = createService(repository)
   })
@@ -65,11 +83,7 @@ describe('AiService', () => {
 
   describe('aiHunt', () => {
     it('should return response with reasoning array and confidence', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'detect lateral movement' }, mockUser)
@@ -85,7 +99,7 @@ describe('AiService', () => {
     })
 
     it('should throw 403 when Bedrock connector not enabled', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue(null)
+      repository.findEnabledConnectorByTypes.mockResolvedValue([])
 
       await expect(service.aiHunt({ query: 'detect lateral movement' }, mockUser)).rejects.toThrow(
         BusinessException
@@ -100,11 +114,7 @@ describe('AiService', () => {
     })
 
     it('should generate hunt-specific response for brute force queries', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'brute force attacks on login' }, mockUser)
@@ -114,11 +124,7 @@ describe('AiService', () => {
     })
 
     it('should generate hunt-specific response for C2 queries', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'detect C2 beacon traffic' }, mockUser)
@@ -128,11 +134,7 @@ describe('AiService', () => {
     })
 
     it('should generate generic response for unrecognized queries', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiHunt({ query: 'unusual network patterns' }, mockUser)
@@ -142,11 +144,7 @@ describe('AiService', () => {
     })
 
     it('should log audit record after successful hunt', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiHunt({ query: 'test query' }, mockUser)
@@ -164,11 +162,7 @@ describe('AiService', () => {
     })
 
     it('should handle audit log failure gracefully without throwing', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockRejectedValue(new Error('Table not found'))
 
       // Should not throw even if audit logging fails
@@ -204,11 +198,7 @@ describe('AiService', () => {
     }
 
     it('should return investigation response', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
       repository.createAuditLog.mockResolvedValue(undefined)
 
@@ -226,7 +216,7 @@ describe('AiService', () => {
     })
 
     it('should throw 403 when AI not enabled', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue(null)
+      repository.findEnabledConnectorByTypes.mockResolvedValue([])
 
       await expect(service.aiInvestigate(dto, mockUser)).rejects.toThrow(BusinessException)
 
@@ -239,11 +229,7 @@ describe('AiService', () => {
     })
 
     it('should throw 404 when alert not found', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.findAlertByIdAndTenant.mockResolvedValue(null)
 
       await expect(service.aiInvestigate(dto, mockUser)).rejects.toThrow(BusinessException)
@@ -257,11 +243,7 @@ describe('AiService', () => {
     })
 
     it('should validate alert belongs to the caller tenant', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
       repository.createAuditLog.mockResolvedValue(undefined)
 
@@ -271,11 +253,7 @@ describe('AiService', () => {
     })
 
     it('should log audit record after investigation', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.findAlertByIdAndTenant.mockResolvedValue(mockAlert)
       repository.createAuditLog.mockResolvedValue(undefined)
 
@@ -299,28 +277,24 @@ describe('AiService', () => {
   describe('aiExplain', () => {
     const body = { prompt: 'Explain MITRE T1059 technique' }
 
-    it('should return explanation response with confidence 0.95', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+    it('should return explanation response with fallback confidence', async () => {
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiExplain(body, mockUser)
 
       expect(result.result).toContain('Explainable AI Analysis')
       expect(result.result).toContain('Explain MITRE T1059 technique')
-      expect(result.confidence).toBe(0.95)
-      expect(result.model).toBe('anthropic.claude-3-sonnet')
+      expect(result.confidence).toBe(0.85)
+      expect(result.model).toBe('rule-based')
       expect(Array.isArray(result.reasoning)).toBe(true)
       expect(result.reasoning.length).toBeGreaterThan(0)
-      expect(result.tokensUsed.input).toBe(892)
-      expect(result.tokensUsed.output).toBe(1654)
+      expect(result.tokensUsed.input).toBe(0)
+      expect(result.tokensUsed.output).toBe(0)
     })
 
     it('should throw 403 when AI not enabled', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue(null)
+      repository.findEnabledConnectorByTypes.mockResolvedValue([])
 
       await expect(service.aiExplain(body, mockUser)).rejects.toThrow(BusinessException)
 
@@ -333,11 +307,7 @@ describe('AiService', () => {
     })
 
     it('should log audit record after explanation', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       await service.aiExplain(body, mockUser)
@@ -347,19 +317,15 @@ describe('AiService', () => {
           tenantId: 'tenant-1',
           actor: 'user-1',
           action: 'ai_explain',
-          model: 'anthropic.claude-3-sonnet',
-          inputTokens: 892,
-          outputTokens: 1654,
+          model: 'rule-based',
+          inputTokens: 0,
+          outputTokens: 0,
         })
       )
     })
 
     it('should include reasoning steps in the response', async () => {
-      repository.findEnabledConnectorByType.mockResolvedValue({
-        id: 'conn-1',
-        type: 'bedrock',
-        enabled: true,
-      })
+      repository.findEnabledConnectorByTypes.mockResolvedValue([ENABLED_CONNECTOR])
       repository.createAuditLog.mockResolvedValue(undefined)
 
       const result = await service.aiExplain(body, mockUser)
@@ -369,7 +335,9 @@ describe('AiService', () => {
     })
 
     it('should throw 503 when ensureAiEnabled encounters an unexpected error', async () => {
-      repository.findEnabledConnectorByType.mockRejectedValue(new Error('Database connection lost'))
+      repository.findEnabledConnectorByTypes.mockRejectedValue(
+        new Error('Database connection lost')
+      )
 
       try {
         await service.aiExplain(body, mockUser)

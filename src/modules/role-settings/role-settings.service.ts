@@ -19,6 +19,10 @@ import { UserRole as UserRoleEnum } from '../../common/interfaces/authenticated-
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PermissionUpdateReason } from '../notifications/notifications.enums'
 import { NotificationsService } from '../notifications/notifications.service'
+import {
+  USERS_CONTROL_ASSIGNABLE_ROLES,
+  USERS_CONTROL_PERMISSION_KEYS,
+} from '../users-control/users-control.constants'
 import type { UserRole } from '@prisma/client'
 
 @Injectable()
@@ -81,6 +85,64 @@ export class RoleSettingsService {
     )
   }
 
+  private buildDefaultAllowedPermissionEntries(): Array<{
+    role: UserRole
+    permissionKey: string
+    allowed: boolean
+  }> {
+    const entries: Array<{ role: UserRole; permissionKey: string; allowed: boolean }> = []
+
+    for (const role of CONFIGURABLE_ROLES) {
+      const permissions = (Reflect.get(DEFAULT_PERMISSIONS, role) as string[] | undefined) ?? []
+
+      for (const permissionKey of permissions) {
+        entries.push({
+          role: role as UserRole,
+          permissionKey,
+          allowed: true,
+        })
+      }
+    }
+
+    return entries
+  }
+
+  private async ensurePermissionDefinitionsInitialized(): Promise<void> {
+    const definitionChecks = await Promise.all(
+      USERS_CONTROL_PERMISSION_KEYS.map(permissionKey =>
+        this.repository.hasPermissionDefinition(null, permissionKey)
+      )
+    )
+
+    if (definitionChecks.every(Boolean)) {
+      return
+    }
+
+    await this.seedPermissionDefinitions()
+  }
+
+  private async ensureTenantDefaultPermissionsInitialized(tenantId: string): Promise<void> {
+    const permissionChecks = await Promise.all(
+      USERS_CONTROL_PERMISSION_KEYS.map(permissionKey =>
+        this.repository.hasPermissionByTenantAndRole(
+          tenantId,
+          UserRoleEnum.TENANT_ADMIN as UserRole,
+          permissionKey
+        )
+      )
+    )
+
+    if (permissionChecks.every(Boolean)) {
+      return
+    }
+
+    await this.repository.bulkCreatePermissions(
+      tenantId,
+      this.buildDefaultAllowedPermissionEntries()
+    )
+    this.cache.invalidate(tenantId)
+  }
+
   private async assertProtectedRoleSettingsPermissionsUnchanged(
     tenantId: string,
     matrix: Record<string, string[]>,
@@ -120,6 +182,30 @@ export class RoleSettingsService {
     }
   }
 
+  private assertUsersControlPermissionsRestrictedToAllowedRoles(
+    matrix: Record<string, string[]>
+  ): void {
+    const requestedMatrixMap = this.toPermissionMatrixMap(matrix)
+    const allowedRoles = new Set<string>(USERS_CONTROL_ASSIGNABLE_ROLES)
+
+    for (const role of CONFIGURABLE_ROLES) {
+      if (allowedRoles.has(role)) {
+        continue
+      }
+
+      const requestedPermissions = new Set(requestedMatrixMap.get(role) ?? [])
+      for (const permission of USERS_CONTROL_PERMISSION_KEYS) {
+        if (requestedPermissions.has(permission)) {
+          throw new BusinessException(
+            400,
+            'Users control permissions are restricted to global administrators or tenant administrators',
+            'errors.roleSettings.usersControlRestrictedRole'
+          )
+        }
+      }
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* GET CONFIGURABLE ROLES                                            */
   /* ---------------------------------------------------------------- */
@@ -133,6 +219,7 @@ export class RoleSettingsService {
   /* ---------------------------------------------------------------- */
 
   async getPermissionMatrix(tenantId: string): Promise<Record<string, string[]>> {
+    await this.ensureTenantDefaultPermissionsInitialized(tenantId)
     const records = await this.repository.findPermissionsByTenant(tenantId)
 
     const matrix = new Map<string, string[]>()
@@ -164,6 +251,7 @@ export class RoleSettingsService {
   ): Promise<Record<string, string[]>> {
     const currentMatrix = await this.getPermissionMatrix(tenantId)
     await this.assertProtectedRoleSettingsPermissionsUnchanged(tenantId, matrix, actorRole)
+    this.assertUsersControlPermissionsRestrictedToAllowedRoles(matrix)
 
     // Escalation prevention: non-GLOBAL_ADMIN users can only grant permissions they themselves have
     if (actorRole !== UserRoleEnum.GLOBAL_ADMIN) {
@@ -322,10 +410,7 @@ export class RoleSettingsService {
     const tenantIds = await this.repository.findAllTenantIds()
 
     const seedPromises = tenantIds.map(async tenantId => {
-      const count = await this.repository.countByTenant(tenantId)
-      if (count === 0) {
-        await this.seedDefaultsForTenant(tenantId)
-      }
+      await this.ensureTenantDefaultPermissionsInitialized(tenantId)
     })
     await Promise.all(seedPromises)
 
@@ -344,6 +429,7 @@ export class RoleSettingsService {
     tenantId: string,
     actorRole?: string
   ): Promise<Array<{ key: string; module: string; labelKey: string; sortOrder: number }>> {
+    await this.ensurePermissionDefinitionsInitialized()
     const definitions = await this.repository.findPermissionDefinitions(tenantId)
 
     if (actorRole === UserRoleEnum.TENANT_ADMIN) {

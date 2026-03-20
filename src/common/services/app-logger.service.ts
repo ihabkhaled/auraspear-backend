@@ -56,17 +56,47 @@ export class AppLoggerService {
 
   private formatLogMessage(message: string, context: AppLogContext): string {
     const parts = [`${context.feature} => ${message}`]
+    if (context.action) {
+      parts.push(`action=${context.action}`)
+    }
+    if (context.outcome) {
+      parts.push(`outcome=${context.outcome}`)
+    }
+    if (context.className) {
+      parts.push(`class=${context.className}`)
+    }
+    if (context.functionName) {
+      parts.push(`fn=${context.functionName}`)
+    }
     if (context.actorEmail) {
       parts.push(`actorEmail=${context.actorEmail}`)
     }
     if (context.tenantId) {
       parts.push(`tenantId=${context.tenantId}`)
     }
-    if (context.targetResource && context.targetResourceId) {
-      parts.push(`${context.targetResource}=${context.targetResourceId}`)
+    if (context.targetResource) {
+      parts.push(`resource=${context.targetResource}`)
     }
-    if (context.outcome) {
-      parts.push(`outcome=${context.outcome}`)
+    if (context.targetResourceId) {
+      parts.push(`resourceId=${context.targetResourceId}`)
+    }
+    if (context.sourceType) {
+      parts.push(`source=${context.sourceType}`)
+    }
+    if (context.requestId) {
+      parts.push(`reqId=${context.requestId}`)
+    }
+    if (context.httpMethod && context.httpRoute) {
+      parts.push(`${context.httpMethod} ${context.httpRoute}`)
+    }
+    if (context.httpStatusCode) {
+      parts.push(`httpStatus=${context.httpStatusCode}`)
+    }
+    if (context.ipAddress) {
+      parts.push(`ip=${context.ipAddress}`)
+    }
+    if (context.metadata && Object.keys(context.metadata).length > 0) {
+      parts.push(`metadata=${JSON.stringify(context.metadata)}`)
     }
     return parts.join(' ')
   }

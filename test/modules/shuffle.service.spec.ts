@@ -1,9 +1,10 @@
-import { connectorFetch } from '../../src/common/utils/connector-http.utility'
 import { ShuffleService } from '../../src/modules/connectors/services/shuffle.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -13,7 +14,7 @@ const mockAppLogger = {
 }
 
 function createService(): ShuffleService {
-  return new ShuffleService(mockAppLogger as never)
+  return new ShuffleService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
 const VALID_CONFIG: Record<string, unknown> = {
@@ -36,7 +37,7 @@ describe('ShuffleService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true when Shuffle is reachable', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { success: true },
         headers: {},
@@ -48,7 +49,7 @@ describe('ShuffleService', () => {
       expect(result.ok).toBe(true)
       expect(result.details).toContain('Shuffle SOAR reachable')
       expect(result.details).toContain('shuffle.local')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://shuffle.local/api/v1/apps/authentication',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -59,7 +60,7 @@ describe('ShuffleService', () => {
     })
 
     it('should accept baseUrl as alternative to webhookUrl', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -70,7 +71,7 @@ describe('ShuffleService', () => {
       const result = await service.testConnection(config)
 
       expect(result.ok).toBe(true)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://shuffle-alt.local/api/v1/apps/authentication',
         expect.objectContaining({})
       )
@@ -81,7 +82,7 @@ describe('ShuffleService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Shuffle URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when API key is not configured', async () => {
@@ -89,11 +90,11 @@ describe('ShuffleService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Shuffle API key not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when Shuffle returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 401,
         data: { error: 'Unauthorized' },
         headers: {},
@@ -103,11 +104,11 @@ describe('ShuffleService', () => {
       const result = await service.testConnection(VALID_CONFIG)
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Shuffle returned status 401')
+      expect(result.details).toBe('Shuffle returned status 401: Unauthorized')
     })
 
     it('should handle network errors gracefully', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ECONNREFUSED'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('ECONNREFUSED'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -117,7 +118,7 @@ describe('ShuffleService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValue(42)
+      mockAxiosService.fetch.mockRejectedValue(42)
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -126,7 +127,7 @@ describe('ShuffleService', () => {
     })
 
     it('should log success on successful connection', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -144,7 +145,7 @@ describe('ShuffleService', () => {
     })
 
     it('should log error on failed connection', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('timeout'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('timeout'))
 
       await service.testConnection(VALID_CONFIG)
 
@@ -157,7 +158,7 @@ describe('ShuffleService', () => {
     })
 
     it('should pass verifyTls option correctly', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -166,7 +167,7 @@ describe('ShuffleService', () => {
 
       await service.testConnection({ ...VALID_CONFIG, verifyTls: false })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('shuffle.local'),
         expect.objectContaining({ rejectUnauthorized: false })
       )
@@ -183,7 +184,7 @@ describe('ShuffleService', () => {
         { id: 'wf-1', name: 'Alert Enrichment' },
         { id: 'wf-2', name: 'Block IP' },
       ]
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: mockWorkflows,
         headers: {},
@@ -193,7 +194,7 @@ describe('ShuffleService', () => {
       const workflows = await service.getWorkflows(VALID_CONFIG)
 
       expect(workflows).toEqual(mockWorkflows)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://shuffle.local/api/v1/workflows',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -204,7 +205,7 @@ describe('ShuffleService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 500,
         data: { error: 'Internal' },
         headers: {},
@@ -212,13 +213,13 @@ describe('ShuffleService', () => {
       })
 
       await expect(service.getWorkflows(VALID_CONFIG)).rejects.toThrow(
-        'Failed to fetch workflows: status 500'
+        'Shuffle returned status 500: Internal'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should return empty array when data is null', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: null,
         headers: {},
@@ -231,7 +232,7 @@ describe('ShuffleService', () => {
     })
 
     it('should log success after retrieving workflows', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: [{ id: '1' }, { id: '2' }, { id: '3' }],
         headers: {},
@@ -255,7 +256,7 @@ describe('ShuffleService', () => {
 
   describe('executeWorkflow', () => {
     it('should execute a workflow and return execution ID', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { execution_id: 'exec-abc-123' },
         headers: {},
@@ -267,7 +268,7 @@ describe('ShuffleService', () => {
       })
 
       expect(result.executionId).toBe('exec-abc-123')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://shuffle.local/api/v1/workflows/aaaa-bbbb-cccc/execute',
         expect.objectContaining({
           method: 'POST',
@@ -280,7 +281,7 @@ describe('ShuffleService', () => {
     })
 
     it('should fall back to id field when execution_id is missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { id: 'fallback-id' },
         headers: {},
@@ -293,7 +294,7 @@ describe('ShuffleService', () => {
     })
 
     it('should return unknown when both execution_id and id are missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -306,7 +307,7 @@ describe('ShuffleService', () => {
     })
 
     it('should use empty object as default data', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { execution_id: 'exec-1' },
         headers: {},
@@ -315,7 +316,7 @@ describe('ShuffleService', () => {
 
       await service.executeWorkflow(VALID_CONFIG, 'aabb-ccdd-eeff')
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('execute'),
         expect.objectContaining({ body: {} })
       )
@@ -325,18 +326,18 @@ describe('ShuffleService', () => {
       await expect(service.executeWorkflow(VALID_CONFIG, 'invalid!id@#$')).rejects.toThrow(
         'Invalid workflow ID'
       )
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should throw on workflow ID with path traversal', async () => {
       await expect(service.executeWorkflow(VALID_CONFIG, '../../../etc/passwd')).rejects.toThrow(
         'Invalid workflow ID'
       )
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should accept valid UUID-style workflow IDs', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { execution_id: 'e1' },
         headers: {},
@@ -352,7 +353,7 @@ describe('ShuffleService', () => {
     })
 
     it('should accept hex-only workflow IDs', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { execution_id: 'e2' },
         headers: {},
@@ -365,7 +366,7 @@ describe('ShuffleService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 500,
         data: {},
         headers: {},
@@ -374,7 +375,7 @@ describe('ShuffleService', () => {
 
       await expect(
         service.executeWorkflow(VALID_CONFIG, 'aabb-ccdd', { data: 'test' })
-      ).rejects.toThrow('Workflow execution failed: status 500')
+      ).rejects.toThrow('Shuffle returned status 500')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
@@ -394,7 +395,7 @@ describe('ShuffleService', () => {
     })
 
     it('should log success after workflow execution', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { execution_id: 'exec-xyz' },
         headers: {},

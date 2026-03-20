@@ -138,6 +138,10 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_UPDATE,
     Permission.ROLE_SETTINGS_VIEW,
     Permission.ROLE_SETTINGS_UPDATE,
+    Permission.USERS_CONTROL_VIEW,
+    Permission.USERS_CONTROL_VIEW_SESSIONS,
+    Permission.USERS_CONTROL_FORCE_LOGOUT,
+    Permission.USERS_CONTROL_FORCE_LOGOUT_ALL,
   ],
 
   [UserRole.DETECTION_ENGINEER]: [

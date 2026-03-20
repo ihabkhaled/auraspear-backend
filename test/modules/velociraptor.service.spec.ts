@@ -1,10 +1,10 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { VelociraptorService } from '../../src/modules/connectors/services/velociraptor.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -14,7 +14,10 @@ const mockAppLogger = {
 }
 
 function createService(): VelociraptorService {
-  return new VelociraptorService(mockAppLogger as never)
+  return new VelociraptorService(
+    mockAppLogger as never,
+    mockAxiosService as unknown as AxiosService
+  )
 }
 
 /** Config using basic auth (username + password) */
@@ -38,7 +41,7 @@ describe('VelociraptorService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    mockedBasicAuth.mockReturnValue('Basic YWRtaW46YWRtaW4=')
+    mockAxiosService.basicAuth.mockReturnValue('Basic YWRtaW46YWRtaW4=')
     service = createService()
   })
 
@@ -48,7 +51,7 @@ describe('VelociraptorService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true with basic auth when reachable', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { metadata: {} },
         headers: {},
@@ -60,7 +63,7 @@ describe('VelociraptorService', () => {
       expect(result.ok).toBe(true)
       expect(result.details).toContain('Velociraptor server reachable')
       expect(result.details).toContain('velociraptor.local')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://velociraptor.local:8889/api/v1/GetUserUITraits',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -73,7 +76,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should return ok: true with mTLS auth when reachable', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -84,7 +87,7 @@ describe('VelociraptorService', () => {
 
       expect(result.ok).toBe(true)
       expect(result.details).toContain('Velociraptor server reachable')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://velociraptor.local:8001/api/v1/GetUserUITraits',
         expect.objectContaining({
           clientCert: MTLS_CONFIG.clientCert,
@@ -94,7 +97,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should use basicAuth helper for username/password', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -103,11 +106,11 @@ describe('VelociraptorService', () => {
 
       await service.testConnection(BASIC_AUTH_CONFIG)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'admin')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'admin')
     })
 
     it('should fall back to baseUrl when apiUrl is missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -116,7 +119,7 @@ describe('VelociraptorService', () => {
 
       await service.testConnection({ baseUrl: 'https://vr.local', username: 'u', password: 'p' })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://vr.local/api/v1/GetUserUITraits',
         expect.anything()
       )
@@ -127,7 +130,7 @@ describe('VelociraptorService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Velociraptor URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when no auth is configured', async () => {
@@ -135,11 +138,11 @@ describe('VelociraptorService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toContain('authentication not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when Velociraptor returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 403,
         data: {},
         headers: {},
@@ -153,7 +156,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should handle network errors gracefully', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('self-signed certificate'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('self-signed certificate'))
 
       const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
@@ -163,7 +166,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValue({ code: 'UNKNOWN' })
+      mockAxiosService.fetch.mockRejectedValue({ code: 'UNKNOWN' })
 
       const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
@@ -172,7 +175,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should log success on successful connection', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -190,7 +193,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should log error on failed connection', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ETIMEDOUT'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('ETIMEDOUT'))
 
       await service.testConnection(BASIC_AUTH_CONFIG)
 
@@ -204,7 +207,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should pass verifyTls option correctly', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -213,14 +216,14 @@ describe('VelociraptorService', () => {
 
       await service.testConnection({ ...BASIC_AUTH_CONFIG, verifyTls: false })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('velociraptor.local'),
         expect.objectContaining({ rejectUnauthorized: false })
       )
     })
 
     it('should include caCert in mTLS options when provided', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -233,7 +236,7 @@ describe('VelociraptorService', () => {
       }
       await service.testConnection(config)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           caCert: config.caCert,
@@ -250,7 +253,7 @@ describe('VelociraptorService', () => {
     it('should execute VQL query and return rows and columns', async () => {
       const mockRows = [{ ClientId: 'C.123', Hostname: 'server01' }]
       const mockColumns = ['ClientId', 'Hostname']
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { rows: mockRows, columns: mockColumns },
         headers: {},
@@ -262,7 +265,7 @@ describe('VelociraptorService', () => {
 
       expect(result.rows).toEqual(mockRows)
       expect(result.columns).toEqual(mockColumns)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://velociraptor.local:8889/api/v1/CreateNotebook',
         expect.objectContaining({
           method: 'POST',
@@ -272,7 +275,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should return empty arrays when rows and columns are missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -286,7 +289,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 400,
         data: { error: 'Bad query' },
         headers: {},
@@ -294,13 +297,13 @@ describe('VelociraptorService', () => {
       })
 
       await expect(service.runVQL(BASIC_AUTH_CONFIG, 'INVALID VQL')).rejects.toThrow(
-        'VQL query failed: status 400'
+        'Velociraptor returned status 400: Bad query'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should log success after VQL execution', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { rows: [{ a: 1 }, { a: 2 }], columns: ['a'] },
         headers: {},
@@ -318,7 +321,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should use basic auth header for VQL queries', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { rows: [], columns: [] },
         headers: {},
@@ -327,7 +330,7 @@ describe('VelociraptorService', () => {
 
       await service.runVQL(BASIC_AUTH_CONFIG, 'SELECT 1')
 
-      const callArguments = mockedConnectorFetch.mock.calls[0]
+      const callArguments = mockAxiosService.fetch.mock.calls[0]
       const options = callArguments?.[1] as Record<string, unknown> | undefined
       const headers = options?.headers as Record<string, string> | undefined
 
@@ -345,7 +348,7 @@ describe('VelociraptorService', () => {
         { client_id: 'C.123', os_info: { hostname: 'server01' } },
         { client_id: 'C.456', os_info: { hostname: 'server02' } },
       ]
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { items: mockClients },
         headers: {},
@@ -355,7 +358,7 @@ describe('VelociraptorService', () => {
       const clients = await service.getClients(BASIC_AUTH_CONFIG)
 
       expect(clients).toEqual(mockClients)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://velociraptor.local:8889/api/v1/SearchClients?query=all&limit=500',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -366,7 +369,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should return empty array when items key is missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -379,7 +382,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 503,
         data: {},
         headers: {},
@@ -387,13 +390,13 @@ describe('VelociraptorService', () => {
       })
 
       await expect(service.getClients(BASIC_AUTH_CONFIG)).rejects.toThrow(
-        'Failed to fetch clients: status 503'
+        'Velociraptor returned status 503'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should log success after retrieving clients', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { items: [{ client_id: 'C.1' }] },
         headers: {},
@@ -411,7 +414,7 @@ describe('VelociraptorService', () => {
     })
 
     it('should use mTLS options for client queries', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { items: [] },
         headers: {},
@@ -420,7 +423,7 @@ describe('VelociraptorService', () => {
 
       await service.getClients(MTLS_CONFIG)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           clientCert: MTLS_CONFIG.clientCert,

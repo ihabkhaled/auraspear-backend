@@ -9,6 +9,6 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
   imports: [AppLogsModule],
   controllers: [NormalizationController],
   providers: [NormalizationRepository, NormalizationService, NormalizationExecutor],
-  exports: [NormalizationService, NormalizationExecutor],
+  exports: [NormalizationRepository, NormalizationService, NormalizationExecutor],
 })
 export class NormalizationModule {}

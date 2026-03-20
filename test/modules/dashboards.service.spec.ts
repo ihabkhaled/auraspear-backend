@@ -1,4 +1,16 @@
+import {
+  AiAgentSessionStatus,
+  AiAgentStatus,
+  AttackPathStatus,
+  ConnectorType,
+  ComplianceControlStatus,
+  IncidentStatus,
+  SoarExecutionStatus,
+  SyncJobStatus,
+  VulnerabilitySeverity,
+} from '../../src/common/enums'
 import { DashboardsService } from '../../src/modules/dashboards/dashboards.service'
+import { JobStatus } from '../../src/modules/jobs/enums/job.enums'
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -26,6 +38,37 @@ function createMockRepository() {
     getTopMitreTechniques: jest.fn(),
     getTopTargetedAssets: jest.fn(),
     findEnabledConnectors: jest.fn(),
+    countOpenIncidents: jest.fn(),
+    countVulnerabilitiesBySeverity: jest.fn(),
+    countExploitAvailableVulnerabilities: jest.fn(),
+    countAttackPathsByStatus: jest.fn(),
+    countAiAgentsByStatus: jest.fn(),
+    countAiAgentSessionsSince: jest.fn(),
+    countJobsByStatus: jest.fn(),
+    countJobs: jest.fn(),
+    countDelayedJobs: jest.fn(),
+    countComplianceFrameworks: jest.fn(),
+    countComplianceControlsByStatus: jest.fn(),
+    countCompletedReports: jest.fn(),
+    countCompletedReportsSince: jest.fn(),
+    countAvailableReportTemplates: jest.fn(),
+    groupIncidentsByStatus: jest.fn(),
+    countUnassignedOpenCases: jest.fn(),
+    countOpenCasesOlderThan: jest.fn(),
+    getAverageOpenCaseAgeHours: jest.fn(),
+    countActiveDetectionRules: jest.fn(),
+    findTopDetectionRules: jest.fn(),
+    findTopNoisyDetectionRules: jest.fn(),
+    groupConnectorSyncJobsByStatusSince: jest.fn(),
+    getTopFailingConnectorTypes: jest.fn(),
+    countJobsByTypeAndStatuses: jest.fn(),
+    countStaleRunningJobs: jest.fn(),
+    groupAiAgentSessionsByStatusSince: jest.fn(),
+    getAverageAiSessionDurationMsSince: jest.fn(),
+    groupSoarExecutionsByStatusSince: jest.fn(),
+    getAverageSoarCompletionRateSince: jest.fn(),
+    countCloudFindingsByStatus: jest.fn(),
+    countCloudFindingsBySeverity: jest.fn(),
   }
 }
 
@@ -215,81 +258,190 @@ describe('DashboardsService', () => {
   /* ------------------------------------------------------------------ */
 
   describe('getAlertTrend', () => {
-    it('should return trend data pivoted by severity', async () => {
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-03-20T12:00:00Z'))
+    })
+
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    it('should return a zero-filled 7-day trend that includes today', async () => {
       repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
-        { date: '2026-03-01', severity: 'critical', count: 5n },
-        { date: '2026-03-01', severity: 'high', count: 10n },
-        { date: '2026-03-01', severity: 'medium', count: 20n },
-        { date: '2026-03-02', severity: 'low', count: 3n },
-        { date: '2026-03-02', severity: 'info', count: 7n },
+        { date: '2026-03-14', severity: 'critical', count: 5n },
+        { date: '2026-03-14', severity: 'high', count: 10n },
+        { date: '2026-03-18', severity: 'medium', count: 20n },
+        { date: '2026-03-20', severity: 'low', count: 3n },
+        { date: '2026-03-20', severity: 'info', count: 7n },
       ])
 
       const result = await service.getAlertTrend(TENANT_ID, 7)
 
+      expect(repository.getAlertCountsByDateAndSeverity).toHaveBeenCalledWith(
+        TENANT_ID,
+        new Date('2026-03-14T00:00:00.000Z'),
+        new Date('2026-03-21T00:00:00.000Z')
+      )
       expect(result.tenantId).toBe(TENANT_ID)
       expect(result.days).toBe(7)
-      expect(result.trend).toHaveLength(2)
-
-      const day1 = result.trend[0]
-      expect(day1).toEqual({
-        date: '2026-03-01',
-        critical: 5,
-        high: 10,
-        medium: 20,
-        low: 0,
-        info: 0,
-      })
-
-      const day2 = result.trend[1]
-      expect(day2).toEqual({
-        date: '2026-03-02',
-        critical: 0,
-        high: 0,
-        medium: 0,
-        low: 3,
-        info: 7,
-      })
+      expect(result.trend).toEqual([
+        {
+          date: '2026-03-14',
+          critical: 5,
+          high: 10,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-15',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-16',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-17',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-18',
+          critical: 0,
+          high: 0,
+          medium: 20,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-19',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-20',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 3,
+          info: 7,
+        },
+      ])
     })
 
     it('should convert bigint counts to number', async () => {
       repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
-        { date: '2026-03-10', severity: 'critical', count: 999n },
+        { date: '2026-03-20', severity: 'critical', count: 999n },
       ])
 
       const result = await service.getAlertTrend(TENANT_ID, 30)
 
-      expect(result.trend[0]?.critical).toBe(999)
-      expect(typeof result.trend[0]?.critical).toBe('number')
+      const today = result.trend.find(entry => entry.date === '2026-03-20')
+      expect(today?.critical).toBe(999)
+      expect(typeof today?.critical).toBe('number')
     })
 
-    it('should return empty trend when no data', async () => {
+    it('should return a zero-filled trend when there is no data', async () => {
       repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([])
 
       const result = await service.getAlertTrend(TENANT_ID, 7)
 
-      expect(result.trend).toEqual([])
+      expect(result.trend).toEqual([
+        {
+          date: '2026-03-14',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-15',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-16',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-17',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-18',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-19',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+        {
+          date: '2026-03-20',
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          info: 0,
+        },
+      ])
     })
 
     it('should aggregate multiple severities for the same date', async () => {
       repository.getAlertCountsByDateAndSeverity.mockResolvedValueOnce([
-        { date: '2026-03-05', severity: 'critical', count: 2n },
-        { date: '2026-03-05', severity: 'high', count: 8n },
-        { date: '2026-03-05', severity: 'medium', count: 15n },
-        { date: '2026-03-05', severity: 'low', count: 30n },
-        { date: '2026-03-05', severity: 'info', count: 50n },
+        { date: '2026-03-18', severity: 'critical', count: 2n },
+        { date: '2026-03-18', severity: 'high', count: 8n },
+        { date: '2026-03-18', severity: 'medium', count: 15n },
+        { date: '2026-03-18', severity: 'low', count: 30n },
+        { date: '2026-03-18', severity: 'info', count: 50n },
       ])
 
       const result = await service.getAlertTrend(TENANT_ID, 7)
 
-      expect(result.trend).toHaveLength(1)
-      expect(result.trend[0]).toEqual({
-        date: '2026-03-05',
+      const entry = result.trend.find(day => day.date === '2026-03-18')
+      expect(entry).toEqual({
+        date: '2026-03-18',
         critical: 2,
         high: 8,
         medium: 15,
         low: 30,
         info: 50,
       })
+      expect(result.trend).toHaveLength(7)
     })
   })
 
@@ -551,6 +703,254 @@ describe('DashboardsService', () => {
 
       expect(result.tenantId).toBe(TENANT_ID)
       expect(result.pipelines).toEqual([])
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* getAnalyticsOverview                                               */
+  /* ------------------------------------------------------------------ */
+
+  describe('getAnalyticsOverview', () => {
+    it('should return grouped analytics sections', async () => {
+      repository.countAlertsSince.mockResolvedValueOnce(21)
+      repository.countResolvedAlertsSince.mockResolvedValueOnce(8)
+      repository.countOpenCases.mockResolvedValueOnce(13)
+      repository.countOpenIncidents.mockResolvedValueOnce(5)
+      repository.countVulnerabilitiesBySeverity.mockResolvedValueOnce(4).mockResolvedValueOnce(9)
+      repository.countAttackPathsByStatus.mockResolvedValueOnce(3)
+      repository.countAiAgentsByStatus.mockResolvedValueOnce(6)
+      repository.countAiAgentSessionsSince.mockResolvedValueOnce(17)
+      repository.countJobsByStatus
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(1)
+      repository.countJobs.mockResolvedValueOnce(24)
+      repository.countDelayedJobs.mockResolvedValueOnce(4)
+      repository.countComplianceFrameworks.mockResolvedValueOnce(6)
+      repository.countComplianceControlsByStatus
+        .mockResolvedValueOnce(41)
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(4)
+      repository.countCompletedReports.mockResolvedValueOnce(12)
+      repository.countCompletedReportsSince.mockResolvedValueOnce(9)
+      repository.countAvailableReportTemplates.mockResolvedValueOnce(7)
+      repository.countAlertsBetween.mockResolvedValueOnce(64)
+      repository.countCriticalAlertsBetween.mockResolvedValueOnce(11)
+      repository.findEnabledConnectors.mockResolvedValueOnce([
+        {
+          type: 'wazuh',
+          name: 'Wazuh',
+          lastTestAt: new Date('2026-03-10T10:00:00Z'),
+          lastTestOk: true,
+          lastError: null,
+        },
+        {
+          type: 'misp',
+          name: 'MISP',
+          lastTestAt: new Date('2026-03-10T10:00:00Z'),
+          lastTestOk: false,
+          lastError: 'Timeout',
+        },
+      ])
+
+      const result = await service.getAnalyticsOverview(TENANT_ID)
+
+      expect(result.tenantId).toBe(TENANT_ID)
+      expect(result.overview).toEqual({
+        alertsLast24h: 21,
+        resolvedLast24h: 8,
+        openCases: 13,
+        openIncidents: 5,
+        criticalVulnerabilities: 4,
+        connectedSources: 2,
+        completedReports: 12,
+      })
+      expect(result.threatOperations).toEqual({
+        totalAlerts7d: 64,
+        criticalAlerts7d: 11,
+        openCases: 13,
+        openIncidents: 5,
+        criticalVulnerabilities: 4,
+        highVulnerabilities: 9,
+        activeAttackPaths: 3,
+      })
+      expect(result.automation).toEqual({
+        onlineAgents: 6,
+        aiSessions24h: 17,
+        pendingJobs: 2,
+        runningJobs: 7,
+        failedJobs: 1,
+        healthyConnectors: 1,
+        failingConnectors: 1,
+      })
+      expect(result.governance).toEqual({
+        totalFrameworks: 6,
+        passedControls: 41,
+        failedControls: 5,
+        notAssessedControls: 4,
+        complianceScore: 82,
+        availableTemplates: 7,
+      })
+      expect(result.infrastructure).toEqual({
+        enabledConnectors: 2,
+        healthyConnectors: 1,
+        failingConnectors: 1,
+        totalJobs: 24,
+        delayedJobs: 4,
+        generatedReports30d: 9,
+      })
+
+      expect(repository.countOpenIncidents).toHaveBeenCalledWith(TENANT_ID)
+      expect(repository.countVulnerabilitiesBySeverity).toHaveBeenNthCalledWith(
+        1,
+        TENANT_ID,
+        VulnerabilitySeverity.CRITICAL
+      )
+      expect(repository.countVulnerabilitiesBySeverity).toHaveBeenNthCalledWith(
+        2,
+        TENANT_ID,
+        VulnerabilitySeverity.HIGH
+      )
+      expect(repository.countAttackPathsByStatus).toHaveBeenCalledWith(
+        TENANT_ID,
+        AttackPathStatus.ACTIVE
+      )
+      expect(repository.countAiAgentsByStatus).toHaveBeenCalledWith(TENANT_ID, AiAgentStatus.ONLINE)
+      expect(repository.countJobsByStatus).toHaveBeenNthCalledWith(1, TENANT_ID, JobStatus.PENDING)
+      expect(repository.countJobsByStatus).toHaveBeenNthCalledWith(2, TENANT_ID, JobStatus.RUNNING)
+      expect(repository.countJobsByStatus).toHaveBeenNthCalledWith(3, TENANT_ID, JobStatus.FAILED)
+      expect(repository.countComplianceControlsByStatus).toHaveBeenNthCalledWith(
+        1,
+        TENANT_ID,
+        ComplianceControlStatus.PASSED
+      )
+    })
+  })
+
+  /* ------------------------------------------------------------------ */
+  /* getOperationsOverview                                              */
+  /* ------------------------------------------------------------------ */
+
+  describe('getOperationsOverview', () => {
+    it('should return operational metrics for daily SOC workflows', async () => {
+      repository.groupIncidentsByStatus.mockResolvedValueOnce([
+        { status: IncidentStatus.OPEN, _count: 4 },
+        { status: IncidentStatus.IN_PROGRESS, _count: 3 },
+        { status: IncidentStatus.RESOLVED, _count: 2 },
+      ])
+      repository.countOpenCases.mockResolvedValueOnce(12)
+      repository.countUnassignedOpenCases.mockResolvedValueOnce(5)
+      repository.countOpenCasesOlderThan.mockResolvedValueOnce(4).mockResolvedValueOnce(2)
+      repository.getAverageOpenCaseAgeHours.mockResolvedValueOnce([{ avg_hours: 19.4 }])
+      repository.countActiveDetectionRules.mockResolvedValueOnce(8)
+      repository.findTopDetectionRules.mockResolvedValueOnce([
+        {
+          id: 'rule-1',
+          name: 'Credential Abuse',
+          hitCount: 40,
+          falsePositiveCount: 4,
+          lastTriggeredAt: new Date('2026-03-20T08:00:00Z'),
+        },
+      ])
+      repository.findTopNoisyDetectionRules.mockResolvedValueOnce([
+        {
+          id: 'rule-2',
+          name: 'Admin Login Spike',
+          hitCount: 10,
+          falsePositiveCount: 6,
+          lastTriggeredAt: new Date('2026-03-20T07:00:00Z'),
+        },
+      ])
+      repository.groupConnectorSyncJobsByStatusSince.mockResolvedValueOnce([
+        { status: SyncJobStatus.COMPLETED, _count: 9 },
+        { status: SyncJobStatus.FAILED, _count: 3 },
+        { status: SyncJobStatus.RUNNING, _count: 1 },
+      ])
+      repository.getTopFailingConnectorTypes.mockResolvedValueOnce([
+        { connectorType: ConnectorType.WAZUH, failures: 2 },
+        { connectorType: ConnectorType.MISP, failures: 1 },
+      ])
+      repository.countJobsByStatus
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(2)
+        .mockResolvedValueOnce(5)
+      repository.countStaleRunningJobs.mockResolvedValueOnce(1)
+      repository.countJobsByTypeAndStatuses.mockResolvedValueOnce(3).mockResolvedValueOnce(2)
+      repository.groupAiAgentSessionsByStatusSince.mockResolvedValueOnce([
+        { status: AiAgentSessionStatus.COMPLETED, _count: 12 },
+        { status: AiAgentSessionStatus.FAILED, _count: 2 },
+      ])
+      repository.getAverageAiSessionDurationMsSince.mockResolvedValueOnce([{ avg_ms: 5400 }])
+      repository.groupSoarExecutionsByStatusSince.mockResolvedValueOnce([
+        { status: SoarExecutionStatus.COMPLETED, _count: 11 },
+        { status: SoarExecutionStatus.FAILED, _count: 1 },
+      ])
+      repository.getAverageSoarCompletionRateSince.mockResolvedValueOnce([{ avg_percentage: 92.3 }])
+      repository.countVulnerabilitiesBySeverity.mockResolvedValueOnce(6)
+      repository.countExploitAvailableVulnerabilities.mockResolvedValueOnce(4)
+      repository.countCloudFindingsByStatus.mockResolvedValueOnce(13)
+      repository.countCloudFindingsBySeverity.mockResolvedValueOnce(3)
+      repository.countComplianceControlsByStatus.mockResolvedValueOnce(28).mockResolvedValueOnce(6)
+
+      const result = await service.getOperationsOverview(TENANT_ID)
+
+      expect(result.tenantId).toBe(TENANT_ID)
+      expect(result.incidentStatus).toEqual([
+        { status: IncidentStatus.OPEN, count: 4 },
+        { status: IncidentStatus.IN_PROGRESS, count: 3 },
+        { status: IncidentStatus.RESOLVED, count: 2 },
+      ])
+      expect(result.caseAging).toEqual({
+        openCases: 12,
+        unassignedCases: 5,
+        agedOverSevenDays: 4,
+        agedOverFourteenDays: 2,
+        meanOpenAgeHours: 19,
+      })
+      expect(result.rulePerformance.activeRules).toBe(8)
+      expect(result.rulePerformance.topRules[0]).toMatchObject({
+        id: 'rule-1',
+        hitCount: 40,
+        falsePositiveRate: 10,
+      })
+      expect(result.rulePerformance.noisyRules[0]).toMatchObject({
+        id: 'rule-2',
+        falsePositiveRate: 60,
+      })
+      expect(result.connectorSync).toEqual({
+        completedRuns7d: 9,
+        failedRuns7d: 3,
+        runningSyncs: 1,
+        topFailingConnectors: [
+          { connectorType: ConnectorType.WAZUH, failures: 2 },
+          { connectorType: ConnectorType.MISP, failures: 1 },
+        ],
+      })
+      expect(result.runtimeBacklog).toEqual({
+        pendingJobs: 7,
+        retryingJobs: 2,
+        failedJobs: 5,
+        staleRunningJobs: 1,
+        queuedConnectorSyncJobs: 3,
+        queuedReportJobs: 2,
+      })
+      expect(result.automationQuality).toEqual({
+        aiSessions24h: 14,
+        successfulAiSessions24h: 12,
+        failedAiSessions24h: 2,
+        averageAiDurationSeconds: 5.4,
+        completedSoarRuns30d: 11,
+        failedSoarRuns30d: 1,
+        averageSoarCompletionRate: 92.3,
+      })
+      expect(result.exposureSummary).toEqual({
+        criticalVulnerabilities: 6,
+        exploitAvailableVulnerabilities: 4,
+        openCloudFindings: 13,
+        criticalCloudFindings: 3,
+        passedControls: 28,
+        failedControls: 6,
+      })
     })
   })
 })

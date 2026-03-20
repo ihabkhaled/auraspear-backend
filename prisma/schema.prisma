@@ -35,6 +35,8 @@ enum ConnectorType {
   misp
   shuffle
   bedrock
+  llm_apis
+  openclaw_gateway
 }
 
 enum AuthType {
@@ -310,6 +312,82 @@ enum ReportStatus {
   failed
 }
 
+enum ReportModule {
+  dashboard
+  alerts
+  incidents
+  cases
+  vulnerabilities
+  compliance
+  ai_agents
+  soar
+  connectors
+  system_health
+}
+
+enum ReportTemplateKey {
+  executive_overview
+  incident_posture
+  threat_exposure
+  vulnerability_exposure
+  compliance_posture
+  automation_health
+  connector_health
+}
+
+enum DashboardDensity {
+  compact
+  comfortable
+  expanded
+}
+
+enum DashboardPanelKey {
+  overview
+  threat_operations
+  automation
+  governance
+  infrastructure
+  alert_trends
+  severity_distribution
+  mitre_techniques
+  targeted_assets
+  report_templates
+  ai_canvas
+  recent_activity
+  connector_sync
+  rule_performance
+  runtime_backlog
+  automation_quality
+  exposure_summary
+  incident_status
+  operations
+  case_aging
+}
+
+enum UserSessionStatus {
+  active
+  revoked
+  expired
+}
+
+enum UserSessionOsFamily {
+  windows
+  macos
+  linux
+  ios
+  android
+  ipados
+  unknown
+}
+
+enum UserSessionClientType {
+  desktop
+  mobile
+  tablet
+  web
+  unknown
+}
+
 // ─── System Health Enums ──────────────────────────────────────
 
 enum ServiceType {
@@ -438,6 +516,7 @@ model Tenant {
   soarExecutions       SoarExecution[]
   complianceFrameworks ComplianceFramework[]
   reports              Report[]
+  reportTemplates      ReportTemplate[]
   systemHealthChecks      SystemHealthCheck[]
   systemMetrics           SystemMetric[]
   normalizationPipelines  NormalizationPipeline[]
@@ -448,6 +527,7 @@ model Tenant {
   permissionDefinitions   PermissionDefinition[]
   jobs                    Job[]
   refreshTokenFamilies    RefreshTokenFamily[]
+  userSessions            UserSession[]
 
   @@map("tenants")
 }
@@ -507,6 +587,7 @@ model User {
   memberships TenantMembership[]
   preference  UserPreference?
   refreshTokenFamilies RefreshTokenFamily[]
+  sessions             UserSession[]
 
   @@map("users")
 }
@@ -558,6 +639,8 @@ model UserPreference {
   retentionLogs      String @default("90")  @map("retention_logs") @db.VarChar(20)
   retentionIncidents String @default("365") @map("retention_incidents") @db.VarChar(20)
   retentionAuditLogs String @default("365") @map("retention_audit_logs") @db.VarChar(20)
+  dashboardDensity   DashboardDensity @default(comfortable) @map("dashboard_density")
+  collapsedDashboardPanels DashboardPanelKey[] @default([]) @map("collapsed_dashboard_panels")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -565,6 +648,36 @@ model UserPreference {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
+}
+
+model UserSession {
+  id          String                @id @default(uuid()) @db.Uuid
+  familyId    String                @unique @map("family_id") @db.Uuid
+  userId      String                @map("user_id") @db.Uuid
+  tenantId    String                @map("tenant_id") @db.Uuid
+  status      UserSessionStatus     @default(active)
+  osFamily    UserSessionOsFamily   @default(unknown) @map("os_family")
+  clientType  UserSessionClientType @default(unknown) @map("client_type")
+  ipAddress   String?               @map("ip_address") @db.VarChar(64)
+  userAgent   String?               @map("user_agent") @db.VarChar(1024)
+  currentAccessJti String?          @map("current_access_jti") @db.VarChar(64)
+  currentAccessExpiresAt DateTime?  @map("current_access_expires_at")
+  lastSeenAt  DateTime              @map("last_seen_at")
+  lastLoginAt DateTime              @map("last_login_at")
+  revokedAt   DateTime?             @map("revoked_at")
+  revokedByUserId String?           @map("revoked_by_user_id") @db.Uuid
+  revokeReason    String?           @map("revoke_reason") @db.VarChar(100)
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  family RefreshTokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([userId, status])
+  @@index([lastSeenAt])
+  @@map("user_sessions")
 }
 
 model RefreshTokenFamily {
@@ -582,6 +695,7 @@ model RefreshTokenFamily {
   tenant    Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   rotations RefreshTokenRotation[]
+  session   UserSession?
 
   @@index([tenantId, status])
   @@index([userId, status])
@@ -1632,26 +1746,57 @@ model ComplianceControl {
 model Report {
   id          String       @id @default(uuid()) @db.Uuid
   tenantId    String       @map("tenant_id") @db.Uuid
+  templateId  String?      @map("template_id") @db.Uuid
   name        String       @db.VarChar(255)
   description String?      @db.Text
   type        ReportType   @default(custom)
+  module      ReportModule?
+  templateKey ReportTemplateKey? @map("template_key")
   format      ReportFormat @default(pdf)
   status      ReportStatus @default(generating)
   generatedBy String       @map("generated_by") @db.VarChar(320)
   parameters  Json?
-  fileUrl     String?      @map("file_url") @db.VarChar(1000)
-  fileSize    BigInt?      @map("file_size")
-  generatedAt DateTime?    @map("generated_at")
+  filterSnapshot Json?     @map("filter_snapshot")
+  fileUrl          String?      @map("file_url") @db.VarChar(1000)
+  fileSize         BigInt?      @map("file_size")
+  generatedContent String?      @map("generated_content") @db.Text
+  generatedAt      DateTime?    @map("generated_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template ReportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([tenantId, type])
+  @@index([tenantId, module])
   @@index([tenantId, status])
+  @@index([tenantId, templateKey])
   @@index([tenantId, createdAt])
   @@map("reports")
+}
+
+model ReportTemplate {
+  id            String            @id @default(uuid()) @db.Uuid
+  tenantId      String?           @map("tenant_id") @db.Uuid
+  key           ReportTemplateKey
+  module        ReportModule
+  name          String            @db.VarChar(255)
+  description   String?           @db.Text
+  type          ReportType        @default(custom)
+  defaultFormat ReportFormat      @default(pdf) @map("default_format")
+  parameters    Json?
+  isSystem      Boolean           @default(true) @map("is_system")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  tenant  Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  reports Report[]
+
+  @@index([tenantId])
+  @@index([module])
+  @@index([key])
+  @@map("report_templates")
 }
 
 // ─── System Health Checks ───────────────────────────────────

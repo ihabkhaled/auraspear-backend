@@ -30,7 +30,7 @@ function getInfluxDatabaseSeverity(level: string): string {
  * id, message, details, level, time, duration, data, previousLevel,
  * _check_name, _measurement, _source_measurement.
  */
-export function mapInfluxDbToOcsf(
+export function mapInfluxDatabaseToOcsf(
   event: Record<string, unknown>,
   tenantId?: string
 ): OcsfSecurityFinding {

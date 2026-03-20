@@ -1,10 +1,10 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { GraylogService } from '../../src/modules/connectors/services/graylog.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -14,7 +14,7 @@ const mockAppLogger = {
 }
 
 function createService(): GraylogService {
-  return new GraylogService(mockAppLogger as never)
+  return new GraylogService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
 function buildConnectorResponse(overrides: {
@@ -44,7 +44,7 @@ describe('GraylogService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     service = createService()
-    mockedBasicAuth.mockReturnValue('Basic bW9jay1hdXRo')
+    mockAxiosService.basicAuth.mockReturnValue('Basic bW9jay1hdXRo')
   })
 
   /* ------------------------------------------------------------------ */
@@ -53,7 +53,7 @@ describe('GraylogService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true when cluster nodes endpoint returns 200', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { nodes: 3, cluster_id: 'abc-123' },
         })
@@ -65,7 +65,7 @@ describe('GraylogService', () => {
       expect(result.details).toContain('Graylog reachable')
       expect(result.details).toContain(VALID_CONFIG.baseUrl)
       expect(result.details).toContain('3')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://graylog.local:9000/api/system/cluster/nodes',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -78,7 +78,7 @@ describe('GraylogService', () => {
     })
 
     it('should use total field when nodes field is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { total: 5 },
         })
@@ -91,7 +91,7 @@ describe('GraylogService', () => {
     })
 
     it('should display unknown when neither nodes nor total is present', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: {} }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: {} }))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -106,7 +106,7 @@ describe('GraylogService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Graylog base URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when username is missing', async () => {
@@ -128,7 +128,7 @@ describe('GraylogService', () => {
     })
 
     it('should return ok: false when cluster endpoint returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 401, data: { message: 'unauthorized' } })
       )
 
@@ -138,8 +138,8 @@ describe('GraylogService', () => {
       expect(result.details).toContain('401')
     })
 
-    it('should return ok: false when connectorFetch throws an error', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('Connection refused'))
+    it('should return ok: false when fetch throws an error', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('Connection refused'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -149,7 +149,7 @@ describe('GraylogService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce('unexpected-error')
+      mockAxiosService.fetch.mockRejectedValueOnce('unexpected-error')
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -159,22 +159,22 @@ describe('GraylogService', () => {
 
     it('should pass verifyTls config to rejectUnauthorized', async () => {
       const config = { ...VALID_CONFIG, verifyTls: false }
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: { nodes: 1 } }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: { nodes: 1 } }))
 
       await service.testConnection(config)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ rejectUnauthorized: false })
       )
     })
 
     it('should call basicAuth with provided credentials', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: { nodes: 1 } }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: { nodes: 1 } }))
 
       await service.testConnection(VALID_CONFIG)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
     })
   })
 
@@ -193,7 +193,7 @@ describe('GraylogService', () => {
         { event: { id: 'evt-1', message: 'alert fired' } },
         { event: { id: 'evt-2', message: 'rule triggered' } },
       ]
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { events: eventItems, total_results: 42 },
         })
@@ -204,7 +204,7 @@ describe('GraylogService', () => {
       expect(result.events).toHaveLength(2)
       expect(result.total).toBe(42)
       expect(result.events[0]).toEqual(eventItems[0])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://graylog.local:9000/api/events/search',
         expect.objectContaining({
           method: 'POST',
@@ -218,7 +218,7 @@ describe('GraylogService', () => {
     })
 
     it('should return empty events array when events field is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { total_results: 0 } })
       )
 
@@ -229,7 +229,7 @@ describe('GraylogService', () => {
     })
 
     it('should default total to 0 when total_results is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { events: [{ id: '1' }] } })
       )
 
@@ -240,30 +240,30 @@ describe('GraylogService', () => {
     })
 
     it('should throw when events search returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 500, data: { message: 'Internal error' } })
       )
 
       await expect(service.searchEvents(VALID_CONFIG, filter)).rejects.toThrow(
-        'Graylog events search failed: status 500'
+        'Graylog returned status 500: Internal error'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('Timeout'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('Timeout'))
 
       await expect(service.searchEvents(VALID_CONFIG, filter)).rejects.toThrow('Timeout')
     })
 
     it('should use basic auth credentials from config', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { events: [], total_results: 0 } })
       )
 
       await service.searchEvents(VALID_CONFIG, filter)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
     })
   })
 
@@ -277,7 +277,7 @@ describe('GraylogService', () => {
         { id: 'def-1', title: 'SSH Brute Force', priority: 2 },
         { id: 'def-2', title: 'Firewall Deny', priority: 1 },
       ]
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({
           data: { event_definitions: definitions },
         })
@@ -287,7 +287,7 @@ describe('GraylogService', () => {
 
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual(definitions[0])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://graylog.local:9000/api/events/definitions',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -300,7 +300,7 @@ describe('GraylogService', () => {
     })
 
     it('should return empty array when event_definitions is absent', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(buildConnectorResponse({ data: {} }))
+      mockAxiosService.fetch.mockResolvedValueOnce(buildConnectorResponse({ data: {} }))
 
       const result = await service.getEventDefinitions(VALID_CONFIG)
 
@@ -308,18 +308,18 @@ describe('GraylogService', () => {
     })
 
     it('should throw when endpoint returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ status: 403, data: { message: 'forbidden' } })
       )
 
       await expect(service.getEventDefinitions(VALID_CONFIG)).rejects.toThrow(
-        'Graylog event definitions failed: status 403'
+        'Graylog returned status 403: forbidden'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should propagate connectorFetch errors', async () => {
-      mockedConnectorFetch.mockRejectedValueOnce(new Error('DNS resolution failed'))
+    it('should propagate fetch errors', async () => {
+      mockAxiosService.fetch.mockRejectedValueOnce(new Error('DNS resolution failed'))
 
       await expect(service.getEventDefinitions(VALID_CONFIG)).rejects.toThrow(
         'DNS resolution failed'
@@ -328,26 +328,26 @@ describe('GraylogService', () => {
 
     it('should pass verifyTls config to rejectUnauthorized', async () => {
       const config = { ...VALID_CONFIG, verifyTls: false }
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { event_definitions: [] } })
       )
 
       await service.getEventDefinitions(config)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ rejectUnauthorized: false })
       )
     })
 
     it('should use basic auth credentials from config', async () => {
-      mockedConnectorFetch.mockResolvedValueOnce(
+      mockAxiosService.fetch.mockResolvedValueOnce(
         buildConnectorResponse({ data: { event_definitions: [] } })
       )
 
       await service.getEventDefinitions(VALID_CONFIG)
 
-      expect(mockedBasicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
+      expect(mockAxiosService.basicAuth).toHaveBeenCalledWith('admin', 'graylog-secret')
     })
   })
 })

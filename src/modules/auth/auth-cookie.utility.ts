@@ -33,14 +33,14 @@ export function setAuthCookies(
     ...baseOptions,
     httpOnly: true,
     sameSite: AuthCookieSameSite.STRICT,
-    path: AuthCookiePath.AUTH,
+    path: AuthCookiePath.ROOT,
     maxAge: REFRESH_COOKIE_MAX_AGE_MS,
   })
 }
 
 export function clearAuthCookies(response: Response): void {
   response.clearCookie(AuthCookieName.ACCESS, { path: AuthCookiePath.ROOT })
-  response.clearCookie(AuthCookieName.REFRESH, { path: AuthCookiePath.AUTH })
+  response.clearCookie(AuthCookieName.REFRESH, { path: AuthCookiePath.ROOT })
   response.clearCookie(AuthCookieName.CSRF, { path: AuthCookiePath.ROOT })
 }
 

@@ -12,6 +12,12 @@ import {
 } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { AiAgentsService } from './ai-agents.service'
+import {
+  type CreateAgentToolDto,
+  CreateAgentToolSchema,
+  type UpdateAgentToolDto,
+  UpdateAgentToolSchema,
+} from './dto/agent-tool.dto'
 import { type CreateAgentDto, CreateAgentSchema } from './dto/create-agent.dto'
 import { type ExecuteAgentDto, ExecuteAgentSchema } from './dto/execute-agent.dto'
 import { ListAgentsQuerySchema } from './dto/list-agents-query.dto'
@@ -27,7 +33,7 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type { AiAgentRecord, AiAgentStats, PaginatedAgents } from './ai-agents.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
-import type { AiAgentSession } from '@prisma/client'
+import type { AiAgentSession, AiAgentTool } from '@prisma/client'
 
 @Controller('ai-agents')
 @UseGuards(AuthGuard, TenantGuard)
@@ -151,5 +157,42 @@ export class AiAgentsController {
     const page = rawQuery['page'] ? Number(rawQuery['page']) : 1
     const limit = rawQuery['limit'] ? Number(rawQuery['limit']) : 20
     return this.aiAgentsService.getAgentSessions(id, tenantId, page, limit)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* TOOL CRUD                                                         */
+  /* ---------------------------------------------------------------- */
+
+  @Post(':id/tools')
+  @RequirePermission(Permission.AI_AGENTS_UPDATE)
+  async createTool(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(CreateAgentToolSchema)) dto: CreateAgentToolDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<AiAgentTool> {
+    return this.aiAgentsService.createTool(id, dto, user)
+  }
+
+  @Patch(':id/tools/:toolId')
+  @RequirePermission(Permission.AI_AGENTS_UPDATE)
+  async updateTool(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('toolId', ParseUUIDPipe) toolId: string,
+    @Body(new ZodValidationPipe(UpdateAgentToolSchema)) dto: UpdateAgentToolDto,
+    @CurrentUser() user: JwtPayload
+  ): Promise<AiAgentTool> {
+    return this.aiAgentsService.updateTool(id, toolId, dto, user)
+  }
+
+  @Delete(':id/tools/:toolId')
+  @RequirePermission(Permission.AI_AGENTS_DELETE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async deleteTool(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('toolId', ParseUUIDPipe) toolId: string,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ deleted: boolean }> {
+    return this.aiAgentsService.deleteTool(id, toolId, tenantId, user.email)
   }
 }

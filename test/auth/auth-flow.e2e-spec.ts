@@ -163,6 +163,19 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
   const families = new Map<string, MockRefreshFamily>()
   const rotationsById = new Map<string, MockRefreshRotation>()
   const rotationsByHash = new Map<string, MockRefreshRotation>()
+  const sessionsByFamily = new Map<
+    string,
+    {
+      familyId: string
+      userId: string
+      tenantId: string
+      status: string
+      currentAccessJti: string | null
+      currentAccessExpiresAt: Date | null
+      lastSeenAt: Date
+      lastLoginAt: Date
+    }
+  >()
   let rotationCounter = 0
 
   return {
@@ -265,6 +278,45 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
         return rotation
       }
     ),
+    createUserSession: jest.fn(
+      async (data: {
+        familyId: string
+        userId: string
+        tenantId: string
+        lastLoginAt: Date
+        currentAccessJti: string
+        currentAccessExpiresAt: Date
+      }) => {
+        const session = {
+          familyId: data.familyId,
+          userId: data.userId,
+          tenantId: data.tenantId,
+          status: 'active',
+          currentAccessJti: data.currentAccessJti,
+          currentAccessExpiresAt: data.currentAccessExpiresAt,
+          lastSeenAt: data.lastLoginAt,
+          lastLoginAt: data.lastLoginAt,
+        }
+
+        sessionsByFamily.set(data.familyId, session)
+
+        return {
+          id: `session-${data.familyId}`,
+          ...session,
+        }
+      }
+    ),
+    findUserSessionByFamilyId: jest.fn(async (familyId: string) => {
+      const session = sessionsByFamily.get(familyId)
+      if (!session) {
+        return null
+      }
+
+      return {
+        id: `session-${familyId}`,
+        ...session,
+      }
+    }),
     findRefreshTokenRotationByHash: jest.fn(async (jtiHash: string) => {
       const rotation = rotationsByHash.get(jtiHash)
       if (!rotation) {
@@ -325,7 +377,39 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
         rotationsById.set(newRotation.id, newRotation)
         rotationsByHash.set(newRotation.jtiHash, newRotation)
 
+        const session = sessionsByFamily.get(data.familyId)
+        if (session) {
+          session.currentAccessJti = null
+          session.currentAccessExpiresAt = null
+          session.lastSeenAt = data.rotatedAt
+          sessionsByFamily.set(data.familyId, session)
+        }
+
         return { familyAdvanceCount: 1, newRotation }
+      }
+    ),
+    touchUserSession: jest.fn(
+      async (data: {
+        familyId: string
+        touchedAt: Date
+        currentAccessJti?: string
+        currentAccessExpiresAt?: Date
+      }) => {
+        const session = sessionsByFamily.get(data.familyId)
+        if (session?.status !== 'active') {
+          return 0
+        }
+
+        session.lastSeenAt = data.touchedAt
+        if (data.currentAccessJti !== undefined) {
+          session.currentAccessJti = data.currentAccessJti
+        }
+        if (data.currentAccessExpiresAt !== undefined) {
+          session.currentAccessExpiresAt = data.currentAccessExpiresAt
+        }
+        sessionsByFamily.set(data.familyId, session)
+
+        return 1
       }
     ),
     revokeRefreshTokenFamily: jest.fn(
@@ -354,6 +438,12 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
           rotationsById.set(rotation.id, rotation)
           rotationsByHash.set(rotation.jtiHash, rotation)
         }
+
+        const session = sessionsByFamily.get(familyId)
+        if (session) {
+          session.status = 'revoked'
+          sessionsByFamily.set(familyId, session)
+        }
       }
     ),
     expireRefreshTokenFamily: jest.fn(async (familyId: string) => {
@@ -362,6 +452,12 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
         family.status = 'expired'
         family.updatedAt = new Date()
         families.set(family.id, family)
+      }
+
+      const session = sessionsByFamily.get(familyId)
+      if (session) {
+        session.status = 'expired'
+        sessionsByFamily.set(familyId, session)
       }
     }),
     upsertUserByOidcSub: jest.fn(),
@@ -396,8 +492,8 @@ describe('Auth Flow (E2E)', () => {
   beforeAll(async () => {
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 12)
     mockRepository = buildMockRepository(passwordHash)
-    const blacklist = buildBlacklistService()
-    revokedJtis = blacklist.revokedJtis
+    const { revokedJtis: builtRevokedJtis, service: blacklistService } = buildBlacklistService()
+    revokedJtis = builtRevokedJtis
 
     const moduleReference = await Test.createTestingModule({
       imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }])],
@@ -405,7 +501,7 @@ describe('Auth Flow (E2E)', () => {
       providers: [
         AuthService,
         { provide: AuthRepository, useValue: mockRepository },
-        { provide: TokenBlacklistService, useValue: blacklist.service },
+        { provide: TokenBlacklistService, useValue: blacklistService },
         {
           provide: AppLoggerService,
           useValue: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },

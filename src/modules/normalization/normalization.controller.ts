@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { type CreatePipelineDto, CreatePipelineSchema } from './dto/create-pipeline.dto'
+import { type DryRunPipelineDto, DryRunPipelineSchema } from './dto/dry-run-pipeline.dto'
 import { ListPipelinesQuerySchema } from './dto/list-pipelines-query.dto'
 import { type UpdatePipelineDto, UpdatePipelineSchema } from './dto/update-pipeline.dto'
 import { NormalizationService } from './normalization.service'
@@ -23,6 +24,7 @@ import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
+  NormalizationOutput,
   NormalizationPipelineRecord,
   NormalizationStats,
   PaginatedPipelines,
@@ -113,5 +115,17 @@ export class NormalizationController {
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
     return this.normalizationService.deletePipeline(id, tenantId, user.email)
+  }
+
+  @Post('pipelines/:id/dry-run')
+  @RequirePermission(Permission.NORMALIZATION_UPDATE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async dryRunPipeline(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(DryRunPipelineSchema)) dto: DryRunPipelineDto,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<NormalizationOutput> {
+    return this.normalizationService.dryRunPipeline(id, tenantId, dto.events, user.email)
   }
 }

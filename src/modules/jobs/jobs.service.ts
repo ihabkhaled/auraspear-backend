@@ -7,7 +7,9 @@ import {
   getStaleRunningThreshold,
   shouldRetryJob,
 } from './jobs.utilities'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { EnqueueParameters, JobRuntimeStats, ListJobsOptions } from './jobs.types'
 import type { Job, Prisma } from '@prisma/client'
 
@@ -15,7 +17,10 @@ import type { Job, Prisma } from '@prisma/client'
 export class JobService {
   private readonly logger = new Logger(JobService.name)
 
-  constructor(private readonly jobRepository: JobRepository) {}
+  constructor(
+    private readonly jobRepository: JobRepository,
+    private readonly appLogger: AppLoggerService
+  ) {}
 
   async enqueue(params: EnqueueParameters): Promise<Job> {
     // Idempotency check
@@ -25,9 +30,23 @@ export class JobService {
         params.idempotencyKey
       )
       if (existing) {
-        this.logger.log(
-          `Job already exists for idempotency key ${params.idempotencyKey}, returning existing job ${existing.id}`
-        )
+        this.appLogger.debug(`Job deduplicated by idempotency key`, {
+          feature: AppLogFeature.JOBS,
+          action: 'enqueue',
+          outcome: AppLogOutcome.SKIPPED,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'JobService',
+          functionName: 'enqueue',
+          tenantId: params.tenantId,
+          targetResource: 'Job',
+          targetResourceId: existing.id,
+          metadata: {
+            jobType: params.type,
+            idempotencyKey: params.idempotencyKey,
+            existingJobId: existing.id,
+            existingStatus: existing.status,
+          },
+        })
         return existing
       }
     }
@@ -42,7 +61,25 @@ export class JobService {
       createdBy: params.createdBy,
     })
 
-    this.logger.log(`Job ${job.id} enqueued: type=${params.type} tenant=${params.tenantId}`)
+    this.appLogger.info(`Job enqueued: ${params.type}`, {
+      feature: AppLogFeature.JOBS,
+      action: 'enqueue',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'enqueue',
+      tenantId: params.tenantId,
+      targetResource: 'Job',
+      targetResourceId: job.id,
+      metadata: {
+        jobType: params.type,
+        maxAttempts: params.maxAttempts ?? 3,
+        scheduledAt: params.scheduledAt?.toISOString() ?? null,
+        createdBy: params.createdBy ?? null,
+        hasPayload: Boolean(params.payload),
+      },
+    })
+
     return job
   }
 
@@ -110,9 +147,49 @@ export class JobService {
     })
 
     if (retrying) {
-      this.logger.warn(`Job ${jobId} failed (attempt ${nextAttempt}/${maxAttempts}), will retry`)
+      this.appLogger.warn(
+        `Job ${jobId} failed, scheduling retry ${String(nextAttempt)}/${String(maxAttempts)}`,
+        {
+          feature: AppLogFeature.JOBS,
+          action: 'markFailed',
+          outcome: AppLogOutcome.WARNING,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'JobService',
+          functionName: 'markFailed',
+          tenantId,
+          targetResource: 'Job',
+          targetResourceId: jobId,
+          metadata: {
+            attempt: nextAttempt,
+            maxAttempts,
+            error,
+            newStatus,
+            willRetry: true,
+          },
+        }
+      )
     } else {
-      this.logger.error(`Job ${jobId} failed permanently after ${maxAttempts} attempts: ${error}`)
+      this.appLogger.error(
+        `Job ${jobId} failed permanently after ${String(maxAttempts)} attempts`,
+        {
+          feature: AppLogFeature.JOBS,
+          action: 'markFailed',
+          outcome: AppLogOutcome.FAILURE,
+          sourceType: AppLogSourceType.SERVICE,
+          className: 'JobService',
+          functionName: 'markFailed',
+          tenantId,
+          targetResource: 'Job',
+          targetResourceId: jobId,
+          metadata: {
+            attempt: nextAttempt,
+            maxAttempts,
+            error,
+            newStatus,
+            willRetry: false,
+          },
+        }
+      )
     }
 
     return { retrying }
@@ -124,6 +201,19 @@ export class JobService {
     error: string,
     attempts: number
   ): Promise<Job> {
+    this.appLogger.error(`Job ${jobId} marked as unrecoverable failure`, {
+      feature: AppLogFeature.JOBS,
+      action: 'markUnrecoverableFailure',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'markUnrecoverableFailure',
+      tenantId,
+      targetResource: 'Job',
+      targetResourceId: jobId,
+      metadata: { error, attempts },
+    })
+
     return this.jobRepository.updateStatus(jobId, tenantId, {
       status: JobStatus.FAILED,
       error,
@@ -162,11 +252,22 @@ export class JobService {
   }
 
   async cancelJob(id: string, tenantId: string): Promise<boolean> {
-    await this.getJobOrThrow(id, tenantId)
+    const job = await this.getJobOrThrow(id, tenantId)
 
     const result = await this.jobRepository.cancelJob(id, tenantId)
     if (result.count > 0) {
-      this.logger.log(`Job ${id} cancelled`)
+      this.appLogger.info(`Job ${id} cancelled`, {
+        feature: AppLogFeature.JOBS,
+        action: 'cancelJob',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'JobService',
+        functionName: 'cancelJob',
+        tenantId,
+        targetResource: 'Job',
+        targetResourceId: id,
+        metadata: { jobType: job.type, previousStatus: job.status },
+      })
       return true
     }
 
@@ -195,7 +296,19 @@ export class JobService {
       throw new BusinessException(409, `Job ${id} could not be retried`, 'errors.jobs.cannotRetry')
     }
 
-    this.logger.log(`Job ${id} retried`)
+    this.appLogger.info(`Job ${id} retried`, {
+      feature: AppLogFeature.JOBS,
+      action: 'retryJob',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'retryJob',
+      tenantId,
+      targetResource: 'Job',
+      targetResourceId: id,
+      metadata: { jobType: job.type, previousStatus: job.status },
+    })
+
     return this.getJobOrThrow(id, tenantId)
   }
 }

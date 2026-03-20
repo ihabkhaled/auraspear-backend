@@ -486,6 +486,201 @@ export function buildBedrockAgentTaskResponse(
   }
 }
 
+/* ---------------------------------------------------------------- */
+/* LLM APIs RESPONSE BUILDERS                                        */
+/* ---------------------------------------------------------------- */
+
+export function buildLlmApisHuntResponse(
+  aiText: string,
+  query: string,
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Analyzing hunt query: "${query}"`,
+      'Decomposing query into threat hypotheses',
+      'Generating detection queries and MITRE ATT&CK mapping via LLM API',
+    ],
+    confidence: 0.85,
+    model: `llm-apis:${modelId}`,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildLlmApisInvestigateResponse(
+  aiText: string,
+  alertId: string,
+  relatedCount: number,
+  alert: Pick<Alert, 'severity' | 'mitreTechniques' | 'sourceIp'>,
+  relatedAlerts: unknown[],
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Loading alert ${alertId} details and raw event data`,
+      `Found ${relatedCount} related alerts in 48-hour window`,
+      'Analyzing severity, MITRE ATT&CK mapping, and IOC indicators',
+      'Generating AI-powered investigation report via LLM API',
+    ],
+    confidence: computeInvestigationConfidence(alert, relatedAlerts),
+    model: `llm-apis:${modelId}`,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildLlmApisAgentTaskResponse(
+  aiText: string,
+  agentName: string,
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Loading AI agent "${agentName}" execution context`,
+      'Applying agent SOUL and configured tools as guidance boundaries',
+      'Generating an assistive response through the configured LLM API',
+    ],
+    confidence: 0.82,
+    model: `llm-apis:${modelId}`,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildLlmApisExplainResponse(
+  aiText: string,
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      'Parsing the security concept or finding to explain',
+      'Breaking down technical details into analyst-friendly language',
+      'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
+      'Providing contextual examples relevant to the environment',
+      'Including remediation guidance and best practices via LLM API',
+    ],
+    confidence: 0.9,
+    model: `llm-apis:${modelId}`,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* OpenClaw Gateway RESPONSE BUILDERS                                */
+/* ---------------------------------------------------------------- */
+
+export function buildOpenClawHuntResponse(
+  aiText: string,
+  query: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Analyzing hunt query: "${query}"`,
+      'Decomposing query into threat hypotheses',
+      'Generating detection queries and MITRE ATT&CK mapping via OpenClaw Gateway',
+    ],
+    confidence: 0.85,
+    model: 'openclaw-gateway',
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildOpenClawInvestigateResponse(
+  aiText: string,
+  alertId: string,
+  relatedCount: number,
+  alert: Pick<Alert, 'severity' | 'mitreTechniques' | 'sourceIp'>,
+  relatedAlerts: unknown[],
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Loading alert ${alertId} details and raw event data`,
+      `Found ${relatedCount} related alerts in 48-hour window`,
+      'Analyzing severity, MITRE ATT&CK mapping, and IOC indicators',
+      'Generating AI-powered investigation report via OpenClaw Gateway',
+    ],
+    confidence: computeInvestigationConfidence(alert, relatedAlerts),
+    model: 'openclaw-gateway',
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildOpenClawAgentTaskResponse(
+  aiText: string,
+  agentName: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      `Loading AI agent "${agentName}" execution context`,
+      'Applying agent SOUL and configured tools as guidance boundaries',
+      'Generating an assistive response through OpenClaw Gateway',
+    ],
+    confidence: 0.82,
+    model: 'openclaw-gateway',
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildOpenClawExplainResponse(
+  aiText: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      'Parsing the security concept or finding to explain',
+      'Breaking down technical details into analyst-friendly language',
+      'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
+      'Providing contextual examples relevant to the environment',
+      'Including remediation guidance and best practices via OpenClaw Gateway',
+    ],
+    confidence: 0.9,
+    model: 'openclaw-gateway',
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+export function buildBedrockExplainResponse(
+  aiText: string,
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [
+      'Parsing the security concept or finding to explain',
+      'Breaking down technical details into analyst-friendly language',
+      'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
+      'Providing contextual examples relevant to the environment',
+      'Including remediation guidance and best practices via Bedrock',
+    ],
+    confidence: 0.9,
+    model: modelId,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
 export function buildFallbackAgentTaskResponse(params: AgentTaskResponseParameters): AiResponse {
   return {
     result: generateAgentTaskResponse(params),

@@ -161,6 +161,12 @@ export enum Permission {
   // Role Settings (this module itself)
   ROLE_SETTINGS_VIEW = 'roleSettings.view',
   ROLE_SETTINGS_UPDATE = 'roleSettings.update',
+
+  // Users Control
+  USERS_CONTROL_VIEW = 'usersControl.view',
+  USERS_CONTROL_VIEW_SESSIONS = 'usersControl.viewSessions',
+  USERS_CONTROL_FORCE_LOGOUT = 'usersControl.forceLogout',
+  USERS_CONTROL_FORCE_LOGOUT_ALL = 'usersControl.forceLogoutAll',
 }
 
 /**

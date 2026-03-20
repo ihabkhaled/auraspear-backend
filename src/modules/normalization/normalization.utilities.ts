@@ -1,6 +1,10 @@
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
-import type { NormalizationPipelineRecord, NormalizationStats } from './normalization.types'
+import type {
+  NormalizationPipelineRecord,
+  NormalizationStats,
+  NormalizationStep,
+} from './normalization.types'
 
 /* ---------------------------------------------------------------- */
 /* QUERY BUILDING                                                    */
@@ -106,6 +110,74 @@ export function buildPipelineRecord(pipeline: PipelineEntity): NormalizationPipe
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* PIPELINE STEP EXTRACTION                                          */
+/* ---------------------------------------------------------------- */
+
+const VALID_STEP_TYPES = new Set(['rename', 'map', 'extract', 'drop', 'default'])
+
+function isValidStepType(value: unknown): value is NormalizationStep['type'] {
+  return typeof value === 'string' && VALID_STEP_TYPES.has(value)
+}
+
+/**
+ * Extracts normalization steps from parserConfig and fieldMappings.
+ * parserConfig.steps holds explicit pipeline steps.
+ * fieldMappings entries are converted to 'rename' steps as a fallback.
+ */
+export function extractPipelineSteps(
+  parserConfig: Record<string, unknown>,
+  fieldMappings: Record<string, unknown>
+): NormalizationStep[] {
+  const steps: NormalizationStep[] = []
+
+  // Extract explicit steps from parserConfig
+  const rawSteps = Reflect.get(parserConfig, 'steps')
+  if (Array.isArray(rawSteps)) {
+    for (const raw of rawSteps) {
+      if (
+        typeof raw === 'object' &&
+        raw !== null &&
+        isValidStepType(Reflect.get(raw as Record<string, unknown>, 'type')) &&
+        typeof Reflect.get(raw as Record<string, unknown>, 'sourceField') === 'string'
+      ) {
+        const typed = raw as Record<string, unknown>
+        steps.push({
+          type: Reflect.get(typed, 'type') as NormalizationStep['type'],
+          sourceField: Reflect.get(typed, 'sourceField') as string,
+          targetField:
+            typeof Reflect.get(typed, 'targetField') === 'string'
+              ? (Reflect.get(typed, 'targetField') as string)
+              : undefined,
+          mapping:
+            typeof Reflect.get(typed, 'mapping') === 'object' &&
+            Reflect.get(typed, 'mapping') !== null
+              ? (Reflect.get(typed, 'mapping') as Record<string, string>)
+              : undefined,
+          pattern:
+            typeof Reflect.get(typed, 'pattern') === 'string'
+              ? (Reflect.get(typed, 'pattern') as string)
+              : undefined,
+          defaultValue: Reflect.get(typed, 'defaultValue'),
+        })
+      }
+    }
+  }
+
+  // Convert fieldMappings to rename steps as fallback
+  for (const [sourceField, targetField] of Object.entries(fieldMappings)) {
+    if (typeof targetField === 'string') {
+      steps.push({
+        type: 'rename',
+        sourceField,
+        targetField,
+      })
+    }
+  }
+
+  return steps
 }
 
 /* ---------------------------------------------------------------- */

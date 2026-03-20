@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, HttpMethod } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
 import { ConnectorServiceName } from '../connectors.enums'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 /**
@@ -13,7 +14,10 @@ import type { TestResult } from '../connectors.types'
 export class OpenSearchService {
   private readonly logger = new Logger(OpenSearchService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test OpenSearch cluster health.
@@ -30,17 +34,30 @@ export class OpenSearchService {
     try {
       const headers: Record<string, string> = {}
       if (username && password) {
-        headers.Authorization = basicAuth(username, password)
+        headers.Authorization = this.httpClient.basicAuth(username, password)
       }
 
-      const res = await connectorFetch(`${baseUrl}/_cluster/health`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/_cluster/health`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `OpenSearch returned status ${res.status}` }
+        const remoteError = formatRemoteError('OpenSearch', res.status, res.data)
+        this.appLogger.warn('OpenSearch connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'OpenSearchService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorServiceName.OPENSEARCH,
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const health = res.data as Record<string, unknown>
@@ -74,7 +91,7 @@ export class OpenSearchService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'OpenSearchService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorServiceName.OPENSEARCH },
+        metadata: { connectorType: ConnectorServiceName.OPENSEARCH, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -96,10 +113,10 @@ export class OpenSearchService {
 
     const headers: Record<string, string> = {}
     if (username && password) {
-      headers.Authorization = basicAuth(username, password)
+      headers.Authorization = this.httpClient.basicAuth(username, password)
     }
 
-    const res = await connectorFetch(`${baseUrl}/${index}/_search`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/${index}/_search`, {
       method: HttpMethod.POST,
       headers,
       body: query,
@@ -108,15 +125,16 @@ export class OpenSearchService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('OpenSearch search failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'search',
         className: 'OpenSearchService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, index },
+        metadata: { status: res.status, index, remoteError: remoteMessage },
       })
-      throw new Error(`OpenSearch search failed: status ${res.status}`)
+      throw new Error(formatRemoteError('OpenSearch', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>

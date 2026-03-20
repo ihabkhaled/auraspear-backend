@@ -199,17 +199,11 @@ export class AlertsService {
     ids: string[],
     email: string
   ): Promise<{ succeeded: number; failed: number }> {
-    let succeeded = 0
-    let failed = 0
-
-    for (const id of ids) {
-      try {
-        await this.acknowledge(tenantId, id, email)
-        succeeded++
-      } catch {
-        failed++
-      }
-    }
+    const results = await Promise.allSettled(
+      ids.map(async id => this.acknowledge(tenantId, id, email))
+    )
+    const succeeded = results.filter(result => result.status === 'fulfilled').length
+    const failed = results.length - succeeded
 
     this.logSuccess('bulkAcknowledge', tenantId, { succeeded, failed, total: ids.length })
     return { succeeded, failed }
@@ -221,17 +215,11 @@ export class AlertsService {
     resolution: string,
     email: string
   ): Promise<{ succeeded: number; failed: number }> {
-    let succeeded = 0
-    let failed = 0
-
-    for (const id of ids) {
-      try {
-        await this.close(tenantId, id, resolution, email)
-        succeeded++
-      } catch {
-        failed++
-      }
-    }
+    const results = await Promise.allSettled(
+      ids.map(async id => this.close(tenantId, id, resolution, email))
+    )
+    const succeeded = results.filter(result => result.status === 'fulfilled').length
+    const failed = results.length - succeeded
 
     this.logSuccess('bulkClose', tenantId, { succeeded, failed, total: ids.length })
     return { succeeded, failed }

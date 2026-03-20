@@ -6,8 +6,9 @@ import {
   ConnectorType,
   HttpMethod,
 } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { ScrollCollectionParameters, TestResult, WazuhTokenCache } from '../connectors.types'
 
 @Injectable()
@@ -15,7 +16,10 @@ export class WazuhService {
   private readonly logger = new Logger(WazuhService.name)
   private readonly tokenCache = new Map<string, WazuhTokenCache>()
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test Wazuh Manager connection.
@@ -37,14 +41,31 @@ export class WazuhService {
       const token = await this.authenticate(managerUrl, username, password, config)
 
       // Verify token by getting manager info
-      const infoResponse = await connectorFetch(`${managerUrl}/manager/info`, {
+      const infoResponse = await this.httpClient.fetch(`${managerUrl}/manager/info`, {
         headers: { Authorization: `Bearer ${token}` },
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (infoResponse.status !== 200) {
-        return { ok: false, details: `Wazuh Manager returned status ${infoResponse.status}` }
+        const remoteError = formatRemoteError(
+          'Wazuh Manager',
+          infoResponse.status,
+          infoResponse.data
+        )
+        this.appLogger.warn('Wazuh Manager info request failed', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'WazuhService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorType.WAZUH,
+            status: infoResponse.status,
+            remoteError: extractRemoteErrorMessage(infoResponse.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const info = infoResponse.data as Record<string, unknown>
@@ -76,7 +97,7 @@ export class WazuhService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'WazuhService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.WAZUH },
+        metadata: { connectorType: ConnectorType.WAZUH, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -100,23 +121,24 @@ export class WazuhService {
       return cached.token
     }
 
-    const res = await connectorFetch(`${managerUrl}/security/user/authenticate`, {
+    const res = await this.httpClient.fetch(`${managerUrl}/security/user/authenticate`, {
       method: HttpMethod.POST,
-      headers: { Authorization: basicAuth(username, password) },
+      headers: { Authorization: this.httpClient.basicAuth(username, password) },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Wazuh authentication failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'authenticate',
         className: 'WazuhService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Wazuh authentication failed with status ${res.status}`)
+      throw new Error(formatRemoteError('Wazuh Manager', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -166,22 +188,23 @@ export class WazuhService {
       config
     )
 
-    const res = await connectorFetch(`${managerUrl}/agents?status=active&limit=500`, {
+    const res = await this.httpClient.fetch(`${managerUrl}/agents?status=active&limit=500`, {
       headers: { Authorization: `Bearer ${token}` },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Failed to fetch Wazuh agents', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getAgents',
         className: 'WazuhService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Failed to fetch agents: status ${res.status}`)
+      throw new Error(formatRemoteError('Wazuh Manager', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -238,10 +261,10 @@ export class WazuhService {
       throw new Error('Invalid index name')
     }
 
-    const res = await connectorFetch(`${indexerUrl}/${index}/_search`, {
+    const res = await this.httpClient.fetch(`${indexerUrl}/${index}/_search`, {
       method: HttpMethod.POST,
       headers: {
-        Authorization: basicAuth(username as string, password as string),
+        Authorization: this.httpClient.basicAuth(username as string, password as string),
       },
       body: query,
       rejectUnauthorized: config.verifyTls !== false,
@@ -249,15 +272,16 @@ export class WazuhService {
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Wazuh Indexer search failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'searchAlerts',
         className: 'WazuhService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, index },
+        metadata: { status: res.status, index, remoteError: remoteMessage },
       })
-      throw new Error(`Wazuh Indexer search failed: status ${res.status}`)
+      throw new Error(formatRemoteError('Wazuh Indexer', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
@@ -302,24 +326,29 @@ export class WazuhService {
       throw new Error('Invalid index name')
     }
 
-    const authHeader = basicAuth(username as string, password as string)
+    const authHeader = this.httpClient.basicAuth(username as string, password as string)
     const tlsOption = config.verifyTls !== false
     const maxEvents = 10_000
     const scrollBatchSize = 1000
 
     // Initial search with scroll context (1 minute TTL)
     const scrollQuery = { ...query, size: scrollBatchSize }
-    const initialResponse = await connectorFetch(`${indexerUrl}/${index}/_search?scroll=1m`, {
-      method: HttpMethod.POST,
-      headers: { Authorization: authHeader },
-      body: scrollQuery,
-      rejectUnauthorized: tlsOption,
-      allowPrivateNetwork: true,
-      timeoutMs: 30_000,
-    })
+    const initialResponse = await this.httpClient.fetch(
+      `${indexerUrl}/${index}/_search?scroll=1m`,
+      {
+        method: HttpMethod.POST,
+        headers: { Authorization: authHeader },
+        body: scrollQuery,
+        rejectUnauthorized: tlsOption,
+        allowPrivateNetwork: true,
+        timeoutMs: 30_000,
+      }
+    )
 
     if (initialResponse.status !== 200) {
-      throw new Error(`Wazuh Indexer search failed: status ${initialResponse.status}`)
+      throw new Error(
+        formatRemoteError('Wazuh Indexer', initialResponse.status, initialResponse.data)
+      )
     }
 
     const initialBody = initialResponse.data as Record<string, unknown>
@@ -343,15 +372,17 @@ export class WazuhService {
 
     // Clean up scroll context (fire and forget)
     if (scrollId) {
-      connectorFetch(`${indexerUrl}/_search/scroll`, {
-        method: HttpMethod.DELETE,
-        headers: { Authorization: authHeader },
-        body: { scroll_id: [scrollId] },
-        rejectUnauthorized: tlsOption,
-        allowPrivateNetwork: true,
-      }).catch(() => {
-        // Scroll cleanup is best-effort
-      })
+      this.httpClient
+        .fetch(`${indexerUrl}/_search/scroll`, {
+          method: HttpMethod.DELETE,
+          headers: { Authorization: authHeader },
+          body: { scroll_id: [scrollId] },
+          rejectUnauthorized: tlsOption,
+          allowPrivateNetwork: true,
+        })
+        .catch(() => {
+          // Scroll cleanup is best-effort
+        })
     }
 
     this.appLogger.info('Wazuh full alert search completed', {
@@ -381,7 +412,7 @@ export class WazuhService {
       return scrollId
     }
 
-    const scrollResponse = await connectorFetch(`${indexerUrl}/_search/scroll`, {
+    const scrollResponse = await this.httpClient.fetch(`${indexerUrl}/_search/scroll`, {
       method: HttpMethod.POST,
       headers: { Authorization: authHeader },
       body: { scroll: '1m', scroll_id: scrollId },

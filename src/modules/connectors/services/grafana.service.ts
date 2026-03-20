@@ -1,14 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch, basicAuth } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class GrafanaService {
   private readonly logger = new Logger(GrafanaService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test Grafana connection.
@@ -23,14 +27,27 @@ export class GrafanaService {
     try {
       const headers = this.buildAuthHeaders(config)
 
-      const res = await connectorFetch(`${baseUrl}/api/health`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/api/health`, {
         headers,
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (res.status !== 200) {
-        return { ok: false, details: `Grafana returned status ${res.status}` }
+        const remoteError = formatRemoteError('Grafana', res.status, res.data)
+        this.appLogger.warn('Grafana connection test returned non-200', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'GrafanaService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: 'grafana',
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const health = res.data as Record<string, unknown>
@@ -61,7 +78,7 @@ export class GrafanaService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'GrafanaService',
         functionName: 'testConnection',
-        metadata: { connectorType: 'grafana' },
+        metadata: { connectorType: 'grafana', error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -76,22 +93,23 @@ export class GrafanaService {
     const baseUrl = config.baseUrl as string
     const headers = this.buildAuthHeaders(config)
 
-    const res = await connectorFetch(`${baseUrl}/api/search?type=dash-db`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/search?type=dash-db`, {
       headers,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Failed to fetch Grafana dashboards', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getDashboards',
         className: 'GrafanaService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Failed to fetch dashboards: status ${res.status}`)
+      throw new Error(formatRemoteError('Grafana', res.status, res.data))
     }
 
     const dashboards = (res.data ?? []) as unknown[]
@@ -118,7 +136,7 @@ export class GrafanaService {
     const username = config.username as string | undefined
     const password = config.password as string | undefined
     if (username && password) {
-      return { Authorization: basicAuth(username, password) }
+      return { Authorization: this.httpClient.basicAuth(username, password) }
     }
 
     return {}

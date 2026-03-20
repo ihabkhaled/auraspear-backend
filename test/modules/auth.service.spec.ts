@@ -51,8 +51,11 @@ function createMockRepository() {
     findUserByIdWithAllActiveMemberships: jest.fn(),
     createRefreshTokenFamily: jest.fn(),
     createRefreshTokenRotation: jest.fn(),
+    createUserSession: jest.fn(),
+    findUserSessionByFamilyId: jest.fn(),
     findRefreshTokenRotationByHash: jest.fn(),
     rotateRefreshTokenFamily: jest.fn(),
+    touchUserSession: jest.fn(),
     revokeRefreshTokenFamily: jest.fn(),
     expireRefreshTokenFamily: jest.fn(),
     upsertUserByOidcSub: jest.fn(),
@@ -121,6 +124,13 @@ describe('AuthService', () => {
     mockTokenBlacklist.isBlacklisted.mockResolvedValue(false)
     repository.createRefreshTokenFamily.mockResolvedValue(mockRefreshFamily)
     repository.createRefreshTokenRotation.mockResolvedValue(mockRefreshRotation)
+    repository.createUserSession.mockResolvedValue({
+      id: 'session-001',
+      familyId: mockRefreshFamily.id,
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+    })
+    repository.findUserSessionByFamilyId.mockResolvedValue(null)
     repository.findRefreshTokenRotationByHash.mockResolvedValue({
       ...mockRefreshRotation,
       family: mockRefreshFamily,
@@ -134,6 +144,7 @@ describe('AuthService', () => {
         parentRotationId: mockRefreshRotation.id,
       },
     })
+    repository.touchUserSession.mockResolvedValue(1)
     repository.revokeRefreshTokenFamily.mockResolvedValue(undefined)
     repository.expireRefreshTokenFamily.mockResolvedValue(undefined)
     service = new AuthService(

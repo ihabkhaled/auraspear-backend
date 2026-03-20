@@ -41,6 +41,8 @@ function createMockConnectorServices() {
     misp: { testConnection: jest.fn() },
     shuffle: { testConnection: jest.fn() },
     bedrock: { testConnection: jest.fn() },
+    llmApis: { testConnection: jest.fn() },
+    openClawGateway: { testConnection: jest.fn() },
   }
 }
 
@@ -64,6 +66,8 @@ function createService(
     services.misp as never,
     services.shuffle as never,
     services.bedrock as never,
+    services.llmApis as never,
+    services.openClawGateway as never,
     mockAppLogger as never
   )
 }
@@ -101,6 +105,8 @@ describe('ConnectorsService', () => {
             services.misp as never,
             services.shuffle as never,
             services.bedrock as never,
+            services.llmApis as never,
+            services.openClawGateway as never,
             mockAppLogger as never
           )
       ).toThrow('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
@@ -122,6 +128,8 @@ describe('ConnectorsService', () => {
             services.misp as never,
             services.shuffle as never,
             services.bedrock as never,
+            services.llmApis as never,
+            services.openClawGateway as never,
             mockAppLogger as never
           )
       ).toThrow('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')

@@ -6,15 +6,19 @@ import {
   ConnectorType,
   HttpMethod,
 } from '../../../common/enums'
+import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { connectorFetch } from '../../../common/utils/connector-http.utility'
+import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class InfluxDBService {
   private readonly logger = new Logger(InfluxDBService.name)
 
-  constructor(private readonly appLogger: AppLoggerService) {}
+  constructor(
+    private readonly appLogger: AppLoggerService,
+    private readonly httpClient: AxiosService
+  ) {}
 
   /**
    * Test InfluxDB connection.
@@ -32,14 +36,27 @@ export class InfluxDBService {
     }
 
     try {
-      const res = await connectorFetch(`${baseUrl}/ping`, {
+      const res = await this.httpClient.fetch(`${baseUrl}/ping`, {
         headers: { Authorization: `Token ${token}` },
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       })
 
       if (res.status !== 204 && res.status !== 200) {
-        return { ok: false, details: `InfluxDB returned status ${res.status}` }
+        const remoteError = formatRemoteError('InfluxDB', res.status, res.data)
+        this.appLogger.warn('InfluxDB connection test returned non-success', {
+          feature: AppLogFeature.CONNECTORS,
+          action: 'testConnection',
+          className: 'InfluxDBService',
+          sourceType: AppLogSourceType.SERVICE,
+          outcome: AppLogOutcome.FAILURE,
+          metadata: {
+            connectorType: ConnectorType.INFLUXDB,
+            status: res.status,
+            remoteError: extractRemoteErrorMessage(res.data),
+          },
+        })
+        return { ok: false, details: remoteError }
       }
 
       const version = res.headers['x-influxdb-version'] ?? 'unknown'
@@ -69,7 +86,7 @@ export class InfluxDBService {
         sourceType: AppLogSourceType.SERVICE,
         className: 'InfluxDBService',
         functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.INFLUXDB },
+        metadata: { connectorType: ConnectorType.INFLUXDB, error: message },
         stackTrace: error instanceof Error ? error.stack : undefined,
       })
 
@@ -85,28 +102,32 @@ export class InfluxDBService {
     const token = config.token as string
     const org = (config.org ?? config.organization ?? '') as string
 
-    const res = await connectorFetch(`${baseUrl}/api/v2/query?org=${encodeURIComponent(org)}`, {
-      method: HttpMethod.POST,
-      headers: {
-        Authorization: `Token ${token}`,
-        'Content-Type': 'application/vnd.flux',
-        Accept: 'application/csv',
-      },
-      body: flux,
-      rejectUnauthorized: config.verifyTls !== false,
-      allowPrivateNetwork: true,
-    })
+    const res = await this.httpClient.fetch(
+      `${baseUrl}/api/v2/query?org=${encodeURIComponent(org)}`,
+      {
+        method: HttpMethod.POST,
+        headers: {
+          Authorization: `Token ${token}`,
+          'Content-Type': 'application/vnd.flux',
+          Accept: 'application/csv',
+        },
+        body: flux,
+        rejectUnauthorized: config.verifyTls !== false,
+        allowPrivateNetwork: true,
+      }
+    )
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('InfluxDB Flux query failed', {
         feature: AppLogFeature.CONNECTORS,
         action: 'query',
         className: 'InfluxDBService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`InfluxDB query failed: status ${res.status}`)
+      throw new Error(formatRemoteError('InfluxDB', res.status, res.data))
     }
 
     this.appLogger.info('InfluxDB Flux query executed', {
@@ -129,22 +150,23 @@ export class InfluxDBService {
     const baseUrl = config.baseUrl as string
     const token = config.token as string
 
-    const res = await connectorFetch(`${baseUrl}/api/v2/buckets`, {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/v2/buckets`, {
       headers: { Authorization: `Token ${token}` },
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
+      const remoteMessage = extractRemoteErrorMessage(res.data)
       this.appLogger.warn('Failed to fetch InfluxDB buckets', {
         feature: AppLogFeature.CONNECTORS,
         action: 'getBuckets',
         className: 'InfluxDBService',
         sourceType: AppLogSourceType.SERVICE,
         outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status },
+        metadata: { status: res.status, remoteError: remoteMessage },
       })
-      throw new Error(`Failed to fetch buckets: status ${res.status}`)
+      throw new Error(formatRemoteError('InfluxDB', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>

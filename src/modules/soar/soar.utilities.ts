@@ -127,12 +127,22 @@ interface ExecutionWithPlaybook {
   tenantId: string
   status: string
   triggeredBy: string
+  triggerSource: string | null
+  stepsCompleted: number
+  totalSteps: number
   startedAt: Date
   completedAt: Date | null
   output: unknown
   error: string | null
   createdAt: Date
-  playbook: { name: string }
+  playbook: { name: string; triggerType: string }
+}
+
+function computeDurationSeconds(startedAt: Date, completedAt: Date | null): number | null {
+  if (!completedAt) {
+    return null
+  }
+  return Math.round((completedAt.getTime() - startedAt.getTime()) / 1000)
 }
 
 export function buildExecutionRecord(
@@ -147,6 +157,10 @@ export function buildExecutionRecord(
     status: execution.status,
     triggeredBy: execution.triggeredBy,
     triggeredByName,
+    triggerType: execution.playbook.triggerType,
+    stepsCompleted: execution.stepsCompleted,
+    totalSteps: execution.totalSteps,
+    durationSeconds: computeDurationSeconds(execution.startedAt, execution.completedAt),
     startedAt: execution.startedAt,
     completedAt: execution.completedAt,
     output: execution.output as Record<string, unknown> | null,

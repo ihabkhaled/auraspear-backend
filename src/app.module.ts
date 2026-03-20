@@ -10,6 +10,8 @@ import { PermissionsGuard } from './common/guards/permissions.guard'
 import { RolesGuard } from './common/guards/roles.guard'
 import { TenantGuard } from './common/guards/tenant.guard'
 import { AuditInterceptor } from './common/interceptors/audit.interceptor'
+import { AppLoggerService } from './common/services/app-logger.service'
+import { StartupHealthService } from './common/services/startup-health.service'
 import { validateEnvironment } from './config/env.validation'
 import { AiModule } from './modules/ai/ai.module'
 import { AiAgentsModule } from './modules/ai-agents/ai-agents.module'
@@ -43,6 +45,7 @@ import { SystemHealthModule } from './modules/system-health/system-health.module
 import { TenantsModule } from './modules/tenants/tenants.module'
 import { UebaModule } from './modules/ueba/ueba.module'
 import { UsersModule } from './modules/users/users.module'
+import { UsersControlModule } from './modules/users-control/users-control.module'
 import { VulnerabilitiesModule } from './modules/vulnerabilities/vulnerabilities.module'
 import { PrismaModule } from './prisma/prisma.module'
 
@@ -100,6 +103,7 @@ import { PrismaModule } from './prisma/prisma.module'
     AiModule,
     HealthModule,
     UsersModule,
+    UsersControlModule,
     AttackPathsModule,
     UebaModule,
     VulnerabilitiesModule,
@@ -123,6 +127,10 @@ import { PrismaModule } from './prisma/prisma.module'
 
     // Global interceptors
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+
+    // Startup health checker
+    AppLoggerService,
+    StartupHealthService,
   ],
 })
 export class AppModule {}

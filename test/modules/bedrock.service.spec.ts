@@ -46,21 +46,11 @@ function encodeBody(body: Record<string, unknown>): Uint8Array {
 
 describe('BedrockService', () => {
   let service: BedrockService
-  const originalBedrockMock = process.env['BEDROCK_MOCK']
 
   beforeEach(() => {
     jest.clearAllMocks()
     jest.restoreAllMocks()
-    // Disable mock mode so tests exercise real SDK code paths
-    delete process.env['BEDROCK_MOCK']
     service = createService()
-  })
-
-  afterAll(() => {
-    // Restore original env value
-    if (originalBedrockMock !== undefined) {
-      process.env['BEDROCK_MOCK'] = originalBedrockMock
-    }
   })
 
   /* ------------------------------------------------------------------ */

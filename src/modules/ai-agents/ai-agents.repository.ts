@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { AiAgent, AiAgentSession, Prisma } from '@prisma/client'
+import type { AiAgent, AiAgentSession, AiAgentTool, Prisma } from '@prisma/client'
 
 @Injectable()
 export class AiAgentsRepository {
@@ -271,5 +271,39 @@ export class AiAgentsRepository {
         completedAt: new Date(),
       },
     })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* AI AGENT TOOL QUERIES                                              */
+  /* ---------------------------------------------------------------- */
+
+  async findManyTools(where: Prisma.AiAgentToolWhereInput): Promise<AiAgentTool[]> {
+    return this.prisma.aiAgentTool.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+    })
+  }
+
+  async findFirstTool(where: Prisma.AiAgentToolWhereInput): Promise<AiAgentTool | null> {
+    return this.prisma.aiAgentTool.findFirst({ where })
+  }
+
+  async createTool(data: Prisma.AiAgentToolUncheckedCreateInput): Promise<AiAgentTool> {
+    return this.prisma.aiAgentTool.create({ data })
+  }
+
+  async updateTool(
+    where: { id: string },
+    data: Prisma.AiAgentToolUpdateInput
+  ): Promise<AiAgentTool> {
+    return this.prisma.aiAgentTool.update({ where, data })
+  }
+
+  async deleteTool(where: { id: string }): Promise<AiAgentTool> {
+    return this.prisma.aiAgentTool.delete({ where })
+  }
+
+  async countTools(where: Prisma.AiAgentToolWhereInput): Promise<number> {
+    return this.prisma.aiAgentTool.count({ where })
   }
 }

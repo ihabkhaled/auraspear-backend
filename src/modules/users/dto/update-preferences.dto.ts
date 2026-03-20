@@ -1,11 +1,18 @@
 import { z } from 'zod'
-import { SupportedLanguage, Theme } from '../../../common/enums'
+import {
+  DashboardDensity,
+  DashboardPanelKey,
+  SupportedLanguage,
+  Theme,
+} from '../../../common/enums'
 
 const VALID_RETENTION_VALUES = ['30', '90', '180', '365', 'unlimited'] as const
 
 export const UpdatePreferencesSchema = z.object({
   theme: z.nativeEnum(Theme).optional(),
   language: z.nativeEnum(SupportedLanguage).optional(),
+  dashboardDensity: z.nativeEnum(DashboardDensity).optional(),
+  collapsedDashboardPanels: z.array(z.nativeEnum(DashboardPanelKey)).max(32).optional(),
   notificationsEmail: z.boolean().optional(),
   notificationsInApp: z.boolean().optional(),
   // Notification category preferences

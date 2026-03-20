@@ -9,6 +9,6 @@ import { ConnectorsModule } from '../connectors/connectors.module'
   imports: [ConnectorsModule, AppLogsModule],
   controllers: [AlertsController],
   providers: [AlertsRepository, AlertsService],
-  exports: [AlertsService],
+  exports: [AlertsService, AlertsRepository],
 })
 export class AlertsModule {}

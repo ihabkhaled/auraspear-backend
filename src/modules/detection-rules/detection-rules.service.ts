@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { DetectionRulesExecutor } from './detection-rules.executor'
 import { DetectionRulesRepository } from './detection-rules.repository'
 import {
   buildDetectionRuleRecord,
@@ -17,6 +18,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import type {
+  DetectionExecutionResult,
   DetectionRuleRecord,
   DetectionRuleStats,
   PaginatedDetectionRules,
@@ -32,7 +34,8 @@ export class DetectionRulesService {
 
   constructor(
     private readonly repository: DetectionRulesRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly executor: DetectionRulesExecutor
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -242,6 +245,50 @@ export class DetectionRulesService {
     })
 
     return { deleted: true }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* SIMULATE (dry-run)                                                */
+  /* ---------------------------------------------------------------- */
+
+  async simulateRule(
+    id: string,
+    tenantId: string,
+    events: Record<string, unknown>[],
+    actorEmail: string
+  ): Promise<DetectionExecutionResult> {
+    const rule = await this.getRuleById(id, tenantId)
+
+    const result = await this.executor.evaluateRule(
+      {
+        id: rule.id,
+        name: rule.name,
+        severity: rule.severity,
+        conditions: rule.conditions,
+      },
+      events
+    )
+
+    this.appLogger.info('Detection rule simulation executed', {
+      feature: AppLogFeature.DETECTION_RULES,
+      action: 'simulateRule',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail,
+      targetResource: 'DetectionRule',
+      targetResourceId: id,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DetectionRulesService',
+      functionName: 'simulateRule',
+      metadata: {
+        inputCount: events.length,
+        matchCount: result.matchCount,
+        status: result.status,
+        durationMs: result.durationMs,
+      },
+    })
+
+    return result
   }
 
   /* ---------------------------------------------------------------- */

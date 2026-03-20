@@ -15,8 +15,10 @@ import { BedrockService } from './services/bedrock.service'
 import { GrafanaService } from './services/grafana.service'
 import { GraylogService } from './services/graylog.service'
 import { InfluxDBService } from './services/influxdb.service'
+import { LlmApisService } from './services/llm-apis.service'
 import { LogstashService } from './services/logstash.service'
 import { MispService } from './services/misp.service'
+import { OpenClawGatewayService } from './services/openclaw-gateway.service'
 import { ShuffleService } from './services/shuffle.service'
 import { VelociraptorService } from './services/velociraptor.service'
 import { WazuhService } from './services/wazuh.service'
@@ -57,6 +59,8 @@ export class ConnectorsService {
     private readonly mispService: MispService,
     private readonly shuffleService: ShuffleService,
     private readonly bedrockService: BedrockService,
+    private readonly llmApisService: LlmApisService,
+    private readonly openClawGatewayService: OpenClawGatewayService,
     private readonly appLogger: AppLoggerService
   ) {
     const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
@@ -75,6 +79,8 @@ export class ConnectorsService {
       ['misp', this.mispService],
       ['shuffle', this.shuffleService],
       ['bedrock', this.bedrockService],
+      ['llm_apis', this.llmApisService],
+      ['openclaw_gateway', this.openClawGatewayService],
     ])
   }
 
@@ -219,7 +225,15 @@ export class ConnectorsService {
       lastError: ok ? null : details.slice(0, 500),
     })
 
-    this.logSuccess('testConnection', tenantId, type, { latencyMs, ok })
+    if (ok) {
+      this.logSuccess('testConnection', tenantId, type, { latencyMs, ok })
+    } else {
+      this.logWarn('testConnection', tenantId, type, {
+        latencyMs,
+        ok,
+        details: details.slice(0, 300),
+      })
+    }
     return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
   }
 
@@ -313,9 +327,9 @@ export class ConnectorsService {
    * Falls back to synchronous validation for basic URL structure checks.
    */
   private async validateConfigUrls(config: Record<string, unknown>): Promise<void> {
-    for (const { value } of extractUrlFields(config)) {
-      await resolveAndValidateUrl(value)
-    }
+    await Promise.all(
+      extractUrlFields(config).map(async ({ value }) => resolveAndValidateUrl(value))
+    )
   }
 
   private async buildMergedEncryptedConfig(
@@ -359,10 +373,26 @@ export class ConnectorsService {
       }
     } catch (error) {
       details = sanitizeErrorDetails(error)
+      const errorMessage = error instanceof Error ? error.message : 'unknown'
+      const latencyMs = Date.now() - start
       this.logger.error(
-        `Connector ${type} test failed for tenant ${tenantId}: ${error instanceof Error ? error.message : 'unknown'}`
+        `Connector ${type} test failed for tenant ${tenantId} after ${latencyMs}ms: ${errorMessage}`
       )
-      this.logError('testConnection', tenantId, type, error)
+      this.appLogger.error(`Connector ${type} connection test failed`, {
+        feature: AppLogFeature.CONNECTORS,
+        action: 'testConnection',
+        outcome: AppLogOutcome.FAILURE,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'ConnectorsService',
+        functionName: 'runConnectionTest',
+        tenantId,
+        metadata: {
+          connectorType: type,
+          error: errorMessage,
+          latencyMs,
+        },
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      })
     }
 
     return { ok, details, latencyMs: Date.now() - start }
@@ -447,21 +477,6 @@ export class ConnectorsService {
       className: 'ConnectorsService',
       functionName: action,
       metadata: { ...metadata, tenantId, connectorType: type },
-    })
-  }
-
-  private logError(action: string, tenantId: string, type: string, error: unknown): void {
-    this.appLogger.error(`Connector ${action} error`, {
-      feature: AppLogFeature.CONNECTORS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ConnectorsService',
-      metadata: {
-        tenantId,
-        connectorType: type,
-        error: error instanceof Error ? error.message : 'unknown',
-      },
     })
   }
 }

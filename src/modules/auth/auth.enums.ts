@@ -26,4 +26,8 @@ export enum RefreshTokenFamilyRevocationReason {
   LOGOUT = 'logout',
   IMPERSONATION_ENDED = 'impersonation_ended',
   REPLAY_DETECTED = 'replay_detected',
+  FORCE_LOGOUT_USER = 'force_logout_user',
+  FORCE_LOGOUT_SESSION = 'force_logout_session',
+  FORCE_LOGOUT_ALL = 'force_logout_all',
+  EXPIRED = 'expired',
 }

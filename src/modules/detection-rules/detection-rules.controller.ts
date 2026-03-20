@@ -18,6 +18,10 @@ import {
 } from './dto/create-detection-rule.dto'
 import { ListDetectionRulesQuerySchema } from './dto/list-detection-rules-query.dto'
 import {
+  type SimulateDetectionRuleDto,
+  SimulateDetectionRuleSchema,
+} from './dto/simulate-detection-rule.dto'
+import {
   type ToggleDetectionRuleDto,
   ToggleDetectionRuleSchema,
 } from './dto/toggle-detection-rule.dto'
@@ -33,6 +37,7 @@ import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
+  DetectionExecutionResult,
   DetectionRuleRecord,
   DetectionRuleStats,
   PaginatedDetectionRules,
@@ -119,5 +124,17 @@ export class DetectionRulesController {
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: boolean }> {
     return this.detectionRulesService.deleteRule(id, tenantId, user.email)
+  }
+
+  @Post(':id/simulate')
+  @RequirePermission(Permission.DETECTION_RULES_UPDATE)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async simulateRule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(SimulateDetectionRuleSchema)) dto: SimulateDetectionRuleDto,
+    @TenantId() tenantId: string,
+    @CurrentUser() user: JwtPayload
+  ): Promise<DetectionExecutionResult> {
+    return this.detectionRulesService.simulateRule(id, tenantId, dto.events, user.email)
   }
 }

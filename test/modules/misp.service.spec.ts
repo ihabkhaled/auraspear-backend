@@ -1,9 +1,10 @@
-import { connectorFetch } from '../../src/common/utils/connector-http.utility'
 import { MispService } from '../../src/modules/connectors/services/misp.service'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -13,7 +14,7 @@ const mockAppLogger = {
 }
 
 function createService(): MispService {
-  return new MispService(mockAppLogger as never)
+  return new MispService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
 const VALID_CONFIG: Record<string, unknown> = {
@@ -36,7 +37,7 @@ describe('MispService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true when MISP is reachable', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { version: '2.4.178' },
         headers: {},
@@ -48,7 +49,7 @@ describe('MispService', () => {
       expect(result.ok).toBe(true)
       expect(result.details).toContain('MISP reachable')
       expect(result.details).toContain('2.4.178')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://misp.local/servers/getPyMISPVersion.json',
         expect.objectContaining({
           headers: expect.objectContaining({
@@ -59,7 +60,7 @@ describe('MispService', () => {
     })
 
     it('should return ok: true with unknown version when version is missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -73,7 +74,7 @@ describe('MispService', () => {
     })
 
     it('should accept baseUrl as alternative to mispUrl', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { version: '2.4.178' },
         headers: {},
@@ -84,14 +85,14 @@ describe('MispService', () => {
       const result = await service.testConnection(config)
 
       expect(result.ok).toBe(true)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://misp-alt.local/servers/getPyMISPVersion.json',
         expect.objectContaining({})
       )
     })
 
     it('should accept apiKey as alternative to authKey', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { version: '2.4.178' },
         headers: {},
@@ -102,7 +103,7 @@ describe('MispService', () => {
       const result = await service.testConnection(config)
 
       expect(result.ok).toBe(true)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('misp.local'),
         expect.objectContaining({
           headers: expect.objectContaining({ Authorization: 'alt-key' }),
@@ -115,7 +116,7 @@ describe('MispService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('MISP URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when auth key is not configured', async () => {
@@ -123,11 +124,11 @@ describe('MispService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('MISP auth key not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return error when MISP returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 403,
         data: { error: 'Forbidden' },
         headers: {},
@@ -137,11 +138,11 @@ describe('MispService', () => {
       const result = await service.testConnection(VALID_CONFIG)
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('MISP returned status 403')
+      expect(result.details).toBe('MISP returned status 403: Forbidden')
     })
 
     it('should handle network errors gracefully', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ECONNREFUSED'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('ECONNREFUSED'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -151,7 +152,7 @@ describe('MispService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      mockedConnectorFetch.mockRejectedValue('string error')
+      mockAxiosService.fetch.mockRejectedValue('string error')
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -160,7 +161,7 @@ describe('MispService', () => {
     })
 
     it('should log success on successful connection', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { version: '2.4.178' },
         headers: {},
@@ -181,7 +182,7 @@ describe('MispService', () => {
     })
 
     it('should log error on failed connection', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('timeout'))
+      mockAxiosService.fetch.mockRejectedValue(new Error('timeout'))
 
       await service.testConnection(VALID_CONFIG)
 
@@ -194,7 +195,7 @@ describe('MispService', () => {
     })
 
     it('should pass verifyTls option correctly', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { version: '2.4.178' },
         headers: {},
@@ -203,7 +204,7 @@ describe('MispService', () => {
 
       await service.testConnection({ ...VALID_CONFIG, verifyTls: false })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('misp.local'),
         expect.objectContaining({ rejectUnauthorized: false })
       )
@@ -220,7 +221,7 @@ describe('MispService', () => {
         { id: 1, info: 'Event 1' },
         { id: 2, info: 'Event 2' },
       ]
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: mockEvents,
         headers: {},
@@ -230,7 +231,7 @@ describe('MispService', () => {
       const events = await service.getEvents(VALID_CONFIG)
 
       expect(events).toEqual(mockEvents)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://misp.local/events/index?limit=20&sort=date&direction=desc',
         expect.objectContaining({
           headers: expect.objectContaining({ Authorization: 'test-auth-key-123' }),
@@ -239,7 +240,7 @@ describe('MispService', () => {
     })
 
     it('should accept a custom limit', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: [],
         headers: {},
@@ -248,14 +249,14 @@ describe('MispService', () => {
 
       await service.getEvents(VALID_CONFIG, 50)
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('limit=50'),
         expect.objectContaining({})
       )
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 500,
         data: { error: 'Internal' },
         headers: {},
@@ -263,13 +264,13 @@ describe('MispService', () => {
       })
 
       await expect(service.getEvents(VALID_CONFIG)).rejects.toThrow(
-        'MISP events fetch failed: status 500'
+        'MISP returned status 500: Internal'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should return empty array when data is null', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: null,
         headers: {},
@@ -282,7 +283,7 @@ describe('MispService', () => {
     })
 
     it('should log success after retrieving events', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: [{ id: 1 }],
         headers: {},
@@ -307,7 +308,7 @@ describe('MispService', () => {
   describe('searchAttributes', () => {
     it('should return attributes from search', async () => {
       const mockAttributes = [{ id: '1', value: '8.8.8.8', type: 'ip-dst' }]
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { response: { Attribute: mockAttributes } },
         headers: {},
@@ -318,7 +319,7 @@ describe('MispService', () => {
       const result = await service.searchAttributes(VALID_CONFIG, searchParameters)
 
       expect(result).toEqual(mockAttributes)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://misp.local/attributes/restSearch',
         expect.objectContaining({
           method: 'POST',
@@ -328,7 +329,7 @@ describe('MispService', () => {
     })
 
     it('should return empty array when no attributes found', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { response: {} },
         headers: {},
@@ -341,7 +342,7 @@ describe('MispService', () => {
     })
 
     it('should return empty array when response is missing', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: {},
         headers: {},
@@ -354,7 +355,7 @@ describe('MispService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 403,
         data: {},
         headers: {},
@@ -362,13 +363,13 @@ describe('MispService', () => {
       })
 
       await expect(service.searchAttributes(VALID_CONFIG, { value: 'test' })).rejects.toThrow(
-        'MISP attribute search failed: status 403'
+        'MISP returned status 403'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
     it('should log success after search', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { response: { Attribute: [{ id: '1' }, { id: '2' }] } },
         headers: {},
@@ -393,7 +394,7 @@ describe('MispService', () => {
   describe('getEvent', () => {
     it('should return a single event by ID', async () => {
       const mockEvent = { id: '123', info: 'Test Event' }
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { Event: mockEvent },
         headers: {},
@@ -403,7 +404,7 @@ describe('MispService', () => {
       const result = await service.getEvent(VALID_CONFIG, '123')
 
       expect(result).toEqual(mockEvent)
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://misp.local/events/view/123',
         expect.objectContaining({
           headers: expect.objectContaining({ Authorization: 'test-auth-key-123' }),
@@ -413,7 +414,7 @@ describe('MispService', () => {
 
     it('should return body when Event key is missing', async () => {
       const mockBody = { id: '456', info: 'Raw body' }
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: mockBody,
         headers: {},
@@ -427,25 +428,25 @@ describe('MispService', () => {
 
     it('should throw on invalid event ID (non-numeric)', async () => {
       await expect(service.getEvent(VALID_CONFIG, 'abc')).rejects.toThrow('Invalid MISP event ID')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should throw on event ID with path traversal', async () => {
       await expect(service.getEvent(VALID_CONFIG, '../etc/passwd')).rejects.toThrow(
         'Invalid MISP event ID'
       )
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should throw on event ID with special characters', async () => {
       await expect(service.getEvent(VALID_CONFIG, '123;drop')).rejects.toThrow(
         'Invalid MISP event ID'
       )
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should accept valid numeric event IDs', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { Event: { id: '99999' } },
         headers: {},
@@ -458,7 +459,7 @@ describe('MispService', () => {
     })
 
     it('should throw when status is not 200', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 404,
         data: {},
         headers: {},
@@ -466,7 +467,7 @@ describe('MispService', () => {
       })
 
       await expect(service.getEvent(VALID_CONFIG, '123')).rejects.toThrow(
-        'MISP event fetch failed: status 404'
+        'MISP returned status 404'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -487,7 +488,7 @@ describe('MispService', () => {
     })
 
     it('should log success after retrieving event', async () => {
-      mockedConnectorFetch.mockResolvedValue({
+      mockAxiosService.fetch.mockResolvedValue({
         status: 200,
         data: { Event: { id: '1' } },
         headers: {},

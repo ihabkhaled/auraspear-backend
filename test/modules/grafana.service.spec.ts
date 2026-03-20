@@ -1,11 +1,11 @@
-import { connectorFetch, basicAuth } from '../../src/common/utils/connector-http.utility'
 import { GrafanaService } from '../../src/modules/connectors/services/grafana.service'
-import type { ConnectorHttpResponse } from '../../src/common/utils/connector-http.utility'
+import type { AxiosResponseData } from '../../src/common/modules/axios'
+import type { AxiosService } from '../../src/common/modules/axios/axios.service'
 
-jest.mock('../../src/common/utils/connector-http.utility')
-
-const mockedConnectorFetch = connectorFetch as jest.MockedFunction<typeof connectorFetch>
-const mockedBasicAuth = basicAuth as jest.MockedFunction<typeof basicAuth>
+const mockAxiosService = {
+  fetch: jest.fn(),
+  basicAuth: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -15,10 +15,10 @@ const mockAppLogger = {
 }
 
 function createService(): GrafanaService {
-  return new GrafanaService(mockAppLogger as never)
+  return new GrafanaService(mockAppLogger as never, mockAxiosService as unknown as AxiosService)
 }
 
-function buildResponse(overrides: Partial<ConnectorHttpResponse> = {}): ConnectorHttpResponse {
+function buildResponse(overrides: Partial<AxiosResponseData> = {}): AxiosResponseData {
   return {
     status: 200,
     data: {},
@@ -33,7 +33,7 @@ describe('GrafanaService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    mockedBasicAuth.mockImplementation(
+    mockAxiosService.basicAuth.mockImplementation(
       (username: string, password: string) =>
         `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
     )
@@ -46,7 +46,7 @@ describe('GrafanaService', () => {
 
   describe('testConnection', () => {
     it('should return ok: true with version when health endpoint succeeds', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({
           status: 200,
           data: { version: '10.2.3', database: 'ok', commit: 'abc123' },
@@ -62,7 +62,7 @@ describe('GrafanaService', () => {
       expect(result.details).toContain('Grafana v10.2.3')
       expect(result.details).toContain('https://grafana.local:3000')
       expect(result.details).toContain('ok')
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://grafana.local:3000/api/health',
         expect.objectContaining({
           headers: { Authorization: 'Bearer glsa_secret' },
@@ -77,11 +77,11 @@ describe('GrafanaService', () => {
 
       expect(result.ok).toBe(false)
       expect(result.details).toBe('Grafana base URL not configured')
-      expect(mockedConnectorFetch).not.toHaveBeenCalled()
+      expect(mockAxiosService.fetch).not.toHaveBeenCalled()
     })
 
     it('should return ok: false when health endpoint returns non-200', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 503 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 503 }))
 
       const result = await service.testConnection({
         baseUrl: 'https://grafana.local',
@@ -91,8 +91,8 @@ describe('GrafanaService', () => {
       expect(result.details).toBe('Grafana returned status 503')
     })
 
-    it('should return ok: false when connectorFetch throws', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('ECONNREFUSED'))
+    it('should return ok: false when fetch throws', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('ECONNREFUSED'))
 
       const result = await service.testConnection({
         baseUrl: 'https://grafana.local',
@@ -104,7 +104,7 @@ describe('GrafanaService', () => {
     })
 
     it('should return "Connection failed" when non-Error is thrown', async () => {
-      mockedConnectorFetch.mockRejectedValue('string error')
+      mockAxiosService.fetch.mockRejectedValue('string error')
 
       const result = await service.testConnection({
         baseUrl: 'https://grafana.local',
@@ -115,7 +115,7 @@ describe('GrafanaService', () => {
     })
 
     it('should use "unknown" version when health data has no version field', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { database: 'ok' } })
       )
 
@@ -128,7 +128,7 @@ describe('GrafanaService', () => {
     })
 
     it('should respect verifyTls setting', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '10.0.0' } })
       )
 
@@ -137,7 +137,7 @@ describe('GrafanaService', () => {
         verifyTls: false,
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://grafana.local/api/health',
         expect.objectContaining({
           rejectUnauthorized: false,
@@ -150,7 +150,7 @@ describe('GrafanaService', () => {
     /* ---------------------------------------------------------------- */
 
     it('should prioritize apiKey over basic auth credentials', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '10.0.0' } })
       )
 
@@ -161,7 +161,7 @@ describe('GrafanaService', () => {
         password: 'admin',
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/health'),
         expect.objectContaining({
           headers: { Authorization: 'Bearer glsa_mykey' },
@@ -170,7 +170,7 @@ describe('GrafanaService', () => {
     })
 
     it('should use basic auth when apiKey is absent but username/password provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '10.0.0' } })
       )
 
@@ -181,7 +181,7 @@ describe('GrafanaService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('admin:admin').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/health'),
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
@@ -190,7 +190,7 @@ describe('GrafanaService', () => {
     })
 
     it('should send no auth headers when neither apiKey nor credentials provided', async () => {
-      mockedConnectorFetch.mockResolvedValue(
+      mockAxiosService.fetch.mockResolvedValue(
         buildResponse({ status: 200, data: { version: '10.0.0' } })
       )
 
@@ -198,7 +198,7 @@ describe('GrafanaService', () => {
         baseUrl: 'https://grafana.local',
       })
 
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/health'),
         expect.objectContaining({
           headers: {},
@@ -217,7 +217,7 @@ describe('GrafanaService', () => {
         { id: 1, uid: 'abc', title: 'System Overview', type: 'dash-db' },
         { id: 2, uid: 'def', title: 'Network Stats', type: 'dash-db' },
       ]
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: dashboards }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: dashboards }))
 
       const result = await service.getDashboards({
         baseUrl: 'https://grafana.local',
@@ -227,7 +227,7 @@ describe('GrafanaService', () => {
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual(dashboards[0])
       expect(result[1]).toEqual(dashboards[1])
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         'https://grafana.local/api/search?type=dash-db',
         expect.objectContaining({
           headers: { Authorization: 'Bearer glsa_secret' },
@@ -238,7 +238,7 @@ describe('GrafanaService', () => {
     })
 
     it('should return empty array when data is null', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: null }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: null }))
 
       const result = await service.getDashboards({
         baseUrl: 'https://grafana.local',
@@ -249,20 +249,20 @@ describe('GrafanaService', () => {
     })
 
     it('should throw when API returns non-200 status', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 401 }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 401 }))
 
       await expect(
         service.getDashboards({
           baseUrl: 'https://grafana.local',
           apiKey: 'bad-key',
         })
-      ).rejects.toThrow('Failed to fetch dashboards: status 401')
+      ).rejects.toThrow('Grafana returned status 401')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
-    it('should throw when connectorFetch rejects', async () => {
-      mockedConnectorFetch.mockRejectedValue(new Error('Network error'))
+    it('should throw when fetch rejects', async () => {
+      mockAxiosService.fetch.mockRejectedValue(new Error('Network error'))
 
       await expect(
         service.getDashboards({
@@ -273,7 +273,7 @@ describe('GrafanaService', () => {
     })
 
     it('should use basic auth for getDashboards when apiKey absent', async () => {
-      mockedConnectorFetch.mockResolvedValue(buildResponse({ status: 200, data: [] }))
+      mockAxiosService.fetch.mockResolvedValue(buildResponse({ status: 200, data: [] }))
 
       await service.getDashboards({
         baseUrl: 'https://grafana.local',
@@ -282,7 +282,7 @@ describe('GrafanaService', () => {
       })
 
       const expectedBasic = `Basic ${Buffer.from('viewer:pass').toString('base64')}`
-      expect(mockedConnectorFetch).toHaveBeenCalledWith(
+      expect(mockAxiosService.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/search'),
         expect.objectContaining({
           headers: { Authorization: expectedBasic },
