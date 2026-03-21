@@ -16,6 +16,8 @@ export interface AiResponse {
 
 export interface ResolvedAiConnector {
   type: ConnectorType
+  id?: string
+  name?: string
   config: Record<string, unknown>
 }
 
@@ -47,6 +49,7 @@ export interface AgentTaskExecutionInput {
   prompt: string
   soulMd?: string | null
   tools: AiToolSummary[]
+  connector?: string
 }
 
 export interface AiAuditRecord {

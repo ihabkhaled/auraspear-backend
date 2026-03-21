@@ -779,11 +779,13 @@ describe('AiAgentsService', () => {
         buildMockUser()
       )
 
-      expect(repository.createSession).toHaveBeenCalledWith({
-        agentId: AGENT_ID,
-        input: 'Summarize the latest critical alerts',
-        status: 'running',
-      })
+      expect(repository.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: AGENT_ID,
+          input: 'Summarize the latest critical alerts',
+          status: 'running',
+        })
+      )
       expect(jobService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: TENANT_ID,

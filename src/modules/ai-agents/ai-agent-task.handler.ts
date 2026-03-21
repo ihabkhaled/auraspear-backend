@@ -16,7 +16,7 @@ export class AiAgentTaskHandler {
 
   async handle(job: Job): Promise<Record<string, unknown>> {
     const payload = (job.payload as AgentTaskPayload | null) ?? {}
-    const { agentId, sessionId, prompt, actorUserId, actorEmail } = payload
+    const { agentId, sessionId, prompt, actorUserId, actorEmail, connector } = payload
 
     if (!agentId || !sessionId || !prompt || !actorUserId || !actorEmail) {
       throw new Error('agentId, sessionId, prompt, actorUserId, and actorEmail are required')
@@ -52,6 +52,7 @@ export class AiAgentTaskHandler {
           name: tool.name,
           description: tool.description,
         })),
+        connector,
       })
 
       const durationMs = Date.now() - startedAt
@@ -88,6 +89,7 @@ export class AiAgentTaskHandler {
         sessionId,
         errorMessage: message,
         durationMs,
+        provider: connector ?? undefined,
       })
 
       throw error

@@ -209,13 +209,13 @@ describe('AxiosService', () => {
     describe('protocol enforcement', () => {
       it('should reject FTP protocol', async () => {
         await expect(service.fetch('ftp://files.example.com/data')).rejects.toThrow(
-          'Only HTTP(S) URLs are allowed'
+          'Only HTTP(S) and WS(S) URLs are allowed'
         )
       })
 
       it('should reject file protocol', async () => {
         await expect(service.fetch('file:///etc/passwd')).rejects.toThrow(
-          'Only HTTP(S) URLs are allowed'
+          'Only HTTP(S) and WS(S) URLs are allowed'
         )
       })
     })
@@ -227,7 +227,7 @@ describe('AxiosService', () => {
 
       it('should reject HTTP URLs in production', async () => {
         await expect(service.fetch('http://grafana.example.com:3000/health')).rejects.toThrow(
-          'Only HTTPS URLs are allowed in production'
+          'Only HTTPS/WSS URLs are allowed in production'
         )
       })
 

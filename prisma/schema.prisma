@@ -528,6 +528,7 @@ model Tenant {
   jobs                    Job[]
   refreshTokenFamilies    RefreshTokenFamily[]
   userSessions            UserSession[]
+  llmConnectors           LlmConnector[]
 
   @@map("tenants")
 }
@@ -2011,4 +2012,32 @@ model Job {
   @@index([tenantId, type, status])
   @@index([status, scheduledAt])
   @@map("jobs")
+}
+
+// ─── LLM Connectors (Dynamic) ──────────────────────────────
+
+model LlmConnector {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  description     String?   @db.VarChar(500)
+  enabled         Boolean   @default(false)
+  baseUrl         String    @map("base_url") @db.VarChar(500)
+  encryptedApiKey String    @map("encrypted_api_key") @db.Text
+  defaultModel    String?   @map("default_model") @db.VarChar(255)
+  organizationId  String?   @map("organization_id") @db.VarChar(255)
+  maxTokensParam  String    @default("max_tokens") @map("max_tokens_param") @db.VarChar(50)
+  timeout         Int       @default(60000)
+  lastTestAt      DateTime? @map("last_test_at")
+  lastTestOk      Boolean?  @map("last_test_ok")
+  lastError       String?   @map("last_error") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([tenantId, enabled])
+  @@map("llm_connectors")
 }

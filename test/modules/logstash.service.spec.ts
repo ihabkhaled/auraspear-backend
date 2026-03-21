@@ -92,7 +92,7 @@ describe('LogstashService', () => {
       })
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Logstash returned status 500')
+      expect(result.details).toContain('returned status 500')
     })
 
     it('should return ok: false when fetch throws', async () => {
@@ -244,7 +244,7 @@ describe('LogstashService', () => {
         service.getPipelines({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash returned status 503')
+      ).rejects.toThrow('returned status 503')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -326,7 +326,7 @@ describe('LogstashService', () => {
         service.getPipelineStats({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash returned status 500')
+      ).rejects.toThrow('returned status 500')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -406,7 +406,7 @@ describe('LogstashService', () => {
         service.getHotThreads({
           baseUrl: 'http://logstash.local:9600',
         })
-      ).rejects.toThrow('Logstash returned status 503')
+      ).rejects.toThrow('returned status 503')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

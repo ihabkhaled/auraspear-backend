@@ -1,3 +1,4 @@
+import type { OpenClawFrameType } from '../../common/enums'
 import type { AxiosRequestOptions } from '../../common/modules/axios'
 
 export interface ConnectorResponse {
@@ -6,6 +7,17 @@ export interface ConnectorResponse {
   enabled: boolean
   authType: string
   config: Record<string, unknown>
+  lastTestAt: Date | null
+  lastTestOk: boolean | null
+  lastError: string | null
+}
+
+export interface ConnectorRow {
+  type: string
+  name: string
+  enabled: boolean
+  authType: string
+  encryptedConfig: string
   lastTestAt: Date | null
   lastTestOk: boolean | null
   lastError: string | null
@@ -92,24 +104,44 @@ export interface ModelsListResponse {
 }
 
 /* ---------------------------------------------------------------- */
-/* OpenClaw Gateway                                                  */
+/* OpenClaw Gateway (WebSocket-based)                                */
 /* ---------------------------------------------------------------- */
 
-export interface OpenClawTaskResult {
+export interface OpenClawWsEvent {
+  type: OpenClawFrameType.EVENT
+  event: string
+  payload: Record<string, unknown>
+}
+
+export interface OpenClawWsResponse {
+  type: OpenClawFrameType.RES
+  id: string
+  ok: boolean
+  payload?: Record<string, unknown>
+  error?: string
+}
+
+export interface OpenClawWsRequest {
+  type: OpenClawFrameType.REQ
+  id: string
+  method: string
+  params?: Record<string, unknown>
+}
+
+export interface OpenClawChatMessageContent {
+  type: string
   text: string
-  usage?: {
-    input_tokens: number
-    output_tokens: number
-  }
 }
 
-export interface OpenClawTaskResponse {
-  taskId: string
-  status: string
-  result?: OpenClawTaskResult
+export interface OpenClawChatMessage {
+  role: string
+  content: OpenClawChatMessageContent[]
 }
 
-export interface OpenClawHealthResponse {
-  status: string
-  version?: string
+export interface OpenClawChatEventPayload {
+  state: string
+  message?: OpenClawChatMessage
+  runId?: string
 }
+
+export type OpenClawWsIncoming = OpenClawWsEvent | OpenClawWsResponse

@@ -2,6 +2,7 @@ import { promises as dns } from 'node:dns'
 import * as https from 'node:https'
 import { Injectable, Logger } from '@nestjs/common'
 import axios from 'axios'
+import { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES } from './axios.constants'
 import { HttpMethod, NodeEnvironment, UrlProtocol } from '../../enums'
 import { isPrivateHost } from '../../utils/ssrf.utility'
 import type {
@@ -11,9 +12,6 @@ import type {
   AxiosResponseData,
 } from './axios.types'
 import type { AxiosRequestConfig } from 'axios'
-
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-const DEFAULT_TIMEOUT_MS = 15_000
 
 @Injectable()
 export class AxiosService {
@@ -191,12 +189,21 @@ export class AxiosService {
   private validateUrl(url: string, isProduction: boolean, allowPrivateNetwork: boolean): URL {
     const parsed = new URL(url)
 
-    if (parsed.protocol !== UrlProtocol.HTTPS && parsed.protocol !== UrlProtocol.HTTP) {
-      throw new Error('Only HTTP(S) URLs are allowed')
+    if (
+      parsed.protocol !== UrlProtocol.HTTPS &&
+      parsed.protocol !== UrlProtocol.HTTP &&
+      parsed.protocol !== UrlProtocol.WS &&
+      parsed.protocol !== UrlProtocol.WSS
+    ) {
+      throw new Error('Only HTTP(S) and WS(S) URLs are allowed')
     }
 
-    if (isProduction && parsed.protocol !== UrlProtocol.HTTPS) {
-      throw new Error('Only HTTPS URLs are allowed in production')
+    if (
+      isProduction &&
+      parsed.protocol !== UrlProtocol.HTTPS &&
+      parsed.protocol !== UrlProtocol.WSS
+    ) {
+      throw new Error('Only HTTPS/WSS URLs are allowed in production')
     }
 
     if (isProduction && !allowPrivateNetwork && isPrivateHost(parsed.hostname)) {

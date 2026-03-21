@@ -396,6 +396,8 @@ export class AiAgentsService {
       agentId: id,
       input: dto.prompt,
       status: AiAgentSessionStatus.RUNNING,
+      provider: dto.connector ?? 'default',
+      model: agent.model,
     })
 
     const job = await this.jobService.enqueue({
@@ -407,6 +409,7 @@ export class AiAgentsService {
         prompt: dto.prompt,
         actorUserId: user.sub,
         actorEmail: user.email,
+        connector: dto.connector,
       },
       maxAttempts: 2,
       idempotencyKey: `ai-agent:${id}:${session.id}`,

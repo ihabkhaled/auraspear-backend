@@ -1,21 +1,11 @@
+import { MAX_REMOTE_ERROR_LENGTH, MINIMUM_TIMEOUT_MS, URL_KEYS } from './connectors.constants'
 import { REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
-import type { ConnectorResponse, ConnectorStats } from './connectors.types'
+import type { ConnectorResponse, ConnectorRow, ConnectorStats } from './connectors.types'
 import type { ConnectorConfig } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
 /* CONNECTOR → RESPONSE MAPPING                                      */
 /* ---------------------------------------------------------------- */
-
-interface ConnectorRow {
-  type: string
-  name: string
-  enabled: boolean
-  authType: string
-  encryptedConfig: string
-  lastTestAt: Date | null
-  lastTestOk: boolean | null
-  lastError: string | null
-}
 
 export function mapConnectorToResponse(
   row: ConnectorRow,
@@ -154,16 +144,6 @@ export function normalizeConnectorConfig(config: Record<string, unknown>): Recor
 /* URL VALIDATION                                                    */
 /* ---------------------------------------------------------------- */
 
-const URL_KEYS = new Set([
-  'baseUrl',
-  'managerUrl',
-  'indexerUrl',
-  'webhookUrl',
-  'apiUrl',
-  'grafanaUrl',
-  'mispUrl',
-])
-
 export function extractUrlFields(
   config: Record<string, unknown>
 ): Array<{ key: string; value: string }> {
@@ -188,12 +168,6 @@ export function sanitizeErrorDetails(error: unknown): string {
 /* ---------------------------------------------------------------- */
 /* REMOTE ERROR EXTRACTION                                           */
 /* ---------------------------------------------------------------- */
-
-/**
- * Maximum length for extracted remote error messages.
- * Prevents oversized third-party responses from bloating logs or API responses.
- */
-const MAX_REMOTE_ERROR_LENGTH = 300
 
 /**
  * Extracts a human-readable error message from a third-party service response body.
@@ -267,20 +241,32 @@ export function extractRemoteErrorMessage(data: unknown): string {
  * - `MISP returned status 403`
  */
 export function formatRemoteError(serviceName: string, status: number, data: unknown): string {
+  const hints: Record<number, string> = {
+    400: 'Bad request — check the model name and parameters',
+    401: 'Authentication failed — check your API key',
+    403: 'Access denied — your API key may lack permissions',
+    404: 'Endpoint not found — check the base URL',
+    429: 'Rate limited — too many requests, try again later',
+    500: 'Internal server error on the provider side',
+    502: 'Bad gateway — the provider may be down',
+    503: 'Service unavailable — the provider may be overloaded',
+  }
   const remoteMessage = extractRemoteErrorMessage(data)
-  const base = `${serviceName} returned status ${status}`
-  return remoteMessage ? `${base}: ${remoteMessage}` : base
+  const hint = Reflect.get(hints, status) as string | undefined
+  const base = `${serviceName} returned status ${String(status)}`
+  const parts = [base]
+  if (hint) {
+    parts.push(hint)
+  }
+  if (remoteMessage) {
+    parts.push(remoteMessage)
+  }
+  return parts.join('. ')
 }
 
 /* ---------------------------------------------------------------- */
 /* TIMEOUT NORMALIZATION                                             */
 /* ---------------------------------------------------------------- */
-
-/**
- * Minimum allowed timeout in milliseconds.
- * Prevents accidental sub-second timeouts from breaking connections.
- */
-const MINIMUM_TIMEOUT_MS = 5000
 
 /**
  * Normalizes a user-configured timeout value to milliseconds.

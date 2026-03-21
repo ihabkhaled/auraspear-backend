@@ -30,6 +30,11 @@ const mockOpenClawGatewayService = {
   invoke: jest.fn(),
 }
 
+const mockLlmConnectorsService = {
+  hasEnabledConnectors: jest.fn().mockResolvedValue(false),
+  getEnabledConfigs: jest.fn().mockResolvedValue([]),
+}
+
 const mockUser: JwtPayload = {
   sub: 'user-1',
   tenantId: 'tenant-1',
@@ -58,6 +63,7 @@ function createService(repository: ReturnType<typeof createMockRepository>) {
     repository as never,
     mockAppLogger as never,
     mockConnectorsService as never,
+    mockLlmConnectorsService as never,
     mockBedrockService as never,
     mockLlmApisService as never,
     mockOpenClawGatewayService as never

@@ -44,4 +44,5 @@ export interface AgentTaskPayload {
   prompt?: string
   actorUserId?: string
   actorEmail?: string
+  connector?: string
 }

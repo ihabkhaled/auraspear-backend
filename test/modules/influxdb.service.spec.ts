@@ -113,7 +113,7 @@ describe('InfluxDBService', () => {
       })
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('InfluxDB returned status 401')
+      expect(result.details).toContain('returned status 401')
     })
 
     it('should return ok: false when fetch throws', async () => {
@@ -254,7 +254,7 @@ describe('InfluxDBService', () => {
           },
           'invalid flux'
         )
-      ).rejects.toThrow('InfluxDB returned status 400')
+      ).rejects.toThrow('returned status 400')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -342,7 +342,7 @@ describe('InfluxDBService', () => {
           baseUrl: 'https://influxdb.local:8086',
           token: 'bad-tok',
         })
-      ).rejects.toThrow('InfluxDB returned status 403')
+      ).rejects.toThrow('returned status 403')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

@@ -37,6 +37,13 @@ export enum Permission {
   CONNECTORS_TEST = 'connectors.test',
   CONNECTORS_SYNC = 'connectors.sync',
 
+  // LLM Connectors
+  LLM_CONNECTORS_VIEW = 'llmConnectors.view',
+  LLM_CONNECTORS_CREATE = 'llmConnectors.create',
+  LLM_CONNECTORS_UPDATE = 'llmConnectors.update',
+  LLM_CONNECTORS_DELETE = 'llmConnectors.delete',
+  LLM_CONNECTORS_TEST = 'llmConnectors.test',
+
   // Correlation Rules
   CORRELATION_VIEW = 'correlation.view',
   CORRELATION_CREATE = 'correlation.create',

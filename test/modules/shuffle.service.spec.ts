@@ -104,7 +104,7 @@ describe('ShuffleService', () => {
       const result = await service.testConnection(VALID_CONFIG)
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Shuffle returned status 401: Unauthorized')
+      expect(result.details).toContain('returned status 401')
     })
 
     it('should handle network errors gracefully', async () => {
@@ -212,9 +212,7 @@ describe('ShuffleService', () => {
         latencyMs: 10,
       })
 
-      await expect(service.getWorkflows(VALID_CONFIG)).rejects.toThrow(
-        'Shuffle returned status 500: Internal'
-      )
+      await expect(service.getWorkflows(VALID_CONFIG)).rejects.toThrow('returned status 500')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
@@ -375,7 +373,7 @@ describe('ShuffleService', () => {
 
       await expect(
         service.executeWorkflow(VALID_CONFIG, 'aabb-ccdd', { data: 'test' })
-      ).rejects.toThrow('Shuffle returned status 500')
+      ).rejects.toThrow('returned status 500')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 

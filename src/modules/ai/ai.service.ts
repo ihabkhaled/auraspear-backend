@@ -42,6 +42,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
+import { LlmConnectorsService } from '../connectors/llm-connectors/llm-connectors.service'
 import { BedrockService } from '../connectors/services/bedrock.service'
 import { LlmApisService } from '../connectors/services/llm-apis.service'
 import { OpenClawGatewayService } from '../connectors/services/openclaw-gateway.service'
@@ -62,6 +63,7 @@ export class AiService {
     private readonly aiRepository: AiRepository,
     private readonly appLogger: AppLoggerService,
     private readonly connectorsService: ConnectorsService,
+    private readonly llmConnectorsService: LlmConnectorsService,
     private readonly bedrockService: BedrockService,
     private readonly llmApisService: LlmApisService,
     private readonly openClawGatewayService: OpenClawGatewayService
@@ -157,7 +159,24 @@ export class AiService {
     await this.ensureAiEnabled(input.tenantId)
 
     const startTime = Date.now()
-    const connectors = await this.findAvailableAiConnectors(input.tenantId)
+    let connectors = await this.findAvailableAiConnectors(input.tenantId)
+
+    if (input.connector && input.connector !== 'default') {
+      // Check if it's a UUID (dynamic LLM connector)
+      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
+        input.connector
+      )
+      connectors = isUuid
+        ? connectors.filter(c => c.id === input.connector)
+        : connectors.filter(c => c.type === input.connector && !c.id)
+      if (connectors.length === 0) {
+        throw new BusinessException(
+          400,
+          `Requested AI connector "${input.connector}" is not configured or available`,
+          'errors.aiAgents.connectorNotAvailable'
+        )
+      }
+    }
 
     this.appLogger.info(
       `AI agent task: ${String(connectors.length)} connector(s) available to try`,
@@ -175,8 +194,21 @@ export class AiService {
       }
     )
 
+    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
+      this.routeAgentTask(c, input)
+    )
+
+    // If a specific connector was requested and it failed, throw instead of falling back
+    if (!aiResponse && input.connector && input.connector !== 'default') {
+      throw new BusinessException(
+        502,
+        `AI connector "${input.connector}" failed to process the request`,
+        'errors.aiAgents.connectorFailed'
+      )
+    }
+
     const response =
-      (await this.tryConnectorsInOrder(connectors, c => this.routeAgentTask(c, input))) ??
+      aiResponse ??
       buildFallbackAgentTaskResponse({
         agentName: input.agentName,
         prompt: input.prompt,
@@ -239,8 +271,19 @@ export class AiService {
 
     const resolved = configs.filter((entry): entry is ResolvedAiConnector => entry !== undefined)
 
+    // Also include dynamic LLM connectors
+    const dynamicLlmConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
+    for (const dynamic of dynamicLlmConfigs) {
+      resolved.push({
+        type: ConnectorType.LLM_APIS,
+        id: dynamic.id,
+        name: dynamic.name,
+        config: dynamic.config,
+      })
+    }
+
     this.appLogger.info(
-      `AI connector resolution: ${String(resolved.length)} of ${String(AI_CONNECTOR_PRIORITY.length)} configured`,
+      `AI connector resolution: ${String(resolved.length)} of ${String(AI_CONNECTOR_PRIORITY.length)} fixed + ${String(dynamicLlmConfigs.length)} dynamic configured`,
       {
         feature: AppLogFeature.AI,
         action: 'findAvailableAiConnectors',
@@ -250,8 +293,9 @@ export class AiService {
         tenantId,
         metadata: {
           checked: AI_CONNECTOR_PRIORITY,
-          available: resolved.map(c => c.type),
-          missing: AI_CONNECTOR_PRIORITY.filter(t => !resolved.some(r => r.type === t)),
+          available: resolved.map(c => c.id ?? c.type),
+          missing: AI_CONNECTOR_PRIORITY.filter(t => !resolved.some(r => r.type === t && !r.id)),
+          dynamicCount: dynamicLlmConfigs.length,
         },
       }
     )
@@ -287,13 +331,18 @@ export class AiService {
       return undefined
     }
 
-    this.appLogger.info(`AI: trying provider ${connector.type}...`, {
+    const providerLabel = connector.name ? `${connector.type}(${connector.name})` : connector.type
+    this.appLogger.info(`AI: trying provider ${providerLabel}...`, {
       feature: AppLogFeature.AI,
       action: 'tryConnectorsInOrder',
       sourceType: AppLogSourceType.SERVICE,
       className: 'AiService',
       functionName: 'tryConnectorsInOrder',
-      metadata: { provider: connector.type },
+      metadata: {
+        provider: connector.type,
+        connectorId: connector.id,
+        connectorName: connector.name,
+      },
     })
 
     const response = await attempt(connector)
@@ -401,7 +450,7 @@ export class AiService {
       case ConnectorType.BEDROCK:
         return this.tryBedrockAgentTask(connector.config, input)
       case ConnectorType.LLM_APIS:
-        return this.tryLlmApisAgentTask(connector.config, input)
+        return this.tryLlmApisAgentTask(connector.config, input, connector.name)
       case ConnectorType.OPENCLAW_GATEWAY:
         return this.tryOpenClawAgentTask(connector.config, input)
       default:
@@ -569,7 +618,8 @@ export class AiService {
 
   private async tryLlmApisAgentTask(
     config: Record<string, unknown>,
-    input: AgentTaskExecutionInput
+    input: AgentTaskExecutionInput,
+    connectorName?: string
   ): Promise<AiResponse | undefined> {
     try {
       const prompt = buildAgentTaskPrompt({
@@ -585,7 +635,8 @@ export class AiService {
         input.agentName,
         modelId,
         aiResult.inputTokens,
-        aiResult.outputTokens
+        aiResult.outputTokens,
+        connectorName
       )
     } catch (error) {
       this.logProviderFailure(
@@ -804,13 +855,16 @@ export class AiService {
 
   private async ensureAiEnabled(tenantId: string): Promise<void> {
     try {
-      const enabledConnectors = await this.aiRepository.findEnabledConnectorByTypes(tenantId, [
-        ConnectorType.BEDROCK,
-        ConnectorType.LLM_APIS,
-        ConnectorType.OPENCLAW_GATEWAY,
+      const [enabledConnectors, hasDynamicLlm] = await Promise.all([
+        this.aiRepository.findEnabledConnectorByTypes(tenantId, [
+          ConnectorType.BEDROCK,
+          ConnectorType.LLM_APIS,
+          ConnectorType.OPENCLAW_GATEWAY,
+        ]),
+        this.llmConnectorsService.hasEnabledConnectors(tenantId),
       ])
 
-      if (enabledConnectors.length === 0) {
+      if (enabledConnectors.length === 0 && !hasDynamicLlm) {
         this.appLogger.warn('AI features not enabled for tenant', {
           feature: AppLogFeature.AI,
           action: 'ensureAiEnabled',

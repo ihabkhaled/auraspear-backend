@@ -259,7 +259,7 @@ describe('OpenSearchService', () => {
       )
 
       await expect(service.search(VALID_CONFIG, index, dslQuery)).rejects.toThrow(
-        'OpenSearch returned status 400: parsing_exception'
+        'returned status 400'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

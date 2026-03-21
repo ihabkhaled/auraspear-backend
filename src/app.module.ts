@@ -10,6 +10,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard'
 import { RolesGuard } from './common/guards/roles.guard'
 import { TenantGuard } from './common/guards/tenant.guard'
 import { AuditInterceptor } from './common/interceptors/audit.interceptor'
+import { WebSocketModule } from './common/modules/websocket'
 import { AppLoggerService } from './common/services/app-logger.service'
 import { StartupHealthService } from './common/services/startup-health.service'
 import { validateEnvironment } from './config/env.validation'
@@ -27,6 +28,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module'
 import { ConnectorSyncModule } from './modules/connector-sync/connector-sync.module'
 import { ConnectorWorkspacesModule } from './modules/connector-workspaces/connector-workspaces.module'
 import { ConnectorsModule } from './modules/connectors/connectors.module'
+import { LlmConnectorsModule } from './modules/connectors/llm-connectors/llm-connectors.module'
 import { CorrelationModule } from './modules/correlation/correlation.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DataExplorerModule } from './modules/data-explorer/data-explorer.module'
@@ -77,6 +79,9 @@ import { PrismaModule } from './prisma/prisma.module'
       },
     }),
 
+    // WebSocket
+    WebSocketModule,
+
     // Database
     PrismaModule,
 
@@ -84,6 +89,7 @@ import { PrismaModule } from './prisma/prisma.module'
     AuthModule,
     TenantsModule,
     ConnectorsModule,
+    LlmConnectorsModule,
     ConnectorWorkspacesModule,
     ConnectorSyncModule,
     DataExplorerModule,

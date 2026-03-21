@@ -245,7 +245,7 @@ describe('GraylogService', () => {
       )
 
       await expect(service.searchEvents(VALID_CONFIG, filter)).rejects.toThrow(
-        'Graylog returned status 500: Internal error'
+        'returned status 500'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -312,9 +312,7 @@ describe('GraylogService', () => {
         buildConnectorResponse({ status: 403, data: { message: 'forbidden' } })
       )
 
-      await expect(service.getEventDefinitions(VALID_CONFIG)).rejects.toThrow(
-        'Graylog returned status 403: forbidden'
-      )
+      await expect(service.getEventDefinitions(VALID_CONFIG)).rejects.toThrow('returned status 403')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 

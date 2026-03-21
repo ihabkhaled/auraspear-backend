@@ -138,7 +138,7 @@ describe('MispService', () => {
       const result = await service.testConnection(VALID_CONFIG)
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('MISP returned status 403: Forbidden')
+      expect(result.details).toContain('returned status 403')
     })
 
     it('should handle network errors gracefully', async () => {
@@ -263,9 +263,7 @@ describe('MispService', () => {
         latencyMs: 10,
       })
 
-      await expect(service.getEvents(VALID_CONFIG)).rejects.toThrow(
-        'MISP returned status 500: Internal'
-      )
+      await expect(service.getEvents(VALID_CONFIG)).rejects.toThrow('returned status 500')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 

@@ -263,6 +263,8 @@ export class AiAgentsRepository {
     sessionId: string
     errorMessage: string
     durationMs: number
+    model?: string
+    provider?: string
   }): Promise<void> {
     await this.prisma.aiAgentSession.update({
       where: { id: params.sessionId },
@@ -270,6 +272,8 @@ export class AiAgentsRepository {
         status: 'failed',
         errorMessage: params.errorMessage,
         durationMs: params.durationMs,
+        model: params.model ?? null,
+        provider: params.provider ?? null,
         completedAt: new Date(),
       },
     })

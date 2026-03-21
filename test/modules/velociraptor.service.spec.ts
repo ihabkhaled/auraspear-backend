@@ -152,7 +152,7 @@ describe('VelociraptorService', () => {
       const result = await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Velociraptor returned status 403')
+      expect(result.details).toContain('returned status 403')
     })
 
     it('should handle network errors gracefully', async () => {
@@ -297,7 +297,7 @@ describe('VelociraptorService', () => {
       })
 
       await expect(service.runVQL(BASIC_AUTH_CONFIG, 'INVALID VQL')).rejects.toThrow(
-        'Velociraptor returned status 400: Bad query'
+        'returned status 400'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

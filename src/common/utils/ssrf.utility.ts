@@ -12,10 +12,15 @@ export function validateUrl(urlString: string, allowedHosts?: string[]): URL {
   }
 
   // Only allow HTTPS in production
-  if (parsed.protocol !== UrlProtocol.HTTPS && parsed.protocol !== UrlProtocol.HTTP) {
+  if (
+    parsed.protocol !== UrlProtocol.HTTPS &&
+    parsed.protocol !== UrlProtocol.HTTP &&
+    parsed.protocol !== UrlProtocol.WS &&
+    parsed.protocol !== UrlProtocol.WSS
+  ) {
     throw new BusinessException(
       400,
-      'Only HTTP(S) URLs are allowed',
+      'Only HTTP(S) and WS(S) URLs are allowed',
       'errors.ssrf.unsupportedProtocol'
     )
   }

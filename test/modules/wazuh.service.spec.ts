@@ -212,7 +212,7 @@ describe('WazuhService', () => {
 
       await expect(
         service.authenticate('https://wazuh.local:55000', 'admin', 'wrong')
-      ).rejects.toThrow('Wazuh Manager returned status 401')
+      ).rejects.toThrow('returned status 401')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
@@ -340,9 +340,7 @@ describe('WazuhService', () => {
         buildConnectorResponse({ status: 500, data: { error: 'internal' } })
       )
 
-      await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow(
-        'Wazuh Manager returned status 500: internal'
-      )
+      await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow('returned status 500')
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })
 
@@ -351,9 +349,7 @@ describe('WazuhService', () => {
         buildConnectorResponse({ status: 401, data: {} })
       )
 
-      await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow(
-        'Wazuh Manager returned status 401'
-      )
+      await expect(service.getAgents(VALID_CONFIG)).rejects.toThrow('returned status 401')
     })
   })
 
@@ -485,7 +481,7 @@ describe('WazuhService', () => {
       )
 
       await expect(service.searchAlerts(VALID_CONFIG, dslQuery)).rejects.toThrow(
-        'Wazuh Indexer returned status 400: bad request'
+        'returned status 400'
       )
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

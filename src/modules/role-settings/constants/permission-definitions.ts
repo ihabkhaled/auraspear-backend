@@ -210,6 +210,38 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     sortOrder: 406,
   },
 
+  // ─── LLM Connectors ───
+  {
+    key: Permission.LLM_CONNECTORS_VIEW,
+    module: 'llmConnectors',
+    labelKey: 'roleSettings.permissions.llmConnectors.view',
+    sortOrder: 410,
+  },
+  {
+    key: Permission.LLM_CONNECTORS_CREATE,
+    module: 'llmConnectors',
+    labelKey: 'roleSettings.permissions.llmConnectors.create',
+    sortOrder: 411,
+  },
+  {
+    key: Permission.LLM_CONNECTORS_UPDATE,
+    module: 'llmConnectors',
+    labelKey: 'roleSettings.permissions.llmConnectors.update',
+    sortOrder: 412,
+  },
+  {
+    key: Permission.LLM_CONNECTORS_DELETE,
+    module: 'llmConnectors',
+    labelKey: 'roleSettings.permissions.llmConnectors.delete',
+    sortOrder: 413,
+  },
+  {
+    key: Permission.LLM_CONNECTORS_TEST,
+    module: 'llmConnectors',
+    labelKey: 'roleSettings.permissions.llmConnectors.test',
+    sortOrder: 414,
+  },
+
   // ─── Correlation ───
   {
     key: Permission.CORRELATION_VIEW,

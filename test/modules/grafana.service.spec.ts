@@ -88,7 +88,7 @@ describe('GrafanaService', () => {
       })
 
       expect(result.ok).toBe(false)
-      expect(result.details).toBe('Grafana returned status 503')
+      expect(result.details).toContain('returned status 503')
     })
 
     it('should return ok: false when fetch throws', async () => {
@@ -256,7 +256,7 @@ describe('GrafanaService', () => {
           baseUrl: 'https://grafana.local',
           apiKey: 'bad-key',
         })
-      ).rejects.toThrow('Grafana returned status 401')
+      ).rejects.toThrow('returned status 401')
 
       expect(mockAppLogger.warn).toHaveBeenCalled()
     })

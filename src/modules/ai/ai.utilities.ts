@@ -546,7 +546,8 @@ export function buildLlmApisAgentTaskResponse(
   agentName: string,
   modelId: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  connectorName?: string
 ): AiResponse {
   return {
     result: aiText,
@@ -557,7 +558,7 @@ export function buildLlmApisAgentTaskResponse(
     ],
     confidence: 0.82,
     model: `llm-apis:${modelId}`,
-    provider: AiProvider.LLM_APIS,
+    provider: connectorName ?? AiProvider.LLM_APIS,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
