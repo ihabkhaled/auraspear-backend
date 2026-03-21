@@ -7,9 +7,10 @@ import { IntelService } from './intel.service'
 import { AiModule } from '../ai/ai.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
+import { EntitiesModule } from '../entities/entities.module'
 
 @Module({
-  imports: [ConnectorsModule, AppLogsModule, AiModule],
+  imports: [ConnectorsModule, AppLogsModule, AiModule, EntitiesModule],
   controllers: [IntelController, AiIntelController],
   providers: [IntelRepository, IntelService, AiIntelService],
   exports: [IntelService],

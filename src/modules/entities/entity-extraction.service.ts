@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { EntitiesRepository } from './entities.repository'
-import { EntityRelationType, EntityType } from '../../common/enums'
-import type { AlertExtractionInput, ExtractedEntity } from './entities.types'
+import { CaseArtifactType, EntityRelationType, EntityType } from '../../common/enums'
+import type {
+  AlertExtractionInput,
+  ArtifactExtractionInput,
+  ExtractedEntity,
+  MispIocExtractionInput,
+} from './entities.types'
 
 @Injectable()
 export class EntityExtractionService {
@@ -35,6 +40,92 @@ export class EntityExtractionService {
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(`Entity extraction failed for alert ${alert.id}: ${errorMessage}`)
+    }
+  }
+
+  /**
+   * Extract an entity from a case artifact.
+   * Maps the artifact type to an entity type and upserts.
+   * Best-effort — errors are logged, not thrown.
+   */
+  async extractFromArtifact(params: ArtifactExtractionInput): Promise<void> {
+    try {
+      const entityType = this.mapArtifactTypeToEntityType(params.type)
+      if (!entityType) {
+        return
+      }
+
+      await this.upsertEntity(params.tenantId, {
+        type: entityType,
+        value: params.value,
+      })
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(
+        `Entity extraction failed for artifact ${params.type}:${params.value}: ${errorMessage}`
+      )
+    }
+  }
+
+  /**
+   * Extract an entity from a MISP IOC.
+   * Maps the MISP attribute type to an entity type and upserts.
+   * Best-effort — errors are logged, not thrown.
+   */
+  async extractFromMispIoc(params: MispIocExtractionInput): Promise<void> {
+    try {
+      const entityType = this.mapMispIocTypeToEntityType(params.iocType)
+      if (!entityType) {
+        return
+      }
+
+      await this.upsertEntity(params.tenantId, {
+        type: entityType,
+        value: params.iocValue,
+      })
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(
+        `Entity extraction failed for MISP IOC ${params.iocType}:${params.iocValue}: ${errorMessage}`
+      )
+    }
+  }
+
+  private mapArtifactTypeToEntityType(artifactType: string): EntityType | null {
+    switch (artifactType) {
+      case CaseArtifactType.IP:
+        return EntityType.IP
+      case CaseArtifactType.DOMAIN:
+        return EntityType.DOMAIN
+      case CaseArtifactType.URL:
+        return EntityType.URL
+      case CaseArtifactType.HASH:
+        return EntityType.HASH
+      default:
+        return null
+    }
+  }
+
+  private mapMispIocTypeToEntityType(iocType: string): EntityType | null {
+    switch (iocType) {
+      case 'ip-src':
+      case 'ip-dst':
+        return EntityType.IP
+      case 'domain':
+        return EntityType.DOMAIN
+      case 'hostname':
+        return EntityType.HOSTNAME
+      case 'email-src':
+      case 'email-dst':
+        return EntityType.EMAIL
+      case 'md5':
+      case 'sha1':
+      case 'sha256':
+        return EntityType.HASH
+      case 'url':
+        return EntityType.URL
+      default:
+        return null
     }
   }
 

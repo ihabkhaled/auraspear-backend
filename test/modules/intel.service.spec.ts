@@ -49,6 +49,10 @@ function createService(
     repository as never,
     connectorsService as never,
     mispService as never,
+    {
+      extractFromIOC: jest.fn().mockResolvedValue(undefined),
+      extractFromMispIoc: jest.fn().mockResolvedValue(undefined),
+    } as never,
     mockAppLogger as never
   )
 }

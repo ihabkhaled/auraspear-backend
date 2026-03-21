@@ -18,6 +18,7 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { MispService } from '../connectors/services/misp.service'
+import { EntityExtractionService } from '../entities/entity-extraction.service'
 import type {
   PaginatedMispEvents,
   PaginatedIOCs,
@@ -33,6 +34,7 @@ export class IntelService {
     private readonly intelRepository: IntelRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly mispService: MispService,
+    private readonly entityExtractionService: EntityExtractionService,
     private readonly appLogger: AppLoggerService
   ) {}
 
@@ -199,7 +201,55 @@ export class IntelService {
     const results = await Promise.allSettled(
       iocUpserts.map(upsert => this.intelRepository.upsertIOC(upsert))
     )
-    return countFulfilled(results)
+    const upserted = countFulfilled(results)
+
+    // Best-effort entity extraction from MISP IOCs
+    await this.extractEntitiesFromMispIocs(tenantId, attributes)
+
+    return upserted
+  }
+
+  /**
+   * Extract entities from MISP IOC attributes (best-effort).
+   * Bridges threat intel with the entity graph.
+   */
+  private async extractEntitiesFromMispIocs(
+    tenantId: string,
+    rawAttributes: unknown[]
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      rawAttributes.map(rawAttribute => {
+        const attribute = rawAttribute as Record<string, unknown>
+        const iocType = String(attribute['type'] ?? 'unknown')
+        const iocValue = String(attribute['value'] ?? '')
+        const eventId = attribute['event_id'] as string | undefined
+        const source = eventId ? `MISP-${eventId}` : 'MISP'
+
+        if (!iocValue) {
+          return Promise.resolve()
+        }
+
+        return this.entityExtractionService.extractFromMispIoc({
+          tenantId,
+          iocType,
+          iocValue,
+          source,
+        })
+      })
+    )
+
+    let failed = 0
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        failed++
+      }
+    }
+
+    if (failed > 0) {
+      this.logger.warn(
+        `MISP entity extraction: ${failed}/${rawAttributes.length} IOCs failed entity extraction`
+      )
+    }
   }
 
   private handleSyncError(error: unknown, tenantId: string): never {

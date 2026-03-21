@@ -69,9 +69,14 @@ export interface VelociraptorAuthOptions {
 /* LLM APIs (OpenAI-compatible)                                      */
 /* ---------------------------------------------------------------- */
 
+export interface ChatCompletionContentBlock {
+  type: string
+  text?: string
+}
+
 export interface ChatCompletionMessage {
   role: string
-  content: string
+  content: string | ChatCompletionContentBlock[]
 }
 
 export interface ChatCompletionChoice {

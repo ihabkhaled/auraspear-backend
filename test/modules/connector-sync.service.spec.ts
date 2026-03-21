@@ -46,6 +46,7 @@ describe('ConnectorSyncService', () => {
       mockAlertsService as never,
       mockIntelService as never,
       mockGraylogService as never,
+      { extractFromAlert: jest.fn().mockResolvedValue(undefined) } as never,
       mockAppLogger as never
     )
   })

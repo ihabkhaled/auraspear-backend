@@ -10,6 +10,7 @@ import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { LlmMaxTokensParameter } from '../connectors.enums'
 import {
+  extractChatCompletionText,
   extractRemoteErrorMessage,
   formatRemoteError,
   normalizeTimeoutMs,
@@ -170,7 +171,7 @@ export class LlmApisService {
 
     const parsed = res.data as ChatCompletionResponse
     const firstChoice = parsed.choices.at(0)
-    const text = firstChoice?.message?.content ?? ''
+    const text = extractChatCompletionText(firstChoice?.message?.content)
     const inputTokens = parsed.usage?.prompt_tokens ?? 0
     const outputTokens = parsed.usage?.completion_tokens ?? 0
 

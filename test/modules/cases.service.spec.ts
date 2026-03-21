@@ -73,7 +73,9 @@ describe('CasesService', () => {
     service = new CasesService(
       repository as never,
       mockAppLogger as never,
-      mockNotificationsService as never
+      mockNotificationsService as never,
+      { extractFromArtifact: jest.fn().mockResolvedValue(undefined) } as never,
+      { findByIdAndTenant: jest.fn().mockResolvedValue(null) } as never
     )
   })
 

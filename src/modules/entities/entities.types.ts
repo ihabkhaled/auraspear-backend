@@ -80,3 +80,17 @@ export interface ExtractedEntity {
   value: string
   displayName?: string
 }
+
+export interface ArtifactExtractionInput {
+  tenantId: string
+  type: string
+  value: string
+  source: string
+}
+
+export interface MispIocExtractionInput {
+  tenantId: string
+  iocType: string
+  iocValue: string
+  source: string
+}

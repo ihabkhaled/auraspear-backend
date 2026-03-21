@@ -6,10 +6,18 @@ import { ConnectorSyncService } from './connector-sync.service'
 import { AlertsModule } from '../alerts/alerts.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
+import { EntitiesModule } from '../entities/entities.module'
 import { IntelModule } from '../intel/intel.module'
 
 @Module({
-  imports: [ScheduleModule.forRoot(), ConnectorsModule, AlertsModule, IntelModule, AppLogsModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    ConnectorsModule,
+    AlertsModule,
+    EntitiesModule,
+    IntelModule,
+    AppLogsModule,
+  ],
   controllers: [ConnectorSyncController],
   providers: [ConnectorSyncRepository, ConnectorSyncService],
   exports: [ConnectorSyncService],

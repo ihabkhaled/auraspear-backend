@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Interval } from '@nestjs/schedule'
+import {
+  MIN_SYNC_GAP_MS,
+  SYNC_INTERVAL_MS,
+  SYNCABLE_TYPES,
+  SYNCABLE_TYPES_SET,
+} from './connector-sync.constants'
 import { ConnectorSyncRepository } from './connector-sync.repository'
 import {
   AlertSeverity,
@@ -14,22 +20,9 @@ import { processInBatches } from '../../common/utils/batch.utility'
 import { AlertsService } from '../alerts/alerts.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GraylogService } from '../connectors/services/graylog.service'
+import { EntityExtractionService } from '../entities/entity-extraction.service'
 import { IntelService } from '../intel/intel.service'
 import type { ConnectorType as PrismaConnectorType, Alert, Prisma } from '@prisma/client'
-
-/** Sync runs every 2 minutes (120 000 ms). */
-const SYNC_INTERVAL_MS = 120_000
-
-/** Minimum gap between syncs for the same connector (90 seconds). */
-const MIN_SYNC_GAP_MS = 90_000
-
-/** Connectors whose data we can ingest automatically. */
-const SYNCABLE_TYPES: ConnectorType[] = [
-  ConnectorType.WAZUH,
-  ConnectorType.GRAYLOG,
-  ConnectorType.MISP,
-]
-const SYNCABLE_TYPES_SET = new Set<string>(SYNCABLE_TYPES)
 
 @Injectable()
 export class ConnectorSyncService {
@@ -42,6 +35,7 @@ export class ConnectorSyncService {
     private readonly alertsService: AlertsService,
     private readonly intelService: IntelService,
     private readonly graylogService: GraylogService,
+    private readonly entityExtractionService: EntityExtractionService,
     private readonly appLogger: AppLoggerService
   ) {}
 
@@ -257,14 +251,53 @@ export class ConnectorSyncService {
       }
     )
 
-    let ingested = 0
+    const fulfilledAlerts: Alert[] = []
     for (const batchResult of allResults) {
       if (batchResult.status === 'fulfilled') {
-        ingested++
+        fulfilledAlerts.push(batchResult.value)
       }
     }
 
-    return ingested
+    // Best-effort entity extraction from ingested Graylog alerts
+    if (fulfilledAlerts.length > 0) {
+      await this.extractEntitiesFromGraylogAlerts(tenantId, fulfilledAlerts)
+    }
+
+    return fulfilledAlerts.length
+  }
+
+  /**
+   * Extract entities from Graylog alerts (best-effort).
+   * Follows the same pattern as Wazuh entity extraction in AlertsService.
+   */
+  private async extractEntitiesFromGraylogAlerts(tenantId: string, alerts: Alert[]): Promise<void> {
+    const results = await Promise.allSettled(
+      alerts.map(alert =>
+        this.entityExtractionService.extractFromAlert({
+          tenantId,
+          id: alert.id,
+          sourceIp: alert.sourceIp,
+          destinationIp: alert.destinationIp,
+          agentName: alert.agentName,
+          rawEvent: alert.rawEvent,
+          title: alert.title,
+          source: alert.source,
+        })
+      )
+    )
+
+    let failed = 0
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        failed++
+      }
+    }
+
+    if (failed > 0) {
+      this.logger.warn(
+        `Graylog entity extraction: ${failed}/${alerts.length} alerts failed entity extraction`
+      )
+    }
   }
 
   /** Sync MISP events + IOCs using the existing IntelService method. */

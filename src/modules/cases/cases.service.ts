@@ -653,6 +653,21 @@ export class CasesService {
       }),
     })
 
+    // Best-effort entity extraction from the artifact
+    this.entityExtractionService
+      .extractFromArtifact({
+        tenantId: user.tenantId,
+        type: dto.type,
+        value: dto.value,
+        source: dto.source ?? 'manual',
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        this.logger.warn(
+          `Entity extraction failed for artifact ${dto.type}:${dto.value}: ${message}`
+        )
+      })
+
     this.logSuccess('createArtifact', user, 'CaseArtifact', artifact.id, {
       caseId,
       caseNumber: caseRecord.caseNumber,

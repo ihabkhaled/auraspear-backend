@@ -1,6 +1,11 @@
 import { MAX_REMOTE_ERROR_LENGTH, MINIMUM_TIMEOUT_MS, URL_KEYS } from './connectors.constants'
 import { REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
-import type { ConnectorResponse, ConnectorRow, ConnectorStats } from './connectors.types'
+import type {
+  ChatCompletionContentBlock,
+  ConnectorResponse,
+  ConnectorRow,
+  ConnectorStats,
+} from './connectors.types'
 import type { ConnectorConfig } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -280,4 +285,33 @@ export function formatRemoteError(serviceName: string, status: number, data: unk
 export function normalizeTimeoutMs(value: number): number {
   const ms = value < 1000 ? value * 1000 : value
   return Math.max(ms, MINIMUM_TIMEOUT_MS)
+}
+
+/* ---------------------------------------------------------------- */
+/* CHAT COMPLETION CONTENT EXTRACTION                                 */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts plain text from a chat completion `content` field.
+ *
+ * OpenAI-compatible APIs may return `content` as either a plain string or
+ * an array of typed content blocks (`{ type: 'text', text: '…' }`).
+ * This function normalizes both shapes into a single string.
+ */
+export function extractChatCompletionText(
+  content: string | ChatCompletionContentBlock[] | undefined | null
+): string {
+  if (typeof content === 'string') return content
+
+  if (Array.isArray(content)) {
+    const parts: string[] = []
+    for (const block of content) {
+      if (block.type === 'text' && block.text) {
+        parts.push(block.text)
+      }
+    }
+    return parts.join('')
+  }
+
+  return ''
 }
