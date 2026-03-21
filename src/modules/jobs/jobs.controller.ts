@@ -28,6 +28,8 @@ export class JobsController {
       limit: query.limit,
       status: query.status,
       type: query.type,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     })
   }
 
@@ -41,6 +43,14 @@ export class JobsController {
   @RequirePermission(Permission.JOBS_VIEW)
   async getJob(@Param('id', ParseUUIDPipe) id: string, @TenantId() tenantId: string): Promise<Job> {
     return this.jobService.getJobOrThrow(id, tenantId)
+  }
+
+  @Post('cancel-all')
+  @RequirePermission(Permission.JOBS_CANCEL_ALL)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  async cancelAllJobs(@TenantId() tenantId: string): Promise<{ cancelled: number }> {
+    const cancelled = await this.jobService.cancelAllJobs(tenantId)
+    return { cancelled }
   }
 
   @Post(':id/cancel')

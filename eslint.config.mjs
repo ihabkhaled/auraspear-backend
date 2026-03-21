@@ -141,6 +141,16 @@ export default tseslint.config(
       'no-param-reassign': ['warn', { props: false }],
       // Use { ...obj } instead of Object.assign()
       'prefer-object-spread': 'error',
+      // NEVER use string literal union types — define an enum instead
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'TSTypeAliasDeclaration > TSUnionType > TSLiteralType > Literal[raw=/^[\'"].*[\'"]$/]',
+          message:
+            'Do not use string literal union types. Define an enum in <module>.enums.ts or src/common/enums/ instead.',
+        },
+      ],
 
       // ═══════════════════════════════════════════════════════════════
       // BUG PREVENTION
@@ -320,6 +330,234 @@ export default tseslint.config(
       'unicorn/prefer-module': 'off',
       'unicorn/no-process-exit': 'off',
       'unicorn/prefer-top-level-await': 'off',
+    },
+  },
+
+  // ── No inline declarations in logic files ──────────────────────────────────
+  // Services, controllers, repositories, guards, interceptors, filters, pipes,
+  // and modules must NOT declare interfaces, types, enums, constants, or
+  // standalone functions. Move them to the dedicated file (<module>.types.ts,
+  // .enums.ts, .constants.ts, .utilities.ts) and import.
+  {
+    files: [
+      'src/**/*.service.ts',
+      'src/**/*.controller.ts',
+      'src/**/*.repository.ts',
+      'src/**/*.module.ts',
+      'src/**/*.guard.ts',
+      'src/**/*.interceptor.ts',
+      'src/**/*.filter.ts',
+      'src/**/*.pipe.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        // ── inherited: no string literal unions ──
+        {
+          selector:
+            'TSTypeAliasDeclaration > TSUnionType > TSLiteralType > Literal[raw=/^[\'"].*[\'"]$/]',
+          message:
+            'Do not use string literal union types. Define an enum in <module>.enums.ts or src/common/enums/ instead.',
+        },
+        // ── no inline interfaces ──
+        {
+          selector: 'TSInterfaceDeclaration',
+          message:
+            'Do not declare interfaces inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        // ── no inline type aliases ──
+        {
+          selector: 'TSTypeAliasDeclaration',
+          message:
+            'Do not declare type aliases inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        // ── no inline enums ──
+        {
+          selector: 'TSEnumDeclaration',
+          message:
+            'Do not declare enums inline. Move to <module>.enums.ts or src/common/enums/.',
+        },
+        // ── no inline constants (top-level const outside class) ──
+        {
+          selector: 'Program > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'Program > ExportNamedDeclaration > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        // ── no standalone functions (use class methods or move to utilities) ──
+        {
+          selector: 'FunctionDeclaration',
+          message:
+            'Do not declare standalone functions in logic files. Move to <module>.utilities.ts or src/common/utils/.',
+        },
+      ],
+    },
+  },
+
+  // ── No inline types/enums/constants in utility files ──────────────────────
+  // Utility files own business logic functions only. Interfaces, types, enums,
+  // and constants belong in their dedicated files.
+  {
+    files: ['src/**/*.utilities.ts', 'src/**/*.utility.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        // ── inherited: no string literal unions ──
+        {
+          selector:
+            'TSTypeAliasDeclaration > TSUnionType > TSLiteralType > Literal[raw=/^[\'"].*[\'"]$/]',
+          message:
+            'Do not use string literal union types. Define an enum in <module>.enums.ts or src/common/enums/ instead.',
+        },
+        // ── no inline interfaces ──
+        {
+          selector: 'TSInterfaceDeclaration',
+          message:
+            'Do not declare interfaces in utility files. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        // ── no inline type aliases ──
+        {
+          selector: 'TSTypeAliasDeclaration',
+          message:
+            'Do not declare type aliases in utility files. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        // ── no inline enums ──
+        {
+          selector: 'TSEnumDeclaration',
+          message:
+            'Do not declare enums in utility files. Move to <module>.enums.ts or src/common/enums/.',
+        },
+        // ── no inline constants ──
+        {
+          selector: 'Program > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants in utility files. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'Program > ExportNamedDeclaration > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants in utility files. Move to <module>.constants.ts or src/common/constants/.',
+        },
+      ],
+    },
+  },
+
+  // ── Repository files — pure data access only ─────────────────────────────
+  // Repositories must contain ZERO business logic. No throwing exceptions,
+  // no conditional branching, no standalone helper functions.
+  {
+    files: ['src/**/*.repository.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        // ── inherited: all logic-file bans ──
+        {
+          selector:
+            'TSTypeAliasDeclaration > TSUnionType > TSLiteralType > Literal[raw=/^[\'"].*[\'"]$/]',
+          message:
+            'Do not use string literal union types. Define an enum in <module>.enums.ts or src/common/enums/ instead.',
+        },
+        {
+          selector: 'TSInterfaceDeclaration',
+          message:
+            'Do not declare interfaces inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        {
+          selector: 'TSTypeAliasDeclaration',
+          message:
+            'Do not declare type aliases inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        {
+          selector: 'TSEnumDeclaration',
+          message:
+            'Do not declare enums inline. Move to <module>.enums.ts or src/common/enums/.',
+        },
+        {
+          selector: 'Program > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'Program > ExportNamedDeclaration > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'FunctionDeclaration',
+          message:
+            'Do not declare standalone functions in logic files. Move to <module>.utilities.ts or src/common/utils/.',
+        },
+        // ── repository-specific: no business logic ──
+        {
+          selector: 'ThrowStatement',
+          message:
+            'Repositories must not throw exceptions. Return data and let the service layer handle errors.',
+        },
+      ],
+    },
+  },
+
+  // ── Controller files — routing and delegation only ────────────────────────
+  // Controllers must not contain business logic. No try/catch (let filters
+  // handle), no data transformation, no complex conditionals.
+  {
+    files: ['src/**/*.controller.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        // ── inherited: all logic-file bans ──
+        {
+          selector:
+            'TSTypeAliasDeclaration > TSUnionType > TSLiteralType > Literal[raw=/^[\'"].*[\'"]$/]',
+          message:
+            'Do not use string literal union types. Define an enum in <module>.enums.ts or src/common/enums/ instead.',
+        },
+        {
+          selector: 'TSInterfaceDeclaration',
+          message:
+            'Do not declare interfaces inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        {
+          selector: 'TSTypeAliasDeclaration',
+          message:
+            'Do not declare type aliases inline. Move to <module>.types.ts or src/common/interfaces/.',
+        },
+        {
+          selector: 'TSEnumDeclaration',
+          message:
+            'Do not declare enums inline. Move to <module>.enums.ts or src/common/enums/.',
+        },
+        {
+          selector: 'Program > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'Program > ExportNamedDeclaration > VariableDeclaration[kind="const"]',
+          message:
+            'Do not declare constants inline. Move to <module>.constants.ts or src/common/constants/.',
+        },
+        {
+          selector: 'FunctionDeclaration',
+          message:
+            'Do not declare standalone functions in logic files. Move to <module>.utilities.ts or src/common/utils/.',
+        },
+        // ── controller-specific: no business logic ──
+        {
+          selector: 'TryStatement',
+          message:
+            'Controllers must not use try/catch. Let the GlobalExceptionFilter handle errors.',
+        },
+        {
+          selector: 'ThrowStatement',
+          message:
+            'Controllers must not throw directly. Delegate to the service layer.',
+        },
+      ],
     },
   },
 

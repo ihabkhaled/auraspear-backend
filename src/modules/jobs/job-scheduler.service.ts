@@ -1,27 +1,34 @@
 import { Injectable } from '@nestjs/common'
 import { Interval } from '@nestjs/schedule'
 import { JobType } from './enums/job.enums'
+import { SCHEDULE_INTERVAL_MS } from './jobs.constants'
 import { JobService } from './jobs.service'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
 
-const SCHEDULE_INTERVAL_MS = 5 * 60_000 // 5 minutes
-
 @Injectable()
 export class JobSchedulerService {
+  private readonly enabled: boolean
+
   constructor(
     private readonly jobService: JobService,
     private readonly prisma: PrismaService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    // Only enable automatic scheduling when ENABLE_JOB_SCHEDULER=true
+    // Without real event ingestion, auto-scheduling creates noise
+    this.enabled = process.env['ENABLE_JOB_SCHEDULER'] === 'true'
+  }
 
   /**
    * Every 5 minutes, enqueue detection and correlation rule execution jobs
    * for all active rules across all tenants.
+   * Only runs when ENABLE_JOB_SCHEDULER=true.
    */
   @Interval(SCHEDULE_INTERVAL_MS)
   async scheduleRuleExecution(): Promise<void> {
+    if (!this.enabled) return
     try {
       const detectionCount = await this.scheduleDetectionRules()
       const correlationCount = await this.scheduleCorrelationRules()

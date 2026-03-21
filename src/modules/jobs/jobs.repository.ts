@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
-import { JobStatus } from './enums/job.enums'
+import { JobStatus, JobType } from './enums/job.enums'
 import { SortOrder } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JobTypeCount, ListJobsOptions } from './jobs.types'
@@ -50,15 +50,45 @@ export class JobRepository {
     return this.prisma.job.updateMany(params)
   }
 
+  /**
+   * Fetch pending jobs with priority: interactive jobs (AI_AGENT_TASK, REPORT_GENERATION)
+   * are fetched first, then remaining slots filled with background jobs.
+   * This prevents bulk rule execution jobs from starving user-initiated tasks.
+   */
   async findPendingJobs(limit: number = 10): Promise<Job[]> {
-    return this.prisma.job.findMany({
+    const pendingStatuses: JobStatus[] = [JobStatus.PENDING, JobStatus.RETRYING]
+    const baseWhere = {
+      status: { in: pendingStatuses },
+      OR: [{ scheduledAt: null }, { scheduledAt: { lte: new Date() } }],
+    }
+
+    // Priority: interactive jobs first
+    const priorityJobs = await this.prisma.job.findMany({
       where: {
-        status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
-        OR: [{ scheduledAt: null }, { scheduledAt: { lte: new Date() } }],
+        ...baseWhere,
+        type: { in: [JobType.AI_AGENT_TASK, JobType.REPORT_GENERATION, JobType.SOAR_PLAYBOOK] },
       },
       orderBy: { createdAt: SortOrder.ASC },
       take: limit,
     })
+
+    const remainingSlots = limit - priorityJobs.length
+    if (remainingSlots <= 0) {
+      return priorityJobs
+    }
+
+    const priorityIds = priorityJobs.map(job => job.id)
+
+    const backgroundJobs = await this.prisma.job.findMany({
+      where: {
+        ...baseWhere,
+        ...(priorityIds.length > 0 ? { id: { notIn: priorityIds } } : {}),
+      },
+      orderBy: { createdAt: SortOrder.ASC },
+      take: remainingSlots,
+    })
+
+    return [...priorityJobs, ...backgroundJobs]
   }
 
   async listByTenant(
@@ -76,10 +106,14 @@ export class JobRepository {
       where.status = options.status as Prisma.EnumJobStatusFilter['equals']
     }
 
+    const sortField = options?.sortBy ?? 'createdAt'
+    const sortDirection = (options?.sortOrder as SortOrder) ?? SortOrder.DESC
+    const orderBy: Prisma.JobOrderByWithRelationInput = { [sortField]: sortDirection }
+
     const [data, total] = await Promise.all([
       this.prisma.job.findMany({
         where,
-        orderBy: { createdAt: SortOrder.DESC },
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -132,6 +166,16 @@ export class JobRepository {
     return this.prisma.job.updateMany({
       where: {
         id,
+        tenantId,
+        status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
+      },
+      data: { status: JobStatus.CANCELLED },
+    })
+  }
+
+  async cancelAllPendingJobs(tenantId: string): Promise<Prisma.BatchPayload> {
+    return this.prisma.job.updateMany({
+      where: {
         tenantId,
         status: { in: [JobStatus.PENDING, JobStatus.RETRYING] },
       },

@@ -278,6 +278,23 @@ export class JobService {
     )
   }
 
+  async cancelAllJobs(tenantId: string): Promise<number> {
+    const result = await this.jobRepository.cancelAllPendingJobs(tenantId)
+
+    this.appLogger.info(`Cancelled ${String(result.count)} pending/retrying job(s)`, {
+      feature: AppLogFeature.JOBS,
+      action: 'cancelAllJobs',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'cancelAllJobs',
+      tenantId,
+      metadata: { cancelledCount: result.count },
+    })
+
+    return result.count
+  }
+
   async retryJob(id: string, tenantId: string): Promise<Job> {
     const job = await this.getJobOrThrow(id, tenantId)
 

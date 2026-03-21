@@ -493,6 +493,12 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.jobs.manage',
     sortOrder: 1451,
   },
+  {
+    key: Permission.JOBS_CANCEL_ALL,
+    module: 'jobs',
+    labelKey: 'roleSettings.permissions.jobs.cancelAll',
+    sortOrder: 1452,
+  },
 
   // ─── Cloud Security ───
   {

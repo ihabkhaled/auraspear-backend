@@ -138,7 +138,7 @@ export class LlmApisService {
     const organizationId = config.organizationId as string | undefined
     const maxTokensParameter =
       (config.maxTokensParameter as string | undefined) ?? LlmMaxTokensParameter.MAX_TOKENS
-    const timeout = (config.timeout as number | undefined) ?? 60_000
+    const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 60_000)
 
     const resolvedModel = model ?? defaultModel
 

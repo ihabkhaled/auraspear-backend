@@ -111,6 +111,7 @@ export class BedrockService {
     const client = new BedrockRuntimeClient({
       region,
       credentials: { accessKeyId, secretAccessKey },
+      requestHandler: { requestTimeout: 30_000 },
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     })
 
@@ -125,7 +126,12 @@ export class BedrockService {
       }),
     })
 
-    const response = await client.send(command)
+    const response = await Promise.race([
+      client.send(command),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('Bedrock invoke timed out after 30 seconds')), 30_000)
+      }),
+    ])
     const bodyString = new TextDecoder().decode(response.body)
     const body = JSON.parse(bodyString) as Record<string, unknown>
     const content = body.content as Array<{ text: string }> | undefined

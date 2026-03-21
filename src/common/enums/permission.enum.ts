@@ -102,6 +102,7 @@ export enum Permission {
   // Jobs / Runtime
   JOBS_VIEW = 'jobs.view',
   JOBS_MANAGE = 'jobs.manage',
+  JOBS_CANCEL_ALL = 'jobs.cancelAll',
 
   // System Health
   SYSTEM_HEALTH_VIEW = 'systemHealth.view',

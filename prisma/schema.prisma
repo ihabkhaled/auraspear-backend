@@ -1474,9 +1474,12 @@ model AiAgentSession {
   status      AiAgentSessionStatus @default(running)
   input       String               @db.Text
   output      String?              @db.Text
+  model       String?              @db.VarChar(255)
+  provider    String?              @db.VarChar(50)
   tokensUsed  Int                  @default(0) @map("tokens_used")
   cost        Float                @default(0)
   durationMs  Int                  @default(0) @map("duration_ms")
+  errorMessage String?             @map("error_message") @db.Text
 
   startedAt   DateTime  @default(now()) @map("started_at")
   completedAt DateTime? @map("completed_at")

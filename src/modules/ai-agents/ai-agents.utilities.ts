@@ -1,19 +1,8 @@
 import { SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { AiAgentRecord } from './ai-agents.types'
+import type { AgentWithRelations, AiAgentRecord } from './ai-agents.types'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
-import type { Prisma, AiAgentSession, AiAgentTool } from '@prisma/client'
-
-/* ---------------------------------------------------------------- */
-/* SHAPE RETURNED BY PRISMA WITH RELATIONS                           */
-/* ---------------------------------------------------------------- */
-
-export interface AgentWithRelations {
-  _count: { tools: number; sessions: number }
-  tools: AiAgentTool[]
-  sessions: AiAgentSession[]
-  [key: string]: unknown
-}
+import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
 /* RECORD MAPPING                                                    */
@@ -74,6 +63,8 @@ export function buildAgentOrderBy(
       return { updatedAt: order }
     case 'name':
       return { name: order }
+    case 'model':
+      return { model: order }
     case 'status':
       return { status: order }
     case 'tier':

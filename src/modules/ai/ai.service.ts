@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import {
   AI_BEDROCK_MAX_TOKENS,
+  AI_CONNECTOR_PRIORITY,
   AI_DEFAULT_MODEL,
   AI_LLM_APIS_MAX_TOKENS,
   AI_OPENCLAW_MAX_TOKENS,
@@ -53,13 +54,6 @@ import type {
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Alert, Prisma } from '@prisma/client'
 
-/** Priority order for AI connector resolution. */
-const AI_CONNECTOR_PRIORITY: ConnectorType[] = [
-  ConnectorType.BEDROCK,
-  ConnectorType.LLM_APIS,
-  ConnectorType.OPENCLAW_GATEWAY,
-]
-
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name)
@@ -82,14 +76,10 @@ export class AiService {
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
-    const connector = await this.findAvailableAiConnector(user.tenantId)
-
-    let response: AiResponse | undefined
-    if (connector) {
-      response = await this.routeHunt(connector, dto, user)
-    }
-
-    response ??= buildFallbackHuntResponse(dto.query)
+    const connectors = await this.findAvailableAiConnectors(user.tenantId)
+    const response =
+      (await this.tryConnectorsInOrder(connectors, c => this.routeHunt(c, dto, user))) ??
+      buildFallbackHuntResponse(dto.query)
 
     const latencyMs = Date.now() - startTime
     await this.logAudit(
@@ -116,14 +106,11 @@ export class AiService {
     const relatedAlerts = await this.loadRelatedAlerts(fullAlert, user.tenantId)
 
     const startTime = Date.now()
-    const connector = await this.findAvailableAiConnector(user.tenantId)
-
-    let response: AiResponse | undefined
-    if (connector) {
-      response = await this.routeInvestigate(connector, fullAlert, relatedAlerts, dto.alertId, user)
-    }
-
-    response ??= buildFallbackInvestigateResponse(fullAlert, relatedAlerts, dto.alertId)
+    const connectors = await this.findAvailableAiConnectors(user.tenantId)
+    const response =
+      (await this.tryConnectorsInOrder(connectors, c =>
+        this.routeInvestigate(c, fullAlert, relatedAlerts, dto.alertId, user)
+      )) ?? buildFallbackInvestigateResponse(fullAlert, relatedAlerts, dto.alertId)
 
     const latencyMs = Date.now() - startTime
     await this.logAudit(
@@ -148,14 +135,10 @@ export class AiService {
     await this.ensureAiEnabled(user.tenantId)
 
     const startTime = Date.now()
-    const connector = await this.findAvailableAiConnector(user.tenantId)
-
-    let response: AiResponse | undefined
-    if (connector) {
-      response = await this.routeExplain(connector, body.prompt, user)
-    }
-
-    response ??= this.buildFallbackExplainResponse(body.prompt)
+    const connectors = await this.findAvailableAiConnectors(user.tenantId)
+    const response =
+      (await this.tryConnectorsInOrder(connectors, c => this.routeExplain(c, body.prompt, user))) ??
+      this.buildFallbackExplainResponse(body.prompt)
 
     const latencyMs = Date.now() - startTime
     await this.logAudit(
@@ -174,18 +157,31 @@ export class AiService {
     await this.ensureAiEnabled(input.tenantId)
 
     const startTime = Date.now()
-    const connector = await this.findAvailableAiConnector(input.tenantId)
+    const connectors = await this.findAvailableAiConnectors(input.tenantId)
 
-    let response: AiResponse | undefined
-    if (connector) {
-      response = await this.routeAgentTask(connector, input)
-    }
+    this.appLogger.info(
+      `AI agent task: ${String(connectors.length)} connector(s) available to try`,
+      {
+        feature: AppLogFeature.AI_AGENTS,
+        action: 'runAgentTask',
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'runAgentTask',
+        tenantId: input.tenantId,
+        metadata: {
+          connectors: connectors.map(c => c.type),
+          agentName: input.agentName,
+        },
+      }
+    )
 
-    response ??= buildFallbackAgentTaskResponse({
-      agentName: input.agentName,
-      prompt: input.prompt,
-      tools: input.tools,
-    })
+    const response =
+      (await this.tryConnectorsInOrder(connectors, c => this.routeAgentTask(c, input))) ??
+      buildFallbackAgentTaskResponse({
+        agentName: input.agentName,
+        prompt: input.prompt,
+        tools: input.tools,
+      })
 
     const latencyMs = Date.now() - startTime
     await this.logAudit({
@@ -229,9 +225,11 @@ export class AiService {
   /* PRIVATE: Multi-Provider Connector Resolution                      */
   /* ---------------------------------------------------------------- */
 
-  private async findAvailableAiConnector(
-    tenantId: string
-  ): Promise<ResolvedAiConnector | undefined> {
+  /**
+   * Returns ALL configured AI connectors in priority order.
+   * The caller cascades through them until one succeeds.
+   */
+  private async findAvailableAiConnectors(tenantId: string): Promise<ResolvedAiConnector[]> {
     const configs = await Promise.all(
       AI_CONNECTOR_PRIORITY.map(async connectorType => {
         const config = await this.connectorsService.getDecryptedConfig(tenantId, connectorType)
@@ -239,13 +237,91 @@ export class AiService {
       })
     )
 
-    const resolved = configs.find((entry): entry is ResolvedAiConnector => entry !== undefined)
+    const resolved = configs.filter((entry): entry is ResolvedAiConnector => entry !== undefined)
 
-    if (resolved) {
-      this.logger.log(`Resolved AI connector: ${resolved.type} for tenant ${tenantId}`)
-    }
+    this.appLogger.info(
+      `AI connector resolution: ${String(resolved.length)} of ${String(AI_CONNECTOR_PRIORITY.length)} configured`,
+      {
+        feature: AppLogFeature.AI,
+        action: 'findAvailableAiConnectors',
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'findAvailableAiConnectors',
+        tenantId,
+        metadata: {
+          checked: AI_CONNECTOR_PRIORITY,
+          available: resolved.map(c => c.type),
+          missing: AI_CONNECTOR_PRIORITY.filter(t => !resolved.some(r => r.type === t)),
+        },
+      }
+    )
 
     return resolved
+  }
+
+  /**
+   * Try each connector sequentially until one returns a response.
+   * Uses recursion to avoid await-in-loop lint warning.
+   * Returns undefined if all connectors fail.
+   */
+  private async tryConnectorsInOrder(
+    connectors: ResolvedAiConnector[],
+    attempt: (connector: ResolvedAiConnector) => Promise<AiResponse | undefined>,
+    index = 0
+  ): Promise<AiResponse | undefined> {
+    if (index >= connectors.length) {
+      this.appLogger.warn('AI: all connectors failed, using rule-based fallback', {
+        feature: AppLogFeature.AI,
+        action: 'tryConnectorsInOrder',
+        outcome: AppLogOutcome.WARNING,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'tryConnectorsInOrder',
+        metadata: { triedConnectors: connectors.map(c => c.type) },
+      })
+      return undefined
+    }
+
+    const connector = connectors.at(index)
+    if (!connector) {
+      return undefined
+    }
+
+    this.appLogger.info(`AI: trying provider ${connector.type}...`, {
+      feature: AppLogFeature.AI,
+      action: 'tryConnectorsInOrder',
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'tryConnectorsInOrder',
+      metadata: { provider: connector.type },
+    })
+
+    const response = await attempt(connector)
+
+    if (response) {
+      this.appLogger.info(`AI: ${connector.type} succeeded`, {
+        feature: AppLogFeature.AI,
+        action: 'tryConnectorsInOrder',
+        outcome: AppLogOutcome.SUCCESS,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'AiService',
+        functionName: 'tryConnectorsInOrder',
+        metadata: { provider: connector.type, model: response.model },
+      })
+      return response
+    }
+
+    this.appLogger.warn(`AI: ${connector.type} failed, trying next...`, {
+      feature: AppLogFeature.AI,
+      action: 'tryConnectorsInOrder',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'tryConnectorsInOrder',
+      metadata: { provider: connector.type },
+    })
+
+    return this.tryConnectorsInOrder(connectors, attempt, index + 1)
   }
 
   /* ---------------------------------------------------------------- */
@@ -690,6 +766,7 @@ export class AiService {
       ],
       confidence: 0.85,
       model: 'rule-based',
+      provider: 'rule-based',
       tokensUsed: { input: 0, output: 0 },
     }
   }

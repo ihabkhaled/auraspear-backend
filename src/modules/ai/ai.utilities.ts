@@ -1,4 +1,4 @@
-import { AiResponseModel } from './ai.enums'
+import { AiProvider, AiResponseModel } from './ai.enums'
 import { AlertSeverity } from '../../common/enums'
 import type { AgentTaskPromptParameters, AgentTaskResponseParameters, AiResponse } from './ai.types'
 import type { Alert } from '@prisma/client'
@@ -401,6 +401,7 @@ export function buildBedrockHuntResponse(
     ],
     confidence: 0.85,
     model: modelId,
+    provider: AiProvider.BEDROCK,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -418,6 +419,7 @@ export function buildFallbackHuntResponse(query: string): AiResponse {
     ],
     confidence: 0.87,
     model: AiResponseModel.RULE_BASED,
+    provider: AiProvider.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }
@@ -442,6 +444,7 @@ export function buildBedrockInvestigateResponse(
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
     model: modelId,
+    provider: AiProvider.BEDROCK,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -462,6 +465,7 @@ export function buildFallbackInvestigateResponse(
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
     model: AiResponseModel.RULE_BASED,
+    provider: AiProvider.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }
@@ -482,6 +486,7 @@ export function buildBedrockAgentTaskResponse(
     ],
     confidence: 0.82,
     model: modelId,
+    provider: AiProvider.BEDROCK,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -506,6 +511,7 @@ export function buildLlmApisHuntResponse(
     ],
     confidence: 0.85,
     model: `llm-apis:${modelId}`,
+    provider: AiProvider.LLM_APIS,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -530,6 +536,7 @@ export function buildLlmApisInvestigateResponse(
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
     model: `llm-apis:${modelId}`,
+    provider: AiProvider.LLM_APIS,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -550,6 +557,7 @@ export function buildLlmApisAgentTaskResponse(
     ],
     confidence: 0.82,
     model: `llm-apis:${modelId}`,
+    provider: AiProvider.LLM_APIS,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -571,6 +579,7 @@ export function buildLlmApisExplainResponse(
     ],
     confidence: 0.9,
     model: `llm-apis:${modelId}`,
+    provider: AiProvider.LLM_APIS,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -594,6 +603,7 @@ export function buildOpenClawHuntResponse(
     ],
     confidence: 0.85,
     model: 'openclaw-gateway',
+    provider: AiProvider.OPENCLAW_GATEWAY,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -617,6 +627,7 @@ export function buildOpenClawInvestigateResponse(
     ],
     confidence: computeInvestigationConfidence(alert, relatedAlerts),
     model: 'openclaw-gateway',
+    provider: AiProvider.OPENCLAW_GATEWAY,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -636,6 +647,7 @@ export function buildOpenClawAgentTaskResponse(
     ],
     confidence: 0.82,
     model: 'openclaw-gateway',
+    provider: AiProvider.OPENCLAW_GATEWAY,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -656,6 +668,7 @@ export function buildOpenClawExplainResponse(
     ],
     confidence: 0.9,
     model: 'openclaw-gateway',
+    provider: AiProvider.OPENCLAW_GATEWAY,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -677,6 +690,7 @@ export function buildBedrockExplainResponse(
     ],
     confidence: 0.9,
     model: modelId,
+    provider: AiProvider.BEDROCK,
     tokensUsed: { input: inputTokens, output: outputTokens },
   }
 }
@@ -691,6 +705,7 @@ export function buildFallbackAgentTaskResponse(params: AgentTaskResponseParamete
     ],
     confidence: 0.7,
     model: AiResponseModel.RULE_BASED,
+    provider: AiProvider.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
 }

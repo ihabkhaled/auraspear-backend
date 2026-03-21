@@ -9,6 +9,7 @@ export const ListAgentsQuerySchema = z.object({
       'createdAt',
       'updatedAt',
       'name',
+      'model',
       'status',
       'tier',
       'totalTasks',

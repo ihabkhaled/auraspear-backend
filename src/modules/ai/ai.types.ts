@@ -10,6 +10,7 @@ export interface AiResponse {
   reasoning: string[]
   confidence: number
   model: string
+  provider: string
   tokensUsed: AiTokenUsage
 }
 

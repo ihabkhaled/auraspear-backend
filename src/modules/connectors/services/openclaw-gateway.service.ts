@@ -78,7 +78,7 @@ export class OpenClawGatewayService {
   ): Promise<{ text: string; inputTokens: number; outputTokens: number; taskId?: string }> {
     const baseUrl = config.baseUrl as string
     const apiKey = config.apiKey as string
-    const timeout = (config.timeout as number | undefined) ?? 60_000
+    const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 60_000)
     const resolvedTaskType = taskType ?? 'agent_task'
 
     const headers: Record<string, string> = {

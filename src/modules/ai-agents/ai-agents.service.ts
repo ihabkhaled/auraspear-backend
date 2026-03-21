@@ -19,8 +19,12 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { JobType } from '../jobs/enums/job.enums'
 import { JobService } from '../jobs/jobs.service'
-import type { AiAgentRecord, AiAgentStats, PaginatedAgents } from './ai-agents.types'
-import type { AgentWithRelations } from './ai-agents.utilities'
+import type {
+  AiAgentRecord,
+  AiAgentStats,
+  AgentWithRelations,
+  PaginatedAgents,
+} from './ai-agents.types'
 import type { CreateAgentToolDto, UpdateAgentToolDto } from './dto/agent-tool.dto'
 import type { CreateAgentDto } from './dto/create-agent.dto'
 import type { ExecuteAgentDto } from './dto/execute-agent.dto'

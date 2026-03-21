@@ -122,15 +122,13 @@ export class AiAgentsRepository {
   async updateWithDetails(params: {
     where: { id: string; tenantId: string }
     data: Prisma.AiAgentUpdateManyMutationInput | Record<string, unknown>
-  }): Promise<
-    Prisma.AiAgentGetPayload<{
-      include: {
-        tools: true
-        sessions: true
-        _count: { select: { tools: true; sessions: true } }
-      }
-    }>
-  > {
+  }): Promise<Prisma.AiAgentGetPayload<{
+    include: {
+      tools: true
+      sessions: true
+      _count: { select: { tools: true; sessions: true } }
+    }
+  }> | null> {
     await this.prisma.aiAgent.updateMany({
       where: params.where,
       data: params.data,
@@ -154,7 +152,7 @@ export class AiAgentsRepository {
     })
 
     if (!updated) {
-      throw new Error(`AiAgent ${params.where.id} not found after update`)
+      return null
     }
 
     return updated
@@ -213,6 +211,8 @@ export class AiAgentsRepository {
     agentId: string
     tenantId: string
     output: string
+    model: string
+    provider: string
     tokensUsed: number
     cost: number
     durationMs: number
@@ -223,6 +223,8 @@ export class AiAgentsRepository {
         data: {
           status: 'completed',
           output: params.output,
+          model: params.model,
+          provider: params.provider,
           tokensUsed: params.tokensUsed,
           cost: params.cost,
           durationMs: params.durationMs,
@@ -236,7 +238,7 @@ export class AiAgentsRepository {
       })
 
       if (!agent) {
-        throw new Error(`AiAgent ${params.agentId} not found while recording execution`)
+        return
       }
 
       const nextTotalTasks = agent.totalTasks + 1
@@ -266,7 +268,7 @@ export class AiAgentsRepository {
       where: { id: params.sessionId },
       data: {
         status: 'failed',
-        output: params.errorMessage,
+        errorMessage: params.errorMessage,
         durationMs: params.durationMs,
         completedAt: new Date(),
       },

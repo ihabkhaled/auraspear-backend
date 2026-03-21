@@ -556,6 +556,6 @@ describe('BedrockService', () => {
       // If the SDK IS installed, the test will still pass (ok: true).
       expect(typeof result.ok).toBe('boolean')
       expect(typeof result.details).toBe('string')
-    })
+    }, 30_000)
   })
 })

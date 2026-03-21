@@ -65,6 +65,8 @@ export class AiAgentTaskHandler {
         agentId,
         tenantId: job.tenantId,
         output: response.result,
+        model: response.model,
+        provider: response.provider,
         tokensUsed,
         cost: estimatedCost,
         durationMs,

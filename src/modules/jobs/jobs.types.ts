@@ -49,6 +49,8 @@ export interface ListJobsOptions {
   status?: PrismaJobStatus
   page?: number
   limit?: number
+  sortBy?: string
+  sortOrder?: string
 }
 
 export type JobHandler = (job: Job) => Promise<Record<string, unknown>>
