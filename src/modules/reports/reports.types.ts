@@ -113,5 +113,5 @@ export interface GeneratedReportContent {
 export interface ReportDownloadResponse {
   filename: string
   contentType: string
-  content: string
+  content: string | Buffer
 }

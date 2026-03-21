@@ -529,6 +529,12 @@ model Tenant {
   refreshTokenFamilies    RefreshTokenFamily[]
   userSessions            UserSession[]
   llmConnectors           LlmConnector[]
+  aiPromptTemplates       AiPromptTemplate[]
+  aiFeatureConfigs        AiFeatureConfig[]
+  aiUsageLedger           AiUsageLedger[]
+  runbooks                Runbook[]
+  entities                Entity[]
+  entityRelations         EntityRelation[]
 
   @@map("tenants")
 }
@@ -2040,4 +2046,141 @@ model LlmConnector {
   @@index([tenantId])
   @@index([tenantId, enabled])
   @@map("llm_connectors")
+}
+
+// ─── AI Prompt Templates ────────────────────────────────────
+
+model AiPromptTemplate {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  taskType   String    @map("task_type") @db.VarChar(100)
+  version    Int       @default(1)
+  name       String    @db.VarChar(255)
+  content    String    @db.Text
+  isActive   Boolean   @default(true) @map("is_active")
+  createdBy  String    @map("created_by") @db.VarChar(320)
+  reviewedBy String?   @map("reviewed_by") @db.VarChar(320)
+  reviewedAt DateTime? @map("reviewed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, taskType, version])
+  @@index([tenantId, taskType])
+  @@index([tenantId, taskType, isActive])
+  @@map("ai_prompt_templates")
+}
+
+// ─── AI Feature Configs ─────────────────────────────────────
+
+model AiFeatureConfig {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  featureKey         String   @map("feature_key") @db.VarChar(100)
+  enabled            Boolean  @default(true)
+  preferredProvider  String?  @map("preferred_provider") @db.VarChar(100)
+  maxTokens          Int      @default(2048) @map("max_tokens")
+  approvalLevel      String   @default("none") @map("approval_level") @db.VarChar(50)
+  monthlyTokenBudget Int?     @map("monthly_token_budget")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, featureKey])
+  @@index([tenantId])
+  @@index([tenantId, featureKey, enabled])
+  @@map("ai_feature_configs")
+}
+
+// ─── AI Usage Ledger ───────────────────────────────────────
+
+model AiUsageLedger {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  featureKey   String   @map("feature_key") @db.VarChar(100)
+  provider     String   @db.VarChar(100)
+  model        String?  @db.VarChar(255)
+  inputTokens  Int      @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  estimatedCost Float   @default(0) @map("estimated_cost")
+  userId       String   @map("user_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, featureKey])
+  @@index([tenantId, featureKey, createdAt])
+  @@map("ai_usage_ledger")
+}
+
+// ─── Runbooks / Knowledge Base ──────────────────────────────
+
+model Runbook {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  title     String   @db.VarChar(500)
+  content   String   @db.Text
+  category  String   @default("general") @db.VarChar(100)
+  tags      String[] @default([])
+  createdBy String   @map("created_by") @db.VarChar(320)
+  updatedBy String?  @map("updated_by") @db.VarChar(320)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@map("runbooks")
+}
+
+// ─── Entity Graph ──────────────────────────────────────────
+
+model Entity {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  type        String   @db.VarChar(50)
+  value       String   @db.VarChar(1000)
+  displayName String?  @map("display_name") @db.VarChar(500)
+  firstSeen   DateTime @default(now()) @map("first_seen")
+  lastSeen    DateTime @default(now()) @map("last_seen")
+  riskScore   Float    @default(0) @map("risk_score")
+  metadata    Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationsFrom EntityRelation[] @relation("from_entity")
+  relationsTo   EntityRelation[] @relation("to_entity")
+
+  @@unique([tenantId, type, value])
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([tenantId, riskScore])
+  @@map("entities")
+}
+
+model EntityRelation {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  fromEntityId String   @map("from_entity_id") @db.Uuid
+  toEntityId   String   @map("to_entity_id") @db.Uuid
+  relationType String   @map("relation_type") @db.VarChar(100)
+  confidence   Float    @default(1.0)
+  source       String?  @db.VarChar(255)
+  metadata     Json?    @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromEntity Entity @relation("from_entity", fields: [fromEntityId], references: [id], onDelete: Cascade)
+  toEntity   Entity @relation("to_entity", fields: [toEntityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([fromEntityId])
+  @@index([toEntityId])
+  @@index([tenantId, relationType])
+  @@map("entity_relations")
 }

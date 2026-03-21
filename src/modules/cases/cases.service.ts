@@ -34,6 +34,8 @@ import { MembershipStatus, UserRole } from '../../common/interfaces/authenticate
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { hasRoleAtLeast } from '../../common/utils/role.utility'
+import { AlertsRepository } from '../alerts/alerts.repository'
+import { EntityExtractionService } from '../entities/entity-extraction.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
   CaseCommentResponse,
@@ -70,7 +72,9 @@ export class CasesService {
   constructor(
     private readonly casesRepository: CasesRepository,
     private readonly appLogger: AppLoggerService,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly entityExtractionService: EntityExtractionService,
+    private readonly alertsRepository: AlertsRepository
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -169,6 +173,17 @@ export class CasesService {
       caseNumber: result.caseNumber,
       severity: result.severity,
     })
+
+    // Best-effort entity extraction from linked alerts
+    if (linkedAlerts.length > 0) {
+      this.extractEntitiesFromLinkedAlerts(user.tenantId, linkedAlerts).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        this.logger.warn(
+          `Entity extraction from linked alerts failed for case ${result.id}: ${message}`
+        )
+      })
+    }
+
     return this.enrichCaseRecord(result)
   }
 
@@ -798,6 +813,36 @@ export class CasesService {
         400,
         'One or more linked alerts do not belong to this tenant',
         'errors.cases.invalidLinkedAlerts'
+      )
+    }
+  }
+
+  private async extractEntitiesFromLinkedAlerts(
+    tenantId: string,
+    alertIds: string[]
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      alertIds.map(async alertId => {
+        const alert = await this.alertsRepository.findFirstByIdAndTenant(alertId, tenantId)
+        if (alert) {
+          await this.entityExtractionService.extractFromAlert({
+            tenantId,
+            id: alert.id,
+            sourceIp: alert.sourceIp,
+            destinationIp: alert.destinationIp,
+            agentName: alert.agentName,
+            rawEvent: alert.rawEvent,
+            title: alert.title,
+            source: alert.source,
+          })
+        }
+      })
+    )
+
+    const failedCount = results.filter(r => r.status === 'rejected').length
+    if (failedCount > 0) {
+      this.logger.warn(
+        `Entity extraction failed for ${String(failedCount)}/${String(alertIds.length)} linked alerts`
       )
     }
   }

@@ -11,6 +11,14 @@ import {
 export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
   [UserRole.PLATFORM_OPERATOR]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.ENTITIES_CREATE,
+    Permission.ENTITIES_UPDATE,
+    Permission.MSSP_DASHBOARD_VIEW,
+    Permission.RUNBOOKS_VIEW,
+    Permission.RUNBOOKS_CREATE,
+    Permission.RUNBOOKS_UPDATE,
+    Permission.RUNBOOKS_DELETE,
     Permission.CONNECTORS_VIEW,
     Permission.CONNECTORS_CREATE,
     Permission.CONNECTORS_UPDATE,
@@ -22,6 +30,10 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.LLM_CONNECTORS_UPDATE,
     Permission.LLM_CONNECTORS_DELETE,
     Permission.LLM_CONNECTORS_TEST,
+    Permission.AI_ALERT_TRIAGE,
+    Permission.AI_CASE_COPILOT,
+    Permission.AI_DETECTION_COPILOT,
+    Permission.AI_SOAR_COPILOT,
     Permission.SYSTEM_HEALTH_VIEW,
     Permission.JOBS_VIEW,
     Permission.JOBS_MANAGE,
@@ -39,6 +51,13 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
 
   [UserRole.TENANT_ADMIN]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.ENTITIES_CREATE,
+    Permission.ENTITIES_UPDATE,
+    Permission.RUNBOOKS_VIEW,
+    Permission.RUNBOOKS_CREATE,
+    Permission.RUNBOOKS_UPDATE,
+    Permission.RUNBOOKS_DELETE,
     Permission.ALERTS_VIEW,
     Permission.ALERTS_INVESTIGATE,
     Permission.ALERTS_ACKNOWLEDGE,
@@ -116,6 +135,10 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_AGENTS_CREATE,
     Permission.AI_AGENTS_UPDATE,
     Permission.AI_AGENTS_DELETE,
+    Permission.AI_ALERT_TRIAGE,
+    Permission.AI_CASE_COPILOT,
+    Permission.AI_DETECTION_COPILOT,
+    Permission.AI_SOAR_COPILOT,
     Permission.CLOUD_SECURITY_VIEW,
     Permission.CLOUD_SECURITY_CREATE,
     Permission.CLOUD_SECURITY_UPDATE,
@@ -158,6 +181,9 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
 
   [UserRole.DETECTION_ENGINEER]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.RUNBOOKS_VIEW,
+    Permission.RUNBOOKS_CREATE,
     Permission.ALERTS_VIEW,
     Permission.CASES_VIEW,
     Permission.INCIDENTS_VIEW,
@@ -185,6 +211,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.UEBA_VIEW,
     Permission.CONNECTORS_VIEW,
     Permission.LLM_CONNECTORS_VIEW,
+    Permission.AI_ALERT_TRIAGE,
+    Permission.AI_DETECTION_COPILOT,
     Permission.NOTIFICATIONS_VIEW,
     Permission.NOTIFICATIONS_MANAGE,
     Permission.PROFILE_VIEW,
@@ -195,6 +223,9 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
 
   [UserRole.INCIDENT_RESPONDER]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.RUNBOOKS_VIEW,
+    Permission.RUNBOOKS_CREATE,
     Permission.ALERTS_VIEW,
     Permission.ALERTS_INVESTIGATE,
     Permission.ALERTS_ACKNOWLEDGE,
@@ -231,6 +262,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SOAR_EXECUTE,
     Permission.AI_AGENTS_VIEW,
     Permission.AI_AGENTS_EXECUTE,
+    Permission.AI_ALERT_TRIAGE,
+    Permission.AI_CASE_COPILOT,
     Permission.COMPLIANCE_VIEW,
     Permission.LLM_CONNECTORS_VIEW,
     Permission.NOTIFICATIONS_VIEW,
@@ -345,6 +378,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
 
   [UserRole.SOC_ANALYST_L2]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.RUNBOOKS_VIEW,
     Permission.ALERTS_VIEW,
     Permission.ALERTS_INVESTIGATE,
     Permission.ALERTS_ACKNOWLEDGE,
@@ -393,6 +428,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
 
   [UserRole.SOC_ANALYST_L1]: [
     Permission.DASHBOARD_VIEW,
+    Permission.ENTITIES_VIEW,
+    Permission.RUNBOOKS_VIEW,
     Permission.ALERTS_VIEW,
     Permission.ALERTS_ACKNOWLEDGE,
     Permission.CASES_VIEW,

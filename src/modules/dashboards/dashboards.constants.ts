@@ -17,3 +17,5 @@ export const OPEN_CASE_STATUSES = [CaseStatus.OPEN, CaseStatus.IN_PROGRESS] as c
 export const RESOLVED_ALERT_STATUSES = [AlertStatus.RESOLVED, AlertStatus.CLOSED] as const
 export const QUEUED_JOB_STATUSES = [JobStatus.PENDING, JobStatus.RETRYING] as const
 export const ACTIVE_SYNC_JOB_STATUSES = [SyncJobStatus.RUNNING] as const
+
+export const AI_DASHBOARD_SERVICE_CLASS_NAME = 'AiDashboardService'

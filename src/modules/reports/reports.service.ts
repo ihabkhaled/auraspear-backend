@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
+import { generateReportPdf } from './pdf-generator.utility'
 import { ReportsRepository } from './reports.repository'
 import {
   buildReportListWhere,
@@ -10,7 +11,13 @@ import {
   buildReportStats,
   mergeReportParameters,
 } from './reports.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, ReportStatus } from '../../common/enums'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  ReportFormat,
+  ReportStatus,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
@@ -453,13 +460,21 @@ export class ReportsService {
     const safeName = report.name.replaceAll(/[^a-zA-Z0-9_-]/g, '_')
 
     switch (report.format) {
-      case 'csv':
+      case ReportFormat.PDF: {
+        const pdfBuffer = await generateReportPdf(content)
+        return {
+          filename: `${safeName}.pdf`,
+          contentType: 'application/pdf',
+          content: pdfBuffer,
+        }
+      }
+      case ReportFormat.CSV:
         return {
           filename: `${safeName}.csv`,
           contentType: 'text/csv; charset=utf-8',
           content: this.convertToCsv(content),
         }
-      case 'html':
+      case ReportFormat.HTML:
         return {
           filename: `${safeName}.html`,
           contentType: 'text/html; charset=utf-8',

@@ -15,6 +15,7 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import { processInBatches } from '../../common/utils/batch.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
+import { EntityExtractionService } from '../entities/entity-extraction.service'
 import type { PaginatedAlerts, AlertRecord } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
 
@@ -26,7 +27,8 @@ export class AlertsService {
     private readonly alertsRepository: AlertsRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly wazuhService: WazuhService,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    private readonly entityExtractionService: EntityExtractionService
   ) {}
 
   async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedAlerts> {
@@ -156,6 +158,12 @@ export class AlertsService {
       this.logger.warn(`Failed to ingest alert: ${message}`)
     }
 
+    // Best-effort entity extraction from ingested alerts
+    const fulfilledAlerts = allResults
+      .filter((r): r is PromiseFulfilledResult<AlertRecord> => r.status === 'fulfilled')
+      .map(r => r.value)
+    await this.extractEntitiesFromAlerts(tenantId, fulfilledAlerts)
+
     this.logSuccess('ingestFromWazuh', tenantId, { ingested, totalHits: upsertOps.length })
     return { ingested }
   }
@@ -228,6 +236,30 @@ export class AlertsService {
   /* ---------------------------------------------------------------- */
   /* PRIVATE HELPERS                                                   */
   /* ---------------------------------------------------------------- */
+
+  private async extractEntitiesFromAlerts(tenantId: string, alerts: AlertRecord[]): Promise<void> {
+    const results = await Promise.allSettled(
+      alerts.map(alert =>
+        this.entityExtractionService.extractFromAlert({
+          tenantId,
+          id: alert.id,
+          sourceIp: alert.sourceIp,
+          destinationIp: alert.destinationIp,
+          agentName: alert.agentName,
+          rawEvent: alert.rawEvent,
+          title: alert.title,
+          source: alert.source,
+        })
+      )
+    )
+
+    const failedCount = results.filter(r => r.status === 'rejected').length
+    if (failedCount > 0) {
+      this.logger.warn(
+        `Entity extraction failed for ${String(failedCount)}/${String(alerts.length)} alerts`
+      )
+    }
+  }
 
   private ensureNotClosedOrResolved(
     alert: AlertRecord,

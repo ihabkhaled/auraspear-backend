@@ -170,6 +170,32 @@ export enum Permission {
   ROLE_SETTINGS_VIEW = 'roleSettings.view',
   ROLE_SETTINGS_UPDATE = 'roleSettings.update',
 
+  // AI Alert Triage
+  AI_ALERT_TRIAGE = 'ai.alerts.triage',
+
+  // AI Case Copilot
+  AI_CASE_COPILOT = 'ai.cases.copilot',
+
+  // AI Detection Copilot
+  AI_DETECTION_COPILOT = 'ai.detection.copilot',
+
+  // AI SOAR Copilot
+  AI_SOAR_COPILOT = 'ai.soar.copilot',
+
+  // Runbooks / Knowledge Base
+  RUNBOOKS_VIEW = 'runbooks.view',
+  RUNBOOKS_CREATE = 'runbooks.create',
+  RUNBOOKS_UPDATE = 'runbooks.update',
+  RUNBOOKS_DELETE = 'runbooks.delete',
+
+  // Entities
+  ENTITIES_VIEW = 'entities.view',
+  ENTITIES_CREATE = 'entities.create',
+  ENTITIES_UPDATE = 'entities.update',
+
+  // MSSP Dashboard
+  MSSP_DASHBOARD_VIEW = 'msspDashboard.view',
+
   // Users Control
   USERS_CONTROL_VIEW = 'usersControl.view',
   USERS_CONTROL_VIEW_SESSIONS = 'usersControl.viewSessions',

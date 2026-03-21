@@ -96,7 +96,8 @@ describe('AlertsService', () => {
       repository as never,
       connectorsService as never,
       wazuhService as never,
-      mockAppLogger as never
+      mockAppLogger as never,
+      { extractFromAlert: jest.fn().mockResolvedValue(undefined) } as never
     )
   })
 

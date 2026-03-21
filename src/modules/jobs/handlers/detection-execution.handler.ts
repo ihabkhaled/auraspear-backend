@@ -6,6 +6,7 @@ import {
 import { AlertsRepository } from '../../alerts/alerts.repository'
 import { DetectionRulesExecutor } from '../../detection-rules/detection-rules.executor'
 import { DetectionRulesRepository } from '../../detection-rules/detection-rules.repository'
+import { EntityExtractionService } from '../../entities/entity-extraction.service'
 import type { DetectionRuleMatch } from '../../detection-rules/detection-rules.types'
 import type { Job, Prisma, AlertSeverity as PrismaAlertSeverity } from '@prisma/client'
 
@@ -16,7 +17,8 @@ export class DetectionExecutionHandler {
   constructor(
     private readonly detectionRulesRepository: DetectionRulesRepository,
     private readonly detectionRulesExecutor: DetectionRulesExecutor,
-    private readonly alertsRepository: AlertsRepository
+    private readonly alertsRepository: AlertsRepository,
+    private readonly entityExtractionService: EntityExtractionService
   ) {}
 
   async handle(job: Job): Promise<Record<string, unknown>> {
@@ -130,7 +132,27 @@ export class DetectionExecutionHandler {
       alertData.map(data =>
         this.alertsRepository
           .create(data)
-          .then(() => true)
+          .then(async alert => {
+            // Best-effort entity extraction from created alert
+            await this.entityExtractionService
+              .extractFromAlert({
+                tenantId: alert.tenantId,
+                id: alert.id,
+                sourceIp: alert.sourceIp,
+                destinationIp: alert.destinationIp,
+                agentName: alert.agentName,
+                rawEvent: alert.rawEvent,
+                title: alert.title,
+                source: alert.source,
+              })
+              .catch((extractionError: unknown) => {
+                const message =
+                  extractionError instanceof Error ? extractionError.message : 'Unknown'
+                this.logger.warn(`Entity extraction failed for detection alert: ${message}`)
+              })
+
+            return true
+          })
           .catch((error: unknown) => {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error'
             this.logger.error(

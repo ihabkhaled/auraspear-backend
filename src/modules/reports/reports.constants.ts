@@ -12,3 +12,28 @@ export const REPORT_CSV_DELIMITER = ','
 
 /** CSV newline character */
 export const REPORT_CSV_NEWLINE = '\n'
+
+/* ---------------------------------------------------------------- */
+/* PDF GENERATION CONSTANTS                                          */
+/* ---------------------------------------------------------------- */
+
+export const PDF_FONT_SIZE_TITLE = 20
+export const PDF_FONT_SIZE_HEADING = 14
+export const PDF_FONT_SIZE_BODY = 10
+export const PDF_FONT_SIZE_SMALL = 8
+export const PDF_COLOR_PRIMARY = '#135bec'
+export const PDF_COLOR_HEADING = '#1a1a2e'
+export const PDF_COLOR_BODY = '#333333'
+export const PDF_COLOR_MUTED = '#666666'
+export const PDF_COLOR_TABLE_HEADER_BG = '#f0f0f5'
+export const PDF_MARGIN = 50
+export const PDF_TABLE_COL_MIN_WIDTH = 80
+export const PDF_MAX_TABLE_ROWS = 50
+
+export const AI_REPORT_SERVICE_CLASS_NAME = 'AiReportService'
+export const AI_REPORT_TIME_RANGE_DAYS: Record<string, number> = {
+  '7d': 7,
+  '14d': 14,
+  '30d': 30,
+  '90d': 90,
+}

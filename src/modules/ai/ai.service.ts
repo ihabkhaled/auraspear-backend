@@ -31,9 +31,13 @@ import {
 } from './ai.utilities'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
+import { FeatureCatalogService } from './feature-catalog/feature-catalog.service'
+import { PromptRegistryService } from './prompt-registry/prompt-registry.service'
+import { UsageBudgetService } from './usage-budget/usage-budget.service'
 import {
   AiAuditAction,
   AiAuditStatus,
+  AiFeatureKey,
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
@@ -51,6 +55,7 @@ import type {
   AgentTaskExecutionInput,
   AiAuditRecord,
   AiResponse,
+  ExecuteAiTaskInput,
   ResolvedAiConnector,
 } from './ai.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -67,7 +72,10 @@ export class AiService {
     private readonly llmConnectorsService: LlmConnectorsService,
     private readonly bedrockService: BedrockService,
     private readonly llmApisService: LlmApisService,
-    private readonly openClawGatewayService: OpenClawGatewayService
+    private readonly openClawGatewayService: OpenClawGatewayService,
+    private readonly promptRegistryService: PromptRegistryService,
+    private readonly featureCatalogService: FeatureCatalogService,
+    private readonly usageBudgetService: UsageBudgetService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -290,6 +298,219 @@ export class AiService {
     })
 
     return response
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Generic AI Task Execution (via Feature Catalog + Prompt Registry)  */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Generic AI task execution that checks the feature catalog, loads the prompt
+   * template from the registry, and routes to the best available provider.
+   * This is the entry point for all AI features across the platform.
+   */
+  async executeAiTask(params: ExecuteAiTaskInput): Promise<AiResponse> {
+    // 1. Check feature is enabled
+    const featureConfig = await this.featureCatalogService.getConfig(
+      params.tenantId,
+      params.featureKey
+    )
+    if (!featureConfig.enabled) {
+      throw new BusinessException(403, 'AI feature is disabled', 'errors.ai.featureDisabled')
+    }
+
+    // 2. Check budget
+    const budgetCheck = await this.usageBudgetService.checkBudget(
+      params.tenantId,
+      params.featureKey
+    )
+    if (!budgetCheck.allowed) {
+      throw new BusinessException(429, 'AI usage budget exceeded', 'errors.ai.budgetExceeded')
+    }
+
+    // 3. Load prompt template
+    const promptContent = await this.promptRegistryService.getActivePrompt(
+      params.tenantId,
+      params.featureKey
+    )
+
+    // 4. Build final prompt by replacing {{key}} placeholders
+    const finalPrompt = this.buildPromptFromTemplate(promptContent, params.context)
+
+    // 5. Find connectors (respect preferred provider from feature config)
+    let connectors = await this.findAvailableAiConnectors(params.tenantId)
+
+    const selectedConnector = params.connector ?? featureConfig.preferredProvider
+    if (selectedConnector && selectedConnector !== 'default') {
+      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
+        selectedConnector
+      )
+      connectors = isUuid
+        ? connectors.filter(c => c.id === selectedConnector)
+        : connectors.filter(c => c.type === selectedConnector && !c.id)
+      if (connectors.length === 0) {
+        throw new BusinessException(
+          400,
+          `Requested AI connector "${selectedConnector}" is not configured or available`,
+          'errors.ai.connectorNotAvailable'
+        )
+      }
+    }
+
+    // 6. Execute through connectors in order
+    const startTime = Date.now()
+    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
+      this.routeGenericTask(c, finalPrompt, featureConfig.maxTokens)
+    )
+
+    const response = aiResponse ?? this.buildFallbackGenericResponse(params.featureKey, finalPrompt)
+    const latencyMs = Date.now() - startTime
+
+    // 7. Record usage
+    await this.usageBudgetService.recordUsage({
+      tenantId: params.tenantId,
+      featureKey: params.featureKey,
+      provider: response.provider,
+      model: response.model,
+      inputTokens: response.tokensUsed.input,
+      outputTokens: response.tokensUsed.output,
+      estimatedCost: 0,
+      userId: params.userId,
+    })
+
+    // 8. Audit log
+    await this.logAudit({
+      id: randomUUID(),
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action: `feature:${params.featureKey}`,
+      model: response.model,
+      inputTokens: response.tokensUsed.input,
+      outputTokens: response.tokensUsed.output,
+      latencyMs,
+      status: AiAuditStatus.SUCCESS,
+      createdAt: new Date().toISOString(),
+      prompt: finalPrompt,
+      response: response.result,
+    })
+
+    this.appLogger.info(`AI task executed: ${params.featureKey}`, {
+      feature: AppLogFeature.AI,
+      action: 'executeAiTask',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: params.tenantId,
+      actorEmail: params.userEmail,
+      actorUserId: params.userId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'executeAiTask',
+      metadata: {
+        featureKey: params.featureKey,
+        model: response.model,
+        latencyMs,
+      },
+    })
+
+    return response
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Generic Task Routing                                     */
+  /* ---------------------------------------------------------------- */
+
+  private async routeGenericTask(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    maxTokens: number
+  ): Promise<AiResponse | undefined> {
+    try {
+      switch (connector.type) {
+        case ConnectorType.BEDROCK: {
+          const aiResult = await this.bedrockService.invoke(connector.config, prompt, maxTokens)
+          return {
+            result: aiResult.text,
+            reasoning: ['Processed by AI model via Bedrock'],
+            confidence: 0.9,
+            model: (connector.config.modelId as string) ?? AI_DEFAULT_MODEL,
+            provider: 'bedrock',
+            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
+          }
+        }
+        case ConnectorType.LLM_APIS: {
+          const aiResult = await this.llmApisService.invoke(connector.config, prompt, maxTokens)
+          const modelId = (connector.config.defaultModel as string) ?? 'gpt-4'
+          return {
+            result: aiResult.text,
+            reasoning: ['Processed by AI model via LLM API'],
+            confidence: 0.9,
+            model: modelId,
+            provider: connector.name ? `llm_apis(${connector.name})` : 'llm_apis',
+            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
+          }
+        }
+        case ConnectorType.OPENCLAW_GATEWAY: {
+          const aiResult = await this.openClawGatewayService.invoke(
+            connector.config,
+            prompt,
+            maxTokens,
+            'generic'
+          )
+          return {
+            result: aiResult.text,
+            reasoning: ['Processed by AI model via OpenClaw Gateway'],
+            confidence: 0.9,
+            model: 'openclaw-gateway',
+            provider: 'openclaw_gateway',
+            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
+          }
+        }
+        default:
+          return undefined
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(`Generic AI task routing failed for ${connector.type}: ${errorMessage}`)
+      return undefined
+    }
+  }
+
+  /**
+   * Replaces {{key}} placeholders in a prompt template with values from the context object.
+   * If a key is not found in context, the placeholder is left as-is.
+   */
+  private buildPromptFromTemplate(template: string, context: Record<string, unknown>): string {
+    // Replace {{context}} with JSON-stringified full context if no specific keys
+    let result = template
+    if (result.includes('{{context}}')) {
+      result = result.replaceAll('{{context}}', JSON.stringify(context, null, 2))
+    }
+
+    // Replace specific {{key}} placeholders
+    for (const key of Object.keys(context)) {
+      const placeholder = `{{${key}}}`
+      if (result.includes(placeholder)) {
+        const value = context[key]
+        const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+        result = result.replaceAll(placeholder, stringValue)
+      }
+    }
+
+    return result
+  }
+
+  private buildFallbackGenericResponse(featureKey: AiFeatureKey, prompt: string): AiResponse {
+    return {
+      result: `[Rule-based fallback] No AI provider available to process feature "${featureKey}". The request has been logged for manual review.\n\nPrompt preview: ${prompt.slice(0, 200)}...`,
+      reasoning: [
+        'No AI connector available for this tenant',
+        'Returning rule-based fallback response',
+        'Manual review recommended',
+      ],
+      confidence: 0.3,
+      model: 'rule-based',
+      provider: 'rule-based',
+      tokensUsed: { input: 0, output: 0 },
+    }
   }
 
   /* ---------------------------------------------------------------- */

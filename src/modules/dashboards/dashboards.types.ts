@@ -350,3 +350,20 @@ export type DashboardAiSessionStatusRow = StatusCountRow<AiAgentSessionStatus>
 export type DashboardSoarStatusRow = StatusCountRow<SoarExecutionStatus>
 
 export type DashboardConnectorSyncStatusRow = StatusCountRow<SyncJobStatus>
+
+export interface TenantAlertCounts {
+  tenantId: string
+  tenantName: string
+  alertCount: number
+  criticalAlerts: number
+}
+
+export interface TenantCaseCounts {
+  tenantId: string
+  openCases: number
+}
+
+export interface TenantHuntCounts {
+  tenantId: string
+  activeHunts: number
+}

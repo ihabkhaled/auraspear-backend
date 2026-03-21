@@ -33,4 +33,9 @@ export enum AppLogFeature {
   DETECTION_RULES = 'DetectionRules',
   CLOUD_SECURITY = 'CloudSecurity',
   ROLE_SETTINGS = 'RoleSettings',
+  AI_PROMPTS = 'AiPrompts',
+  AI_FEATURES = 'AiFeatures',
+  KNOWLEDGE = 'Knowledge',
+  ENTITIES = 'Entities',
+  MSSP_DASHBOARD = 'MsspDashboard',
 }

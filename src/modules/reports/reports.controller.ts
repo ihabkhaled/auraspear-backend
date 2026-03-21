@@ -93,7 +93,11 @@ export class ReportsController {
 
     res.setHeader('Content-Type', download.contentType)
     res.setHeader('Content-Disposition', `attachment; filename="${download.filename}"`)
-    res.setHeader('Content-Length', Buffer.byteLength(download.content, 'utf-8'))
+    if (Buffer.isBuffer(download.content)) {
+      res.setHeader('Content-Length', download.content.length)
+    } else {
+      res.setHeader('Content-Length', Buffer.byteLength(download.content, 'utf-8'))
+    }
     res.send(download.content)
   }
 

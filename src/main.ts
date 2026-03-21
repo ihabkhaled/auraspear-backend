@@ -157,7 +157,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
     const port = process.env.PORT ?? 4000
 
     const server = app.getHttpServer()
-    server.setTimeout(30_000)
+    server.setTimeout(120_000)
 
     await app.listen(port)
   })()

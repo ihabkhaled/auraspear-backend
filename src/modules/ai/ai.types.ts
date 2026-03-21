@@ -1,4 +1,4 @@
-import type { AiAuditStatus, ConnectorType } from '../../common/enums'
+import type { AiAuditStatus, AiFeatureKey, ConnectorType } from '../../common/enums'
 
 export interface AiTokenUsage {
   input: number
@@ -65,6 +65,15 @@ export interface AiAuditRecord {
   createdAt: string
   prompt?: string
   response?: string
+}
+
+export interface ExecuteAiTaskInput {
+  tenantId: string
+  userId: string
+  userEmail: string
+  featureKey: AiFeatureKey
+  context: Record<string, unknown>
+  connector?: string
 }
 
 export interface CreateAiAuditLogData {

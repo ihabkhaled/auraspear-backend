@@ -242,6 +242,92 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     sortOrder: 414,
   },
 
+  // ─── Entities ───
+  {
+    key: Permission.ENTITIES_VIEW,
+    module: 'entities',
+    labelKey: 'roleSettings.permissions.entities.view',
+    sortOrder: 425,
+  },
+  {
+    key: Permission.ENTITIES_CREATE,
+    module: 'entities',
+    labelKey: 'roleSettings.permissions.entities.create',
+    sortOrder: 426,
+  },
+  {
+    key: Permission.ENTITIES_UPDATE,
+    module: 'entities',
+    labelKey: 'roleSettings.permissions.entities.update',
+    sortOrder: 427,
+  },
+
+  // ─── MSSP Dashboard ───
+  {
+    key: Permission.MSSP_DASHBOARD_VIEW,
+    module: 'msspDashboard',
+    labelKey: 'roleSettings.permissions.msspDashboard.view',
+    sortOrder: 428,
+  },
+
+  // ─── Runbooks / Knowledge Base ───
+  {
+    key: Permission.RUNBOOKS_VIEW,
+    module: 'runbooks',
+    labelKey: 'roleSettings.permissions.runbooks.view',
+    sortOrder: 420,
+  },
+  {
+    key: Permission.RUNBOOKS_CREATE,
+    module: 'runbooks',
+    labelKey: 'roleSettings.permissions.runbooks.create',
+    sortOrder: 421,
+  },
+  {
+    key: Permission.RUNBOOKS_UPDATE,
+    module: 'runbooks',
+    labelKey: 'roleSettings.permissions.runbooks.update',
+    sortOrder: 422,
+  },
+  {
+    key: Permission.RUNBOOKS_DELETE,
+    module: 'runbooks',
+    labelKey: 'roleSettings.permissions.runbooks.delete',
+    sortOrder: 423,
+  },
+
+  // ─── AI Alert Triage ───
+  {
+    key: Permission.AI_ALERT_TRIAGE,
+    module: 'aiAlertTriage',
+    labelKey: 'roleSettings.permissions.aiAlertTriage',
+    sortOrder: 415,
+  },
+
+  // ─── AI Case Copilot ───
+  {
+    key: Permission.AI_CASE_COPILOT,
+    module: 'aiCaseCopilot',
+    labelKey: 'roleSettings.permissions.aiCaseCopilot',
+    sortOrder: 416,
+  },
+
+  // ─── AI Detection Copilot ───
+  {
+    key: Permission.AI_DETECTION_COPILOT,
+    module: 'aiDetectionCopilot',
+    labelKey: 'roleSettings.permissions.aiDetectionCopilot',
+    sortOrder: 417,
+  },
+
+  // ─── AI SOAR Copilot ───
+  {
+    key: Permission.AI_SOAR_COPILOT,
+    module: 'aiSoarCopilot',
+    labelKey: 'roleSettings.permissions.aiSoarCopilot',
+    sortOrder: 418,
+  },
+
   // ─── Correlation ───
   {
     key: Permission.CORRELATION_VIEW,

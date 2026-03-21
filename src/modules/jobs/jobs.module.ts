@@ -7,6 +7,7 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
 import { CorrelationModule } from '../correlation/correlation.module'
 import { DetectionRulesModule } from '../detection-rules/detection-rules.module'
+import { EntitiesModule } from '../entities/entities.module'
 import { HuntsModule } from '../hunts/hunts.module'
 import { NormalizationModule } from '../normalization/normalization.module'
 import { ReportsModule } from '../reports/reports.module'
@@ -33,6 +34,7 @@ import { JobService } from './jobs.service'
     ConnectorsModule,
     CorrelationModule,
     DetectionRulesModule,
+    EntitiesModule,
     forwardRef(() => HuntsModule),
     NormalizationModule,
     ReportsModule,

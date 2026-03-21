@@ -5718,6 +5718,960 @@ async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise
   return cycleIds
 }
 
+/* ─── Entity Seeding ─────────────────────────────────────────────── */
+
+const ENTITY_IPS = [
+  // Private / internal
+  '10.0.0.1',
+  '10.0.0.5',
+  '10.0.0.12',
+  '10.0.0.50',
+  '10.0.0.100',
+  '10.0.1.1',
+  '10.0.1.25',
+  '10.0.2.10',
+  '10.0.2.50',
+  '10.0.3.1',
+  '192.168.1.1',
+  '192.168.1.10',
+  '192.168.1.50',
+  '192.168.1.100',
+  '192.168.1.200',
+  '192.168.10.1',
+  '192.168.10.5',
+  '192.168.10.20',
+  '192.168.10.100',
+  '192.168.10.254',
+  // Public / suspicious / malicious
+  '185.220.101.34',
+  '185.220.101.45',
+  '185.143.223.12',
+  '185.56.80.65',
+  '185.100.87.202',
+  '45.33.32.156',
+  '45.55.12.99',
+  '45.77.65.211',
+  '45.154.255.147',
+  '45.129.56.200',
+  '91.215.85.17',
+  '91.234.99.38',
+  '103.224.182.244',
+  '104.248.50.87',
+  '141.98.11.96',
+  '198.51.100.1',
+  '203.0.113.50',
+  '172.217.14.206',
+  '8.8.8.8',
+  '1.1.1.1',
+]
+
+const ENTITY_DOMAINS = [
+  'login.suspicious-site.com',
+  'cdn.malware-host.net',
+  'api.legit-service.com',
+  'update.fake-microsoft.com',
+  'dl.trojan-payload.xyz',
+  'c2.darknet-ops.io',
+  'mail.phishing-central.org',
+  'auth.credential-harvest.com',
+  'dns.exfil-tunnel.net',
+  'proxy.anonymizer-hub.ru',
+  'static.cdn-assets.com',
+  'api.internal-tools.local',
+  'monitor.grafana-prod.local',
+  'vault.secrets-mgr.local',
+  'git.devops-internal.local',
+  'siem.wazuh-cluster.local',
+  'ldap.corp-directory.local',
+  'ntp.time-sync.local',
+  'backup.storage-node.local',
+  'log.elk-cluster.local',
+]
+
+const ENTITY_HOSTNAMES = [
+  'fin-web-01',
+  'fin-web-02',
+  'dc-prod-01',
+  'dc-prod-02',
+  'mail-gw-01',
+  'mail-gw-02',
+  'dev-laptop-34',
+  'dev-laptop-12',
+  'hr-desktop-05',
+  'exec-laptop-01',
+  'db-master-01',
+  'db-replica-01',
+  'app-server-01',
+  'app-server-02',
+  'proxy-lb-01',
+  'vpn-gw-01',
+  'wazuh-manager',
+  'elk-node-01',
+  'backup-srv-01',
+  'jump-box-01',
+]
+
+const ENTITY_USERS = [
+  'admin',
+  'root',
+  'j.smith',
+  's.johnson',
+  'a.williams',
+  'm.brown',
+  'r.davis',
+  'k.wilson',
+  'svc-backup',
+  'svc-monitor',
+  'svc-deploy',
+  'compromised-user',
+  'temp-contractor',
+  'd.martinez',
+  'l.anderson',
+  'p.thomas',
+  'c.jackson',
+  'n.white',
+  'b.harris',
+  'f.clark',
+]
+
+const ENTITY_EMAILS = [
+  'phishing@evil-sender.com',
+  'ciso@company.com',
+  'admin@internal.local',
+  'helpdesk@support.company.com',
+  'noreply@auth-alert.com',
+  'hr@company.com',
+  'it-security@company.com',
+  'soc-alerts@company.com',
+  'ceo@company.com',
+  'finance@company.com',
+  'legal@company.com',
+  'spam@bulk-mailer.net',
+  'invoice@fake-vendor.com',
+  'password-reset@phishing-kit.xyz',
+  'recruiter@legit-jobs.com',
+]
+
+const ENTITY_HASHES = [
+  'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
+  'deadbeefcafebabe0123456789abcdef0123456789abcdef0123456789abcdef',
+  'b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c',
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+  '7d793037a0760186574b0282f2f435e7c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
+  'ff9900aabb11cc22dd33ee44ff5566778899aabb00cc11dd22ee33ff44556677',
+  '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+  'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899',
+  'cafed00dcafed00dcafed00dcafed00dcafed00dcafed00dcafed00dcafed00d',
+  '0011223344556677889900aabbccddeeff0011223344556677889900aabbccdd',
+  'face0ff1ce0badbeef1234abcd5678ef9012345678abcdef0123456789abcdef',
+  '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+  'c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00',
+  'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+]
+
+const ENTITY_URLS = [
+  'https://evil.com/payload.exe',
+  'https://malware-host.net/dropper.js',
+  'http://phishing-central.org/login.html',
+  'https://c2.darknet-ops.io/beacon',
+  'https://fake-microsoft.com/update.msi',
+  'http://exfil-tunnel.net/upload',
+  'https://credential-harvest.com/form',
+  'https://trojan-payload.xyz/stage2.bin',
+  'http://anonymizer-hub.ru/proxy.pac',
+  'https://bulk-mailer.net/track/open.gif',
+]
+
+const ENTITY_PROCESSES = [
+  'powershell.exe',
+  'cmd.exe',
+  'svchost.exe',
+  'mimikatz.exe',
+  'psexec.exe',
+  'rundll32.exe',
+  'wmic.exe',
+  'certutil.exe',
+  'mshta.exe',
+  'regsvr32.exe',
+]
+
+interface SeedEntity {
+  type: string
+  value: string
+  displayName: string | null
+  riskScore: number
+}
+
+function buildSeedEntityRiskScore(type: string, value: string): number {
+  // Known malicious
+  const maliciousPatterns = [
+    'mimikatz',
+    'psexec',
+    'evil',
+    'malware',
+    'phishing',
+    'trojan',
+    'c2.',
+    'darknet',
+    'credential-harvest',
+    'exfil',
+    'fake-',
+    'compromised',
+    'payload',
+    'dropper',
+    'beacon',
+  ]
+  const valueLower = value.toLowerCase()
+  if (maliciousPatterns.some(p => valueLower.includes(p))) {
+    return 70 + Math.floor(Math.random() * 26) // 70-95
+  }
+
+  // Suspicious
+  const suspiciousPatterns = [
+    '185.',
+    '91.',
+    '45.154',
+    '45.129',
+    '141.98',
+    'admin',
+    'root',
+    'temp-contractor',
+    'anonymizer',
+    'bulk-mailer',
+    'certutil',
+    'mshta',
+    'regsvr32',
+    'wmic',
+    'rundll32',
+  ]
+  if (suspiciousPatterns.some(p => valueLower.includes(p))) {
+    return 30 + Math.floor(Math.random() * 31) // 30-60
+  }
+
+  // Internal / normal
+  if (type === 'ip' && (valueLower.startsWith('10.') || valueLower.startsWith('192.168.'))) {
+    return Math.floor(Math.random() * 21) // 0-20
+  }
+  if (
+    type === 'hostname' &&
+    (valueLower.includes('-prod-') ||
+      valueLower.includes('-srv-') ||
+      valueLower.includes('wazuh') ||
+      valueLower.includes('elk'))
+  ) {
+    return Math.floor(Math.random() * 16) // 0-15
+  }
+
+  // Default low-medium
+  return Math.floor(Math.random() * 31) // 0-30
+}
+
+function buildSeedEntities(): SeedEntity[] {
+  const entities: SeedEntity[] = []
+
+  for (const ip of ENTITY_IPS) {
+    entities.push({
+      type: 'ip',
+      value: ip,
+      displayName: null,
+      riskScore: buildSeedEntityRiskScore('ip', ip),
+    })
+  }
+  for (const domain of ENTITY_DOMAINS) {
+    entities.push({
+      type: 'domain',
+      value: domain,
+      displayName: null,
+      riskScore: buildSeedEntityRiskScore('domain', domain),
+    })
+  }
+  for (const hostname of ENTITY_HOSTNAMES) {
+    entities.push({
+      type: 'hostname',
+      value: hostname,
+      displayName: hostname,
+      riskScore: buildSeedEntityRiskScore('hostname', hostname),
+    })
+  }
+  for (const user of ENTITY_USERS) {
+    entities.push({
+      type: 'user',
+      value: user,
+      displayName: user,
+      riskScore: buildSeedEntityRiskScore('user', user),
+    })
+  }
+  for (const email of ENTITY_EMAILS) {
+    entities.push({
+      type: 'email',
+      value: email,
+      displayName: null,
+      riskScore: buildSeedEntityRiskScore('email', email),
+    })
+  }
+  for (const hash of ENTITY_HASHES) {
+    entities.push({
+      type: 'hash',
+      value: hash,
+      displayName: null,
+      riskScore: buildSeedEntityRiskScore('hash', hash),
+    })
+  }
+  for (const url of ENTITY_URLS) {
+    entities.push({
+      type: 'url',
+      value: url,
+      displayName: null,
+      riskScore: buildSeedEntityRiskScore('url', url),
+    })
+  }
+  for (const proc of ENTITY_PROCESSES) {
+    entities.push({
+      type: 'process',
+      value: proc,
+      displayName: proc,
+      riskScore: buildSeedEntityRiskScore('process', proc),
+    })
+  }
+
+  return entities
+}
+
+interface SeedRelationSpec {
+  fromType: string
+  fromValue: string
+  toType: string
+  toValue: string
+  relationType: string
+}
+
+const ENTITY_RELATION_SPECS: SeedRelationSpec[] = [
+  // IP → IP (communicates_with)
+  {
+    fromType: 'ip',
+    fromValue: '10.0.0.1',
+    toType: 'ip',
+    toValue: '185.220.101.34',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.0.5',
+    toType: 'ip',
+    toValue: '185.220.101.45',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '192.168.1.10',
+    toType: 'ip',
+    toValue: '45.33.32.156',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '192.168.1.50',
+    toType: 'ip',
+    toValue: '91.215.85.17',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.1.1',
+    toType: 'ip',
+    toValue: '45.154.255.147',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '192.168.10.1',
+    toType: 'ip',
+    toValue: '185.143.223.12',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.2.10',
+    toType: 'ip',
+    toValue: '103.224.182.244',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.0.50',
+    toType: 'ip',
+    toValue: '141.98.11.96',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '192.168.1.100',
+    toType: 'ip',
+    toValue: '45.129.56.200',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.3.1',
+    toType: 'ip',
+    toValue: '91.234.99.38',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '10.0.0.12',
+    toType: 'ip',
+    toValue: '8.8.8.8',
+    relationType: 'communicates_with',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '192.168.10.5',
+    toType: 'ip',
+    toValue: '1.1.1.1',
+    relationType: 'communicates_with',
+  },
+
+  // IP → Domain (resolves_to)
+  {
+    fromType: 'ip',
+    fromValue: '185.220.101.34',
+    toType: 'domain',
+    toValue: 'login.suspicious-site.com',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '185.143.223.12',
+    toType: 'domain',
+    toValue: 'cdn.malware-host.net',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.33.32.156',
+    toType: 'domain',
+    toValue: 'c2.darknet-ops.io',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '91.215.85.17',
+    toType: 'domain',
+    toValue: 'auth.credential-harvest.com',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.154.255.147',
+    toType: 'domain',
+    toValue: 'dl.trojan-payload.xyz',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '185.56.80.65',
+    toType: 'domain',
+    toValue: 'update.fake-microsoft.com',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.129.56.200',
+    toType: 'domain',
+    toValue: 'dns.exfil-tunnel.net',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '91.234.99.38',
+    toType: 'domain',
+    toValue: 'proxy.anonymizer-hub.ru',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '172.217.14.206',
+    toType: 'domain',
+    toValue: 'api.legit-service.com',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '104.248.50.87',
+    toType: 'domain',
+    toValue: 'mail.phishing-central.org',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '185.100.87.202',
+    toType: 'domain',
+    toValue: 'static.cdn-assets.com',
+    relationType: 'resolves_to',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '198.51.100.1',
+    toType: 'domain',
+    toValue: 'api.internal-tools.local',
+    relationType: 'resolves_to',
+  },
+
+  // Hostname → IP (hosts)
+  {
+    fromType: 'hostname',
+    fromValue: 'fin-web-01',
+    toType: 'ip',
+    toValue: '10.0.0.1',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'fin-web-02',
+    toType: 'ip',
+    toValue: '10.0.0.5',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'dc-prod-01',
+    toType: 'ip',
+    toValue: '10.0.0.12',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'dc-prod-02',
+    toType: 'ip',
+    toValue: '10.0.0.50',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'mail-gw-01',
+    toType: 'ip',
+    toValue: '10.0.1.1',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'mail-gw-02',
+    toType: 'ip',
+    toValue: '10.0.1.25',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'dev-laptop-34',
+    toType: 'ip',
+    toValue: '192.168.1.10',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'dev-laptop-12',
+    toType: 'ip',
+    toValue: '192.168.1.50',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'hr-desktop-05',
+    toType: 'ip',
+    toValue: '192.168.1.100',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'exec-laptop-01',
+    toType: 'ip',
+    toValue: '192.168.1.200',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'db-master-01',
+    toType: 'ip',
+    toValue: '10.0.2.10',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'db-replica-01',
+    toType: 'ip',
+    toValue: '10.0.2.50',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'app-server-01',
+    toType: 'ip',
+    toValue: '10.0.0.100',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'app-server-02',
+    toType: 'ip',
+    toValue: '10.0.3.1',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'proxy-lb-01',
+    toType: 'ip',
+    toValue: '192.168.10.1',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'vpn-gw-01',
+    toType: 'ip',
+    toValue: '192.168.10.5',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'wazuh-manager',
+    toType: 'ip',
+    toValue: '192.168.10.20',
+    relationType: 'hosts',
+  },
+  {
+    fromType: 'hostname',
+    fromValue: 'elk-node-01',
+    toType: 'ip',
+    toValue: '192.168.10.100',
+    relationType: 'hosts',
+  },
+
+  // User → Hostname (belongs_to)
+  {
+    fromType: 'user',
+    fromValue: 'j.smith',
+    toType: 'hostname',
+    toValue: 'dev-laptop-34',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 's.johnson',
+    toType: 'hostname',
+    toValue: 'dev-laptop-12',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'a.williams',
+    toType: 'hostname',
+    toValue: 'hr-desktop-05',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'admin',
+    toType: 'hostname',
+    toValue: 'dc-prod-01',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'root',
+    toType: 'hostname',
+    toValue: 'dc-prod-02',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'm.brown',
+    toType: 'hostname',
+    toValue: 'exec-laptop-01',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'svc-backup',
+    toType: 'hostname',
+    toValue: 'backup-srv-01',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'svc-monitor',
+    toType: 'hostname',
+    toValue: 'wazuh-manager',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'svc-deploy',
+    toType: 'hostname',
+    toValue: 'app-server-01',
+    relationType: 'belongs_to',
+  },
+  {
+    fromType: 'user',
+    fromValue: 'compromised-user',
+    toType: 'hostname',
+    toValue: 'fin-web-01',
+    relationType: 'belongs_to',
+  },
+
+  // Email → User (associated_with)
+  {
+    fromType: 'email',
+    fromValue: 'ciso@company.com',
+    toType: 'user',
+    toValue: 'm.brown',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'admin@internal.local',
+    toType: 'user',
+    toValue: 'admin',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'helpdesk@support.company.com',
+    toType: 'user',
+    toValue: 'a.williams',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'it-security@company.com',
+    toType: 'user',
+    toValue: 'r.davis',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'soc-alerts@company.com',
+    toType: 'user',
+    toValue: 'k.wilson',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'hr@company.com',
+    toType: 'user',
+    toValue: 'a.williams',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'finance@company.com',
+    toType: 'user',
+    toValue: 'd.martinez',
+    relationType: 'associated_with',
+  },
+  {
+    fromType: 'email',
+    fromValue: 'ceo@company.com',
+    toType: 'user',
+    toValue: 'l.anderson',
+    relationType: 'associated_with',
+  },
+
+  // Process → Hostname (executed_by)
+  {
+    fromType: 'process',
+    fromValue: 'mimikatz.exe',
+    toType: 'hostname',
+    toValue: 'fin-web-01',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'psexec.exe',
+    toType: 'hostname',
+    toValue: 'dc-prod-01',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'powershell.exe',
+    toType: 'hostname',
+    toValue: 'dev-laptop-34',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'cmd.exe',
+    toType: 'hostname',
+    toValue: 'app-server-01',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'svchost.exe',
+    toType: 'hostname',
+    toValue: 'dc-prod-02',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'rundll32.exe',
+    toType: 'hostname',
+    toValue: 'hr-desktop-05',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'wmic.exe',
+    toType: 'hostname',
+    toValue: 'exec-laptop-01',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'certutil.exe',
+    toType: 'hostname',
+    toValue: 'dev-laptop-12',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'mshta.exe',
+    toType: 'hostname',
+    toValue: 'fin-web-02',
+    relationType: 'executed_by',
+  },
+  {
+    fromType: 'process',
+    fromValue: 'regsvr32.exe',
+    toType: 'hostname',
+    toValue: 'mail-gw-01',
+    relationType: 'executed_by',
+  },
+
+  // IP → triggered_alert (generic)
+  {
+    fromType: 'ip',
+    fromValue: '185.220.101.34',
+    toType: 'hostname',
+    toValue: 'fin-web-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.33.32.156',
+    toType: 'hostname',
+    toValue: 'dc-prod-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '91.215.85.17',
+    toType: 'hostname',
+    toValue: 'dev-laptop-34',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.154.255.147',
+    toType: 'hostname',
+    toValue: 'mail-gw-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '185.143.223.12',
+    toType: 'hostname',
+    toValue: 'app-server-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '141.98.11.96',
+    toType: 'hostname',
+    toValue: 'db-master-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '45.129.56.200',
+    toType: 'hostname',
+    toValue: 'proxy-lb-01',
+    relationType: 'triggered_alert',
+  },
+  {
+    fromType: 'ip',
+    fromValue: '103.224.182.244',
+    toType: 'hostname',
+    toValue: 'vpn-gw-01',
+    relationType: 'triggered_alert',
+  },
+]
+
+async function seedEntities(tenantId: string, tenantSlug: string): Promise<void> {
+  const entities = buildSeedEntities()
+
+  // Upsert all entities (idempotent via unique constraint [tenantId, type, value])
+  const entityIdMap = new Map<string, string>()
+  for (const entity of entities) {
+    const mapKey = `${entity.type}:${entity.value}`
+    try {
+      const result = await prisma.entity.upsert({
+        where: { tenantId_type_value: { tenantId, type: entity.type, value: entity.value } },
+        create: {
+          tenantId,
+          type: entity.type,
+          value: entity.value,
+          displayName: entity.displayName,
+          riskScore: entity.riskScore,
+          lastSeen: new Date(),
+        },
+        update: {
+          riskScore: entity.riskScore,
+          lastSeen: new Date(),
+          ...(entity.displayName ? { displayName: entity.displayName } : {}),
+        },
+      })
+      entityIdMap.set(mapKey, result.id)
+    } catch (err) {
+      logger.warn({ tenant: tenantSlug, entity: mapKey, error: err }, 'Failed to upsert entity')
+    }
+  }
+
+  logger.info({ tenant: tenantSlug, count: entityIdMap.size }, 'Seeded entities')
+
+  // Create relationships
+  let relationsCreated = 0
+  for (const spec of ENTITY_RELATION_SPECS) {
+    const fromKey = `${spec.fromType}:${spec.fromValue}`
+    const toKey = `${spec.toType}:${spec.toValue}`
+    const fromId = entityIdMap.get(fromKey)
+    const toId = entityIdMap.get(toKey)
+
+    if (!fromId || !toId) {
+      continue
+    }
+
+    try {
+      await prisma.entityRelation.create({
+        data: {
+          tenantId,
+          fromEntityId: fromId,
+          toEntityId: toId,
+          relationType: spec.relationType,
+          source: 'seed',
+          confidence: 1.0,
+        },
+      })
+      relationsCreated++
+    } catch {
+      // Duplicate or constraint violation — skip silently (idempotent)
+    }
+  }
+
+  logger.info({ tenant: tenantSlug, count: relationsCreated }, 'Seeded entity relations')
+}
+
 async function seedRolePermissions(tenantId: string): Promise<void> {
   // Build the full set of default role-permission records
   const records: Prisma.RolePermissionCreateManyInput[] = []
@@ -6126,6 +7080,9 @@ async function main(): Promise<void> {
       await seedNormalization(tenantId, profile.slug)
       await seedDetectionRules(tenantId, profile.slug)
       await seedCloudSecurity(tenantId, profile.slug)
+
+      // ─── Entities ───
+      await seedEntities(tenantId, profile.slug)
 
       // ─── Role Permissions ───
       await seedRolePermissions(tenantId)

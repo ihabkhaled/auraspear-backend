@@ -33,11 +33,13 @@ import { CorrelationModule } from './modules/correlation/correlation.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DataExplorerModule } from './modules/data-explorer/data-explorer.module'
 import { DetectionRulesModule } from './modules/detection-rules/detection-rules.module'
+import { EntitiesModule } from './modules/entities/entities.module'
 import { HealthModule } from './modules/health/health.module'
 import { HuntsModule } from './modules/hunts/hunts.module'
 import { IncidentsModule } from './modules/incidents/incidents.module'
 import { IntelModule } from './modules/intel/intel.module'
 import { JobsModule } from './modules/jobs/jobs.module'
+import { KnowledgeModule } from './modules/knowledge/knowledge.module'
 import { NormalizationModule } from './modules/normalization/normalization.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { ReportsModule } from './modules/reports/reports.module'
@@ -102,6 +104,7 @@ import { PrismaModule } from './prisma/prisma.module'
     CasesModule,
     IncidentsModule,
     JobsModule,
+    KnowledgeModule,
     CorrelationModule,
     IntelModule,
     NotificationsModule,
@@ -119,6 +122,7 @@ import { PrismaModule } from './prisma/prisma.module'
     SystemHealthModule,
     NormalizationModule,
     DetectionRulesModule,
+    EntitiesModule,
     CloudSecurityModule,
     RoleSettingsModule,
   ],
