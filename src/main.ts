@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { INestApplication } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
 import cookieParser from 'cookie-parser'
@@ -7,9 +8,15 @@ import helmet from 'helmet'
 import { Logger } from 'nestjs-pino'
 import { AppModule } from './app.module'
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter'
-import type { Express } from 'express'
+import type { Express, Request, Response } from 'express'
 
-async function bootstrap(): Promise<void> {
+let cachedApp: INestApplication | null = null
+
+async function createApp(): Promise<INestApplication> {
+  if (cachedApp) {
+    return cachedApp
+  }
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true })
 
   // Structured logging
@@ -131,13 +138,27 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('api/docs', app, document)
   }
 
-  const port = process.env.PORT ?? 4000
-
-  // Request timeout (30 seconds)
-  const server = app.getHttpServer()
-  server.setTimeout(30_000)
-
-  await app.listen(port)
+  await app.init()
+  cachedApp = app
+  return app
 }
 
-void bootstrap()
+// Vercel serverless handler — export for Vercel to use
+export default async function handler(req: Request, res: Response): Promise<void> {
+  const app = await createApp()
+  const expressApp = app.getHttpAdapter().getInstance() as Express
+  expressApp(req, res)
+}
+
+// Local development — start the server with app.listen()
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  void (async () => {
+    const app = await createApp()
+    const port = process.env.PORT ?? 4000
+
+    const server = app.getHttpServer()
+    server.setTimeout(30_000)
+
+    await app.listen(port)
+  })()
+}

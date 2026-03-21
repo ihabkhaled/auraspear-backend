@@ -167,7 +167,7 @@ async function seedUserSession(
     update: {
       userId,
       tenantId,
-      status: UserSessionStatus.ACTIVE,
+      status: UserSessionStatus.active,
       osFamily,
       clientType,
       ipAddress,
@@ -184,7 +184,7 @@ async function seedUserSession(
       familyId,
       userId,
       tenantId,
-      status: UserSessionStatus.ACTIVE,
+      status: UserSessionStatus.active,
       osFamily,
       clientType,
       ipAddress,
@@ -5804,20 +5804,8 @@ async function main(): Promise<void> {
     },
   })
 
-  await seedUserSession(
-    platformAdmin.id,
-    TENANT_PROFILES[0]?.id ?? '00000000-0000-4000-a000-000000000001',
-    'platform-admin',
-    'desktop',
-    UserSessionOsFamily.MACOS,
-    UserSessionClientType.DESKTOP,
-    '10.99.0.10',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
-    new Date(Date.now() - 15 * 60 * 1000),
-    new Date(Date.now() - 2 * 60 * 1000)
-  )
-
   // Create GLOBAL_ADMIN membership for every tenant
+  let firstTenantId = ''
   for (const profile of TENANT_PROFILES) {
     const tenant = await prisma.tenant.upsert({
       where: { slug: profile.slug },
@@ -5829,6 +5817,10 @@ async function main(): Promise<void> {
       },
     })
 
+    if (!firstTenantId) {
+      firstTenantId = tenant.id
+    }
+
     await prisma.tenantMembership.upsert({
       where: { userId_tenantId: { userId: platformAdmin.id, tenantId: tenant.id } },
       update: { role: UserRole.GLOBAL_ADMIN, status: 'active' },
@@ -5839,6 +5831,20 @@ async function main(): Promise<void> {
       },
     })
   }
+
+  await seedUserSession(
+    platformAdmin.id,
+    firstTenantId,
+    'platform-admin',
+    'desktop',
+    UserSessionOsFamily.macos,
+    UserSessionClientType.desktop,
+    '10.99.0.10',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
+    new Date(Date.now() - 15 * 60 * 1000),
+    new Date(Date.now() - 2 * 60 * 1000)
+  )
+
   logger.info(
     { email: 'platform-admin@auraspear.io' },
     'Seeded platform admin with GLOBAL_ADMIN on all tenants'
@@ -6002,8 +6008,8 @@ async function main(): Promise<void> {
           tenantId,
           userDef.oidcSub,
           'desktop',
-          UserSessionOsFamily.WINDOWS,
-          UserSessionClientType.DESKTOP,
+          UserSessionOsFamily.windows,
+          UserSessionClientType.desktop,
           `10.10.${userIndex + 10}.15`,
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36',
           seededLastLoginAt,
@@ -6016,8 +6022,8 @@ async function main(): Promise<void> {
             tenantId,
             userDef.oidcSub,
             'mobile',
-            UserSessionOsFamily.ANDROID,
-            UserSessionClientType.MOBILE,
+            UserSessionOsFamily.android,
+            UserSessionClientType.mobile,
             `10.20.${userIndex + 20}.25`,
             'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36',
             new Date(seededLastLoginAt.getTime() - 2 * 60 * 60 * 1000),
