@@ -259,6 +259,17 @@ export class AiAgentsRepository {
     })
   }
 
+  async updateSessionProviderInfo(
+    sessionId: string,
+    provider: string,
+    model: string
+  ): Promise<void> {
+    await this.prisma.aiAgentSession.update({
+      where: { id: sessionId },
+      data: { provider, model },
+    })
+  }
+
   async markSessionFailed(params: {
     sessionId: string
     errorMessage: string

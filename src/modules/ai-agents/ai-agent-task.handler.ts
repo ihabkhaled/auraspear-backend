@@ -36,6 +36,16 @@ export class AiAgentTaskHandler {
       throw new Error(`AI Agent session ${sessionId} not found`)
     }
 
+    // Resolve the connector label before execution so it's available for all session states
+    const { providerLabel, modelLabel } = await this.aiService.resolveConnectorLabel(
+      job.tenantId,
+      connector
+    )
+    const resolvedModel = modelLabel || agent.model
+
+    // Update session with resolved connector info immediately
+    await this.repository.updateSessionProviderInfo(sessionId, providerLabel, resolvedModel)
+
     try {
       this.logger.log(`Executing AI agent "${agent.name}" for tenant ${job.tenantId}`)
 
@@ -89,7 +99,8 @@ export class AiAgentTaskHandler {
         sessionId,
         errorMessage: message,
         durationMs,
-        provider: connector ?? undefined,
+        provider: providerLabel,
+        model: resolvedModel,
       })
 
       throw error

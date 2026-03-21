@@ -42,6 +42,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
+import { FIXED_AI_CONNECTORS } from '../connectors/llm-connectors/llm-connectors.constants'
 import { LlmConnectorsService } from '../connectors/llm-connectors/llm-connectors.service'
 import { BedrockService } from '../connectors/services/bedrock.service'
 import { LlmApisService } from '../connectors/services/llm-apis.service'
@@ -68,6 +69,44 @@ export class AiService {
     private readonly llmApisService: LlmApisService,
     private readonly openClawGatewayService: OpenClawGatewayService
   ) {}
+
+  /* ---------------------------------------------------------------- */
+  /* Connector Label Resolution                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Resolves a connector key (UUID or fixed keyword) to a human-readable label.
+   * Used to populate session provider/model fields in all states.
+   */
+  async resolveConnectorLabel(
+    tenantId: string,
+    connectorKey: string | undefined
+  ): Promise<{ providerLabel: string; modelLabel: string }> {
+    if (!connectorKey || connectorKey === 'default') {
+      return { providerLabel: 'default', modelLabel: '' }
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      connectorKey
+    )
+    if (isUuid) {
+      try {
+        const config = await this.llmConnectorsService.getById(connectorKey, tenantId)
+        return {
+          providerLabel: config.name,
+          modelLabel: config.defaultModel ?? '',
+        }
+      } catch {
+        return { providerLabel: connectorKey, modelLabel: '' }
+      }
+    }
+
+    const match = FIXED_AI_CONNECTORS.find(c => c.type === connectorKey)
+    return {
+      providerLabel: match?.label ?? connectorKey,
+      modelLabel: '',
+    }
+  }
 
   /* ---------------------------------------------------------------- */
   /* AI-Assisted Threat Hunting                                        */

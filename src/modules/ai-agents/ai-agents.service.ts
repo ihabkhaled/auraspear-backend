@@ -396,8 +396,6 @@ export class AiAgentsService {
       agentId: id,
       input: dto.prompt,
       status: AiAgentSessionStatus.RUNNING,
-      provider: dto.connector ?? 'default',
-      model: agent.model,
     })
 
     const job = await this.jobService.enqueue({
