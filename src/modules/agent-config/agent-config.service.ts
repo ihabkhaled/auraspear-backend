@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { AI_DEFAULT_PROVIDER_KEY } from './agent-config.constants'
 import { AgentConfigRepository } from './agent-config.repository'
@@ -8,6 +8,7 @@ import {
   isValidAgentId,
   redactOsintSource,
 } from './agent-config.utilities'
+import { BUILTIN_OSINT_SOURCES } from './constants/osint-sources.constants'
 import {
   AiAgentId,
   ApprovalStatus,
@@ -20,6 +21,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { encrypt } from '../../common/utils/encryption.utility'
 import { validateUrl } from '../../common/utils/ssrf.utility'
+import { OsintExecutorService } from '../osint-executor/osint-executor.service'
 import type {
   AgentConfigWithDefaults,
   OsintSourceRedacted,
@@ -40,7 +42,9 @@ export class AgentConfigService {
   constructor(
     private readonly repository: AgentConfigRepository,
     private readonly appLogger: AppLoggerService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    @Inject(forwardRef(() => OsintExecutorService))
+    private readonly osintExecutorService: OsintExecutorService
   ) {}
 
   // ─── Agent Configs ──────────────────────────────────────────
@@ -147,9 +151,49 @@ export class AgentConfigService {
   // ─── OSINT Sources ─────────────────────────────────────────
 
   async listOsintSources(tenantId: string): Promise<OsintSourceRedacted[]> {
-    const sources = await this.repository.findAllOsintSources(tenantId)
+    let sources = await this.repository.findAllOsintSources(tenantId)
+
+    // Lazy seed: if no sources exist for this tenant, seed builtins
+    if (sources.length === 0) {
+      await this.seedBuiltinSources(tenantId)
+      sources = await this.repository.findAllOsintSources(tenantId)
+    }
 
     return sources.map(redactOsintSource)
+  }
+
+  async seedBuiltinSources(tenantId: string): Promise<void> {
+    const existingChecks = await Promise.all(
+      BUILTIN_OSINT_SOURCES.map(builtin =>
+        this.repository
+          .findOsintSourceByTypeAndName(tenantId, builtin.sourceType, builtin.name)
+          .then(existing => ({ builtin, existing }))
+      )
+    )
+
+    const missingSources = existingChecks
+      .filter(entry => !entry.existing)
+      .map(entry => entry.builtin)
+
+    await Promise.all(
+      missingSources.map(builtin =>
+        this.repository.createOsintSource({
+          tenant: { connect: { id: tenantId } },
+          sourceType: builtin.sourceType,
+          name: builtin.name,
+          isEnabled: false,
+          baseUrl: builtin.baseUrl,
+          authType: builtin.authType,
+          headerName: builtin.headerName ?? null,
+          queryParamName: builtin.queryParamName ?? null,
+          responsePath: builtin.responsePath ?? null,
+          requestMethod: builtin.requestMethod ?? 'GET',
+          timeout: 30_000,
+        })
+      )
+    )
+
+    this.logSuccess('seedBuiltinSources', tenantId)
   }
 
   async createOsintSource(
@@ -255,55 +299,7 @@ export class AgentConfigService {
   }
 
   async testOsintSource(id: string, tenantId: string, actor: string): Promise<OsintTestResult> {
-    const source = await this.repository.findOsintSource(id, tenantId)
-    if (!source) {
-      throw new BusinessException(
-        404,
-        'OSINT source not found',
-        'errors.agentConfig.osintSourceNotFound'
-      )
-    }
-
-    const startTime = Date.now()
-    let testSuccess = false
-    let testStatusCode: number | null = null
-    let testError: string | null = null
-
-    try {
-      // Simple connectivity test - just check the base URL responds
-      if (source.baseUrl) {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), source.timeout)
-
-        const response = await fetch(source.baseUrl, {
-          method: 'HEAD',
-          signal: controller.signal,
-        })
-
-        clearTimeout(timeoutId)
-        testStatusCode = response.status
-        testSuccess = response.status < 500
-      }
-    } catch (fetchError: unknown) {
-      testError = fetchError instanceof Error ? fetchError.message : 'Connection failed'
-    }
-
-    const responseTime = Date.now() - startTime
-
-    await this.repository.updateOsintSource(id, tenantId, {
-      lastTestAt: new Date(),
-      lastTestOk: testSuccess,
-      lastError: testError,
-    })
-
-    this.logSuccess('testOsintSource', tenantId, { sourceId: id, success: testSuccess, actor })
-
-    return {
-      success: testSuccess,
-      statusCode: testStatusCode,
-      responseTime,
-      error: testError,
-    }
+    return this.osintExecutorService.testSource(id, tenantId, actor)
   }
 
   // ─── Approvals ─────────────────────────────────────────────

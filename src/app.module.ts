@@ -43,6 +43,7 @@ import { JobsModule } from './modules/jobs/jobs.module'
 import { KnowledgeModule } from './modules/knowledge/knowledge.module'
 import { NormalizationModule } from './modules/normalization/normalization.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
+import { OsintExecutorModule } from './modules/osint-executor/osint-executor.module'
 import { ReportsModule } from './modules/reports/reports.module'
 import { RoleSettingsModule } from './modules/role-settings/role-settings.module'
 import { SoarModule } from './modules/soar/soar.module'
@@ -123,6 +124,7 @@ import { PrismaModule } from './prisma/prisma.module'
     ReportsModule,
     SystemHealthModule,
     NormalizationModule,
+    OsintExecutorModule,
     DetectionRulesModule,
     EntitiesModule,
     CloudSecurityModule,

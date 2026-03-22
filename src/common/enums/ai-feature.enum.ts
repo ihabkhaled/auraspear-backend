@@ -23,6 +23,7 @@ export enum AiFeatureKey {
   KNOWLEDGE_GENERATE_RUNBOOK = 'knowledge.generate_runbook',
   KNOWLEDGE_SUMMARIZE_INCIDENT = 'knowledge.summarize_incident',
   ENTITY_RISK_EXPLAIN = 'entity.risk_explain',
+  NORMALIZATION_VERIFY = 'normalization.verify',
 }
 
 export enum AiApprovalLevel {

@@ -69,8 +69,14 @@ export class WazuhService {
       }
 
       const info = infoResponse.data as Record<string, unknown>
-      const data = (info.data as Record<string, unknown>) ?? info
-      const version = (data.api_version ?? data.version ?? 'unknown') as string
+      const dataWrapper = (info.data as Record<string, unknown>) ?? info
+      const affectedItems = (dataWrapper.affected_items as Record<string, unknown>[]) ?? []
+      const firstItem = affectedItems[0] ?? dataWrapper
+      const version = ((firstItem as Record<string, unknown>).api_version ??
+        (firstItem as Record<string, unknown>).version ??
+        dataWrapper.api_version ??
+        dataWrapper.version ??
+        'unknown') as string
 
       this.appLogger.info('Wazuh connection test succeeded', {
         feature: AppLogFeature.CONNECTORS,

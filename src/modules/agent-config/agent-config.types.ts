@@ -85,6 +85,7 @@ export interface BuiltinOsintSource {
   queryParamName?: string
   responsePath: string
   requestMethod: string
+  supportedIocTypes?: string[]
 }
 
 export interface ResolvedProvider {
@@ -98,6 +99,7 @@ export interface OsintTestResult {
   statusCode: number | null
   responseTime: number | null
   error: string | null
+  messageKey: string | null
 }
 
 export interface ApprovalResolveInput {

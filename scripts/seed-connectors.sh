@@ -26,53 +26,10 @@ header()  { echo -e "\n${CYAN}━━━ $1 ━━━${NC}"; }
 ERRORS=0
 
 # =============================================================================
-# 1. WAZUH INDEXER (OpenSearch) — 200 Security Alerts
+# 1. WAZUH — Skipped (use scripts/seed-wazuh.sh for 10K Wazuh alerts)
 # =============================================================================
-header "1/8 — Wazuh Indexer: Seeding 200 alerts"
-
-WAZUH_URL="https://localhost:9200"
-WAZUH_AUTH="admin:admin"
-
-for attempt in $(seq 1 10); do
-  if curl -sk -u "$WAZUH_AUTH" "$WAZUH_URL/_cluster/health" >/dev/null 2>&1; then break; fi
-  echo "  Waiting for Wazuh Indexer... ($attempt/10)"
-  sleep 5
-done
-
-WAZUH_TOTAL=0
-TMPFILE=$(mktemp)
-
-DESCS=("SSH brute force attack" "SQL injection attempt" "Rootkit detected" "Auth failure" "Malware detected" "XSS attack" "Privilege escalation" "Port scan" "Ransomware behavior" "C2 communication" "Lateral movement" "Credential dumping" "Web shell detected" "DLL sideloading" "DNS tunneling")
-LEVELS=(12 14 15 10 13 14 12 10 15 10 12 15 14 12 11)
-IDS=("5763" "31103" "510" "5720" "52502" "31104" "5401" "4002" "87103" "87401" "92601" "92701" "31170" "93001" "87501")
-AGENTS=("web-server-01" "db-server-01" "app-server-01" "file-server-01" "dc-server-01" "mail-server-01" "vpn-gateway" "k8s-node-01" "k8s-node-02" "proxy-01")
-AGENT_IPS=("10.0.1.10" "10.0.2.20" "10.0.1.30" "10.0.3.40" "10.0.0.5" "10.0.4.10" "10.0.0.1" "10.0.5.10" "10.0.5.11" "10.0.0.50")
-SRC_IPS=("192.168.1.105" "203.0.113.42" "45.33.32.156" "185.220.101.1" "77.247.181.163" "91.189.92.11" "198.51.100.77" "172.16.0.88")
-
-for DAY in 12 13 14; do
-  INDEX="wazuh-alerts-4.x-2026.03.$DAY"
-  > "$TMPFILE"
-
-  for i in $(seq 0 66); do
-    DI=$((i % 15)); AI=$((i % 10)); SI=$((i % 8))
-    H=$(( (i * 21 + DAY) % 24 )); M=$(( (i * 7) % 60 )); S=$(( (i * 11) % 60 ))
-    echo "{\"index\":{\"_index\":\"$INDEX\"}}" >> "$TMPFILE"
-    echo "{\"timestamp\":\"2026-03-${DAY}T$(printf '%02d' $H):$(printf '%02d' $M):$(printf '%02d' $S).000+0000\",\"rule\":{\"level\":${LEVELS[$DI]},\"description\":\"${DESCS[$DI]}\",\"id\":\"${IDS[$DI]}\",\"groups\":[\"security\"]},\"agent\":{\"id\":\"$(printf '%03d' $((AI+1)))\",\"name\":\"${AGENTS[$AI]}\",\"ip\":\"${AGENT_IPS[$AI]}\"},\"data\":{\"srcip\":\"${SRC_IPS[$SI]}\",\"dstip\":\"${AGENT_IPS[$AI]}\",\"srcport\":$((1024 + RANDOM % 64000)),\"dstport\":$((22 + i * 100 % 9000))},\"manager\":{\"name\":\"wazuh-manager\"},\"id\":\"$(printf '%020d' $((1710000000 + DAY * 1000 + i)))\"}" >> "$TMPFILE"
-  done
-
-  RESULT=$(curl -sk -u "$WAZUH_AUTH" -X POST "$WAZUH_URL/_bulk" \
-    -H "Content-Type: application/x-ndjson" \
-    --data-binary "@$TMPFILE" 2>/dev/null)
-
-  if echo "$RESULT" | grep -q '"errors":false'; then
-    WAZUH_TOTAL=$((WAZUH_TOTAL + 67))
-  else
-    warn "Partial errors on index $INDEX"
-    ERRORS=$((ERRORS + 1))
-  fi
-done
-rm -f "$TMPFILE"
-success "Seeded $WAZUH_TOTAL Wazuh alerts across 3 days"
+header "1/8 — Wazuh Indexer: SKIPPED (run seed-wazuh.sh separately)"
+success "Use: bash scripts/seed-wazuh.sh"
 
 # =============================================================================
 # 2. GRAYLOG — 150 Log Events via API

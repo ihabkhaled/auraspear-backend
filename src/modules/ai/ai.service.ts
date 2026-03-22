@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import {
+  agentDisabledKey,
+  agentDisplayName,
+  agentQuotaExceededKey,
+  agentUnreachableKey,
+} from './ai-error.utilities'
+import {
   AI_BEDROCK_MAX_TOKENS,
   AI_CONNECTOR_PRIORITY,
   AI_DEFAULT_MODEL,
@@ -30,16 +36,6 @@ import {
   generateExplainResponse,
 } from './ai.utilities'
 import {
-  AI_DEFAULT_PROVIDER_KEY,
-  FEATURE_TO_AGENT_MAP,
-} from '../agent-config/agent-config.constants'
-import { AgentConfigService } from '../agent-config/agent-config.service'
-import { AiHuntDto } from './dto/ai-hunt.dto'
-import { AiInvestigateDto } from './dto/ai-investigate.dto'
-import { FeatureCatalogService } from './feature-catalog/feature-catalog.service'
-import { PromptRegistryService } from './prompt-registry/prompt-registry.service'
-import { UsageBudgetService } from './usage-budget/usage-budget.service'
-import {
   AiAgentId,
   AiAuditAction,
   AiAuditStatus,
@@ -49,6 +45,17 @@ import {
   AppLogSourceType,
   ConnectorType,
 } from '../../common/enums'
+import {
+  AI_DEFAULT_PROVIDER_KEY,
+  FEATURE_TO_AGENT_MAP,
+} from '../agent-config/agent-config.constants'
+import { AgentConfigService } from '../agent-config/agent-config.service'
+import { OsintExecutorService } from '../osint-executor/osint-executor.service'
+import { AiHuntDto } from './dto/ai-hunt.dto'
+import { AiInvestigateDto } from './dto/ai-investigate.dto'
+import { FeatureCatalogService } from './feature-catalog/feature-catalog.service'
+import { PromptRegistryService } from './prompt-registry/prompt-registry.service'
+import { UsageBudgetService } from './usage-budget/usage-budget.service'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
@@ -83,7 +90,8 @@ export class AiService {
     private readonly promptRegistryService: PromptRegistryService,
     private readonly featureCatalogService: FeatureCatalogService,
     private readonly usageBudgetService: UsageBudgetService,
-    private readonly agentConfigService: AgentConfigService
+    private readonly agentConfigService: AgentConfigService,
+    private readonly osintExecutorService: OsintExecutorService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -228,7 +236,7 @@ export class AiService {
         throw new BusinessException(
           400,
           `Requested AI connector "${input.connector}" is not configured or available`,
-          'errors.aiAgents.connectorNotAvailable'
+          'errors.ai.connectorNotAvailable'
         )
       }
     }
@@ -257,8 +265,8 @@ export class AiService {
     if (!aiResponse && input.connector && input.connector !== 'default') {
       throw new BusinessException(
         502,
-        `AI connector "${input.connector}" failed to process the request`,
-        'errors.aiAgents.connectorFailed'
+        `${agentDisplayName(input.agentId)} AI agent connector failed to process the request`,
+        agentUnreachableKey(input.agentId)
       )
     }
 
@@ -325,7 +333,11 @@ export class AiService {
       params.featureKey
     )
     if (!featureConfig.enabled) {
-      throw new BusinessException(403, 'AI feature is disabled', 'errors.ai.featureDisabled')
+      throw new BusinessException(
+        403,
+        `AI feature "${params.featureKey}" is disabled for this tenant. Enable it in AI Feature Catalog.`,
+        'errors.ai.featureDisabled'
+      )
     }
 
     // 2. Resolve which agent handles this feature and load its config
@@ -336,8 +348,8 @@ export class AiService {
     if (!agentConfig.isEnabled) {
       throw new BusinessException(
         403,
-        `AI agent ${agentConfig.displayName} is disabled`,
-        'errors.ai.agentDisabled'
+        `${agentDisplayName(agentId)} AI agent is disabled for feature "${params.featureKey}". Enable it in AI Configuration.`,
+        agentDisabledKey(agentId)
       )
     }
 
@@ -346,8 +358,8 @@ export class AiService {
     if (!quotaCheck.allowed) {
       throw new BusinessException(
         429,
-        `AI agent ${agentConfig.displayName} quota exceeded`,
-        'errors.ai.agentQuotaExceeded'
+        `${agentDisplayName(agentId)} AI agent token quota exceeded (${quotaCheck.period ?? 'unknown'}). Used: ${String(quotaCheck.used ?? 0)}/${String(quotaCheck.limit ?? 0)}`,
+        agentQuotaExceededKey(agentId)
       )
     }
 
@@ -357,7 +369,11 @@ export class AiService {
       params.featureKey
     )
     if (!budgetCheck.allowed) {
-      throw new BusinessException(429, 'AI usage budget exceeded', 'errors.ai.budgetExceeded')
+      throw new BusinessException(
+        429,
+        `Monthly AI usage budget exceeded for feature "${params.featureKey}". Used: ${String(budgetCheck.used)}/${String(budgetCheck.budget)} tokens.`,
+        'errors.ai.budgetExceeded'
+      )
     }
 
     // 6. Load prompt template
@@ -365,6 +381,9 @@ export class AiService {
       params.tenantId,
       params.featureKey
     )
+
+    // 6b. OSINT enrichment — if agent has OSINT sources and context includes an IoC
+    await this.enrichContextWithOsint(params, agentConfig)
 
     // 7. Build final prompt — apply agent's system prompt and suffix
     let finalPrompt = this.buildPromptFromTemplate(promptContent, params.context)
@@ -392,8 +411,8 @@ export class AiService {
       if (connectors.length === 0) {
         throw new BusinessException(
           400,
-          'Configured AI connector not available',
-          'errors.ai.connectorNotAvailable'
+          `${agentDisplayName(agentId)} AI agent connector is not available or not configured`,
+          agentUnreachableKey(agentId)
         )
       }
     }
@@ -463,6 +482,55 @@ export class AiService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* PRIVATE: OSINT Enrichment                                         */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * If the agent config has OSINT sources and the context contains an IoC,
+   * enrich the context with OSINT query results before building the prompt.
+   */
+  private async enrichContextWithOsint(
+    params: ExecuteAiTaskInput,
+    agentConfig: AgentConfigWithDefaults
+  ): Promise<void> {
+    const { osintSources } = agentConfig
+    if (!Array.isArray(osintSources) || osintSources.length === 0) {
+      return
+    }
+
+    const { iocValue, iocType } = params.context as Record<string, unknown>
+    if (typeof iocValue !== 'string' || typeof iocType !== 'string') {
+      return
+    }
+
+    const sourceIds = osintSources.filter((id): id is string => typeof id === 'string')
+    if (sourceIds.length === 0) {
+      return
+    }
+
+    try {
+      const enrichment = await this.osintExecutorService.enrichIoc(
+        params.tenantId,
+        iocType,
+        iocValue,
+        sourceIds
+      )
+
+      const successfulResults = enrichment.results
+        .filter(r => r.success)
+        .map(r => ({ source: r.sourceName, data: r.data }))
+
+      if (successfulResults.length > 0) {
+        params.context['osintEnrichment'] = JSON.stringify(successfulResults)
+      }
+    } catch (error: unknown) {
+      this.logger.warn(
+        `OSINT enrichment failed: ${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* PRIVATE: Agent Quota Check                                        */
   /* ---------------------------------------------------------------- */
 
@@ -470,18 +538,38 @@ export class AiService {
    * Checks whether an agent's token usage is within its configured quotas.
    * Compares current hour/day/month usage against the respective limits.
    */
-  private checkAgentQuota(agentConfig: AgentConfigWithDefaults): { allowed: boolean } {
+  private checkAgentQuota(agentConfig: AgentConfigWithDefaults): {
+    allowed: boolean
+    period?: string
+    used?: number
+    limit?: number
+  } {
     if (agentConfig.tokensPerHour > 0 && agentConfig.tokensUsedHour >= agentConfig.tokensPerHour) {
-      return { allowed: false }
+      return {
+        allowed: false,
+        period: 'hour',
+        used: agentConfig.tokensUsedHour,
+        limit: agentConfig.tokensPerHour,
+      }
     }
     if (agentConfig.tokensPerDay > 0 && agentConfig.tokensUsedDay >= agentConfig.tokensPerDay) {
-      return { allowed: false }
+      return {
+        allowed: false,
+        period: 'day',
+        used: agentConfig.tokensUsedDay,
+        limit: agentConfig.tokensPerDay,
+      }
     }
     if (
       agentConfig.tokensPerMonth > 0 &&
       agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth
     ) {
-      return { allowed: false }
+      return {
+        allowed: false,
+        period: 'month',
+        used: agentConfig.tokensUsedMonth,
+        limit: agentConfig.tokensPerMonth,
+      }
     }
     return { allowed: true }
   }
@@ -1206,7 +1294,7 @@ export class AiService {
         })
         throw new BusinessException(
           403,
-          'AI features are not enabled for this tenant. Configure an AI connector (Bedrock, LLM APIs, or OpenClaw Gateway).',
+          'No AI connectors are configured or enabled. Set up at least one connector in Connectors settings.',
           'errors.ai.notEnabled'
         )
       }

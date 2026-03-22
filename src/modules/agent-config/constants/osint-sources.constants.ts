@@ -10,6 +10,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'x-apikey',
     responsePath: 'data.attributes',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip', 'domain', 'hash', 'url'],
   },
   {
     sourceType: OsintSourceType.SHODAN,
@@ -19,6 +20,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     queryParamName: 'key',
     responsePath: '',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip'],
   },
   {
     sourceType: OsintSourceType.ABUSEIPDB,
@@ -28,6 +30,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'Key',
     responsePath: 'data',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip'],
   },
   {
     sourceType: OsintSourceType.NVD_NIST,
@@ -36,6 +39,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     authType: OsintAuthType.NONE,
     responsePath: 'vulnerabilities',
     requestMethod: 'GET',
+    supportedIocTypes: ['cve'],
   },
   {
     sourceType: OsintSourceType.ALIENVAULT_OTX,
@@ -45,6 +49,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'X-OTX-API-KEY',
     responsePath: 'results',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip', 'domain', 'hash', 'url'],
   },
   {
     sourceType: OsintSourceType.GREYNOISE,
@@ -54,6 +59,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'key',
     responsePath: '',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip'],
   },
   {
     sourceType: OsintSourceType.URLSCAN,
@@ -63,6 +69,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'API-Key',
     responsePath: '',
     requestMethod: 'GET',
+    supportedIocTypes: ['url', 'domain'],
   },
   {
     sourceType: OsintSourceType.CENSYS,
@@ -71,6 +78,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     authType: OsintAuthType.BASIC,
     responsePath: 'result',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip', 'domain'],
   },
   {
     sourceType: OsintSourceType.MALWARE_BAZAAR,
@@ -79,6 +87,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     authType: OsintAuthType.NONE,
     responsePath: 'data',
     requestMethod: 'POST',
+    supportedIocTypes: ['hash'],
   },
   {
     sourceType: OsintSourceType.THREATFOX,
@@ -87,6 +96,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     authType: OsintAuthType.NONE,
     responsePath: 'data',
     requestMethod: 'POST',
+    supportedIocTypes: ['ip', 'domain', 'hash', 'url'],
   },
   {
     sourceType: OsintSourceType.PULSEDIVE,
@@ -96,6 +106,7 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     queryParamName: 'key',
     responsePath: '',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip', 'domain', 'url'],
   },
   {
     sourceType: OsintSourceType.WEB_SEARCH,
@@ -105,5 +116,6 @@ export const BUILTIN_OSINT_SOURCES: BuiltinOsintSource[] = [
     headerName: 'Ocp-Apim-Subscription-Key',
     responsePath: 'webPages.value',
     requestMethod: 'GET',
+    supportedIocTypes: ['ip', 'domain', 'hash', 'cve'],
   },
 ]

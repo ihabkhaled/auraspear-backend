@@ -10,13 +10,9 @@ import { LlmMaxTokensParameter } from '../connectors.enums'
  * If both are present, verifyTls takes precedence.
  */
 function normalizeVerifyTls(config: Record<string, unknown>): Record<string, unknown> {
-  if ('verifyTLS' in config && !('verifyTls' in config)) {
-    const { verifyTLS, ...rest } = config
+  if ('verifyTLS' in config) {
+    const { verifyTLS, verifyTls: _old, ...rest } = config
     return { ...rest, verifyTls: verifyTLS }
-  }
-  if ('verifyTLS' in config && 'verifyTls' in config) {
-    const { verifyTLS: _deprecated, ...rest } = config
-    return rest
   }
   return config
 }

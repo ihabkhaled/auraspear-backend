@@ -118,6 +118,28 @@ export class AgentConfigRepository {
     return updated as OsintSourceConfigRecord
   }
 
+  async updateOsintSourceHealth(
+    id: string,
+    tenantId: string,
+    ok: boolean,
+    error: string | null
+  ): Promise<void> {
+    await this.prisma.osintSourceConfig.updateMany({
+      where: { id, tenantId },
+      data: { lastTestAt: new Date(), lastTestOk: ok, lastError: error },
+    })
+  }
+
+  async findOsintSourceByTypeAndName(
+    tenantId: string,
+    sourceType: string,
+    name: string
+  ): Promise<OsintSourceConfigRecord | null> {
+    return this.prisma.osintSourceConfig.findFirst({
+      where: { tenantId, sourceType, name },
+    })
+  }
+
   async deleteOsintSource(id: string, tenantId: string): Promise<void> {
     await this.prisma.osintSourceConfig.deleteMany({
       where: { id, tenantId },

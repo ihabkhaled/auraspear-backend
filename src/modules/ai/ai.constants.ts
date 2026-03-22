@@ -1,4 +1,4 @@
-import { ConnectorType } from '../../common/enums'
+import { AiAgentId, ConnectorType } from '../../common/enums'
 
 export const AI_DEFAULT_MODEL = 'anthropic.claude-3-sonnet'
 export const AI_FALLBACK_MODEL = 'rule-based'
@@ -17,6 +17,17 @@ export const AI_CONNECTOR_PRIORITY: ConnectorType[] = [
   ConnectorType.LLM_APIS,
   ConnectorType.OPENCLAW_GATEWAY,
 ]
+
+/** Display names for English error messages (logs/devtools only) */
+export const AGENT_DISPLAY_NAMES: Record<string, string> = {
+  [AiAgentId.ORCHESTRATOR]: 'Orchestrator',
+  [AiAgentId.L1_ANALYST]: 'L1 SOC Analyst',
+  [AiAgentId.L2_ANALYST]: 'L2 SOC Analyst',
+  [AiAgentId.THREAT_HUNTER]: 'Threat Hunter',
+  [AiAgentId.RULES_ANALYST]: 'Rules Analyst',
+  [AiAgentId.NORM_VERIFIER]: 'Normalization Verifier',
+  [AiAgentId.DASHBOARD_BUILDER]: 'Dashboard Builder',
+}
 
 export const AI_EXPLAIN_REASONING = [
   'Parsing the security concept or finding to explain',

@@ -9,6 +9,7 @@ import { AgentConfigModule } from '../agent-config/agent-config.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
 import { LlmConnectorsModule } from '../connectors/llm-connectors/llm-connectors.module'
+import { OsintExecutorModule } from '../osint-executor/osint-executor.module'
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LlmConnectorsModule } from '../connectors/llm-connectors/llm-connectors
     AppLogsModule,
     ConnectorsModule,
     LlmConnectorsModule,
+    OsintExecutorModule,
     PromptRegistryModule,
     FeatureCatalogModule,
     UsageBudgetModule,

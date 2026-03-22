@@ -86,6 +86,13 @@ export class AgentConfigController {
     return this.agentConfigService.listOsintSources(tenantId)
   }
 
+  @Post('osint-sources/seed')
+  @RequirePermission(Permission.AI_CONFIG_MANAGE_OSINT)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  async seedOsintSources(@TenantId() tenantId: string): Promise<void> {
+    await this.agentConfigService.seedBuiltinSources(tenantId)
+  }
+
   @Post('osint-sources')
   @RequirePermission(Permission.AI_CONFIG_MANAGE_OSINT)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
