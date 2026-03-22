@@ -201,6 +201,15 @@ export enum Permission {
   USERS_CONTROL_VIEW_SESSIONS = 'usersControl.viewSessions',
   USERS_CONTROL_FORCE_LOGOUT = 'usersControl.forceLogout',
   USERS_CONTROL_FORCE_LOGOUT_ALL = 'usersControl.forceLogoutAll',
+
+  // AI Config
+  AI_CONFIG_VIEW = 'ai.config.view',
+  AI_CONFIG_EDIT = 'ai.config.edit',
+  AI_CONFIG_MANAGE_PROMPTS = 'ai.config.manage_prompts',
+  AI_CONFIG_MANAGE_TRIGGERS = 'ai.config.manage_triggers',
+  AI_CONFIG_MANAGE_OSINT = 'ai.config.manage_osint',
+  AI_APPROVALS_MANAGE = 'ai.approvals.manage',
+  AI_USAGE_VIEW = 'ai.usage.view',
 }
 
 /**

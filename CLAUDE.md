@@ -97,6 +97,18 @@
 90. **Job processor MUST log Redis connection state changes** — The `JobProcessorService` must track `redisConnected` state via `connect`/`error`/`close` events and skip polling with a logged warning when Redis is down. Silent lock acquisition failures (returning `false` without logging) cause jobs to sit PENDING indefinitely with no diagnostic trail.
 91. **Stale jobs MUST be auto-recovered** — Jobs stuck in RUNNING status for longer than `STALE_RUNNING_WINDOW_MS` (30 minutes) must be automatically reset to PENDING by a periodic recovery task. The `recoverStaleJobs()` interval handles this. Never rely on manual intervention to unstick stale jobs.
 
+## AI Agent Configuration Rules
+
+92. **EVERY agent config mutation MUST validate against `AiAgentId` enum** — Only the 7 defined agents are valid.
+93. **EVERY provider_mode MUST be validated against `AiProviderMode` enum** — Only direct_api, bedrock, openclaw, inherit are valid.
+94. **EVERY trigger_config JSON MUST be validated by a mode-specific Zod schema** — No arbitrary JSON.
+95. **EVERY custom OSINT source URL MUST pass SSRF validation** — Use SsrfUtility.validateUrl().
+96. **EVERY custom OSINT source API key MUST be encrypted at rest** — Use EncryptionUtility.encrypt().
+97. **EVERY approval-required action MUST create an ApprovalRequest record before execution** — Never execute without persisted approval.
+98. **EVERY agent execution MUST check token quota before calling the provider** — Check per-agent limits.
+99. **EVERY trigger evaluation MUST be logged** — Log trigger type, result, agent_id, tenant_id.
+100.  **NEVER hardcode OSINT source definitions in service files** — All builtins in constants files.
+
 ---
 
 ## Security Architecture (Post-Audit)

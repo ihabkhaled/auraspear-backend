@@ -867,4 +867,48 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.usersControl.forceLogoutAll',
     sortOrder: 2603,
   },
+
+  // ─── AI Config ───
+  {
+    key: Permission.AI_CONFIG_VIEW,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.view',
+    sortOrder: 2700,
+  },
+  {
+    key: Permission.AI_CONFIG_EDIT,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.edit',
+    sortOrder: 2701,
+  },
+  {
+    key: Permission.AI_CONFIG_MANAGE_PROMPTS,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.managePrompts',
+    sortOrder: 2702,
+  },
+  {
+    key: Permission.AI_CONFIG_MANAGE_TRIGGERS,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.manageTriggers',
+    sortOrder: 2703,
+  },
+  {
+    key: Permission.AI_CONFIG_MANAGE_OSINT,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.manageOsint',
+    sortOrder: 2704,
+  },
+  {
+    key: Permission.AI_APPROVALS_MANAGE,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.manageApprovals',
+    sortOrder: 2705,
+  },
+  {
+    key: Permission.AI_USAGE_VIEW,
+    module: 'aiConfig',
+    labelKey: 'roleSettings.permissions.aiConfig.viewUsage',
+    sortOrder: 2706,
+  },
 ]

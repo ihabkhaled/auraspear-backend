@@ -14,6 +14,7 @@ import { WebSocketModule } from './common/modules/websocket'
 import { AppLoggerService } from './common/services/app-logger.service'
 import { StartupHealthService } from './common/services/startup-health.service'
 import { validateEnvironment } from './config/env.validation'
+import { AgentConfigModule } from './modules/agent-config/agent-config.module'
 import { AiModule } from './modules/ai/ai.module'
 import { AiAgentsModule } from './modules/ai-agents/ai-agents.module'
 import { AlertsModule } from './modules/alerts/alerts.module'
@@ -88,6 +89,7 @@ import { PrismaModule } from './prisma/prisma.module'
     PrismaModule,
 
     // Feature modules
+    AgentConfigModule,
     AuthModule,
     TenantsModule,
     ConnectorsModule,

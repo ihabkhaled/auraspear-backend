@@ -5,12 +5,14 @@ import { AiService } from './ai.service'
 import { FeatureCatalogModule } from './feature-catalog/feature-catalog.module'
 import { PromptRegistryModule } from './prompt-registry/prompt-registry.module'
 import { UsageBudgetModule } from './usage-budget/usage-budget.module'
+import { AgentConfigModule } from '../agent-config/agent-config.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
 import { LlmConnectorsModule } from '../connectors/llm-connectors/llm-connectors.module'
 
 @Module({
   imports: [
+    AgentConfigModule,
     AppLogsModule,
     ConnectorsModule,
     LlmConnectorsModule,

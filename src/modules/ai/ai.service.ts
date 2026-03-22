@@ -29,12 +29,18 @@ import {
   buildOpenClawExplainResponse,
   generateExplainResponse,
 } from './ai.utilities'
+import {
+  AI_DEFAULT_PROVIDER_KEY,
+  FEATURE_TO_AGENT_MAP,
+} from '../agent-config/agent-config.constants'
+import { AgentConfigService } from '../agent-config/agent-config.service'
 import { AiHuntDto } from './dto/ai-hunt.dto'
 import { AiInvestigateDto } from './dto/ai-investigate.dto'
 import { FeatureCatalogService } from './feature-catalog/feature-catalog.service'
 import { PromptRegistryService } from './prompt-registry/prompt-registry.service'
 import { UsageBudgetService } from './usage-budget/usage-budget.service'
 import {
+  AiAgentId,
   AiAuditAction,
   AiAuditStatus,
   AiFeatureKey,
@@ -59,6 +65,7 @@ import type {
   ResolvedAiConnector,
 } from './ai.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
+import type { AgentConfigWithDefaults } from '../agent-config/agent-config.types'
 import type { Alert, Prisma } from '@prisma/client'
 
 @Injectable()
@@ -75,7 +82,8 @@ export class AiService {
     private readonly openClawGatewayService: OpenClawGatewayService,
     private readonly promptRegistryService: PromptRegistryService,
     private readonly featureCatalogService: FeatureCatalogService,
-    private readonly usageBudgetService: UsageBudgetService
+    private readonly usageBudgetService: UsageBudgetService,
+    private readonly agentConfigService: AgentConfigService
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -306,7 +314,8 @@ export class AiService {
 
   /**
    * Generic AI task execution that checks the feature catalog, loads the prompt
-   * template from the registry, and routes to the best available provider.
+   * template from the registry, resolves the responsible agent config, and
+   * routes to the best available provider.
    * This is the entry point for all AI features across the platform.
    */
   async executeAiTask(params: ExecuteAiTaskInput): Promise<AiResponse> {
@@ -319,7 +328,30 @@ export class AiService {
       throw new BusinessException(403, 'AI feature is disabled', 'errors.ai.featureDisabled')
     }
 
-    // 2. Check budget
+    // 2. Resolve which agent handles this feature and load its config
+    const agentId = FEATURE_TO_AGENT_MAP[params.featureKey] ?? AiAgentId.ORCHESTRATOR
+    const agentConfig = await this.agentConfigService.getAgentConfig(params.tenantId, agentId)
+
+    // 3. Check if agent is enabled
+    if (!agentConfig.isEnabled) {
+      throw new BusinessException(
+        403,
+        `AI agent ${agentConfig.displayName} is disabled`,
+        'errors.ai.agentDisabled'
+      )
+    }
+
+    // 4. Check per-agent token quota
+    const quotaCheck = this.checkAgentQuota(agentConfig)
+    if (!quotaCheck.allowed) {
+      throw new BusinessException(
+        429,
+        `AI agent ${agentConfig.displayName} quota exceeded`,
+        'errors.ai.agentQuotaExceeded'
+      )
+    }
+
+    // 5. Check global budget
     const budgetCheck = await this.usageBudgetService.checkBudget(
       params.tenantId,
       params.featureKey
@@ -328,20 +360,29 @@ export class AiService {
       throw new BusinessException(429, 'AI usage budget exceeded', 'errors.ai.budgetExceeded')
     }
 
-    // 3. Load prompt template
+    // 6. Load prompt template
     const promptContent = await this.promptRegistryService.getActivePrompt(
       params.tenantId,
       params.featureKey
     )
 
-    // 4. Build final prompt by replacing {{key}} placeholders
-    const finalPrompt = this.buildPromptFromTemplate(promptContent, params.context)
+    // 7. Build final prompt — apply agent's system prompt and suffix
+    let finalPrompt = this.buildPromptFromTemplate(promptContent, params.context)
+    if (agentConfig.systemPrompt) {
+      finalPrompt = `${agentConfig.systemPrompt}\n\n${finalPrompt}`
+    }
+    if (agentConfig.promptSuffix) {
+      finalPrompt = `${finalPrompt}\n\n${agentConfig.promptSuffix}`
+    }
 
-    // 5. Find connectors (respect preferred provider from feature config)
+    // 8. Find connectors — agent config's providerMode takes priority over feature catalog
     let connectors = await this.findAvailableAiConnectors(params.tenantId)
+    const selectedConnector =
+      params.connector ??
+      (agentConfig.providerMode === AI_DEFAULT_PROVIDER_KEY ? null : agentConfig.providerMode) ??
+      featureConfig.preferredProvider
 
-    const selectedConnector = params.connector ?? featureConfig.preferredProvider
-    if (selectedConnector && selectedConnector !== 'default') {
+    if (selectedConnector && selectedConnector !== AI_DEFAULT_PROVIDER_KEY) {
       const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
         selectedConnector
       )
@@ -351,22 +392,26 @@ export class AiService {
       if (connectors.length === 0) {
         throw new BusinessException(
           400,
-          `Requested AI connector "${selectedConnector}" is not configured or available`,
+          'Configured AI connector not available',
           'errors.ai.connectorNotAvailable'
         )
       }
     }
 
-    // 6. Execute through connectors in order
+    // 9. Determine max tokens — agent config overrides feature catalog
+    const maxTokens = agentConfig.maxTokensPerCall ?? featureConfig.maxTokens
+
+    // 10. Execute through connectors in order
     const startTime = Date.now()
     const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
-      this.routeGenericTask(c, finalPrompt, featureConfig.maxTokens)
+      this.routeGenericTask(c, finalPrompt, maxTokens)
     )
 
     const response = aiResponse ?? this.buildFallbackGenericResponse(params.featureKey, finalPrompt)
     const latencyMs = Date.now() - startTime
 
-    // 7. Record usage
+    // 11. Record usage — both global budget and per-agent counters
+    const totalTokens = response.tokensUsed.input + response.tokensUsed.output
     await this.usageBudgetService.recordUsage({
       tenantId: params.tenantId,
       featureKey: params.featureKey,
@@ -377,8 +422,9 @@ export class AiService {
       estimatedCost: 0,
       userId: params.userId,
     })
+    await this.agentConfigService.incrementUsage(params.tenantId, agentId, totalTokens)
 
-    // 8. Audit log
+    // 12. Audit log
     await this.logAudit({
       id: randomUUID(),
       tenantId: params.tenantId,
@@ -406,12 +452,38 @@ export class AiService {
       functionName: 'executeAiTask',
       metadata: {
         featureKey: params.featureKey,
+        agentId,
+        agentName: agentConfig.displayName,
         model: response.model,
         latencyMs,
       },
     })
 
     return response
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Agent Quota Check                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Checks whether an agent's token usage is within its configured quotas.
+   * Compares current hour/day/month usage against the respective limits.
+   */
+  private checkAgentQuota(agentConfig: AgentConfigWithDefaults): { allowed: boolean } {
+    if (agentConfig.tokensPerHour > 0 && agentConfig.tokensUsedHour >= agentConfig.tokensPerHour) {
+      return { allowed: false }
+    }
+    if (agentConfig.tokensPerDay > 0 && agentConfig.tokensUsedDay >= agentConfig.tokensPerDay) {
+      return { allowed: false }
+    }
+    if (
+      agentConfig.tokensPerMonth > 0 &&
+      agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth
+    ) {
+      return { allowed: false }
+    }
+    return { allowed: true }
   }
 
   /* ---------------------------------------------------------------- */

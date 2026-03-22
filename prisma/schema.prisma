@@ -535,6 +535,9 @@ model Tenant {
   runbooks                Runbook[]
   entities                Entity[]
   entityRelations         EntityRelation[]
+  tenantAgentConfigs      TenantAgentConfig[]
+  osintSourceConfigs      OsintSourceConfig[]
+  aiApprovalRequests      AiApprovalRequest[]
 
   @@map("tenants")
 }
@@ -2183,4 +2186,100 @@ model EntityRelation {
   @@index([toEntityId])
   @@index([tenantId, relationType])
   @@map("entity_relations")
+}
+
+// ─── Tenant Agent Configuration ─────────────────────────────
+
+model TenantAgentConfig {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  agentId           String    @map("agent_id") @db.VarChar(50)
+  isEnabled         Boolean   @default(true) @map("is_enabled")
+  providerMode      String    @default("default") @map("provider_mode") @db.VarChar(100)
+  model             String?   @db.VarChar(255)
+  temperature       Float     @default(0.7)
+  maxTokensPerCall  Int       @default(2048) @map("max_tokens_per_call")
+  systemPrompt      String?   @map("system_prompt") @db.Text
+  promptSuffix      String?   @map("prompt_suffix") @db.Text
+  indexPatterns     String[]  @default([]) @map("index_patterns")
+  tokensPerHour     Int       @default(50000) @map("tokens_per_hour")
+  tokensPerDay      Int       @default(500000) @map("tokens_per_day")
+  tokensPerMonth    Int       @default(5000000) @map("tokens_per_month")
+  tokensUsedHour    Int       @default(0) @map("tokens_used_hour")
+  tokensUsedDay     Int       @default(0) @map("tokens_used_day")
+  tokensUsedMonth   Int       @default(0) @map("tokens_used_month")
+  maxConcurrentRuns Int       @default(3) @map("max_concurrent_runs")
+  triggerMode       String    @default("manual_only") @map("trigger_mode") @db.VarChar(30)
+  triggerConfig     Json      @default("{}") @map("trigger_config")
+  osintSources      Json      @default("[]") @map("osint_sources")
+  outputFormat      String    @default("markdown") @map("output_format") @db.VarChar(20)
+  presentationSkills String[] @default([]) @map("presentation_skills")
+  lastResetHour     DateTime? @map("last_reset_hour")
+  lastResetDay      DateTime? @map("last_reset_day")
+  lastResetMonth    DateTime? @map("last_reset_month")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, agentId])
+  @@index([tenantId])
+  @@index([tenantId, agentId, isEnabled])
+  @@map("tenant_agent_configs")
+}
+
+// ─── OSINT Source Configuration ─────────────────────────────
+
+model OsintSourceConfig {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  sourceType      String    @map("source_type") @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  isEnabled       Boolean   @default(true) @map("is_enabled")
+  encryptedApiKey String?   @map("encrypted_api_key") @db.Text
+  baseUrl         String?   @map("base_url") @db.VarChar(500)
+  authType        String    @default("none") @map("auth_type") @db.VarChar(30)
+  headerName      String?   @map("header_name") @db.VarChar(100)
+  queryParamName  String?   @map("query_param_name") @db.VarChar(100)
+  responsePath    String?   @map("response_path") @db.VarChar(500)
+  requestMethod   String    @default("GET") @map("request_method") @db.VarChar(10)
+  timeout         Int       @default(30000)
+  lastTestAt      DateTime? @map("last_test_at")
+  lastTestOk      Boolean?  @map("last_test_ok")
+  lastError       String?   @map("last_error") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceType, name])
+  @@index([tenantId])
+  @@index([tenantId, sourceType])
+  @@map("osint_source_configs")
+}
+
+// ─── AI Approval Requests ───────────────────────────────────
+
+model AiApprovalRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  agentId     String    @map("agent_id") @db.VarChar(50)
+  actionType  String    @map("action_type") @db.VarChar(100)
+  actionData  Json      @map("action_data")
+  riskLevel   String    @default("medium") @map("risk_level") @db.VarChar(20)
+  status      String    @default("pending") @db.VarChar(20)
+  requestedBy String    @map("requested_by") @db.VarChar(320)
+  reviewedBy  String?   @map("reviewed_by") @db.VarChar(320)
+  reviewedAt  DateTime? @map("reviewed_at")
+  comment     String?   @db.Text
+  result      Json?
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, agentId])
+  @@map("ai_approval_requests")
 }

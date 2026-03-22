@@ -1,4 +1,14 @@
 export { AiActionCategory, AiApprovalLevel, AiFeatureKey } from './ai-feature.enum'
+export {
+  AiAgentId,
+  AiTriggerMode,
+  AiOutputFormat,
+  OsintSourceType,
+  OsintAuthType,
+  ApprovalStatus,
+  ApprovalRiskLevel,
+  TokenResetPeriod,
+} from './ai-agent-config.enum'
 export { AiAuditAction } from './ai-audit-action.enum'
 export { AiConnectorPreference } from './ai-connector-preference.enum'
 export { AiAuditStatus } from './ai-audit-status.enum'

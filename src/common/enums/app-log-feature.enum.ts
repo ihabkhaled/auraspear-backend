@@ -38,4 +38,5 @@ export enum AppLogFeature {
   KNOWLEDGE = 'Knowledge',
   ENTITIES = 'Entities',
   MSSP_DASHBOARD = 'MsspDashboard',
+  AI_CONFIG = 'AiConfig',
 }
