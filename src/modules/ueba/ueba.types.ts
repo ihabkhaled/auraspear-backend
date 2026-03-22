@@ -1,6 +1,11 @@
 import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
 import type { UebaEntity, UebaAnomaly, MlModel } from '@prisma/client'
 
+export type EntityWithAnomalyCount = UebaEntity & { _count: { anomalies: number } }
+export type AnomalyWithEntity = UebaAnomaly & {
+  entity: { entityName: string; entityType: string }
+}
+
 export type UebaEntityRecord = UebaEntity & {
   anomalyCount: number
 }

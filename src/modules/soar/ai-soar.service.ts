@@ -15,7 +15,8 @@ export class AiSoarService {
   async draftPlaybook(
     tenantId: string,
     user: JwtPayload,
-    description: string
+    description: string,
+    connector?: string
   ): Promise<AiResponse> {
     const existingPlaybooks = await this.soarRepository.findManyPlaybooksWithTenant({
       where: { tenantId },
@@ -39,6 +40,7 @@ export class AiSoarService {
       userEmail: user.email,
       featureKey: AiFeatureKey.SOAR_PLAYBOOK_DRAFT,
       context,
+      connector,
     })
   }
 }

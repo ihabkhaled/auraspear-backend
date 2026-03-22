@@ -21,7 +21,8 @@ export class AiDashboardService {
   async explainAnomaly(
     tenantId: string,
     input: ExplainAnomalyInput,
-    user: JwtPayload
+    user: JwtPayload,
+    connector?: string
   ): Promise<AiResponse> {
     this.appLogger.info('AI anomaly explanation requested', {
       feature: AppLogFeature.DASHBOARD,
@@ -53,10 +54,15 @@ export class AiDashboardService {
         changePercent,
         timeRange: input.timeRange,
       },
+      connector,
     })
   }
 
-  async generateDailySummary(tenantId: string, user: JwtPayload): Promise<AiResponse> {
+  async generateDailySummary(
+    tenantId: string,
+    user: JwtPayload,
+    connector?: string
+  ): Promise<AiResponse> {
     this.appLogger.info('AI daily summary requested', {
       feature: AppLogFeature.DASHBOARD,
       action: 'generateDailySummary',
@@ -88,6 +94,7 @@ export class AiDashboardService {
         openCases,
         date: new Date().toISOString().split('T').at(0) ?? '',
       },
+      connector,
     })
   }
 }

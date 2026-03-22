@@ -91,21 +91,25 @@ export class EntitiesService {
 
     // Collect unique connected entity IDs
     const connectedIds = new Set<string>()
-    for (const rel of directRelations) {
-      connectedIds.add(rel.fromEntityId)
-      connectedIds.add(rel.toEntityId)
+    for (const relation of directRelations) {
+      connectedIds.add(relation.fromEntityId)
+      connectedIds.add(relation.toEntityId)
     }
     connectedIds.delete(entityId)
 
-    // Second hop: get relations from connected entities
+    // Second hop: get relations from connected entities (independent lookups)
+    const secondHopResults = await Promise.all(
+      [...connectedIds].map(connId =>
+        this.entitiesRepository.findRelationsForEntity(connId, tenantId)
+      )
+    )
     const secondHopRelations: typeof directRelations = []
     const secondHopIds = new Set<string>()
-    for (const connId of connectedIds) {
-      const rels = await this.entitiesRepository.findRelationsForEntity(connId, tenantId)
-      for (const rel of rels) {
-        secondHopRelations.push(rel)
-        secondHopIds.add(rel.fromEntityId)
-        secondHopIds.add(rel.toEntityId)
+    for (const relations of secondHopResults) {
+      for (const relation of relations) {
+        secondHopRelations.push(relation)
+        secondHopIds.add(relation.fromEntityId)
+        secondHopIds.add(relation.toEntityId)
       }
     }
 
@@ -115,8 +119,8 @@ export class EntitiesService {
 
     // Deduplicate relations by id
     const uniqueRelations = new Map<string, (typeof allRelations)[number]>()
-    for (const rel of allRelations) {
-      uniqueRelations.set(rel.id, rel)
+    for (const relation of allRelations) {
+      uniqueRelations.set(relation.id, relation)
     }
 
     // Fetch all entity records

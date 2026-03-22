@@ -170,6 +170,14 @@ export class UebaService {
       data: dto,
     })
 
+    if (!updated) {
+      throw new BusinessException(
+        404,
+        `UEBA entity ${id} not found after update`,
+        'errors.ueba.entityNotFound'
+      )
+    }
+
     this.appLogger.info('UEBA entity updated', {
       feature: AppLogFeature.UEBA,
       action: 'updateEntity',
@@ -234,6 +242,14 @@ export class UebaService {
       where: { id, tenantId },
       data: { resolved: true },
     })
+
+    if (!updated) {
+      throw new BusinessException(
+        404,
+        `UEBA anomaly ${id} not found after update`,
+        'errors.ueba.anomalyNotFound'
+      )
+    }
 
     this.appLogger.info('UEBA anomaly resolved', {
       feature: AppLogFeature.UEBA,

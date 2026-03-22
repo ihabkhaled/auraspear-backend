@@ -1,32 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
+import {
+  MAX_MESSAGE_LENGTH,
+  MAX_STACK_TRACE_LENGTH,
+  MAX_METADATA_SIZE,
+} from './app-logger.constants'
 import { PrismaService } from '../../prisma/prisma.service'
 import { redactSensitiveFields } from '../utils/redaction.utility'
+import type { AppLogContext } from './app-logger.types'
 import type { Prisma } from '@prisma/client'
 
-export interface AppLogContext {
-  feature: string
-  action: string
-  functionName?: string
-  className?: string
-  tenantId?: string
-  actorUserId?: string
-  actorEmail?: string
-  requestId?: string
-  targetResource?: string
-  targetResourceId?: string
-  outcome?: string
-  metadata?: Record<string, unknown>
-  stackTrace?: string
-  httpMethod?: string
-  httpRoute?: string
-  httpStatusCode?: number
-  sourceType?: string
-  ipAddress?: string
-}
-
-const MAX_MESSAGE_LENGTH = 2000
-const MAX_STACK_TRACE_LENGTH = 5000
-const MAX_METADATA_SIZE = 10000
+export type { AppLogContext } from './app-logger.types'
 
 @Injectable()
 export class AppLoggerService {

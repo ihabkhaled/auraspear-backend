@@ -71,6 +71,10 @@ export const AI_AGENT_DEFAULTS: Record<AiAgentId, AgentDefaultConfig> = {
   },
 }
 
+export const AGENT_DEFAULTS_MAP = new Map<string, AgentDefaultConfig>(
+  Object.entries(AI_AGENT_DEFAULTS)
+)
+
 /**
  * Maps each AI feature to the agent responsible for handling it.
  * Used by AiService.executeAiTask() to load per-agent configuration

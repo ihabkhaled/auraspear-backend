@@ -37,3 +37,28 @@ export interface SystemHealthStats {
   avgResponseTimeMs: number | null
   lastCheckedAt: Date | null
 }
+
+export interface HealthCheckEntity {
+  id: string
+  tenantId: string
+  serviceName: string
+  serviceType: string
+  status: string
+  responseTimeMs: number | null
+  errorMessage: string | null
+  metadata: unknown
+  lastCheckedAt: Date
+  createdAt: Date
+}
+
+export interface MetricEntity {
+  id: string
+  tenantId: string
+  metricName: string
+  metricType: string
+  value: number
+  unit: string | null
+  tags: unknown
+  recordedAt: Date
+  createdAt: Date
+}

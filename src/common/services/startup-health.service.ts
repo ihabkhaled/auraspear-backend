@@ -4,13 +4,7 @@ import Redis from 'ioredis'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../enums'
 import { AppLoggerService } from './app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
-
-interface ServiceCheck {
-  name: string
-  status: 'up' | 'down'
-  latencyMs: number
-  error?: string
-}
+import type { ServiceCheck } from './startup-health.types'
 
 @Injectable()
 export class StartupHealthService implements OnModuleInit {

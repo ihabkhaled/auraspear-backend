@@ -17,7 +17,8 @@ export class AiDetectionCopilotService {
     ruleId: string,
     tenantId: string,
     taskType: AiFeatureKey,
-    user: JwtPayload
+    user: JwtPayload,
+    connector?: string
   ): Promise<AiResponse> {
     const rule = await this.detectionRulesRepository.findByIdAndTenant(ruleId, tenantId)
     if (!rule) {
@@ -42,10 +43,16 @@ export class AiDetectionCopilotService {
       userEmail: user.email,
       featureKey: taskType,
       context,
+      connector,
     })
   }
 
-  async draftRule(tenantId: string, description: string, user: JwtPayload): Promise<AiResponse> {
+  async draftRule(
+    tenantId: string,
+    description: string,
+    user: JwtPayload,
+    connector?: string
+  ): Promise<AiResponse> {
     const context: Record<string, unknown> = {
       description,
     }
@@ -56,6 +63,7 @@ export class AiDetectionCopilotService {
       userEmail: user.email,
       featureKey: AiFeatureKey.DETECTION_RULE_DRAFT,
       context,
+      connector,
     })
   }
 }

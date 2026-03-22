@@ -1,4 +1,4 @@
-import { AI_AGENT_DEFAULTS, AI_DEFAULT_PROVIDER_KEY } from './agent-config.constants'
+import { AGENT_DEFAULTS_MAP, AI_DEFAULT_PROVIDER_KEY } from './agent-config.constants'
 import { AiAgentId, TokenResetPeriod } from '../../common/enums'
 import type {
   AgentConfigWithDefaults,
@@ -11,7 +11,11 @@ export function buildAgentConfigWithDefaults(
   agentId: AiAgentId,
   record: TenantAgentConfigRecord | null
 ): AgentConfigWithDefaults {
-  const defaults = AI_AGENT_DEFAULTS[agentId]
+  const defaults = AGENT_DEFAULTS_MAP.get(agentId)
+
+  if (!defaults) {
+    throw new Error(`Unknown agent ID: ${agentId}`)
+  }
 
   if (!record) {
     return {

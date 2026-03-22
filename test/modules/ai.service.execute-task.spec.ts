@@ -56,6 +56,24 @@ const mockUsageBudgetService = {
   recordUsage: jest.fn(),
 }
 
+const mockAgentConfigService = {
+  getAgentConfig: jest.fn().mockResolvedValue({
+    isEnabled: true,
+    providerMode: 'default',
+    displayName: 'Orchestrator',
+    tokensPerHour: 0,
+    tokensUsedHour: 0,
+    tokensPerDay: 0,
+    tokensUsedDay: 0,
+    tokensPerMonth: 0,
+    tokensUsedMonth: 0,
+    systemPrompt: null,
+    promptSuffix: null,
+    maxTokensPerCall: null,
+  }),
+  incrementUsage: jest.fn().mockResolvedValue(undefined),
+}
+
 function createService() {
   return new AiService(
     mockRepository as never,
@@ -67,7 +85,8 @@ function createService() {
     mockOpenClawGatewayService as never,
     mockPromptRegistryService as never,
     mockFeatureCatalogService as never,
-    mockUsageBudgetService as never
+    mockUsageBudgetService as never,
+    mockAgentConfigService as never
   )
 }
 

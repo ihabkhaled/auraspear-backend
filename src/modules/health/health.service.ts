@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
 import { HealthRepository } from './health.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
@@ -38,6 +39,20 @@ export class HealthService {
 
   /**
    * GET /health
+   * Overall system health -- checks database and Redis connectivity.
+   * Throws 503 if all services are down.
+   */
+  async getOverallHealthOrThrow(): Promise<OverallHealth> {
+    const health = await this.getOverallHealth()
+
+    if (health.status === HealthStatus.DOWN) {
+      throw new BusinessException(503, 'System is down', 'errors.health.serviceUnavailable')
+    }
+
+    return health
+  }
+
+  /**
    * Overall system health -- checks database and Redis connectivity.
    * This endpoint is public (no auth required).
    */

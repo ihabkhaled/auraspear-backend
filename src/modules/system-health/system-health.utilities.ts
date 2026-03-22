@@ -1,6 +1,12 @@
 import { ServiceStatus } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { HealthCheckRecord, MetricRecord, SystemHealthStats } from './system-health.types'
+import type {
+  HealthCheckRecord,
+  MetricRecord,
+  SystemHealthStats,
+  HealthCheckEntity,
+  MetricEntity,
+} from './system-health.types'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -83,19 +89,6 @@ export function buildMetricOrderBy(
 /* RECORD MAPPING                                                    */
 /* ---------------------------------------------------------------- */
 
-interface HealthCheckEntity {
-  id: string
-  tenantId: string
-  serviceName: string
-  serviceType: string
-  status: string
-  responseTimeMs: number | null
-  errorMessage: string | null
-  metadata: unknown
-  lastCheckedAt: Date
-  createdAt: Date
-}
-
 export function buildHealthCheckRecord(hc: HealthCheckEntity): HealthCheckRecord {
   return {
     id: hc.id,
@@ -109,18 +102,6 @@ export function buildHealthCheckRecord(hc: HealthCheckEntity): HealthCheckRecord
     checkedAt: hc.lastCheckedAt,
     createdAt: hc.createdAt,
   }
-}
-
-interface MetricEntity {
-  id: string
-  tenantId: string
-  metricName: string
-  metricType: string
-  value: number
-  unit: string | null
-  tags: unknown
-  recordedAt: Date
-  createdAt: Date
 }
 
 export function buildMetricRecord(m: MetricEntity): MetricRecord {

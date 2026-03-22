@@ -1,4 +1,4 @@
-import { Controller, Post, Param, ParseUUIDPipe } from '@nestjs/common'
+import { Body, Controller, Post, Param, ParseUUIDPipe } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { AiAlertTriageService } from './ai-alert-triage.service'
@@ -21,9 +21,16 @@ export class AiAlertTriageController {
   async summarizeAlert(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiAlertTriageService.triageAlert(id, tenantId, AiFeatureKey.ALERT_SUMMARIZE, user)
+    return this.aiAlertTriageService.triageAlert(
+      id,
+      tenantId,
+      AiFeatureKey.ALERT_SUMMARIZE,
+      user,
+      connector
+    )
   }
 
   @Post(':id/ai/explain-severity')
@@ -32,13 +39,15 @@ export class AiAlertTriageController {
   async explainSeverity(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
     return this.aiAlertTriageService.triageAlert(
       id,
       tenantId,
       AiFeatureKey.ALERT_EXPLAIN_SEVERITY,
-      user
+      user,
+      connector
     )
   }
 
@@ -48,13 +57,15 @@ export class AiAlertTriageController {
   async scoreFalsePositive(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
     return this.aiAlertTriageService.triageAlert(
       id,
       tenantId,
       AiFeatureKey.ALERT_FALSE_POSITIVE_SCORE,
-      user
+      user,
+      connector
     )
   }
 
@@ -64,8 +75,15 @@ export class AiAlertTriageController {
   async recommendNextAction(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiAlertTriageService.triageAlert(id, tenantId, AiFeatureKey.ALERT_NEXT_ACTION, user)
+    return this.aiAlertTriageService.triageAlert(
+      id,
+      tenantId,
+      AiFeatureKey.ALERT_NEXT_ACTION,
+      user,
+      connector
+    )
   }
 }

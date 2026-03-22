@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { USER_MEMBER_SELECT } from './tenants.constants'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   FindOrCreateUserResult,
@@ -7,20 +8,6 @@ import type {
 } from './tenants.types'
 import type { MembershipStatus } from '../../common/interfaces/authenticated-request.interface'
 import type { Prisma, UserRole, UserStatus, TenantMembership, User } from '@prisma/client'
-
-/** Fields needed from User when listing members — excludes passwordHash and oidcSub */
-const USER_MEMBER_SELECT = {
-  select: {
-    id: true,
-    email: true,
-    name: true,
-    mfaEnabled: true,
-    isProtected: true,
-    lastLoginAt: true,
-    createdAt: true,
-    updatedAt: true,
-  },
-} as const
 
 @Injectable()
 export class TenantsRepository {

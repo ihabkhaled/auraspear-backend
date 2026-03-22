@@ -17,6 +17,13 @@ export interface IOCMatchResult {
   matchCount: number
 }
 
+export interface IOCMatch {
+  iocValue: string
+  iocType: string
+  source: string
+  severity: string
+}
+
 export interface IntelStatsResponse {
   threatActors: number
   ipIOCs: number

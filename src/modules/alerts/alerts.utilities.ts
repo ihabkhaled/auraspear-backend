@@ -1,13 +1,8 @@
-import { AlertSeverity as AppAlertSeverity, AlertStatus, SortOrder } from '../../common/enums'
+import { VALID_SEVERITIES, VALID_STATUSES } from './alerts.constants'
+import { AlertStatus, SortOrder } from '../../common/enums'
+import type { WazuhUpsertOp } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
 import type { AlertSeverity, AlertStatus as PrismaAlertStatus, Prisma } from '@prisma/client'
-
-/* ---------------------------------------------------------------- */
-/* VALID SETS                                                        */
-/* ---------------------------------------------------------------- */
-
-const VALID_SEVERITIES = new Set<string>(Object.values(AppAlertSeverity))
-const VALID_STATUSES = new Set<string>(Object.values(AlertStatus))
 
 /* ---------------------------------------------------------------- */
 /* SEARCH WHERE CLAUSE                                               */
@@ -135,18 +130,6 @@ export function mapWazuhLevel(
 /* ---------------------------------------------------------------- */
 /* WAZUH HIT → UPSERT OP MAPPING                                    */
 /* ---------------------------------------------------------------- */
-
-export interface WazuhUpsertOp {
-  externalId: string
-  rule: Record<string, unknown> | undefined
-  agent: Record<string, unknown> | null
-  data: Record<string, unknown> | null
-  source: Record<string, unknown>
-  severity: string
-  mitreTactics: string[]
-  mitreTechniques: string[]
-  timestamp: Date
-}
 
 export function buildWazuhUpsertOps(hits: unknown[]): WazuhUpsertOp[] {
   const now = new Date()

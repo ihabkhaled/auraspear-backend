@@ -109,7 +109,7 @@ export class CaseCyclesRepository {
     cycleId: string,
     tenantId: string,
     closedByEmail: string
-  ): Promise<CaseCycle> {
+  ): Promise<CaseCycle | null> {
     return this.prisma.$transaction(async tx => {
       await tx.caseCycle.updateMany({
         where: { tenantId, status: 'active', id: { not: cycleId } },
@@ -129,15 +129,9 @@ export class CaseCyclesRepository {
         },
       })
 
-      const activated = await tx.caseCycle.findFirst({
+      return tx.caseCycle.findFirst({
         where: { id: cycleId, tenantId },
       })
-
-      if (!activated) {
-        throw new Error(`CaseCycle ${cycleId} not found after activation`)
-      }
-
-      return activated
     })
   }
 

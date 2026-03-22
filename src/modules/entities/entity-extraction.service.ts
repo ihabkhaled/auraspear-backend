@@ -179,12 +179,12 @@ export class EntityExtractionService {
   private extractUserFromRawEvent(rawEvent: Record<string, unknown>): string | null {
     const data = rawEvent['data'] as Record<string, unknown> | undefined
     if (data) {
-      const srcuser = data['srcuser']
+      const { srcuser } = data
       if (typeof srcuser === 'string' && srcuser.length > 0) {
         return srcuser
       }
 
-      const dstuser = data['dstuser']
+      const { dstuser } = data
       if (typeof dstuser === 'string' && dstuser.length > 0) {
         return dstuser
       }
@@ -196,7 +196,7 @@ export class EntityExtractionService {
         return targetUserName
       }
 
-      const user = data['user']
+      const { user } = data
       if (typeof user === 'string' && user.length > 0) {
         return user
       }
@@ -208,12 +208,12 @@ export class EntityExtractionService {
   private extractDomainFromRawEvent(rawEvent: Record<string, unknown>): string | null {
     const data = rawEvent['data'] as Record<string, unknown> | undefined
     if (data) {
-      const hostname = data['hostname']
+      const { hostname } = data
       if (typeof hostname === 'string' && hostname.includes('.')) {
         return hostname
       }
 
-      const query = data['query']
+      const { query } = data
       if (typeof query === 'string' && query.includes('.')) {
         return query
       }

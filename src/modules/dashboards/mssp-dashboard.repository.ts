@@ -14,55 +14,55 @@ export class MsspDashboardRepository {
   }
 
   async countAlertsByTenant(tenantIds: string[]): Promise<TenantAlertCounts[]> {
-    const results: TenantAlertCounts[] = []
+    const results = await Promise.all(
+      tenantIds.map(async tenantId => {
+        const [tenant, alertCount, criticalAlerts] = await Promise.all([
+          this.prisma.tenant.findUnique({
+            where: { id: tenantId },
+            select: { name: true },
+          }),
+          this.prisma.alert.count({
+            where: { tenantId },
+          }),
+          this.prisma.alert.count({
+            where: { tenantId, severity: 'critical' },
+          }),
+        ])
 
-    for (const tenantId of tenantIds) {
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { name: true },
+        return {
+          tenantId,
+          tenantName: tenant?.name ?? 'Unknown',
+          alertCount,
+          criticalAlerts,
+        }
       })
-
-      const alertCount = await this.prisma.alert.count({
-        where: { tenantId },
-      })
-
-      const criticalAlerts = await this.prisma.alert.count({
-        where: { tenantId, severity: 'critical' },
-      })
-
-      results.push({
-        tenantId,
-        tenantName: tenant?.name ?? 'Unknown',
-        alertCount,
-        criticalAlerts,
-      })
-    }
+    )
 
     return results
   }
 
   async countOpenCasesByTenant(tenantIds: string[]): Promise<TenantCaseCounts[]> {
-    const results: TenantCaseCounts[] = []
-
-    for (const tenantId of tenantIds) {
-      const openCases = await this.prisma.case.count({
-        where: { tenantId, status: { in: ['open', 'in_progress'] } },
+    const results = await Promise.all(
+      tenantIds.map(async tenantId => {
+        const openCases = await this.prisma.case.count({
+          where: { tenantId, status: { in: ['open', 'in_progress'] } },
+        })
+        return { tenantId, openCases }
       })
-      results.push({ tenantId, openCases })
-    }
+    )
 
     return results
   }
 
   async countActiveHuntsByTenant(tenantIds: string[]): Promise<TenantHuntCounts[]> {
-    const results: TenantHuntCounts[] = []
-
-    for (const tenantId of tenantIds) {
-      const activeHunts = await this.prisma.huntSession.count({
-        where: { tenantId, status: 'running' },
+    const results = await Promise.all(
+      tenantIds.map(async tenantId => {
+        const activeHunts = await this.prisma.huntSession.count({
+          where: { tenantId, status: 'running' },
+        })
+        return { tenantId, activeHunts }
       })
-      results.push({ tenantId, activeHunts })
-    }
+    )
 
     return results
   }

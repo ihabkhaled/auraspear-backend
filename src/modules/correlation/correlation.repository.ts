@@ -67,7 +67,7 @@ export class CorrelationRepository {
   async update(params: {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
-  }): Promise<CorrelationRule> {
+  }): Promise<CorrelationRule | null> {
     // Use updateMany to enforce tenantId in WHERE clause (Prisma .update() only
     // accepts unique fields, so tenantId would be silently ignored).
     await this.prisma.correlationRule.updateMany({
@@ -75,21 +75,15 @@ export class CorrelationRepository {
       data: params.data as Prisma.CorrelationRuleUncheckedUpdateManyInput,
     })
 
-    const updated = await this.prisma.correlationRule.findFirst({
+    return this.prisma.correlationRule.findFirst({
       where: { id: params.where.id, tenantId: params.where.tenantId },
     })
-
-    if (!updated) {
-      throw new Error(`CorrelationRule ${params.where.id} not found after update`)
-    }
-
-    return updated
   }
 
   async updateWithTenant(params: {
     where: { id: string; tenantId: string }
     data: Prisma.CorrelationRuleUpdateInput
-  }): Promise<CorrelationRule & { tenant: { name: string } }> {
+  }): Promise<(CorrelationRule & { tenant: { name: string } }) | null> {
     // Use updateMany to enforce tenantId in WHERE clause (Prisma .update() only
     // accepts unique fields, so tenantId would be silently ignored).
     await this.prisma.correlationRule.updateMany({
@@ -97,16 +91,10 @@ export class CorrelationRepository {
       data: params.data as Prisma.CorrelationRuleUncheckedUpdateManyInput,
     })
 
-    const updated = await this.prisma.correlationRule.findFirst({
+    return this.prisma.correlationRule.findFirst({
       where: { id: params.where.id, tenantId: params.where.tenantId },
       include: { tenant: { select: { name: true } } },
     })
-
-    if (!updated) {
-      throw new Error(`CorrelationRule ${params.where.id} not found after update`)
-    }
-
-    return updated
   }
 
   async deleteByIdAndTenantId(id: string, tenantId: string): Promise<Prisma.BatchPayload> {

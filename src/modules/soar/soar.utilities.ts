@@ -1,7 +1,13 @@
 import { SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdatePlaybookDto } from './dto/update-playbook.dto'
-import type { SoarPlaybookRecord, SoarExecutionRecord, SoarStats } from './soar.types'
+import type {
+  SoarPlaybookRecord,
+  SoarExecutionRecord,
+  SoarStats,
+  PlaybookWithTenant,
+  ExecutionWithPlaybook,
+} from './soar.types'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -78,23 +84,6 @@ export function buildPlaybookUpdateData(dto: UpdatePlaybookDto): Record<string, 
 /* RECORD MAPPING                                                    */
 /* ---------------------------------------------------------------- */
 
-interface PlaybookWithTenant {
-  id: string
-  tenantId: string
-  name: string
-  description: string | null
-  status: string
-  triggerType: string
-  triggerConditions: unknown
-  steps: unknown
-  executionCount: number
-  lastExecutedAt: Date | null
-  createdBy: string
-  createdAt: Date
-  updatedAt: Date
-  tenant: { name: string }
-}
-
 export function buildPlaybookRecord(
   playbook: PlaybookWithTenant,
   createdByName: string | null
@@ -119,23 +108,6 @@ export function buildPlaybookRecord(
     createdAt: playbook.createdAt,
     updatedAt: playbook.updatedAt,
   }
-}
-
-interface ExecutionWithPlaybook {
-  id: string
-  playbookId: string
-  tenantId: string
-  status: string
-  triggeredBy: string
-  triggerSource: string | null
-  stepsCompleted: number
-  totalSteps: number
-  startedAt: Date
-  completedAt: Date | null
-  output: unknown
-  error: string | null
-  createdAt: Date
-  playbook: { name: string; triggerType: string }
 }
 
 function computeDurationSeconds(startedAt: Date, completedAt: Date | null): number | null {

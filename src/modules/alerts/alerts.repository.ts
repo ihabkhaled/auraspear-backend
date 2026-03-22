@@ -29,7 +29,7 @@ export class AlertsRepository {
     id: string,
     tenantId: string,
     data: Prisma.AlertUpdateInput
-  ): Promise<AlertRecord> {
+  ): Promise<AlertRecord | null> {
     // Use updateMany to enforce tenantId in WHERE clause (Prisma .update() only
     // accepts unique fields, so tenantId would be silently ignored).
     await this.prisma.alert.updateMany({
@@ -37,15 +37,9 @@ export class AlertsRepository {
       data: data as Prisma.AlertUncheckedUpdateManyInput,
     })
 
-    const updated = await this.prisma.alert.findFirst({
+    return this.prisma.alert.findFirst({
       where: { id, tenantId },
     })
-
-    if (!updated) {
-      throw new Error(`Alert ${id} not found after update`)
-    }
-
-    return updated
   }
 
   async upsertByTenantAndExternalId(

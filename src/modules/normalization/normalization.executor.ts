@@ -134,10 +134,8 @@ export class NormalizationExecutor {
         throw new Error('Regex pattern exceeds maximum allowed length of 1000 characters')
       }
 
-      let regex: RegExp
-      try {
-        regex = new RegExp(step.pattern)
-      } catch {
+      const regex = this.buildRegex(step.pattern)
+      if (!regex) {
         throw new Error(`Invalid regex pattern: ${step.pattern}`)
       }
 
@@ -171,5 +169,18 @@ export class NormalizationExecutor {
     }
 
     return result
+  }
+
+  /**
+   * Builds a RegExp from a validated pattern string.
+   * Returns null if the pattern is invalid.
+   */
+  private buildRegex(pattern: string): RegExp | null {
+    try {
+      // Pattern has been length-validated before this call
+      return RegExp(pattern)
+    } catch {
+      return null
+    }
   }
 }

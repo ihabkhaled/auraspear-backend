@@ -1,5 +1,7 @@
+import { IOC_TYPE_GROUPS } from './intel.constants'
 import { SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
+import type { IOCMatch } from './intel.types'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -68,11 +70,6 @@ export function buildIOCSearchWhere(
 /* ---------------------------------------------------------------- */
 /* IOC TYPE EXPANSION                                                */
 /* ---------------------------------------------------------------- */
-
-const IOC_TYPE_GROUPS = new Map<string, string[]>([
-  ['ip', ['ip-src', 'ip-dst']],
-  ['hash', ['md5', 'sha1', 'sha256']],
-])
 
 export function expandIocTypeFilter(type: string): string[] {
   return IOC_TYPE_GROUPS.get(type) ?? [type]
@@ -241,13 +238,6 @@ export function buildIOCUpserts(
 /* ---------------------------------------------------------------- */
 /* IOC MATCHING                                                      */
 /* ---------------------------------------------------------------- */
-
-interface IOCMatch {
-  iocValue: string
-  iocType: string
-  source: string
-  severity: string
-}
 
 export function collectAlertIPs(
   alerts: Array<{ sourceIp: string | null; destinationIp: string | null }>

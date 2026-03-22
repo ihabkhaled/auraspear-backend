@@ -17,7 +17,8 @@ export class AiCaseCopilotService {
     caseId: string,
     tenantId: string,
     taskType: AiFeatureKey,
-    user: JwtPayload
+    user: JwtPayload,
+    connector?: string
   ): Promise<AiResponse> {
     const caseItem = await this.casesRepository.findCaseByIdAndTenant(caseId, tenantId)
     if (!caseItem) {
@@ -50,6 +51,7 @@ export class AiCaseCopilotService {
       userEmail: user.email,
       featureKey: taskType,
       context,
+      connector,
     })
   }
 }

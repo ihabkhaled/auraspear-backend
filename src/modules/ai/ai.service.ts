@@ -558,10 +558,9 @@ export class AiService {
     }
 
     // Replace specific {{key}} placeholders
-    for (const key of Object.keys(context)) {
+    for (const [key, value] of Object.entries(context)) {
       const placeholder = `{{${key}}}`
       if (result.includes(placeholder)) {
-        const value = context[key]
         const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
         result = result.replaceAll(placeholder, stringValue)
       }

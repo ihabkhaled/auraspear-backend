@@ -1,9 +1,11 @@
+import { VALID_STEP_TYPES } from './normalization.constants'
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
 import type {
   NormalizationPipelineRecord,
   NormalizationStats,
   NormalizationStep,
+  PipelineEntity,
 } from './normalization.types'
 
 /* ---------------------------------------------------------------- */
@@ -78,22 +80,6 @@ export function buildPipelineUpdateData(dto: UpdatePipelineDto): Record<string, 
 /* RECORD MAPPING                                                    */
 /* ---------------------------------------------------------------- */
 
-interface PipelineEntity {
-  id: string
-  tenantId: string
-  name: string
-  description: string | null
-  sourceType: string
-  status: string
-  parserConfig: unknown
-  fieldMappings: unknown
-  processedCount: bigint | number
-  errorCount: number
-  lastProcessedAt: Date | null
-  createdAt: Date
-  updatedAt: Date
-}
-
 export function buildPipelineRecord(pipeline: PipelineEntity): NormalizationPipelineRecord {
   return {
     id: pipeline.id,
@@ -115,8 +101,6 @@ export function buildPipelineRecord(pipeline: PipelineEntity): NormalizationPipe
 /* ---------------------------------------------------------------- */
 /* PIPELINE STEP EXTRACTION                                          */
 /* ---------------------------------------------------------------- */
-
-const VALID_STEP_TYPES = new Set(['rename', 'map', 'extract', 'drop', 'default'])
 
 function isValidStepType(value: unknown): value is NormalizationStep['type'] {
   return typeof value === 'string' && VALID_STEP_TYPES.has(value)

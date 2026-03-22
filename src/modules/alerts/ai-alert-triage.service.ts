@@ -17,7 +17,8 @@ export class AiAlertTriageService {
     alertId: string,
     tenantId: string,
     taskType: AiFeatureKey,
-    user: JwtPayload
+    user: JwtPayload,
+    connector?: string
   ): Promise<AiResponse> {
     const alert = await this.alertsRepository.findFirstByIdAndTenant(alertId, tenantId)
     if (!alert) {
@@ -40,6 +41,7 @@ export class AiAlertTriageService {
       userEmail: user.email,
       featureKey: taskType,
       context,
+      connector,
     })
   }
 }

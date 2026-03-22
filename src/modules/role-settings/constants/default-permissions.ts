@@ -431,6 +431,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SOAR_VIEW,
     Permission.AI_AGENTS_VIEW,
     Permission.AI_AGENTS_EXECUTE,
+    Permission.AI_CONFIG_VIEW,
     Permission.VULNERABILITIES_VIEW,
     Permission.ATTACK_PATHS_VIEW,
     Permission.UEBA_VIEW,

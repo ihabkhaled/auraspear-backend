@@ -6,12 +6,9 @@
  */
 
 import { SortOrder } from '../enums'
+import type { SortDirection } from './query.types'
 
-/* ---------------------------------------------------------------- */
-/* SORT ORDER                                                        */
-/* ---------------------------------------------------------------- */
-
-export type SortDirection = SortOrder
+export type { SortDirection } from './query.types'
 
 /**
  * Coerce an arbitrary string into a Prisma-compatible sort direction.
@@ -21,10 +18,6 @@ export type SortDirection = SortOrder
 export function toSortOrder(sortOrder?: string): SortDirection {
   return sortOrder === SortOrder.ASC ? SortOrder.ASC : SortOrder.DESC
 }
-
-/* ---------------------------------------------------------------- */
-/* OPTIONAL WHERE-CLAUSE FILTERS                                     */
-/* ---------------------------------------------------------------- */
 
 /**
  * Append a set of optional scalar filters to an existing `where` object.

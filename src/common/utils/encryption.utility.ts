@@ -1,9 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-
-const ALGORITHM = 'aes-256-gcm'
-const IV_LENGTH = 16
-const AUTH_TAG_LENGTH = 16
-const KEY_HEX_LENGTH = 64
+import { ALGORITHM, IV_LENGTH, AUTH_TAG_LENGTH, KEY_HEX_LENGTH } from './encryption.constants'
 
 export function encrypt(plaintext: string, keyHex: string): string {
   if (keyHex.length !== KEY_HEX_LENGTH || !/^[\da-f]+$/i.test(keyHex)) {

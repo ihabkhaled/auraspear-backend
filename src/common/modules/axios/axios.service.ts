@@ -100,14 +100,15 @@ export class AxiosService {
       // Not JSON — keep as raw string
     }
 
-    const responseHeaders: Record<string, string> = {}
+    const responseHeaders = new Map<string, string>()
     for (const [key, value] of Object.entries(response.headers as Record<string, unknown>)) {
       if (typeof value === 'string') {
-        responseHeaders[key] = value
+        responseHeaders.set(key, value)
       }
     }
+    const responseHeadersObject = Object.fromEntries(responseHeaders)
 
-    return { status: response.status, data, headers: responseHeaders, latencyMs }
+    return { status: response.status, data, headers: responseHeadersObject, latencyMs }
   }
 
   /* ---------------------------------------------------------------- */

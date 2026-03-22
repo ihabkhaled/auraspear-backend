@@ -28,6 +28,11 @@ export class AiReportController {
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiReportService.generateExecutiveReport(tenantId, dto.timeRange, user)
+    return this.aiReportService.generateExecutiveReport(
+      tenantId,
+      dto.timeRange,
+      user,
+      dto.connector
+    )
   }
 }

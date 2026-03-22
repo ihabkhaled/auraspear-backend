@@ -1,13 +1,12 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaClient } from '@prisma/client'
-
-const MAX_RETRIES = 5
-const BASE_DELAY_MS = 2000
-
-/** Default connection pool size: num_cpus * 2 + 1 (Prisma default) capped at a sane max */
-const DEFAULT_CONNECTION_LIMIT = 20
-const DEFAULT_POOL_TIMEOUT_SECONDS = 10
+import {
+  MAX_RETRIES,
+  BASE_DELAY_MS,
+  DEFAULT_CONNECTION_LIMIT,
+  DEFAULT_POOL_TIMEOUT_SECONDS,
+} from './prisma.constants'
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {

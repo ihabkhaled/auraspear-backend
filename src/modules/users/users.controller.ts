@@ -11,23 +11,9 @@ import { Permission } from '../../common/enums'
 import { AuthGuard } from '../../common/guards/auth.guard'
 import { TenantGuard } from '../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
+import type { UserProfile, UserPreferenceOrDefault } from './users.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
-import type { Tenant, User, UserPreference } from '@prisma/client'
-
-type UserProfile = Omit<User, 'passwordHash'> & {
-  tenant: Tenant | null
-  preference: UserPreference | null
-}
-
-type UserPreferenceOrDefault =
-  | UserPreference
-  | {
-      userId: string
-      theme: string
-      language: string
-      notificationsEmail: boolean
-      notificationsInApp: boolean
-    }
+import type { UserPreference } from '@prisma/client'
 
 @ApiTags('users')
 @ApiBearerAuth()

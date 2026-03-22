@@ -31,6 +31,10 @@ export interface ConnectorStats {
   untestedConnectors: number
 }
 
+export interface ConnectorTestable {
+  testConnection(config: Record<string, unknown>): Promise<{ ok: boolean; details: string }>
+}
+
 /** Base test result returned by individual connector adapters. */
 export interface TestResult {
   ok: boolean

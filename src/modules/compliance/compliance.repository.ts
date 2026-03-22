@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
+import type { ComplianceFrameworkWithTenant } from './compliance.types'
 import type { Prisma, ComplianceFramework, ComplianceControl } from '@prisma/client'
-
-type ComplianceFrameworkWithTenant = ComplianceFramework & { tenant: { name: string } }
 
 @Injectable()
 export class ComplianceRepository {

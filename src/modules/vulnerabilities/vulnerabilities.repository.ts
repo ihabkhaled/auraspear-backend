@@ -106,11 +106,9 @@ export class VulnerabilitiesRepository {
     id: string,
     tenantId: string,
     data: Prisma.VulnerabilityUpdateInput
-  ): Promise<
-    Prisma.VulnerabilityGetPayload<{
-      include: { tenant: { select: { name: true } } }
-    }>
-  > {
+  ): Promise<Prisma.VulnerabilityGetPayload<{
+    include: { tenant: { select: { name: true } } }
+  }> | null> {
     // Prisma update requires a unique where, so we use updateMany for tenant scoping
     // then fetch the updated record. This ensures tenantId is always in the where clause.
     await this.prisma.vulnerability.updateMany({
@@ -118,16 +116,10 @@ export class VulnerabilitiesRepository {
       data: data as Prisma.VulnerabilityUncheckedUpdateManyInput,
     })
 
-    const updated = await this.prisma.vulnerability.findFirst({
+    return this.prisma.vulnerability.findFirst({
       where: { id, tenantId },
       include: { tenant: { select: { name: true } } },
     })
-
-    if (!updated) {
-      throw new Error(`Vulnerability ${id} not found after update`)
-    }
-
-    return updated
   }
 
   async deleteByIdAndTenant(id: string, tenantId: string): Promise<void> {

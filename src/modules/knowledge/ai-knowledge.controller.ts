@@ -32,7 +32,8 @@ export class AiKnowledgeController {
       user.tenantId,
       user.sub,
       user.email,
-      dto.description
+      dto.description,
+      dto.connector
     )
   }
 
@@ -42,6 +43,12 @@ export class AiKnowledgeController {
     @Body(new ZodValidationPipe(AiSearchKnowledgeSchema)) dto: AiSearchKnowledgeDto,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiKnowledgeService.searchWithAi(user.tenantId, user.sub, user.email, dto.query)
+    return this.aiKnowledgeService.searchWithAi(
+      user.tenantId,
+      user.sub,
+      user.email,
+      dto.query,
+      dto.connector
+    )
   }
 }

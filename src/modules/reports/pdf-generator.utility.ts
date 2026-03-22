@@ -196,7 +196,7 @@ function addTable(
     for (let colIndex = 0; colIndex < colCount; colIndex++) {
       const col = table.columns.at(colIndex)
       if (col) {
-        const cellValue = String(row[col] ?? '')
+        const cellValue = String(Reflect.get(row, col) ?? '')
         document.text(cellValue, startX + colIndex * colWidth + 4, currentY + 2, {
           width: colWidth - 8,
           height: 14,

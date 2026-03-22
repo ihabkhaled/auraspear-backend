@@ -73,6 +73,10 @@ export class AlertsService {
       acknowledgedAt: new Date(),
     })
 
+    if (!updated) {
+      throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
+    }
+
     this.logSuccess('acknowledge', tenantId, { alertId: id })
     return updated
   }
@@ -84,6 +88,10 @@ export class AlertsService {
     const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
       status: AlertStatus.IN_PROGRESS,
     })
+
+    if (!updated) {
+      throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
+    }
 
     this.logSuccess('investigate', tenantId, { alertId: id })
     return updated
@@ -101,6 +109,10 @@ export class AlertsService {
     const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
       status: AlertStatus.IN_PROGRESS,
     })
+
+    if (!updated) {
+      throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
+    }
 
     this.logSuccess('escalate', tenantId, { alertId: id, reason })
     return updated
@@ -121,6 +133,10 @@ export class AlertsService {
       closedAt: new Date(),
       closedBy: email,
     })
+
+    if (!updated) {
+      throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
+    }
 
     this.logSuccess('close', tenantId, { alertId: id, resolution })
     return updated

@@ -15,7 +15,8 @@ export class AiKnowledgeService {
     tenantId: string,
     userId: string,
     userEmail: string,
-    description: string
+    description: string,
+    connector?: string
   ): Promise<AiResponse> {
     return this.aiService.executeAiTask({
       tenantId,
@@ -23,6 +24,7 @@ export class AiKnowledgeService {
       userEmail,
       featureKey: AiFeatureKey.KNOWLEDGE_GENERATE_RUNBOOK,
       context: { description },
+      connector,
     })
   }
 
@@ -30,7 +32,8 @@ export class AiKnowledgeService {
     tenantId: string,
     userId: string,
     userEmail: string,
-    query: string
+    query: string,
+    connector?: string
   ): Promise<AiResponse> {
     const existingRunbooks = await this.knowledgeRepository.search(tenantId, query, 20)
     const runbookTitles = existingRunbooks.map(r => r.title)
@@ -41,6 +44,7 @@ export class AiKnowledgeService {
       userEmail,
       featureKey: AiFeatureKey.KNOWLEDGE_SEARCH,
       context: { query, existingRunbooks: JSON.stringify(runbookTitles) },
+      connector,
     })
   }
 }

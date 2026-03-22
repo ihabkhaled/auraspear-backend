@@ -1019,42 +1019,41 @@ export class CasesService {
     dto: CreateCaseDto,
     linkedAlerts: string[],
     user: JwtPayload
-  ): Promise<Awaited<ReturnType<CasesRepository['createCaseTransaction']>>> {
-    try {
-      return await this.casesRepository.createCaseTransaction(
-        {
-          tenantId: user.tenantId,
-          cycleId: dto.cycleId,
-          title: dto.title,
-          description: dto.description,
-          severity: dto.severity,
-          status: CaseStatus.OPEN,
-          ownerUserId: dto.ownerUserId ?? null,
-          createdBy: user.email,
-          linkedAlerts,
-        },
-        { type: CaseTimelineType.CREATED, actor: user.email, description: '' },
-        linkedAlerts.length > 0
-          ? {
-              type: CaseTimelineType.ALERT_LINKED,
-              actor: user.email,
-              description: JSON.stringify({
-                key: 'alertsLinkedAtCreation',
-                params: { count: String(linkedAlerts.length) },
-              }),
-            }
-          : undefined
+  ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['createCaseTransaction']>>>> {
+    const result = await this.casesRepository.createCaseTransaction(
+      {
+        tenantId: user.tenantId,
+        cycleId: dto.cycleId,
+        title: dto.title,
+        description: dto.description,
+        severity: dto.severity,
+        status: CaseStatus.OPEN,
+        ownerUserId: dto.ownerUserId ?? null,
+        createdBy: user.email,
+        linkedAlerts,
+      },
+      { type: CaseTimelineType.CREATED, actor: user.email, description: '' },
+      linkedAlerts.length > 0
+        ? {
+            type: CaseTimelineType.ALERT_LINKED,
+            actor: user.email,
+            description: JSON.stringify({
+              key: 'alertsLinkedAtCreation',
+              params: { count: String(linkedAlerts.length) },
+            }),
+          }
+        : undefined
+    )
+
+    if (!result) {
+      throw new BusinessException(
+        400,
+        'The specified cycle does not belong to this tenant',
+        'errors.cases.invalidCycle'
       )
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'INVALID_CYCLE') {
-        throw new BusinessException(
-          400,
-          'The specified cycle does not belong to this tenant',
-          'errors.cases.invalidCycle'
-        )
-      }
-      throw error
     }
+
+    return result
   }
 
   private async executeUpdateCase(
@@ -1062,16 +1061,20 @@ export class CasesService {
     tenantId: string,
     updateData: Record<string, unknown>,
     timeline: { type: string; actor: string; description: string }
-  ): Promise<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>> {
-    try {
-      return await this.casesRepository.updateCaseTransaction(id, tenantId, updateData, timeline)
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'CASE_NOT_FOUND') {
-        this.logWarn('updateCase', { caseId: id })
-        throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
-      }
-      throw error
+  ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>>> {
+    const result = await this.casesRepository.updateCaseTransaction(
+      id,
+      tenantId,
+      updateData,
+      timeline
+    )
+
+    if (!result) {
+      this.logWarn('updateCase', { caseId: id })
+      throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
+
+    return result
   }
 
   private async executeLinkAlert(
@@ -1079,28 +1082,27 @@ export class CasesService {
     user: JwtPayload,
     existingAlerts: string[],
     dto: LinkAlertDto
-  ): Promise<Awaited<ReturnType<CasesRepository['linkAlertTransaction']>>> {
-    try {
-      return await this.casesRepository.linkAlertTransaction(
-        caseId,
-        user.tenantId,
-        [...existingAlerts, dto.alertId],
-        {
-          type: CaseTimelineType.ALERT_LINKED,
-          actor: user.email,
-          description: JSON.stringify({
-            key: 'alertLinked',
-            params: { alertId: dto.alertId, indexName: dto.indexName },
-          }),
-        }
-      )
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'CASE_NOT_FOUND') {
-        this.logWarn('linkAlert', { caseId })
-        throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
+  ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['linkAlertTransaction']>>>> {
+    const result = await this.casesRepository.linkAlertTransaction(
+      caseId,
+      user.tenantId,
+      [...existingAlerts, dto.alertId],
+      {
+        type: CaseTimelineType.ALERT_LINKED,
+        actor: user.email,
+        description: JSON.stringify({
+          key: 'alertLinked',
+          params: { alertId: dto.alertId, indexName: dto.indexName },
+        }),
       }
-      throw error
+    )
+
+    if (!result) {
+      this.logWarn('linkAlert', { caseId })
+      throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
     }
+
+    return result
   }
 
   /* ---------------------------------------------------------------- */

@@ -1,11 +1,10 @@
 import { timingSafeEqual } from 'node:crypto'
 import { type CanActivate, type ExecutionContext, Injectable, Logger } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
+import { STATE_CHANGING_METHODS } from './csrf.constants'
 import { SKIP_CSRF_KEY } from '../decorators/skip-csrf.decorator'
 import { BusinessException } from '../exceptions/business.exception'
 import type { Request } from 'express'
-
-const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 @Injectable()
 export class CsrfGuard implements CanActivate {

@@ -1,46 +1,12 @@
-import { DashboardDensity, DashboardPanelKey } from '../../common/enums'
+import { DEFAULT_PREFERENCES } from './users.constants'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
-import type { Tenant, User, UserPreference } from '@prisma/client'
+import type { UserProfile, UserWithMemberships } from './users.types'
 
-/* ---------------------------------------------------------------- */
-/* DEFAULT PREFERENCES                                               */
-/* ---------------------------------------------------------------- */
-
-export const DEFAULT_PREFERENCES = {
-  theme: 'system',
-  language: 'en',
-  dashboardDensity: DashboardDensity.COMFORTABLE,
-  collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
-  notificationsEmail: true,
-  notificationsInApp: true,
-  notifyCriticalAlerts: true,
-  notifyHighAlerts: true,
-  notifyCaseAssignments: true,
-  notifyIncidentUpdates: true,
-  notifyComplianceAlerts: true,
-  notifyCaseUpdates: true,
-  notifyCaseComments: true,
-  notifyCaseActivity: true,
-  notifyUserManagement: true,
-  retentionAlerts: '90',
-  retentionLogs: '90',
-  retentionIncidents: '365',
-  retentionAuditLogs: '365',
-}
+export { DEFAULT_PREFERENCES }
 
 /* ---------------------------------------------------------------- */
 /* PROFILE MAPPING                                                   */
 /* ---------------------------------------------------------------- */
-
-export type UserProfile = Omit<User, 'passwordHash'> & {
-  tenant: Tenant | null
-  preference: UserPreference | null
-}
-
-interface UserWithMemberships extends User {
-  memberships: Array<{ tenant: Tenant }>
-  preference: UserPreference | null
-}
 
 export function mapUserToProfile(user: UserWithMemberships): UserProfile {
   const { passwordHash: _passwordHash, memberships, ...rest } = user

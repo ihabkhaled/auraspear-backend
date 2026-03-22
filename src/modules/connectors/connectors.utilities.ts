@@ -5,7 +5,9 @@ import type {
   ConnectorResponse,
   ConnectorRow,
   ConnectorStats,
+  VelociraptorAuthOptions,
 } from './connectors.types'
+import type { AxiosRequestOptions } from '../../common/modules/axios'
 import type { ConnectorConfig } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -314,4 +316,51 @@ export function extractChatCompletionText(
   }
 
   return ''
+}
+
+/* ---------------------------------------------------------------- */
+/* VELOCIRAPTOR HELPERS                                               */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Resolves the Velociraptor base URL from config.
+ * Prefers `apiUrl`, falls back to `baseUrl`.
+ */
+export function resolveVelociraptorBaseUrl(config: Record<string, unknown>): string | undefined {
+  return (config.apiUrl ?? config.baseUrl) as string | undefined
+}
+
+/**
+ * Builds authentication options for Velociraptor requests.
+ *
+ * Supports two auth modes:
+ * 1. **mTLS** (preferred for API port 8001) — uses `clientCert` + `clientKey`
+ * 2. **Basic auth** (GUI port 8889) — uses `username` + `password`
+ */
+export function buildVelociraptorAuthOptions(
+  config: Record<string, unknown>,
+  basicAuthFunction: (username: string, password: string) => string
+): VelociraptorAuthOptions {
+  const clientCert = config.clientCert as string | undefined
+  const clientKey = config.clientKey as string | undefined
+  const caCert = config.caCert as string | undefined
+  const username = config.username as string | undefined
+  const password = config.password as string | undefined
+
+  const headers: Record<string, string> = {}
+  const httpOptions: Partial<AxiosRequestOptions> = {}
+
+  if (clientCert && clientKey) {
+    // mTLS authentication for the gRPC gateway API (port 8001)
+    httpOptions.clientCert = clientCert
+    httpOptions.clientKey = clientKey
+    if (caCert) {
+      httpOptions.caCert = caCert
+    }
+  } else if (username && password) {
+    // Basic auth for the GUI REST API (port 8889)
+    headers.Authorization = basicAuthFunction(username, password)
+  }
+
+  return { headers, httpOptions }
 }

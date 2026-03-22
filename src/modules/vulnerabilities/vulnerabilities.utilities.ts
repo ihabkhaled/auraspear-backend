@@ -1,4 +1,5 @@
-import { PatchStatus, SortOrder, VulnerabilitySeverity } from '../../common/enums'
+import { VALID_PATCH_STATUSES, VALID_SEVERITIES } from './vulnerabilities.constants'
+import { PatchStatus, SortOrder } from '../../common/enums'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type { VulnerabilityStats } from './vulnerabilities.types'
 import type {
@@ -6,14 +7,6 @@ import type {
   VulnerabilitySeverity as PrismaVulnerabilitySeverity,
   PatchStatus as PrismaPatchStatus,
 } from '@prisma/client'
-
-/* ---------------------------------------------------------------- */
-/* CONSTANTS                                                         */
-/* ---------------------------------------------------------------- */
-
-const VALID_SEVERITIES = new Set<string>(Object.values(VulnerabilitySeverity))
-
-const VALID_PATCH_STATUSES = new Set<string>(Object.values(PatchStatus))
 
 /* ---------------------------------------------------------------- */
 /* QUERY BUILDING                                                    */

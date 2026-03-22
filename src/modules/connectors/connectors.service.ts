@@ -31,14 +31,11 @@ import { resolveAndValidateUrl } from '../../common/utils/ssrf.utility'
 import type {
   ConnectorResponse,
   ConnectorStats,
+  ConnectorTestable,
   ConnectorTestResult as TestResult,
 } from './connectors.types'
 import type { CreateConnectorDto, UpdateConnectorDto } from './dto/connector.dto'
 import type { ConnectorConfig } from '@prisma/client'
-
-interface ConnectorTestable {
-  testConnection(config: Record<string, unknown>): Promise<{ ok: boolean; details: string }>
-}
 
 @Injectable()
 export class ConnectorsService {

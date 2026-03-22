@@ -250,6 +250,14 @@ export class VulnerabilitiesService {
 
     const vulnerability = await this.repository.updateByIdAndTenant(id, user.tenantId, updateData)
 
+    if (!vulnerability) {
+      throw new BusinessException(
+        404,
+        `Vulnerability ${id} not found after update`,
+        'errors.vulnerabilities.notFound'
+      )
+    }
+
     this.appLogger.info(`Updated vulnerability id=${id}`, {
       feature: AppLogFeature.VULNERABILITIES,
       action: 'updateVulnerability',

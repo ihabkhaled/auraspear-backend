@@ -221,6 +221,10 @@ export class CorrelationService {
       data: buildRuleUpdateData(dto),
     })
 
+    if (!rule) {
+      throw new BusinessException(404, 'Rule not found after update', 'errors.correlation.notFound')
+    }
+
     const creator = await this.repository.findUserNameByEmail(rule.createdBy)
 
     this.logger.log(`User ${user.email} updated correlation rule ${id}`)
@@ -276,6 +280,10 @@ export class CorrelationService {
       where: { id, tenantId: user.tenantId },
       data: { status: newStatus },
     })
+
+    if (!rule) {
+      throw new BusinessException(404, 'Rule not found after toggle', 'errors.correlation.notFound')
+    }
 
     const creator = await this.repository.findUserNameByEmail(rule.createdBy)
 

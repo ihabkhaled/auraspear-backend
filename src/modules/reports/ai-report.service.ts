@@ -22,7 +22,8 @@ export class AiReportService {
   async generateExecutiveReport(
     tenantId: string,
     timeRange: string,
-    user: JwtPayload
+    user: JwtPayload,
+    connector?: string
   ): Promise<AiResponse> {
     this.appLogger.info('AI executive report requested', {
       feature: AppLogFeature.AI,
@@ -63,6 +64,7 @@ export class AiReportService {
         criticalAlerts,
         generatedAt: now.toISOString(),
       },
+      connector,
     })
   }
 }

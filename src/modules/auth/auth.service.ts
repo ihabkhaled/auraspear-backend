@@ -289,6 +289,56 @@ export class AuthService {
     this.logSuccess('logout', { metadata: { family } })
   }
 
+  async performLogout(accessUser: JwtPayload | undefined, refreshToken: string): Promise<void> {
+    if (!accessUser?.jti || !accessUser?.exp) {
+      throw new BusinessException(
+        401,
+        'Access token missing required claims',
+        'errors.auth.invalidAccessToken'
+      )
+    }
+
+    const refreshPayload = await this.verifyRefreshToken(refreshToken)
+    if (!refreshPayload.jti || !refreshPayload.exp) {
+      throw new BusinessException(
+        401,
+        'Refresh token missing required claims',
+        'errors.auth.invalidRefreshToken'
+      )
+    }
+
+    if (refreshPayload.sub !== accessUser.sub) {
+      throw new BusinessException(
+        403,
+        'Refresh token does not belong to this user',
+        'errors.auth.tokenMismatch'
+      )
+    }
+
+    await this.logout(
+      accessUser.jti,
+      refreshPayload.jti,
+      accessUser.exp,
+      refreshPayload.exp,
+      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined,
+      accessUser.sub
+    )
+  }
+
+  resolveRefreshToken(cookieToken: string | undefined, bodyToken: string | undefined): string {
+    const refreshToken = bodyToken ?? cookieToken
+
+    if (!refreshToken) {
+      throw new BusinessException(
+        400,
+        'Refresh token is required',
+        'errors.auth.refreshTokenRequired'
+      )
+    }
+
+    return refreshToken
+  }
+
   async validateUserActive(userId: string): Promise<void> {
     const user = await this.authRepository.findUserByIdWithActiveMembershipCheck(
       userId,

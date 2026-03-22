@@ -2,10 +2,8 @@ import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { SoarExecutionStatus } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import type { PlaybookWithTenantPrisma, ExecutionWithPlaybookPrisma } from './soar.types'
 import type { SoarPlaybook, SoarExecution } from '@prisma/client'
-
-type PlaybookWithTenant = SoarPlaybook & { tenant: { name: string } }
-type ExecutionWithPlaybook = SoarExecution & { playbook: { name: string; triggerType: string } }
 
 @Injectable()
 export class SoarRepository {
@@ -24,7 +22,7 @@ export class SoarRepository {
     skip: number
     take: number
     orderBy: Prisma.SoarPlaybookOrderByWithRelationInput
-  }): Promise<PlaybookWithTenant[]> {
+  }): Promise<PlaybookWithTenantPrisma[]> {
     return this.prisma.soarPlaybook.findMany({
       ...params,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
@@ -37,7 +35,7 @@ export class SoarRepository {
 
   async findFirstPlaybookWithTenant(
     where: Prisma.SoarPlaybookWhereInput
-  ): Promise<PlaybookWithTenant | null> {
+  ): Promise<PlaybookWithTenantPrisma | null> {
     return this.prisma.soarPlaybook.findFirst({
       where,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
@@ -52,7 +50,7 @@ export class SoarRepository {
 
   async createPlaybookWithTenant(
     data: Prisma.SoarPlaybookUncheckedCreateInput
-  ): Promise<PlaybookWithTenant> {
+  ): Promise<PlaybookWithTenantPrisma> {
     return this.prisma.soarPlaybook.create({
       data,
       include: SoarRepository.PLAYBOOK_WITH_TENANT,
@@ -83,7 +81,7 @@ export class SoarRepository {
     skip: number
     take: number
     orderBy: Prisma.SoarExecutionOrderByWithRelationInput
-  }): Promise<ExecutionWithPlaybook[]> {
+  }): Promise<ExecutionWithPlaybookPrisma[]> {
     return this.prisma.soarExecution.findMany({
       ...params,
       include: SoarRepository.EXECUTION_WITH_PLAYBOOK,
@@ -120,7 +118,7 @@ export class SoarRepository {
     playbookId: string
     tenantId: string
     triggeredBy: string
-  }): Promise<ExecutionWithPlaybook> {
+  }): Promise<ExecutionWithPlaybookPrisma> {
     return this.prisma.$transaction(async tx => {
       const execution = await tx.soarExecution.create({
         data: {

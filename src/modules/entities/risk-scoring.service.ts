@@ -144,17 +144,21 @@ export class RiskScoringService {
 
   async recalculateForTenant(tenantId: string): Promise<number> {
     const entities = await this.entitiesRepository.findAllByTenant(tenantId)
-    let updatedCount = 0
 
-    for (const entity of entities) {
-      const relations = await this.entitiesRepository.findRelationsForEntity(entity.id, tenantId)
-      const newScore = this.calculateRiskScore(entity, relations.length)
+    const updateResults = await Promise.all(
+      entities.map(async entity => {
+        const relations = await this.entitiesRepository.findRelationsForEntity(entity.id, tenantId)
+        const newScore = this.calculateRiskScore(entity, relations.length)
 
-      if (Math.abs(newScore - entity.riskScore) > 0.01) {
-        await this.entitiesRepository.updateRiskScore(entity.id, tenantId, newScore)
-        updatedCount++
-      }
-    }
+        if (Math.abs(newScore - entity.riskScore) > 0.01) {
+          await this.entitiesRepository.updateRiskScore(entity.id, tenantId, newScore)
+          return true
+        }
+        return false
+      })
+    )
+
+    const updatedCount = updateResults.filter(Boolean).length
 
     this.logger.log(
       `Recalculated risk scores for tenant ${tenantId}: ${String(updatedCount)} entities updated`

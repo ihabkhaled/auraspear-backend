@@ -29,11 +29,11 @@ import {
   type UpdateUserDto,
 } from './dto/tenant.dto'
 import { TenantsService } from './tenants.service'
+import { assertTenantAccess } from './tenants.utilities'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../common/enums'
-import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import { issueCsrfToken, setAuthCookies } from '../auth/auth-cookie.utility'
@@ -49,20 +49,6 @@ import type {
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Response } from 'express'
-
-/**
- * Validates that a TENANT_ADMIN is only operating on their own tenant.
- * GLOBAL_ADMIN can operate on any tenant.
- */
-function assertTenantAccess(user: JwtPayload, parameterTenantId: string): void {
-  if (user.role !== UserRole.GLOBAL_ADMIN && parameterTenantId !== user.tenantId) {
-    throw new BusinessException(
-      403,
-      'Cannot operate on another tenant',
-      'errors.tenants.crossTenantAccessDenied'
-    )
-  }
-}
 
 @ApiTags('tenants')
 @ApiBearerAuth()

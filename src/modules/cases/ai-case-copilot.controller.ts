@@ -1,4 +1,4 @@
-import { Controller, Post, Param, ParseUUIDPipe } from '@nestjs/common'
+import { Body, Controller, Post, Param, ParseUUIDPipe } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { AiCaseCopilotService } from './ai-case-copilot.service'
@@ -21,9 +21,16 @@ export class AiCaseCopilotController {
   async summarizeCase(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiCaseCopilotService.analyzeCase(id, tenantId, AiFeatureKey.CASE_SUMMARIZE, user)
+    return this.aiCaseCopilotService.analyzeCase(
+      id,
+      tenantId,
+      AiFeatureKey.CASE_SUMMARIZE,
+      user,
+      connector
+    )
   }
 
   @Post(':id/ai/executive-summary')
@@ -32,13 +39,15 @@ export class AiCaseCopilotController {
   async executiveSummary(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
     return this.aiCaseCopilotService.analyzeCase(
       id,
       tenantId,
       AiFeatureKey.CASE_EXECUTIVE_SUMMARY,
-      user
+      user,
+      connector
     )
   }
 
@@ -48,9 +57,16 @@ export class AiCaseCopilotController {
   async synthesizeTimeline(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiCaseCopilotService.analyzeCase(id, tenantId, AiFeatureKey.CASE_TIMELINE, user)
+    return this.aiCaseCopilotService.analyzeCase(
+      id,
+      tenantId,
+      AiFeatureKey.CASE_TIMELINE,
+      user,
+      connector
+    )
   }
 
   @Post(':id/ai/next-tasks')
@@ -59,8 +75,15 @@ export class AiCaseCopilotController {
   async suggestNextTasks(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiCaseCopilotService.analyzeCase(id, tenantId, AiFeatureKey.CASE_NEXT_TASKS, user)
+    return this.aiCaseCopilotService.analyzeCase(
+      id,
+      tenantId,
+      AiFeatureKey.CASE_NEXT_TASKS,
+      user,
+      connector
+    )
   }
 }

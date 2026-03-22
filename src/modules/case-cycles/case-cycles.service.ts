@@ -179,6 +179,15 @@ export class CaseCyclesService {
       user.tenantId,
       user.email
     )
+
+    if (!result) {
+      throw new BusinessException(
+        404,
+        `Case cycle ${id} not found after activation`,
+        'errors.caseCycles.notFound'
+      )
+    }
+
     const { openCount, closedCount } = countOpenAndClosed(existing.cases)
 
     this.logSuccess('activateCycle', user.tenantId, id, undefined, user)

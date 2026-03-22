@@ -1,35 +1,22 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
-  Case,
+  CaseCommentWithMentions,
+  CaseWithRelations,
+  CaseWithTenant,
+  MembershipWithUser,
+} from './cases.types'
+import type {
   CaseArtifact,
   CaseComment,
-  CaseCommentMention,
   CaseNote,
   CaseSeverity,
   CaseStatus,
   CaseTask,
   CaseTimeline,
   Prisma,
-  TenantMembership,
   UserStatus,
 } from '@prisma/client'
-
-type CaseWithRelations = Case & {
-  notes: CaseNote[]
-  timeline: CaseTimeline[]
-  tasks: CaseTask[]
-  artifacts: CaseArtifact[]
-  tenant: { name: string }
-}
-
-type CaseWithTenant = Case & { tenant: { name: string } }
-
-type CaseCommentWithMentions = CaseComment & { mentions: CaseCommentMention[] }
-
-type MembershipWithUser = TenantMembership & {
-  user: { id: string; name: string; email: string }
-}
 
 @Injectable()
 export class CasesRepository {
@@ -200,7 +187,7 @@ export class CasesRepository {
       actor: string
       description: string
     }
-  ): Promise<CaseWithRelations> {
+  ): Promise<CaseWithRelations | null> {
     return this.prisma.$transaction(async tx => {
       let resolvedCycleId: string | null = null
       if (params.cycleId) {
@@ -209,7 +196,7 @@ export class CasesRepository {
           select: { id: true },
         })
         if (!cycle) {
-          throw new Error('INVALID_CYCLE')
+          return null
         }
         resolvedCycleId = params.cycleId
       } else {
@@ -299,7 +286,7 @@ export class CasesRepository {
     tenantId: string,
     updateData: Record<string, unknown>,
     timelineData: { type: string; actor: string; description: string }
-  ): Promise<CaseWithRelations> {
+  ): Promise<CaseWithRelations | null> {
     return this.prisma.$transaction(async tx => {
       const updated = await tx.case.updateMany({
         where: { id, tenantId },
@@ -307,7 +294,7 @@ export class CasesRepository {
       })
 
       if (updated.count === 0) {
-        throw new Error('CASE_NOT_FOUND')
+        return null
       }
 
       await tx.caseTimeline.create({
@@ -367,7 +354,7 @@ export class CasesRepository {
     tenantId: string,
     linkedAlerts: string[],
     timelineData: { type: string; actor: string; description: string }
-  ): Promise<CaseWithRelations> {
+  ): Promise<CaseWithRelations | null> {
     return this.prisma.$transaction(async tx => {
       const updated = await tx.case.updateMany({
         where: { id: caseId, tenantId },
@@ -375,7 +362,7 @@ export class CasesRepository {
       })
 
       if (updated.count === 0) {
-        throw new Error('CASE_NOT_FOUND')
+        return null
       }
 
       await tx.caseTimeline.create({

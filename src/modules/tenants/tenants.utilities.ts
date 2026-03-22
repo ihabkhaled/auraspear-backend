@@ -1,7 +1,14 @@
 import { SortOrder } from '../../common/enums'
+import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { UserRecord, TenantWithCounts } from './tenants.types'
+import type {
+  UserRecord,
+  TenantWithCounts,
+  TenantWithDatabaseCounts,
+  MembershipWithUser,
+} from './tenants.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { Prisma, UserStatus } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -94,14 +101,6 @@ export function buildUserOrderBy(
 /* RECORD MAPPING                                                    */
 /* ---------------------------------------------------------------- */
 
-interface TenantWithDatabaseCounts {
-  id: string
-  name: string
-  slug: string
-  createdAt: Date
-  _count: { memberships: number; alerts: number; cases: number }
-}
-
 export function mapTenantToCounts(t: TenantWithDatabaseCounts): TenantWithCounts {
   return {
     id: t.id,
@@ -111,20 +110,6 @@ export function mapTenantToCounts(t: TenantWithDatabaseCounts): TenantWithCounts
     userCount: t._count.memberships,
     alertCount: t._count.alerts,
     caseCount: t._count.cases,
-  }
-}
-
-interface MembershipWithUser {
-  role: string
-  status: string
-  createdAt: Date
-  user: {
-    id: string
-    email: string
-    name: string
-    lastLoginAt: Date | null
-    mfaEnabled: boolean
-    isProtected: boolean
   }
 }
 
@@ -206,6 +191,20 @@ export function isNotSuspended(status: string): boolean {
 
 export function isNotInactive(status: string): boolean {
   return status !== MembershipStatus.INACTIVE
+}
+
+/**
+ * Validates that a TENANT_ADMIN is only operating on their own tenant.
+ * GLOBAL_ADMIN can operate on any tenant.
+ */
+export function assertTenantAccess(user: JwtPayload, parameterTenantId: string): void {
+  if (user.role !== UserRole.GLOBAL_ADMIN && parameterTenantId !== user.tenantId) {
+    throw new BusinessException(
+      403,
+      'Cannot operate on another tenant',
+      'errors.tenants.crossTenantAccessDenied'
+    )
+  }
 }
 
 export function needsNewUserFields(

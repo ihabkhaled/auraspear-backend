@@ -1,19 +1,11 @@
+import { RANGE_MAP, SEVERITY_WEIGHTS } from './hunts.constants'
 import { AlertSeverity, SortOrder } from '../../common/enums'
 import { sanitizeEsQueryString } from '../../common/utils/es-sanitize.utility'
+import type { HuntEventData } from './hunts.types'
 
 /* ---------------------------------------------------------------- */
 /* ES QUERY BUILDER                                                  */
 /* ---------------------------------------------------------------- */
-
-const RANGE_MAP = new Map<string, number>([
-  ['1h', 60 * 60 * 1000],
-  ['6h', 6 * 60 * 60 * 1000],
-  ['12h', 12 * 60 * 60 * 1000],
-  ['24h', 24 * 60 * 60 * 1000],
-  ['7d', 7 * 24 * 60 * 60 * 1000],
-  ['30d', 30 * 24 * 60 * 60 * 1000],
-  ['90d', 90 * 24 * 60 * 60 * 1000],
-])
 
 export function buildHuntEsQuery(
   sanitizedQuery: string,
@@ -127,16 +119,6 @@ export function extractDescription(source: Record<string, unknown> | undefined):
 /* HIT → EVENT DATA MAPPING                                          */
 /* ---------------------------------------------------------------- */
 
-export interface HuntEventData {
-  huntSessionId: string
-  timestamp: Date
-  severity: string
-  eventId: string
-  sourceIp: string | null
-  user: string | null
-  description: string
-}
-
 export function mapHitsToEventData(hits: unknown[], sessionId: string): HuntEventData[] {
   return hits.map((hit: unknown) => {
     const source = (hit as Record<string, unknown>)['_source'] as
@@ -210,14 +192,6 @@ export function countUniqueIps(events: HuntEventData[]): number {
 /* ---------------------------------------------------------------- */
 /* THREAT SCORE                                                      */
 /* ---------------------------------------------------------------- */
-
-const SEVERITY_WEIGHTS: Record<string, number> = {
-  [AlertSeverity.CRITICAL]: 10,
-  [AlertSeverity.HIGH]: 7,
-  [AlertSeverity.MEDIUM]: 4,
-  [AlertSeverity.LOW]: 2,
-  [AlertSeverity.INFO]: 1,
-}
 
 export function computeThreatScore(
   events: Array<{ severity: string }>,

@@ -41,7 +41,8 @@ export class PromptRegistryService {
       return template.content
     }
 
-    const defaultPrompt = DEFAULT_PROMPTS[taskType]
+    const defaultPromptsMap = new Map(Object.entries(DEFAULT_PROMPTS))
+    const defaultPrompt = defaultPromptsMap.get(taskType)
     if (defaultPrompt) {
       return defaultPrompt
     }

@@ -10,7 +10,6 @@ import { AuthRefreshSchema, type AuthRefreshDto } from './dto/auth-refresh.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { Public } from '../../common/decorators/public.decorator'
 import { SkipCsrf } from '../../common/decorators/skip-csrf.decorator'
-import { BusinessException } from '../../common/exceptions/business.exception'
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe'
 import type {
   AuthenticatedRequest,
@@ -83,7 +82,8 @@ export class AuthController {
     @Body() dto: AuthRefreshDto,
     @Res({ passthrough: true }) response: Response
   ): Promise<{ accessToken: string; csrfToken: string }> {
-    const refreshToken = this.extractRefreshToken(request, dto.refreshToken)
+    const cookieToken = request.cookies?.['refresh_token'] as string | undefined
+    const refreshToken = this.authService.resolveRefreshToken(cookieToken, dto.refreshToken)
     const requestedTenantId = this.getSingleHeaderValue(request.headers['x-tenant-id'])
     const session = await this.authService.refreshTokens(
       refreshToken,
@@ -126,59 +126,12 @@ export class AuthController {
     @Body(new ZodValidationPipe(AuthLogoutSchema)) dto: AuthLogoutDto,
     @Res({ passthrough: true }) response: Response
   ): Promise<{ loggedOut: boolean }> {
-    const accessUser = request.user
-    if (!accessUser?.jti || !accessUser?.exp) {
-      throw new BusinessException(
-        401,
-        'Access token missing required claims',
-        'errors.auth.invalidAccessToken'
-      )
-    }
-
-    const refreshToken = this.extractRefreshToken(request, dto.refreshToken)
-    const refreshPayload = await this.authService.verifyRefreshToken(refreshToken)
-    if (!refreshPayload.jti || !refreshPayload.exp) {
-      throw new BusinessException(
-        401,
-        'Refresh token missing required claims',
-        'errors.auth.invalidRefreshToken'
-      )
-    }
-
-    if (refreshPayload.sub !== accessUser.sub) {
-      throw new BusinessException(
-        403,
-        'Refresh token does not belong to this user',
-        'errors.auth.tokenMismatch'
-      )
-    }
-
-    await this.authService.logout(
-      accessUser.jti,
-      refreshPayload.jti,
-      accessUser.exp,
-      refreshPayload.exp,
-      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined,
-      accessUser.sub
-    )
+    const cookieToken = request.cookies?.['refresh_token'] as string | undefined
+    const refreshToken = this.authService.resolveRefreshToken(cookieToken, dto.refreshToken)
+    await this.authService.performLogout(request.user, refreshToken)
     clearAuthCookies(response)
 
     return { loggedOut: true }
-  }
-
-  private extractRefreshToken(request: Request, bodyToken?: string): string {
-    const cookieToken = request.cookies?.['refresh_token'] as string | undefined
-    const refreshToken = bodyToken ?? cookieToken
-
-    if (!refreshToken) {
-      throw new BusinessException(
-        400,
-        'Refresh token is required',
-        'errors.auth.refreshTokenRequired'
-      )
-    }
-
-    return refreshToken
   }
 
   private getSingleHeaderValue(value: string | string[] | undefined): string | undefined {

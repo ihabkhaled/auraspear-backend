@@ -4,8 +4,7 @@ import { HealthService } from './health.service'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { Public } from '../../common/decorators/public.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
-import { HealthStatus, Permission } from '../../common/enums'
-import { BusinessException } from '../../common/exceptions/business.exception'
+import { Permission } from '../../common/enums'
 import type { OverallHealth, ServiceHealthResult } from './health.types'
 
 @ApiTags('health')
@@ -20,13 +19,7 @@ export class HealthController {
   @Get()
   @Public()
   async getOverallHealth(): Promise<OverallHealth> {
-    const health = await this.healthService.getOverallHealth()
-
-    if (health.status === HealthStatus.DOWN) {
-      throw new BusinessException(503, 'System is down', 'errors.health.serviceUnavailable')
-    }
-
-    return health
+    return this.healthService.getOverallHealthOrThrow()
   }
 
   /**

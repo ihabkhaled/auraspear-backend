@@ -7,80 +7,14 @@ import {
   Logger,
 } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
-import { ZodError, type ZodIssue } from 'zod'
+import { ZodError } from 'zod'
+import {
+  statusToMessageKey,
+  zodIssueToMessageKey,
+  sanitizeMessage,
+} from './http-exception.utilities'
+import type { ErrorResponse } from './http-exception.types'
 import type { Response } from 'express'
-
-interface ErrorResponse {
-  statusCode: number
-  message: string | string[]
-  messageKey: string
-  errors?: string[]
-  error: string
-  timestamp: string
-  path: string
-}
-
-const STATUS_MESSAGE_KEYS = new Map<number, string>([
-  [HttpStatus.BAD_REQUEST, 'errors.badRequest'],
-  [HttpStatus.UNAUTHORIZED, 'errors.unauthorized'],
-  [HttpStatus.FORBIDDEN, 'errors.forbidden'],
-  [HttpStatus.NOT_FOUND, 'errors.notFound'],
-  [HttpStatus.CONFLICT, 'errors.conflict'],
-  [HttpStatus.UNPROCESSABLE_ENTITY, 'errors.validationFailed'],
-  [HttpStatus.TOO_MANY_REQUESTS, 'errors.tooManyRequests'],
-  [HttpStatus.INTERNAL_SERVER_ERROR, 'errors.internalError'],
-  [HttpStatus.SERVICE_UNAVAILABLE, 'errors.serviceUnavailable'],
-])
-
-function statusToMessageKey(status: number): string {
-  return STATUS_MESSAGE_KEYS.get(status) ?? 'errors.internalError'
-}
-
-/** Maps a ZodIssue to a field-specific i18n messageKey (same logic as ZodValidationPipe). */
-function zodIssueToMessageKey(issue: ZodIssue): string {
-  const field = issue.path.join('.') || 'field'
-
-  switch (issue.code) {
-    case 'invalid_type': {
-      if (issue.received === 'undefined') {
-        return `errors.validation.${field}.required`
-      }
-      return `errors.validation.${field}.invalid`
-    }
-    case 'too_small': {
-      if (issue.type === 'string' && issue.minimum === 1) {
-        return `errors.validation.${field}.required`
-      }
-      if (issue.type === 'string') {
-        return `errors.validation.${field}.tooShort`
-      }
-      if (issue.type === 'array') {
-        return `errors.validation.${field}.tooFew`
-      }
-      return `errors.validation.${field}.invalid`
-    }
-    case 'too_big': {
-      if (issue.type === 'string') {
-        return `errors.validation.${field}.tooLong`
-      }
-      if (issue.type === 'number') {
-        return `errors.validation.${field}.tooLarge`
-      }
-      return `errors.validation.${field}.invalid`
-    }
-    case 'invalid_enum_value': {
-      return `errors.validation.${field}.invalidOption`
-    }
-    default: {
-      return `errors.validation.${field}.invalid`
-    }
-  }
-}
-
-/** Strip internal file paths from error messages to prevent information leakage. */
-function sanitizeMessage(value: string): string {
-  return value.replaceAll(/[A-Z]:\\[^\s]+|\/[\w./-]+/g, '[path]').slice(0, 500)
-}
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {

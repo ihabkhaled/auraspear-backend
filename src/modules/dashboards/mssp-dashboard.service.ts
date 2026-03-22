@@ -2,11 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { MsspDashboardRepository } from './mssp-dashboard.repository'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import type {
-  MsspPortfolioOverview,
-  MsspTenantComparison,
-  MsspTenantSummary,
-} from '../entities/entities.types'
+import type { MsspPortfolioOverview, MsspTenantComparison } from '../entities/entities.types'
 
 @Injectable()
 export class MsspDashboardService {
@@ -25,30 +21,37 @@ export class MsspDashboardService {
       this.msspRepository.countActiveHuntsByTenant(tenantIds),
     ])
 
-    const summaries: MsspTenantSummary[] = []
+    const summaries = await Promise.all(
+      tenants.map(async tenant => {
+        const alertData = alertCounts.find(a => a.tenantId === tenant.id)
+        const caseData = caseCounts.find(c => c.tenantId === tenant.id)
+        const huntData = huntCounts.find(h => h.tenantId === tenant.id)
+        const [connectorHealth, aiUsage] = await Promise.all([
+          this.msspRepository.countConnectorHealthByTenant(tenant.id),
+          this.msspRepository.countAiUsageByTenant(tenant.id),
+        ])
 
-    for (const tenant of tenants) {
-      const alertData = alertCounts.find(a => a.tenantId === tenant.id)
-      const caseData = caseCounts.find(c => c.tenantId === tenant.id)
-      const huntData = huntCounts.find(h => h.tenantId === tenant.id)
-      const connectorHealth = await this.msspRepository.countConnectorHealthByTenant(tenant.id)
-      const aiUsage = await this.msspRepository.countAiUsageByTenant(tenant.id)
-
-      summaries.push({
-        tenantId: tenant.id,
-        tenantName: tenant.name,
-        alertCount: alertData?.alertCount ?? 0,
-        criticalAlerts: alertData?.criticalAlerts ?? 0,
-        openCases: caseData?.openCases ?? 0,
-        activeHunts: huntData?.activeHunts ?? 0,
-        connectorHealth,
-        aiUsage,
+        return {
+          tenantId: tenant.id,
+          tenantName: tenant.name,
+          alertCount: alertData?.alertCount ?? 0,
+          criticalAlerts: alertData?.criticalAlerts ?? 0,
+          openCases: caseData?.openCases ?? 0,
+          activeHunts: huntData?.activeHunts ?? 0,
+          connectorHealth,
+          aiUsage,
+        }
       })
-    }
+    )
 
-    const totalAlerts = summaries.reduce((sum, s) => sum + s.alertCount, 0)
-    const totalCriticalAlerts = summaries.reduce((sum, s) => sum + s.criticalAlerts, 0)
-    const totalOpenCases = summaries.reduce((sum, s) => sum + s.openCases, 0)
+    let totalAlerts = 0
+    let totalCriticalAlerts = 0
+    let totalOpenCases = 0
+    for (const summary of summaries) {
+      totalAlerts += summary.alertCount
+      totalCriticalAlerts += summary.criticalAlerts
+      totalOpenCases += summary.openCases
+    }
 
     this.appLogger.info('MSSP portfolio overview fetched', {
       feature: AppLogFeature.MSSP_DASHBOARD,

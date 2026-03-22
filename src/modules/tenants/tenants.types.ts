@@ -93,6 +93,28 @@ export interface ImpersonationSessionResult {
 }
 
 /** Response returned by the impersonate-user endpoint. */
+export interface TenantWithDatabaseCounts {
+  id: string
+  name: string
+  slug: string
+  createdAt: Date
+  _count: { memberships: number; alerts: number; cases: number }
+}
+
+export interface MembershipWithUser {
+  role: string
+  status: string
+  createdAt: Date
+  user: {
+    id: string
+    email: string
+    name: string
+    lastLoginAt: Date | null
+    mfaEnabled: boolean
+    isProtected: boolean
+  }
+}
+
 export interface ImpersonateUserResponse {
   accessToken: string
   csrfToken: string

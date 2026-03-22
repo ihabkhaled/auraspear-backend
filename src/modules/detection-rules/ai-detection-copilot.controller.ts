@@ -19,11 +19,16 @@ export class AiDetectionCopilotController {
   @RequirePermission(Permission.AI_DETECTION_COPILOT)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async draftRule(
-    @Body() body: { description: string },
+    @Body() body: { description: string; connector?: string },
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiDetectionCopilotService.draftRule(tenantId, body.description, user)
+    return this.aiDetectionCopilotService.draftRule(
+      tenantId,
+      body.description,
+      user,
+      body.connector
+    )
   }
 
   @Post(':id/ai/tuning')
@@ -32,13 +37,15 @@ export class AiDetectionCopilotController {
   async tuningRule(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
     return this.aiDetectionCopilotService.analyzeRule(
       id,
       tenantId,
       AiFeatureKey.DETECTION_TUNING,
-      user
+      user,
+      connector
     )
   }
 }

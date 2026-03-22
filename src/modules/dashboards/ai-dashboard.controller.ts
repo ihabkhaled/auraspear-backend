@@ -28,15 +28,16 @@ export class AiDashboardController {
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiDashboardService.explainAnomaly(tenantId, dto, user)
+    return this.aiDashboardService.explainAnomaly(tenantId, dto, user, dto.connector)
   }
 
   @Post('daily-summary')
   @RequirePermission(Permission.DASHBOARD_VIEW)
   async dailySummary(
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiDashboardService.generateDailySummary(tenantId, user)
+    return this.aiDashboardService.generateDailySummary(tenantId, user, connector)
   }
 }

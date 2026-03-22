@@ -1,15 +1,10 @@
 import { Injectable } from '@nestjs/common'
-
-interface CacheEntry {
-  permissions: Set<string>
-  expiresAt: number
-}
-
-const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+import { CACHE_TTL_MS } from './role-settings.constants'
+import type { PermissionCacheEntry } from './role-settings.types'
 
 @Injectable()
 export class PermissionCacheService {
-  private readonly cache = new Map<string, CacheEntry>()
+  private readonly cache = new Map<string, PermissionCacheEntry>()
 
   private buildKey(tenantId: string, role: string): string {
     return `${tenantId}:${role}`

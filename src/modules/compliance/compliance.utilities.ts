@@ -4,6 +4,10 @@ import type {
   ComplianceFrameworkRecord,
   ComplianceControlRecord,
   ComplianceStats,
+  ControlCountEntry,
+  ControlEntity,
+  FrameworkWithTenant,
+  GroupedControlEntry,
 } from './compliance.types'
 import type { UpdateControlDto } from './dto/update-control.dto'
 import type { UpdateFrameworkDto } from './dto/update-framework.dto'
@@ -98,18 +102,6 @@ export function buildControlUpdateData(
 /* RECORD MAPPING                                                    */
 /* ---------------------------------------------------------------- */
 
-interface FrameworkWithTenant {
-  id: string
-  tenantId: string
-  name: string
-  description: string | null
-  standard: string
-  version: string
-  tenant: { name: string }
-  createdAt: Date
-  updatedAt: Date
-}
-
 export function buildFrameworkRecord(
   framework: FrameworkWithTenant,
   controlStats?: { total: number; passed: number; failed: number }
@@ -136,20 +128,6 @@ export function buildFrameworkRecord(
   }
 }
 
-interface ControlEntity {
-  id: string
-  frameworkId: string
-  controlNumber: string
-  title: string
-  description: string | null
-  status: string
-  evidence: string | null
-  assessedAt: Date | null
-  assessedBy: string | null
-  createdAt: Date
-  updatedAt: Date
-}
-
 export function buildControlRecord(
   control: ControlEntity,
   assessedByName: string | null
@@ -173,11 +151,6 @@ export function buildControlRecord(
 /* ---------------------------------------------------------------- */
 /* STATS BUILDING                                                    */
 /* ---------------------------------------------------------------- */
-
-interface ControlCountEntry {
-  status: string
-  _count: { id: number }
-}
 
 export function buildComplianceStats(
   totalFrameworks: number,
@@ -223,12 +196,6 @@ export function buildComplianceStats(
 /* ---------------------------------------------------------------- */
 /* CONTROL STATS BATCH                                               */
 /* ---------------------------------------------------------------- */
-
-interface GroupedControlEntry {
-  frameworkId: string
-  status: string
-  _count: { id: number }
-}
 
 export function buildControlStatsBatchMap(
   controls: GroupedControlEntry[]

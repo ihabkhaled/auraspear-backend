@@ -6,11 +6,10 @@ import {
   Logger,
 } from '@nestjs/common'
 import { type Observable, tap } from 'rxjs'
+import { MUTATION_METHODS } from './audit.constants'
 import { PrismaService } from '../../prisma/prisma.service'
 import { redactSensitiveFields } from '../utils/redaction.utility'
 import type { AuthenticatedRequest } from '../interfaces/authenticated-request.interface'
-
-const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {

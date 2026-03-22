@@ -60,3 +60,19 @@ export interface NormalizationOutput {
   result: NormalizationResult
   normalizedEvents: Record<string, unknown>[]
 }
+
+export interface PipelineEntity {
+  id: string
+  tenantId: string
+  name: string
+  description: string | null
+  sourceType: string
+  status: string
+  parserConfig: unknown
+  fieldMappings: unknown
+  processedCount: bigint | number
+  errorCount: number
+  lastProcessedAt: Date | null
+  createdAt: Date
+  updatedAt: Date
+}

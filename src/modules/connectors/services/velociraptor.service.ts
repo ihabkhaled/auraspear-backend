@@ -8,52 +8,13 @@ import {
 } from '../../../common/enums'
 import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
-import type { AxiosRequestOptions } from '../../../common/modules/axios'
-import type { TestResult, VelociraptorAuthOptions } from '../connectors.types'
-
-/**
- * Resolves the Velociraptor base URL from config.
- * Prefers `apiUrl`, falls back to `baseUrl`.
- */
-function resolveBaseUrl(config: Record<string, unknown>): string | undefined {
-  return (config.apiUrl ?? config.baseUrl) as string | undefined
-}
-
-/**
- * Builds authentication options for Velociraptor requests.
- *
- * Supports two auth modes:
- * 1. **mTLS** (preferred for API port 8001) — uses `clientCert` + `clientKey`
- * 2. **Basic auth** (GUI port 8889) — uses `username` + `password`
- */
-function buildAuthOptions(
-  config: Record<string, unknown>,
-  basicAuthFunction: (username: string, password: string) => string
-): VelociraptorAuthOptions {
-  const clientCert = config.clientCert as string | undefined
-  const clientKey = config.clientKey as string | undefined
-  const caCert = config.caCert as string | undefined
-  const username = config.username as string | undefined
-  const password = config.password as string | undefined
-
-  const headers: Record<string, string> = {}
-  const httpOptions: Partial<AxiosRequestOptions> = {}
-
-  if (clientCert && clientKey) {
-    // mTLS authentication for the gRPC gateway API (port 8001)
-    httpOptions.clientCert = clientCert
-    httpOptions.clientKey = clientKey
-    if (caCert) {
-      httpOptions.caCert = caCert
-    }
-  } else if (username && password) {
-    // Basic auth for the GUI REST API (port 8889)
-    headers.Authorization = basicAuthFunction(username, password)
-  }
-
-  return { headers, httpOptions }
-}
+import {
+  buildVelociraptorAuthOptions,
+  extractRemoteErrorMessage,
+  formatRemoteError,
+  resolveVelociraptorBaseUrl,
+} from '../connectors.utilities'
+import type { TestResult } from '../connectors.types'
 
 @Injectable()
 export class VelociraptorService {
@@ -69,12 +30,12 @@ export class VelociraptorService {
    * Supports mTLS (clientCert + clientKey) or Basic auth (username + password).
    */
   async testConnection(config: Record<string, unknown>): Promise<TestResult> {
-    const baseUrl = resolveBaseUrl(config)
+    const baseUrl = resolveVelociraptorBaseUrl(config)
     if (!baseUrl) {
       return { ok: false, details: 'Velociraptor URL not configured' }
     }
 
-    const { headers, httpOptions } = buildAuthOptions(config, (u, p) =>
+    const { headers, httpOptions } = buildVelociraptorAuthOptions(config, (u, p) =>
       this.httpClient.basicAuth(u, p)
     )
 
@@ -154,8 +115,8 @@ export class VelociraptorService {
     config: Record<string, unknown>,
     vql: string
   ): Promise<{ rows: unknown[]; columns: string[] }> {
-    const baseUrl = resolveBaseUrl(config) as string
-    const { headers, httpOptions } = buildAuthOptions(config, (u, p) =>
+    const baseUrl = resolveVelociraptorBaseUrl(config) as string
+    const { headers, httpOptions } = buildVelociraptorAuthOptions(config, (u, p) =>
       this.httpClient.basicAuth(u, p)
     )
 
@@ -206,8 +167,8 @@ export class VelociraptorService {
    * Get connected clients from Velociraptor.
    */
   async getClients(config: Record<string, unknown>): Promise<unknown[]> {
-    const baseUrl = resolveBaseUrl(config) as string
-    const { headers, httpOptions } = buildAuthOptions(config, (u, p) =>
+    const baseUrl = resolveVelociraptorBaseUrl(config) as string
+    const { headers, httpOptions } = buildVelociraptorAuthOptions(config, (u, p) =>
       this.httpClient.basicAuth(u, p)
     )
 

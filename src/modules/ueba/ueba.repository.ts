@@ -1,11 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
-import type { UebaEntity, UebaAnomaly, MlModel, Prisma } from '@prisma/client'
-
-type EntityWithAnomalyCount = UebaEntity & { _count: { anomalies: number } }
-type AnomalyWithEntity = UebaAnomaly & {
-  entity: { entityName: string; entityType: string }
-}
+import type { EntityWithAnomalyCount, AnomalyWithEntity } from './ueba.types'
+import type { MlModel, Prisma } from '@prisma/client'
 
 @Injectable()
 export class UebaRepository {
@@ -50,22 +46,16 @@ export class UebaRepository {
   async updateEntity(params: {
     where: { id: string; tenantId: string }
     data: Prisma.UebaEntityUpdateManyMutationInput
-  }): Promise<EntityWithAnomalyCount> {
+  }): Promise<EntityWithAnomalyCount | null> {
     await this.prisma.uebaEntity.updateMany({
       where: params.where,
       data: params.data,
     })
 
-    const updated = await this.prisma.uebaEntity.findFirst({
+    return this.prisma.uebaEntity.findFirst({
       where: params.where,
       include: { _count: { select: { anomalies: true } } },
     })
-
-    if (!updated) {
-      throw new Error(`UebaEntity ${params.where.id} not found after update`)
-    }
-
-    return updated
   }
 
   async deleteEntity(where: { id: string; tenantId: string }): Promise<Prisma.BatchPayload> {
@@ -104,22 +94,16 @@ export class UebaRepository {
   async updateAnomaly(params: {
     where: { id: string; tenantId: string }
     data: Prisma.UebaAnomalyUpdateManyMutationInput
-  }): Promise<AnomalyWithEntity> {
+  }): Promise<AnomalyWithEntity | null> {
     await this.prisma.uebaAnomaly.updateMany({
       where: params.where,
       data: params.data,
     })
 
-    const updated = await this.prisma.uebaAnomaly.findFirst({
+    return this.prisma.uebaAnomaly.findFirst({
       where: params.where,
       include: { entity: { select: { entityName: true, entityType: true } } },
     })
-
-    if (!updated) {
-      throw new Error(`UebaAnomaly ${params.where.id} not found after update`)
-    }
-
-    return updated
   }
 
   /* ---------------------------------------------------------------- */

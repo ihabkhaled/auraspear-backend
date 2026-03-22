@@ -21,19 +21,20 @@ export class AiIntelController {
   async enrichIoc(
     @Param('id', ParseUUIDPipe) id: string,
     @TenantId() tenantId: string,
-    @CurrentUser() user: JwtPayload
+    @CurrentUser() user: JwtPayload,
+    @Body('connector') connector?: string
   ): Promise<AiResponse> {
-    return this.aiIntelService.enrichIoc(id, tenantId, user)
+    return this.aiIntelService.enrichIoc(id, tenantId, user, connector)
   }
 
   @Post('ai/advisory')
   @RequirePermission(Permission.INTEL_VIEW)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async draftAdvisory(
-    @Body() body: { iocIds: string[] },
+    @Body() body: { iocIds: string[]; connector?: string },
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiIntelService.draftAdvisory(tenantId, user, body.iocIds)
+    return this.aiIntelService.draftAdvisory(tenantId, user, body.iocIds, body.connector)
   }
 }

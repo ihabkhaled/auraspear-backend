@@ -40,6 +40,7 @@ export class AgentConfigRepository {
       create: {
         tenant: { connect: { id: tenantId } },
         agentId,
+        isEnabled: true,
         ...data,
       } as Prisma.TenantAgentConfigCreateInput,
     })
@@ -71,6 +72,7 @@ export class AgentConfigRepository {
       create: {
         tenant: { connect: { id: tenantId } },
         agentId,
+        isEnabled: true,
         tokensUsedHour: tokens,
         tokensUsedDay: tokens,
         tokensUsedMonth: tokens,

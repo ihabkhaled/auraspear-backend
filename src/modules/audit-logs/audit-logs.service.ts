@@ -4,21 +4,9 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType, SortOrder } from '../..
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { AuditLogRecord, PaginatedAuditLogs } from './audit-logs.types'
+import type { AuditLogRecord, CreateAuditLogData, PaginatedAuditLogs } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
-import type { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import type { Prisma } from '@prisma/client'
-
-export interface CreateAuditLogData {
-  tenantId: string
-  actor: string
-  role: UserRole
-  action: string
-  resource: string
-  resourceId?: string | null
-  details?: string | null
-  ipAddress?: string | null
-}
 
 @Injectable()
 export class AuditLogsService {

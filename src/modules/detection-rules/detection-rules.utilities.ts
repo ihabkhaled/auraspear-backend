@@ -850,12 +850,24 @@ function compareEndsWith(eventValue: unknown, expectedValue: unknown): boolean {
   return false
 }
 
+function buildSafeRegex(pattern: string, flags: string): RegExp | null {
+  try {
+    return RegExp(pattern, flags)
+  } catch {
+    return null
+  }
+}
+
 function compareRegex(eventValue: unknown, expectedValue: unknown): boolean {
   if (typeof expectedValue !== 'string') {
     return false
   }
 
-  const regex = new RegExp(expectedValue, 'i')
+  const regex = buildSafeRegex(expectedValue, 'i')
+  if (!regex) {
+    return false
+  }
+
   const eventValues = normalizeComparableValues(eventValue)
   for (const currentEventValue of eventValues) {
     if (typeof currentEventValue === 'string' && regex.test(currentEventValue)) {

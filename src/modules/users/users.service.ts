@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
+import { BCRYPT_SALT_ROUNDS } from './users.constants'
 import { UsersRepository } from './users.repository'
 import {
   DEFAULT_PREFERENCES,
@@ -13,10 +14,8 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { ChangePasswordDto } from './dto/change-password.dto'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UpdateProfileDto } from './dto/update-profile.dto'
-import type { UserProfile } from './users.utilities'
+import type { UserProfile } from './users.types'
 import type { User, UserPreference } from '@prisma/client'
-
-const BCRYPT_SALT_ROUNDS = 12
 
 @Injectable()
 export class UsersService {

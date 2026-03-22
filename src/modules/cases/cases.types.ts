@@ -7,6 +7,7 @@ import type {
   CaseNote,
   CaseTask,
   CaseTimeline,
+  TenantMembership,
 } from '@prisma/client'
 
 export type CaseRecord = Case & {
@@ -57,8 +58,22 @@ export interface CaseCommentResponse {
 
 export type PaginatedCaseComments = PaginatedResponse<CaseCommentResponse>
 
+export type CaseWithRelations = Case & {
+  notes: CaseNote[]
+  timeline: CaseTimeline[]
+  tasks: CaseTask[]
+  artifacts: CaseArtifact[]
+  tenant: { name: string }
+}
+
+export type CaseWithTenant = Case & { tenant: { name: string } }
+
 export type CaseCommentWithMentions = CaseComment & {
   mentions: CaseCommentMention[]
+}
+
+export type MembershipWithUser = TenantMembership & {
+  user: { id: string; name: string; email: string }
 }
 
 export interface MentionableUser {

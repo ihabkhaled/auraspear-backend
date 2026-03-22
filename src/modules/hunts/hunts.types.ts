@@ -47,3 +47,13 @@ export interface CreateEventInput {
   user: string | null
   description: string
 }
+
+export interface HuntEventData {
+  huntSessionId: string
+  timestamp: Date
+  severity: string
+  eventId: string
+  sourceIp: string | null
+  user: string | null
+  description: string
+}

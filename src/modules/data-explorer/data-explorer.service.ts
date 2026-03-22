@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { CLASS_NAME } from './data-explorer.constants'
 import { DataExplorerRepository } from './data-explorer.repository'
 import {
   buildFluxQuery,
@@ -62,8 +63,6 @@ import type {
   SyncJobQueryDto,
 } from './dto/explorer-query.dto'
 import type { ConnectorSyncJob } from '@prisma/client'
-
-const CLASS_NAME = 'DataExplorerService'
 
 @Injectable()
 export class DataExplorerService {

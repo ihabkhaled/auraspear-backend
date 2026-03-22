@@ -13,7 +13,12 @@ export class AiIntelService {
     private readonly intelRepository: IntelRepository
   ) {}
 
-  async enrichIoc(iocId: string, tenantId: string, user: JwtPayload): Promise<AiResponse> {
+  async enrichIoc(
+    iocId: string,
+    tenantId: string,
+    user: JwtPayload,
+    connector?: string
+  ): Promise<AiResponse> {
     const iocs = await this.intelRepository.findManyIOCs({
       where: { id: iocId, tenantId },
       orderBy: { createdAt: 'desc' },
@@ -42,10 +47,16 @@ export class AiIntelService {
       userEmail: user.email,
       featureKey: AiFeatureKey.INTEL_IOC_ENRICH,
       context,
+      connector,
     })
   }
 
-  async draftAdvisory(tenantId: string, user: JwtPayload, iocIds: string[]): Promise<AiResponse> {
+  async draftAdvisory(
+    tenantId: string,
+    user: JwtPayload,
+    iocIds: string[],
+    connector?: string
+  ): Promise<AiResponse> {
     const iocs = await this.intelRepository.findManyIOCs({
       where: { id: { in: iocIds }, tenantId },
       orderBy: { createdAt: 'desc' },
@@ -74,6 +85,7 @@ export class AiIntelService {
       userEmail: user.email,
       featureKey: AiFeatureKey.INTEL_ADVISORY_DRAFT,
       context,
+      connector,
     })
   }
 }

@@ -19,10 +19,10 @@ export class AiSoarController {
   @RequirePermission(Permission.AI_SOAR_COPILOT)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async draftPlaybook(
-    @Body() body: { description: string },
+    @Body() body: { description: string; connector?: string },
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload
   ): Promise<AiResponse> {
-    return this.aiSoarService.draftPlaybook(tenantId, user, body.description)
+    return this.aiSoarService.draftPlaybook(tenantId, user, body.description, body.connector)
   }
 }
