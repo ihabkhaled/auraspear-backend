@@ -40,7 +40,7 @@ export type NotificationHandshakeAuth = Record<string, string>
 export interface NotificationRow {
   id: string
   type: string
-  actorUserId: string
+  actorUserId: string | null
   title: string
   message: string
   entityType: string

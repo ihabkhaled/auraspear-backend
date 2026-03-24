@@ -207,12 +207,14 @@ function buildKeyFindings(alert: Alert, relatedCount: number): string {
   const finding1 = alert.sourceIp
     ? `1. Source IP \`${alert.sourceIp}\` detected in this event`
     : '1. No source IP recorded'
-  const finding2 = relatedCount > 0
-    ? `2. ${relatedCount} related alert(s) found in the last 48 hours`
-    : '2. No related alerts found in the last 48 hours'
-  const finding3 = alert.mitreTechniques.length > 0
-    ? `3. MITRE ATT&CK techniques identified: ${alert.mitreTechniques.join(', ')}`
-    : '3. No MITRE ATT&CK techniques mapped'
+  const finding2 =
+    relatedCount > 0
+      ? `2. ${relatedCount} related alert(s) found in the last 48 hours`
+      : '2. No related alerts found in the last 48 hours'
+  const finding3 =
+    alert.mitreTechniques.length > 0
+      ? `3. MITRE ATT&CK techniques identified: ${alert.mitreTechniques.join(', ')}`
+      : '3. No MITRE ATT&CK techniques mapped'
   const finding4 = alert.agentName
     ? `4. Alert originated from agent: ${sanitizeForMarkdown(alert.agentName)}`
     : '4. No agent information available'
@@ -223,35 +225,40 @@ function buildKeyFindings(alert: Alert, relatedCount: number): string {
 function buildRiskSection(alert: Alert, relatedCount: number): string {
   const immediateRisk = computeImmediateRisk(alert.severity)
   const relatedRisk = computeRelatedRisk(relatedCount)
-  const mitreCoverage = alert.mitreTechniques.length > 0
-    ? `${alert.mitreTechniques.length} technique(s) mapped`
-    : 'None mapped'
+  const mitreCoverage =
+    alert.mitreTechniques.length > 0
+      ? `${alert.mitreTechniques.length} technique(s) mapped`
+      : 'None mapped'
 
   return `**Risk Assessment:**\n- Immediate Risk: ${immediateRisk}\n- Related Activity: ${relatedRisk}\n- MITRE Coverage: ${mitreCoverage}`
 }
 
 function buildMitreSection(alert: Alert): string {
-  const tactics = alert.mitreTactics.length > 0
-    ? `- Tactics: ${alert.mitreTactics.join(', ')}`
-    : '- No tactics identified'
-  const techniques = alert.mitreTechniques.length > 0
-    ? `- Techniques: ${alert.mitreTechniques.join(', ')}`
-    : '- No techniques identified'
+  const tactics =
+    alert.mitreTactics.length > 0
+      ? `- Tactics: ${alert.mitreTactics.join(', ')}`
+      : '- No tactics identified'
+  const techniques =
+    alert.mitreTechniques.length > 0
+      ? `- Techniques: ${alert.mitreTechniques.join(', ')}`
+      : '- No techniques identified'
 
   return `**MITRE ATT&CK Mapping:**\n${tactics}\n${techniques}`
 }
 
 function buildRecommendedActions(alert: Alert, relatedCount: number): string {
-  const isHighSeverity = alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH
+  const isHighSeverity =
+    alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH
   const action1 = isHighSeverity
     ? 'Escalate immediately to incident response team'
     : 'Review alert context and determine if escalation is needed'
   const action2 = alert.sourceIp
     ? `Investigate source IP \`${alert.sourceIp}\` for additional activity`
     : 'Identify the source of this activity'
-  const action3 = relatedCount > 0
-    ? 'Review related alerts for attack pattern correlation'
-    : 'Monitor for follow-up alerts from the same source'
+  const action3 =
+    relatedCount > 0
+      ? 'Review related alerts for attack pattern correlation'
+      : 'Monitor for follow-up alerts from the same source'
   const action4 = alert.agentName
     ? `Check endpoint health for agent ${sanitizeForMarkdown(alert.agentName)}`
     : 'Verify the affected system status'
@@ -792,10 +799,7 @@ export function checkAgentQuota(agentConfig: AgentConfigWithDefaults): QuotaChec
       limit: agentConfig.tokensPerDay,
     }
   }
-  if (
-    agentConfig.tokensPerMonth > 0 &&
-    agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth
-  ) {
+  if (agentConfig.tokensPerMonth > 0 && agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth) {
     return {
       allowed: false,
       period: 'month',
@@ -839,16 +843,12 @@ export function buildPromptFromTemplate(
  * If a specific connector is requested, filters the list to match.
  * Returns the filtered list and whether a specific connector was requested.
  */
-export function filterConnectorsBySelection(
-  input: ConnectorFilterInput
-): FilteredConnectorsResult {
+export function filterConnectorsBySelection(input: ConnectorFilterInput): FilteredConnectorsResult {
   if (!input.connector || input.connector === 'default') {
     return { connectors: input.connectors, connectorRequested: false }
   }
 
-  const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
-    input.connector
-  )
+  const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(input.connector)
   const filtered = isUuid
     ? input.connectors.filter(c => c.id === input.connector)
     : input.connectors.filter(c => c.type === input.connector && !c.id)
@@ -862,7 +862,7 @@ export function filterConnectorsBySelection(
 
 export function buildFallbackGenericResponse(featureKey: string, prompt: string): AiResponse {
   return {
-    result: `[Rule-based fallback] No AI provider available to process feature "${featureKey}". The request has been logged for manual review.\n\nPrompt preview: ${prompt.slice(0, 200)}...`,
+    result: `[Rule-based fallback] No AI provider available to process feature "${featureKey}". The request has been logged for manual review.\n\nFull prompt:\n${prompt}`,
     reasoning: [
       'No AI connector available for this tenant',
       'Returning rule-based fallback response',

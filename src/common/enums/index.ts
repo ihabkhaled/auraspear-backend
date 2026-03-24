@@ -12,7 +12,10 @@ export {
   ApprovalRiskLevel,
   TokenResetPeriod,
 } from './ai-agent-config.enum'
+export { AiFindingStatus } from './ai-finding-status.enum'
+export { AiFindingType } from './ai-finding-type.enum'
 export { AiAuditAction } from './ai-audit-action.enum'
+export { AiTriggerType } from './ai-trigger-type.enum'
 export { AiConnectorPreference } from './ai-connector-preference.enum'
 export { AiAuditStatus } from './ai-audit-status.enum'
 export { AppLogFeature } from './app-log-feature.enum'

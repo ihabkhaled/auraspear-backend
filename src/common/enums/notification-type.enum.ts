@@ -13,4 +13,5 @@ export enum NotificationType {
   USER_UNBLOCKED = 'user_unblocked',
   USER_REMOVED = 'user_removed',
   USER_RESTORED = 'user_restored',
+  AI_ANALYSIS_COMPLETE = 'ai_analysis_complete',
 }

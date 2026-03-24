@@ -6,6 +6,7 @@ import { FeatureCatalogModule } from './feature-catalog/feature-catalog.module'
 import { OrchestratorModule } from './orchestrator/orchestrator.module'
 import { PromptRegistryModule } from './prompt-registry/prompt-registry.module'
 import { UsageBudgetModule } from './usage-budget/usage-budget.module'
+import { AiWritebackModule } from './writeback/ai-writeback.module'
 import { AgentConfigModule } from '../agent-config/agent-config.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
@@ -23,6 +24,7 @@ import { OsintExecutorModule } from '../osint-executor/osint-executor.module'
     PromptRegistryModule,
     FeatureCatalogModule,
     UsageBudgetModule,
+    AiWritebackModule,
   ],
   controllers: [AiController],
   providers: [AiRepository, AiService],
@@ -32,6 +34,7 @@ import { OsintExecutorModule } from '../osint-executor/osint-executor.module'
     PromptRegistryModule,
     FeatureCatalogModule,
     UsageBudgetModule,
+    AiWritebackModule,
   ],
 })
 export class AiModule {}

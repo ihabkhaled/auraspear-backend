@@ -538,6 +538,7 @@ model Tenant {
   tenantAgentConfigs      TenantAgentConfig[]
   osintSourceConfigs      OsintSourceConfig[]
   aiApprovalRequests      AiApprovalRequest[]
+  aiExecutionFindings     AiExecutionFinding[]
 
   @@map("tenants")
 }
@@ -788,6 +789,14 @@ model Alert {
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  aiSummary              String?   @map("ai_summary") @db.Text
+  aiConfidence           Float?    @map("ai_confidence")
+  aiSeveritySuggestion   String?   @map("ai_severity_suggestion") @db.VarChar(20)
+  aiEscalationSuggestion String?   @map("ai_escalation_suggestion") @db.Text
+  aiLastRunAt            DateTime? @map("ai_last_run_at")
+  aiLastExecutionId      String?   @map("ai_last_execution_id") @db.Uuid
+  aiStatus               String?   @map("ai_status") @db.VarChar(30)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1494,10 +1503,22 @@ model AiAgentSession {
   startedAt   DateTime  @default(now()) @map("started_at")
   completedAt DateTime? @map("completed_at")
 
+  tenantId        String?   @map("tenant_id") @db.Uuid
+  triggerType     String    @default("user") @map("trigger_type") @db.VarChar(30)
+  sourceModule    String?   @map("source_module") @db.VarChar(50)
+  sourceEntityId  String?   @map("source_entity_id") @db.VarChar(255)
+  jobId           String?   @map("job_id") @db.Uuid
+  confidenceScore Float?    @map("confidence_score")
+  findingsCount   Int       @default(0) @map("findings_count")
+  writebacksCount Int       @default(0) @map("writebacks_count")
+
   agent AiAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@index([agentId])
   @@index([agentId, startedAt])
+  @@index([tenantId])
+  @@index([tenantId, triggerType])
+  @@index([sourceModule, sourceEntityId])
   @@map("ai_agent_sessions")
 }
 
@@ -1624,7 +1645,7 @@ model Notification {
   id               String    @id @default(uuid()) @db.Uuid
   tenantId         String    @map("tenant_id") @db.Uuid
   type             String    @db.VarChar(50)
-  actorUserId      String    @map("actor_user_id") @db.Uuid
+  actorUserId      String?   @map("actor_user_id") @db.Uuid
   recipientUserId  String    @map("recipient_user_id") @db.Uuid
   title            String    @db.VarChar(500)
   message          String    @db.Text
@@ -2282,4 +2303,34 @@ model AiApprovalRequest {
   @@index([tenantId, status])
   @@index([tenantId, agentId])
   @@map("ai_approval_requests")
+}
+
+// ─── AI Execution Findings ─────────────────────────────────
+
+model AiExecutionFinding {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  sessionId       String    @map("session_id") @db.Uuid
+  agentId         String    @map("agent_id") @db.VarChar(50)
+  sourceModule    String    @map("source_module") @db.VarChar(50)
+  sourceEntityId  String?   @map("source_entity_id") @db.VarChar(255)
+  findingType     String    @map("finding_type") @db.VarChar(50)
+  title           String    @db.VarChar(500)
+  summary         String    @db.Text
+  confidenceScore Float?    @map("confidence_score")
+  severity        String?   @db.VarChar(20)
+  evidenceJson    Json?     @map("evidence_json")
+  recommendedAction String? @map("recommended_action") @db.Text
+  status          String    @default("proposed") @db.VarChar(20)
+  appliedAt       DateTime? @map("applied_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, sessionId])
+  @@index([tenantId, sourceModule, sourceEntityId])
+  @@index([tenantId, agentId])
+  @@index([tenantId, findingType])
+  @@map("ai_execution_findings")
 }

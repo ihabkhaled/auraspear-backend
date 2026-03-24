@@ -3,4 +3,6 @@ export enum NotificationEntityType {
   CASE = 'case',
   TENANT = 'tenant',
   USER = 'user',
+  ALERT = 'alert',
+  INCIDENT = 'incident',
 }

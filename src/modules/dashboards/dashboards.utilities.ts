@@ -105,10 +105,7 @@ export function buildAlertTrend(
   }
 }
 
-function initializeAlertTrendMap(
-  startDate?: Date,
-  endDate?: Date
-): Map<string, AlertTrendEntry> {
+function initializeAlertTrendMap(startDate?: Date, endDate?: Date): Map<string, AlertTrendEntry> {
   const trendMap = new Map<string, AlertTrendEntry>()
 
   if (startDate && endDate) {
@@ -427,10 +424,7 @@ export function buildOperationsOverview(params: {
 /* SUMMARY BUILDING                                                  */
 /* ---------------------------------------------------------------- */
 
-export function buildDashboardSummary(
-  tenantId: string,
-  rawData: SummaryRawData
-): DashboardSummary {
+export function buildDashboardSummary(tenantId: string, rawData: SummaryRawData): DashboardSummary {
   const avgMs = rawData.avgResolutionTime[0]?.avg_ms ?? 0
   const mttrMinutes = Math.round(avgMs / 60_000)
   const mttrCurrentMs = rawData.mttrCurrentWeek[0]?.avg_ms ?? 0
@@ -589,7 +583,7 @@ export function buildRecentActivityFromRawData(
   const actorMap = new Map(input.actors.map(actor => [actor.id, actor]))
 
   const data: RecentActivityItem[] = input.notifications.map(notification => {
-    const actor = actorMap.get(notification.actorUserId)
+    const actor = notification.actorUserId ? actorMap.get(notification.actorUserId) : undefined
 
     return {
       id: notification.id,

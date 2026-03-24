@@ -77,7 +77,9 @@ export class NotificationsService {
         take: limit,
       })
 
-      const actorIds = [...new Set(notifications.map(n => n.actorUserId))]
+      const actorIds = [
+        ...new Set(notifications.map(n => n.actorUserId).filter((id): id is string => id !== null)),
+      ]
       const actors =
         actorIds.length > 0 ? await this.notificationsRepository.findUsersByIds(actorIds) : []
       const actorMap = buildActorMap(actors)

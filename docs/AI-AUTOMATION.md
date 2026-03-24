@@ -521,6 +521,115 @@ Immutable audit trail for all AI invocations.
 
 ---
 
+## AI Writeback & Findings Persistence
+
+### Overview
+
+When an AI agent completes execution, the writeback system persists structured findings and updates the source entity. The flow is:
+
+```
+AI Agent Task completes
+        |
+        v
+AiWritebackService.processSystemTriggeredResult()
+        |
+        +-- 1. Parse findings from AI response text
+        |       Extracts finding type, title, summary, confidence, severity
+        |       Falls back to a single summary finding when structured data cannot be parsed
+        |
+        +-- 2. Persist findings to ai_execution_findings table
+        |       Each finding gets: tenantId, sessionId, agentId, sourceModule,
+        |       sourceEntityId, findingType, title, summary, confidenceScore,
+        |       severity, recommendedAction, status (initially "proposed")
+        |
+        +-- 3. Write back to source entity
+        |       |
+        |       +-- Alert: Updates aiSummary, aiConfidence, aiSeveritySuggestion,
+        |       |          aiLastRunAt, aiLastExecutionId, aiStatus fields
+        |       |
+        |       +-- Incident: Creates an IncidentTimeline entry with AI analysis
+        |       |
+        |       +-- Case: Creates a CaseNote with formatted AI analysis
+        |
+        +-- 4. Update session counts (findingsCount, writebacksCount)
+        |
+        +-- 5. Log completion via AppLoggerService
+```
+
+Writeback failures are logged but never re-thrown -- they must not crash the job handler.
+
+### AiExecutionFinding Fields
+
+| Field               | Type      | Description                                                  |
+| ------------------- | --------- | ------------------------------------------------------------ |
+| `id`                | UUID      | Primary key                                                  |
+| `tenantId`          | UUID      | Tenant scope                                                 |
+| `sessionId`         | UUID      | Reference to the AiAgentSession that produced the finding    |
+| `agentId`           | String    | Agent identifier (from AiAgentId enum)                       |
+| `sourceModule`      | String    | Source module (`alert`, `incident`, `case`, etc.)            |
+| `sourceEntityId`    | String?   | ID of the source entity (nullable)                           |
+| `findingType`       | String    | Type of finding (from AiFindingType enum)                    |
+| `title`             | String    | Short title describing the finding                           |
+| `summary`           | Text      | Full AI-generated summary (max 10,000 chars)                 |
+| `confidenceScore`   | Float?    | AI confidence score (0.0 - 1.0)                              |
+| `severity`          | String?   | Suggested severity (`critical`, `high`, `medium`, etc.)      |
+| `evidenceJson`      | JSON?     | Structured evidence data                                     |
+| `recommendedAction` | Text?     | Suggested next action                                        |
+| `status`            | String    | Finding status: `proposed`, `applied`, `dismissed`, `failed` |
+| `appliedAt`         | DateTime? | When the finding was applied                                 |
+| `createdAt`         | DateTime  | Creation timestamp                                           |
+
+### Finding Types (AiFindingType)
+
+| Type                        | Description                    |
+| --------------------------- | ------------------------------ |
+| `triage`                    | Alert triage result            |
+| `summary`                   | General summary                |
+| `severity_recommendation`   | Severity level recommendation  |
+| `escalation_recommendation` | Escalation recommendation      |
+| `investigation_step`        | Investigation step suggestion  |
+| `entity_risk_signal`        | Entity risk signal             |
+| `correlation_candidate`     | Correlation candidate          |
+| `vulnerability_priority`    | Vulnerability prioritization   |
+| `cloud_posture_finding`     | Cloud security posture finding |
+| `rule_recommendation`       | Detection rule recommendation  |
+| `report_insight`            | Report insight                 |
+| `other`                     | Uncategorized finding          |
+
+### Finding Statuses (AiFindingStatus)
+
+| Status      | Description                                    |
+| ----------- | ---------------------------------------------- |
+| `proposed`  | Initial state -- finding awaits analyst review |
+| `applied`   | Analyst accepted and applied the finding       |
+| `dismissed` | Analyst dismissed the finding                  |
+| `failed`    | Finding could not be applied                   |
+
+### API Endpoints (`/ai/findings`)
+
+| Method | Endpoint                                       | Permission      | Description                                   |
+| ------ | ---------------------------------------------- | --------------- | --------------------------------------------- |
+| GET    | `/ai/findings`                                 | `aiAgents.view` | List findings (paginated, filterable)         |
+| GET    | `/ai/findings/:id`                             | `aiAgents.view` | Get a single finding by ID                    |
+| GET    | `/ai/findings/by-entity/:entityType/:entityId` | `aiAgents.view` | Get all findings for a specific source entity |
+
+#### Query Parameters for `GET /ai/findings`
+
+| Parameter        | Type   | Default     | Description                                                                                |
+| ---------------- | ------ | ----------- | ------------------------------------------------------------------------------------------ |
+| `page`           | number | `1`         | Page number (1-10000)                                                                      |
+| `limit`          | number | `20`        | Items per page (1-100)                                                                     |
+| `sortBy`         | string | `createdAt` | Sort field: `createdAt`, `findingType`, `severity`, `confidenceScore`, `status`, `agentId` |
+| `sortOrder`      | string | `desc`      | Sort direction: `asc` or `desc`                                                            |
+| `sourceModule`   | string | --          | Filter by source module (e.g., `alert`)                                                    |
+| `agentId`        | string | --          | Filter by agent ID                                                                         |
+| `status`         | string | --          | Filter by finding status                                                                   |
+| `findingType`    | string | --          | Filter by finding type                                                                     |
+| `sourceEntityId` | string | --          | Filter by source entity ID                                                                 |
+| `query`          | string | --          | Full-text search on title and summary                                                      |
+
+---
+
 ## Related Documentation
 
 - [AI Provider Routing](./AI-ROUTING.md) -- Detailed provider selection and fallback strategy

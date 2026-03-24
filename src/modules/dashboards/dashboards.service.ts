@@ -264,7 +264,13 @@ export class DashboardsService {
       this.dashboardsRepository.countNotifications(tenantId),
     ])
 
-    const actorIds = [...new Set(notifications.map(notification => notification.actorUserId))]
+    const actorIds = [
+      ...new Set(
+        notifications
+          .map(notification => notification.actorUserId)
+          .filter((id): id is string => id !== null)
+      ),
+    ]
     const actors =
       actorIds.length > 0 ? await this.dashboardsRepository.findUsersByIds(actorIds) : []
 

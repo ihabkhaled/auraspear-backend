@@ -1,0 +1,30 @@
+import type { AiFindingType } from '../../../common/enums'
+
+export interface AiWritebackParameters {
+  tenantId: string
+  sessionId: string
+  agentId: string
+  sourceModule: string
+  sourceEntityId?: string
+  aiResponse: AiWritebackResponse
+  actionType: string
+  /** True when the sessionId corresponds to a real AiAgentSession record (FK-linked to AiAgent). */
+  hasRealSession?: boolean
+}
+
+export interface AiWritebackResponse {
+  result: string
+  model: string
+  provider: string
+  confidence?: number
+  tokensUsed: { input: number; output: number }
+}
+
+export interface ParsedAiFinding {
+  findingType: AiFindingType
+  title: string
+  summary: string
+  confidence: number | null
+  severity: string | null
+  recommendedAction: string | null
+}

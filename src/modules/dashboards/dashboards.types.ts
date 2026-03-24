@@ -287,7 +287,7 @@ export interface ConnectorRow {
 export interface RecentNotificationRow {
   id: string
   type: string
-  actorUserId: string
+  actorUserId: string | null
   title: string
   message: string
   readAt: Date | null

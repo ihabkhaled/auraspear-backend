@@ -28,7 +28,7 @@ export function mapNotificationToResponse(
   n: NotificationRow,
   actorMap: NotificationActorMap
 ): NotificationResponse {
-  const actor = actorMap.get(n.actorUserId)
+  const actor = n.actorUserId ? actorMap.get(n.actorUserId) : undefined
   return {
     id: n.id,
     type: n.type as NotificationType,
