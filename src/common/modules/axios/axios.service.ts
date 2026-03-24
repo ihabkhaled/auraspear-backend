@@ -1,8 +1,13 @@
 import { promises as dns } from 'node:dns'
-import * as https from 'node:https'
 import { Injectable, Logger } from '@nestjs/common'
 import axios from 'axios'
-import { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES } from './axios.constants'
+import {
+  resolveFetchOptions,
+  buildHttpsAgent,
+  buildAxiosRequestConfig,
+  parseResponseHeaders,
+  parseResponseBody,
+} from './axios.utilities'
 import { HttpMethod, NodeEnvironment, UrlProtocol } from '../../enums'
 import { isPrivateHost } from '../../utils/ssrf.utility'
 import type {
@@ -11,7 +16,6 @@ import type {
   AxiosRequestOptionsWithoutBody,
   AxiosResponseData,
 } from './axios.types'
-import type { AxiosRequestConfig } from 'axios'
 
 @Injectable()
 export class AxiosService {
@@ -21,94 +25,29 @@ export class AxiosService {
   /* CORE REQUEST METHOD                                               */
   /* ---------------------------------------------------------------- */
 
-  /**
-   * Make an HTTP request with full security hardening.
-   *
-   * - URL protocol validation (HTTP/HTTPS only, HTTPS-only in production)
-   * - SSRF protection via DNS resolution in production
-   * - Private network blocking unless explicitly allowed
-   * - Self-signed certificate support (common in internal security tools)
-   * - Client certificate (mTLS) support
-   * - Response size limiting (10 MB)
-   * - Configurable timeouts
-   */
   async fetch(url: string, options: AxiosRequestOptions = {}): Promise<AxiosResponseData> {
     const isProduction = process.env.NODE_ENV === NodeEnvironment.PRODUCTION
-    const {
-      method = HttpMethod.GET,
-      headers = {},
-      body,
-      timeoutMs = DEFAULT_TIMEOUT_MS,
-      rejectUnauthorized: callerRejectUnauthorized = isProduction,
-      allowPrivateNetwork = false,
-      clientCert,
-      clientKey,
-      caCert,
-    } = options
+    const resolved = resolveFetchOptions(options, isProduction)
 
-    const rejectUnauthorized = isProduction ? callerRejectUnauthorized : false
-    const parsed = this.validateUrl(url, isProduction, allowPrivateNetwork)
-
-    await this.validateDns(parsed, isProduction, allowPrivateNetwork)
+    const parsed = this.validateUrl(url, isProduction, resolved.allowPrivateNetwork)
+    await this.validateDns(parsed, isProduction, resolved.allowPrivateNetwork)
 
     const isHttps = parsed.protocol === UrlProtocol.HTTPS
+    this.warnIfTlsDisabled(isHttps, resolved.rejectUnauthorized, parsed.hostname)
 
-    if (isHttps && !rejectUnauthorized) {
-      this.logger.warn(`TLS verification disabled for ${parsed.hostname}`)
-    }
-
-    const httpsAgent = isHttps
-      ? new https.Agent({
-          rejectUnauthorized,
-          ...(clientCert ? { cert: clientCert } : {}),
-          ...(clientKey ? { key: clientKey } : {}),
-          ...(caCert ? { ca: caCert } : {}),
-        })
-      : undefined
-
-    const requestConfig: AxiosRequestConfig = {
-      url,
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        ...headers,
-      },
-      data: body,
-      timeout: timeoutMs,
-      maxContentLength: MAX_RESPONSE_BYTES,
-      maxBodyLength: MAX_RESPONSE_BYTES,
-      // Do not throw on non-2xx — consumers handle status codes themselves
-      validateStatus: () => true,
-      // Return raw text so we can attempt JSON parse
-      responseType: 'text',
-      transformResponse: (rawData: string) => rawData,
-      ...(httpsAgent ? { httpsAgent } : {}),
-    }
+    const httpsAgent = buildHttpsAgent(isHttps, resolved)
+    const requestConfig = buildAxiosRequestConfig(url, resolved, httpsAgent)
 
     const start = Date.now()
-
     const response = await axios.request(requestConfig)
     const latencyMs = Date.now() - start
 
-    const rawBody = typeof response.data === 'string' ? response.data : String(response.data ?? '')
-    let data: unknown = rawBody
-
-    try {
-      data = JSON.parse(rawBody)
-    } catch {
-      // Not JSON — keep as raw string
+    return {
+      status: response.status,
+      data: parseResponseBody(response.data),
+      headers: parseResponseHeaders(response.headers as Record<string, unknown>),
+      latencyMs,
     }
-
-    const responseHeaders = new Map<string, string>()
-    for (const [key, value] of Object.entries(response.headers as Record<string, unknown>)) {
-      if (typeof value === 'string') {
-        responseHeaders.set(key, value)
-      }
-    }
-    const responseHeadersObject = Object.fromEntries(responseHeaders)
-
-    return { status: response.status, data, headers: responseHeadersObject, latencyMs }
   }
 
   /* ---------------------------------------------------------------- */
@@ -173,9 +112,6 @@ export class AxiosService {
   /* AUTHENTICATION HELPERS                                            */
   /* ---------------------------------------------------------------- */
 
-  /**
-   * Generate a Base64-encoded Basic Authentication header value.
-   */
   basicAuth(username: string, password: string): string {
     return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
   }
@@ -184,26 +120,26 @@ export class AxiosService {
   /* PRIVATE — VALIDATION                                              */
   /* ---------------------------------------------------------------- */
 
-  /**
-   * Validate URL protocol and private network restrictions.
-   */
+  private warnIfTlsDisabled(
+    isHttps: boolean,
+    rejectUnauthorized: boolean,
+    hostname: string
+  ): void {
+    if (isHttps && !rejectUnauthorized) {
+      this.logger.warn(`TLS verification disabled for ${hostname}`)
+    }
+  }
+
   private validateUrl(url: string, isProduction: boolean, allowPrivateNetwork: boolean): URL {
     const parsed = new URL(url)
 
-    if (
-      parsed.protocol !== UrlProtocol.HTTPS &&
-      parsed.protocol !== UrlProtocol.HTTP &&
-      parsed.protocol !== UrlProtocol.WS &&
-      parsed.protocol !== UrlProtocol.WSS
-    ) {
+    const allowedProtocols = new Set([UrlProtocol.HTTPS, UrlProtocol.HTTP, UrlProtocol.WS, UrlProtocol.WSS])
+    if (!allowedProtocols.has(parsed.protocol as UrlProtocol)) {
       throw new Error('Only HTTP(S) and WS(S) URLs are allowed')
     }
 
-    if (
-      isProduction &&
-      parsed.protocol !== UrlProtocol.HTTPS &&
-      parsed.protocol !== UrlProtocol.WSS
-    ) {
+    const secureProtocols = new Set([UrlProtocol.HTTPS, UrlProtocol.WSS])
+    if (isProduction && !secureProtocols.has(parsed.protocol as UrlProtocol)) {
       throw new Error('Only HTTPS/WSS URLs are allowed in production')
     }
 
@@ -214,9 +150,6 @@ export class AxiosService {
     return parsed
   }
 
-  /**
-   * Perform DNS resolution to prevent DNS rebinding SSRF attacks in production.
-   */
   private async validateDns(
     parsed: URL,
     isProduction: boolean,

@@ -22,7 +22,13 @@ import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { AddTimelineEntryDto } from './dto/add-timeline-entry.dto'
 import type { CreateIncidentDto } from './dto/create-incident.dto'
 import type { UpdateIncidentDto } from './dto/update-incident.dto'
-import type { IncidentRecord, IncidentStats, PaginatedIncidents } from './incidents.types'
+import type {
+  IncidentRecord,
+  IncidentStats,
+  IncidentWithTenant,
+  IncidentWithTenantAndTimeline,
+  PaginatedIncidents,
+} from './incidents.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { IncidentTimeline } from '@prisma/client'
 
@@ -93,25 +99,24 @@ export class IncidentsService {
 
     const [incidents, total] = await Promise.all([
       this.repository.findManyWithTenant({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
+        where, skip: (page - 1) * limit, take: limit,
         orderBy: buildIncidentOrderBy(sortBy, sortOrder),
       }),
       this.repository.count(where),
     ])
 
+    const data = await this.enrichIncidentListItems(incidents)
+    return { data, pagination: buildPaginationMeta(page, limit, total) }
+  }
+
+  private async enrichIncidentListItems(
+    incidents: IncidentWithTenant[]
+  ): Promise<ReturnType<typeof mapIncidentListItem>[]> {
     const [assigneesMap, creatorsMap] = await Promise.all([
       this.resolveAssigneesBatch(incidents.map(index => index.assigneeId)),
       this.resolveCreatorNamesBatch(incidents.map(index => index.createdBy)),
     ])
-
-    const data = incidents.map(index => mapIncidentListItem(index, assigneesMap, creatorsMap))
-
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
-    }
+    return incidents.map(index => mapIncidentListItem(index, assigneesMap, creatorsMap))
   }
 
   /* ---------------------------------------------------------------- */
@@ -157,85 +162,20 @@ export class IncidentsService {
     if (dto.assigneeId) {
       await this.validateAssigneeInTenant(dto.assigneeId, user.tenantId)
     }
-
     if (linkedAlertIds.length > 0) {
-      const validAlerts = await this.repository.countAlertsByIdsAndTenant(
-        linkedAlertIds,
-        user.tenantId
-      )
-      if (validAlerts !== linkedAlertIds.length) {
-        this.appLogger.warn('Invalid linked alerts: some do not belong to tenant', {
-          feature: AppLogFeature.INCIDENTS,
-          action: 'createIncident',
-          className: 'IncidentsService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          tenantId: user.tenantId,
-          actorEmail: user.email,
-          metadata: { linkedAlertIds, validCount: validAlerts },
-        })
-        throw new BusinessException(
-          400,
-          'One or more linked alerts do not belong to this tenant',
-          'errors.incidents.invalidLinkedAlerts'
-        )
-      }
+      await this.validateLinkedAlerts(linkedAlertIds, user)
     }
-
     if (dto.linkedCaseId) {
-      const caseExists = await this.repository.countCasesByIdAndTenant(
-        dto.linkedCaseId,
-        user.tenantId
-      )
-      if (caseExists === 0) {
-        throw new BusinessException(
-          400,
-          'Linked case does not belong to this tenant',
-          'errors.incidents.invalidLinkedCase'
-        )
-      }
+      await this.validateLinkedCase(dto.linkedCaseId, user.tenantId)
     }
 
-    const result = await this.repository.createIncidentWithTimeline({
-      data: {
-        tenantId: user.tenantId,
-        incidentNumber: '', // Will be generated in transaction
-        title: dto.title,
-        description: dto.description ?? null,
-        severity: dto.severity,
-        status: IncidentStatus.OPEN,
-        category: dto.category,
-        assigneeId: dto.assigneeId ?? null,
-        linkedAlertIds,
-        linkedCaseId: dto.linkedCaseId ?? null,
-        mitreTactics: dto.mitreTactics ?? [],
-        mitreTechniques: dto.mitreTechniques ?? [],
-        createdBy: user.email,
-      },
-      timelineEvent: `Incident created by ${user.email}`,
-      actorEmail: user.email,
+    const result = await this.executeCreateIncident(dto, linkedAlertIds, user)
+    this.logIncidentAction('createIncident', user, result.id, {
+      incidentNumber: result.incidentNumber,
+      severity: result.severity,
     })
 
-    this.appLogger.info('Incident created', {
-      feature: AppLogFeature.INCIDENTS,
-      action: 'createIncident',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'Incident',
-      targetResourceId: result.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IncidentsService',
-      functionName: 'createIncident',
-      metadata: { incidentNumber: result.incidentNumber, severity: result.severity },
-    })
-
-    const [{ assigneeName, assigneeEmail }, createdByName] = await Promise.all([
-      this.resolveAssignee(result.assigneeId),
-      this.resolveCreatorName(result.createdBy),
-    ])
-    return { ...result, assigneeName, assigneeEmail, createdByName, tenantName: result.tenant.name }
+    return this.enrichIncidentRecord(result)
   }
 
   /* ---------------------------------------------------------------- */
@@ -248,81 +188,20 @@ export class IncidentsService {
     user: JwtPayload
   ): Promise<IncidentRecord> {
     const existing = await this.getIncidentById(id, user.tenantId)
-
-    if (
-      existing.status === IncidentStatus.CLOSED &&
-      dto.status !== IncidentStatus.OPEN &&
-      dto.status !== IncidentStatus.IN_PROGRESS
-    ) {
-      this.appLogger.warn('Update incident denied: incident is closed', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'updateIncident',
-        outcome: AppLogOutcome.DENIED,
-        tenantId: user.tenantId,
-        actorEmail: user.email,
-        targetResource: 'Incident',
-        targetResourceId: id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'IncidentsService',
-        functionName: 'updateIncident',
-      })
-      throw new BusinessException(
-        400,
-        'Cannot update a closed incident',
-        'errors.incidents.alreadyClosed'
-      )
-    }
+    this.guardClosedIncidentUpdate(existing, dto, id, user)
 
     if (dto.assigneeId) {
       await this.validateAssigneeInTenant(dto.assigneeId, user.tenantId)
     }
 
-    // Build timeline description
-    const actorUser = await this.repository.findUserNameById(user.sub)
-    const actorLabel = actorUser ? `${actorUser.name} (${user.email})` : user.email
+    const actorLabel = await this.resolveActorLabel(user)
     const timelineEvent = describeIncidentChanges(dto, existing, actorLabel)
     const updateData = buildIncidentUpdateData(dto, existing.status, existing.resolvedAt)
 
-    const result = await this.repository.updateIncidentWithTimeline({
-      id,
-      tenantId: user.tenantId,
-      updateData,
-      timelineEvent,
-      actorEmail: user.email,
-    })
+    const result = await this.executeUpdateIncident(id, user.tenantId, updateData, timelineEvent, user.email)
+    this.logIncidentAction('updateIncident', user, id)
 
-    if (!result) {
-      this.appLogger.warn('Incident not found during update transaction', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'updateIncident',
-        className: 'IncidentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        metadata: { incidentId: id },
-      })
-      throw new BusinessException(404, `Incident ${id} not found`, 'errors.incidents.notFound')
-    }
-
-    this.appLogger.info('Incident updated', {
-      feature: AppLogFeature.INCIDENTS,
-      action: 'updateIncident',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'Incident',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IncidentsService',
-      functionName: 'updateIncident',
-    })
-
-    const [{ assigneeName, assigneeEmail }, createdByName] = await Promise.all([
-      this.resolveAssignee(result.assigneeId),
-      this.resolveCreatorName(result.createdBy),
-    ])
-    return { ...result, assigneeName, assigneeEmail, createdByName, tenantName: result.tenant.name }
+    return this.enrichIncidentRecord(result)
   }
 
   /* ---------------------------------------------------------------- */
@@ -461,5 +340,165 @@ export class IncidentsService {
         'errors.incidents.invalidAssignee'
       )
     }
+  }
+
+  private async validateLinkedAlerts(linkedAlertIds: string[], user: JwtPayload): Promise<void> {
+    const validAlerts = await this.repository.countAlertsByIdsAndTenant(
+      linkedAlertIds,
+      user.tenantId
+    )
+    if (validAlerts !== linkedAlertIds.length) {
+      this.appLogger.warn('Invalid linked alerts: some do not belong to tenant', {
+        feature: AppLogFeature.INCIDENTS,
+        action: 'createIncident',
+        className: 'IncidentsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        metadata: { linkedAlertIds, validCount: validAlerts },
+      })
+      throw new BusinessException(
+        400,
+        'One or more linked alerts do not belong to this tenant',
+        'errors.incidents.invalidLinkedAlerts'
+      )
+    }
+  }
+
+  private async validateLinkedCase(linkedCaseId: string, tenantId: string): Promise<void> {
+    const caseExists = await this.repository.countCasesByIdAndTenant(linkedCaseId, tenantId)
+    if (caseExists === 0) {
+      throw new BusinessException(
+        400,
+        'Linked case does not belong to this tenant',
+        'errors.incidents.invalidLinkedCase'
+      )
+    }
+  }
+
+  private guardClosedIncidentUpdate(
+    existing: IncidentRecord,
+    dto: UpdateIncidentDto,
+    id: string,
+    user: JwtPayload
+  ): void {
+    if (
+      existing.status === IncidentStatus.CLOSED &&
+      dto.status !== IncidentStatus.OPEN &&
+      dto.status !== IncidentStatus.IN_PROGRESS
+    ) {
+      this.appLogger.warn('Update incident denied: incident is closed', {
+        feature: AppLogFeature.INCIDENTS,
+        action: 'updateIncident',
+        outcome: AppLogOutcome.DENIED,
+        tenantId: user.tenantId,
+        actorEmail: user.email,
+        targetResource: 'Incident',
+        targetResourceId: id,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'IncidentsService',
+        functionName: 'updateIncident',
+      })
+      throw new BusinessException(
+        400,
+        'Cannot update a closed incident',
+        'errors.incidents.alreadyClosed'
+      )
+    }
+  }
+
+  private async resolveActorLabel(user: JwtPayload): Promise<string> {
+    const actorUser = await this.repository.findUserNameById(user.sub)
+    return actorUser ? `${actorUser.name} (${user.email})` : user.email
+  }
+
+  private async executeCreateIncident(
+    dto: CreateIncidentDto,
+    linkedAlertIds: string[],
+    user: JwtPayload
+  ): Promise<IncidentWithTenantAndTimeline> {
+    return this.repository.createIncidentWithTimeline({
+      data: {
+        tenantId: user.tenantId,
+        incidentNumber: '',
+        title: dto.title,
+        description: dto.description ?? null,
+        severity: dto.severity,
+        status: IncidentStatus.OPEN,
+        category: dto.category,
+        assigneeId: dto.assigneeId ?? null,
+        linkedAlertIds,
+        linkedCaseId: dto.linkedCaseId ?? null,
+        mitreTactics: dto.mitreTactics ?? [],
+        mitreTechniques: dto.mitreTechniques ?? [],
+        createdBy: user.email,
+      },
+      timelineEvent: `Incident created by ${user.email}`,
+      actorEmail: user.email,
+    })
+  }
+
+  private async executeUpdateIncident(
+    id: string,
+    tenantId: string,
+    updateData: Record<string, unknown>,
+    timelineEvent: string,
+    actorEmail: string
+  ): Promise<IncidentWithTenantAndTimeline> {
+    const result = await this.repository.updateIncidentWithTimeline({
+      id,
+      tenantId,
+      updateData,
+      timelineEvent,
+      actorEmail,
+    })
+
+    if (!result) {
+      this.appLogger.warn('Incident not found during update transaction', {
+        feature: AppLogFeature.INCIDENTS,
+        action: 'updateIncident',
+        className: 'IncidentsService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.FAILURE,
+        tenantId,
+        metadata: { incidentId: id },
+      })
+      throw new BusinessException(404, `Incident ${id} not found`, 'errors.incidents.notFound')
+    }
+
+    return result
+  }
+
+  private async enrichIncidentRecord(
+    result: IncidentWithTenantAndTimeline
+  ): Promise<IncidentRecord> {
+    const [{ assigneeName, assigneeEmail }, createdByName] = await Promise.all([
+      this.resolveAssignee(result.assigneeId),
+      this.resolveCreatorName(result.createdBy),
+    ])
+    return { ...result, assigneeName, assigneeEmail, createdByName, tenantName: result.tenant.name }
+  }
+
+  private logIncidentAction(
+    action: string,
+    user: JwtPayload,
+    resourceId: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.appLogger.info(`Incident ${action}`, {
+      feature: AppLogFeature.INCIDENTS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'Incident',
+      targetResourceId: resourceId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'IncidentsService',
+      functionName: action,
+      metadata,
+    })
   }
 }

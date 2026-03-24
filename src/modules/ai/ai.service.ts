@@ -33,7 +33,13 @@ import {
   buildOpenClawInvestigateResponse,
   buildOpenClawAgentTaskResponse,
   buildOpenClawExplainResponse,
-  generateExplainResponse,
+  checkAgentQuota,
+  filterConnectorsBySelection,
+  buildFallbackGenericResponse,
+  buildFallbackExplainResponse,
+  buildGenericAiResponse,
+  assembleFinalPrompt,
+  resolveSelectedConnector,
 } from './ai.utilities'
 import {
   AiAgentId,
@@ -203,7 +209,7 @@ export class AiService {
     const connectors = await this.findAvailableAiConnectors(user.tenantId)
     const response =
       (await this.tryConnectorsInOrder(connectors, c => this.routeExplain(c, body.prompt, user))) ??
-      this.buildFallbackExplainResponse(body.prompt)
+      buildFallbackExplainResponse(body.prompt)
 
     const latencyMs = Date.now() - startTime
     await this.logAudit(
@@ -222,25 +228,61 @@ export class AiService {
     await this.ensureAiEnabled(input.tenantId)
 
     const startTime = Date.now()
-    let connectors = await this.findAvailableAiConnectors(input.tenantId)
+    const connectors = await this.resolveAgentTaskConnectors(input)
 
-    if (input.connector && input.connector !== 'default') {
-      // Check if it's a UUID (dynamic LLM connector)
-      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
-        input.connector
+    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
+      this.routeAgentTask(c, input)
+    )
+
+    this.throwIfConnectorRequestedButFailed(aiResponse, input)
+
+    const response =
+      aiResponse ??
+      buildFallbackAgentTaskResponse({
+        agentName: input.agentName,
+        prompt: input.prompt,
+        tools: input.tools,
+      })
+
+    const latencyMs = Date.now() - startTime
+    await this.logAgentTaskAudit(input, response, latencyMs)
+
+    return response
+  }
+
+  private async resolveAgentTaskConnectors(
+    input: AgentTaskExecutionInput
+  ): Promise<ResolvedAiConnector[]> {
+    const allConnectors = await this.findAvailableAiConnectors(input.tenantId)
+    const { connectors, connectorRequested } = filterConnectorsBySelection({
+      connector: input.connector,
+      connectors: allConnectors,
+    })
+
+    this.assertRequestedConnectorAvailable(connectorRequested, connectors.length, input.connector)
+    this.logAgentTaskConnectors(connectors, input)
+
+    return connectors
+  }
+
+  private assertRequestedConnectorAvailable(
+    connectorRequested: boolean,
+    availableCount: number,
+    connectorName: string | undefined
+  ): void {
+    if (connectorRequested && availableCount === 0) {
+      throw new BusinessException(
+        400,
+        `Requested AI connector "${connectorName}" is not configured or available`,
+        'errors.ai.connectorNotAvailable'
       )
-      connectors = isUuid
-        ? connectors.filter(c => c.id === input.connector)
-        : connectors.filter(c => c.type === input.connector && !c.id)
-      if (connectors.length === 0) {
-        throw new BusinessException(
-          400,
-          `Requested AI connector "${input.connector}" is not configured or available`,
-          'errors.ai.connectorNotAvailable'
-        )
-      }
     }
+  }
 
+  private logAgentTaskConnectors(
+    connectors: ResolvedAiConnector[],
+    input: AgentTaskExecutionInput
+  ): void {
     this.appLogger.info(
       `AI agent task: ${String(connectors.length)} connector(s) available to try`,
       {
@@ -256,12 +298,12 @@ export class AiService {
         },
       }
     )
+  }
 
-    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
-      this.routeAgentTask(c, input)
-    )
-
-    // If a specific connector was requested and it failed, throw instead of falling back
+  private throwIfConnectorRequestedButFailed(
+    aiResponse: AiResponse | undefined,
+    input: AgentTaskExecutionInput
+  ): void {
     if (!aiResponse && input.connector && input.connector !== 'default') {
       throw new BusinessException(
         502,
@@ -269,17 +311,25 @@ export class AiService {
         agentUnreachableKey(input.agentId)
       )
     }
+  }
 
-    const response =
-      aiResponse ??
-      buildFallbackAgentTaskResponse({
-        agentName: input.agentName,
-        prompt: input.prompt,
-        tools: input.tools,
-      })
+  private async logAgentTaskAudit(
+    input: AgentTaskExecutionInput,
+    response: AiResponse,
+    latencyMs: number
+  ): Promise<void> {
+    await this.logAudit(
+      this.buildAgentTaskAuditRecord(input, response, latencyMs)
+    )
+    this.logAgentTaskSuccess(input, response, latencyMs)
+  }
 
-    const latencyMs = Date.now() - startTime
-    await this.logAudit({
+  private buildAgentTaskAuditRecord(
+    input: AgentTaskExecutionInput,
+    response: AiResponse,
+    latencyMs: number
+  ): AiAuditRecord {
+    return {
       id: randomUUID(),
       tenantId: input.tenantId,
       userId: input.actorUserId,
@@ -292,8 +342,14 @@ export class AiService {
       createdAt: new Date().toISOString(),
       prompt: input.prompt,
       response: response.result,
-    })
+    }
+  }
 
+  private logAgentTaskSuccess(
+    input: AgentTaskExecutionInput,
+    response: AiResponse,
+    latencyMs: number
+  ): void {
     this.appLogger.info('AI agent task executed', {
       feature: AppLogFeature.AI_AGENTS,
       action: 'runAgentTask',
@@ -312,8 +368,6 @@ export class AiService {
         latencyMs,
       },
     })
-
-    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -327,34 +381,62 @@ export class AiService {
    * This is the entry point for all AI features across the platform.
    */
   async executeAiTask(params: ExecuteAiTaskInput): Promise<AiResponse> {
-    // 1. Check feature is enabled
     const featureConfig = await this.featureCatalogService.getConfig(
       params.tenantId,
       params.featureKey
     )
-    if (!featureConfig.enabled) {
+    this.validateFeatureEnabled(featureConfig.enabled, params.featureKey)
+
+    const agentId = FEATURE_TO_AGENT_MAP[params.featureKey] ?? AiAgentId.ORCHESTRATOR
+    const agentConfig = await this.agentConfigService.getAgentConfig(params.tenantId, agentId)
+    this.validateAgentEnabled(agentConfig, agentId, params.featureKey)
+    this.validateAgentQuota(agentConfig, agentId)
+    await this.validateGlobalBudget(params.tenantId, params.featureKey)
+
+    const finalPrompt = await this.buildExecuteAiTaskPrompt(params, agentConfig)
+    const connectors = await this.resolveExecuteAiTaskConnectors(
+      params, agentConfig, agentId, featureConfig.preferredProvider
+    )
+    const maxTokens = agentConfig.maxTokensPerCall ?? featureConfig.maxTokens
+
+    const startTime = Date.now()
+    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
+      this.routeGenericTask(c, finalPrompt, maxTokens)
+    )
+    const response = aiResponse ?? buildFallbackGenericResponse(params.featureKey, finalPrompt)
+    const latencyMs = Date.now() - startTime
+
+    await this.recordUsageAndAudit(params, agentId, agentConfig, response, latencyMs, finalPrompt)
+
+    return response
+  }
+
+  private validateFeatureEnabled(enabled: boolean, featureKey: string): void {
+    if (!enabled) {
       throw new BusinessException(
         403,
-        `AI feature "${params.featureKey}" is disabled for this tenant. Enable it in AI Feature Catalog.`,
+        `AI feature "${featureKey}" is disabled for this tenant. Enable it in AI Feature Catalog.`,
         'errors.ai.featureDisabled'
       )
     }
+  }
 
-    // 2. Resolve which agent handles this feature and load its config
-    const agentId = FEATURE_TO_AGENT_MAP[params.featureKey] ?? AiAgentId.ORCHESTRATOR
-    const agentConfig = await this.agentConfigService.getAgentConfig(params.tenantId, agentId)
-
-    // 3. Check if agent is enabled
+  private validateAgentEnabled(
+    agentConfig: AgentConfigWithDefaults,
+    agentId: string,
+    featureKey: string
+  ): void {
     if (!agentConfig.isEnabled) {
       throw new BusinessException(
         403,
-        `${agentDisplayName(agentId)} AI agent is disabled for feature "${params.featureKey}". Enable it in AI Configuration.`,
+        `${agentDisplayName(agentId)} AI agent is disabled for feature "${featureKey}". Enable it in AI Configuration.`,
         agentDisabledKey(agentId)
       )
     }
+  }
 
-    // 4. Check per-agent token quota
-    const quotaCheck = this.checkAgentQuota(agentConfig)
+  private validateAgentQuota(agentConfig: AgentConfigWithDefaults, agentId: string): void {
+    const quotaCheck = checkAgentQuota(agentConfig)
     if (!quotaCheck.allowed) {
       throw new BusinessException(
         429,
@@ -362,74 +444,82 @@ export class AiService {
         agentQuotaExceededKey(agentId)
       )
     }
+  }
 
-    // 5. Check global budget
-    const budgetCheck = await this.usageBudgetService.checkBudget(
-      params.tenantId,
-      params.featureKey
-    )
+  private async validateGlobalBudget(tenantId: string, featureKey: AiFeatureKey): Promise<void> {
+    const budgetCheck = await this.usageBudgetService.checkBudget(tenantId, featureKey)
     if (!budgetCheck.allowed) {
       throw new BusinessException(
         429,
-        `Monthly AI usage budget exceeded for feature "${params.featureKey}". Used: ${String(budgetCheck.used)}/${String(budgetCheck.budget)} tokens.`,
+        `Monthly AI usage budget exceeded for feature "${featureKey}". Used: ${String(budgetCheck.used)}/${String(budgetCheck.budget)} tokens.`,
         'errors.ai.budgetExceeded'
       )
     }
+  }
 
-    // 6. Load prompt template
+  private async buildExecuteAiTaskPrompt(
+    params: ExecuteAiTaskInput,
+    agentConfig: AgentConfigWithDefaults
+  ): Promise<string> {
     const promptContent = await this.promptRegistryService.getActivePrompt(
       params.tenantId,
       params.featureKey
     )
-
-    // 6b. OSINT enrichment — if agent has OSINT sources and context includes an IoC
     await this.enrichContextWithOsint(params, agentConfig)
+    return assembleFinalPrompt(
+      promptContent, params.context, agentConfig.systemPrompt, agentConfig.promptSuffix
+    )
+  }
 
-    // 7. Build final prompt — apply agent's system prompt and suffix
-    let finalPrompt = this.buildPromptFromTemplate(promptContent, params.context)
-    if (agentConfig.systemPrompt) {
-      finalPrompt = `${agentConfig.systemPrompt}\n\n${finalPrompt}`
-    }
-    if (agentConfig.promptSuffix) {
-      finalPrompt = `${finalPrompt}\n\n${agentConfig.promptSuffix}`
-    }
-
-    // 8. Find connectors — agent config's providerMode takes priority over feature catalog
-    let connectors = await this.findAvailableAiConnectors(params.tenantId)
-    const selectedConnector =
-      params.connector ??
-      (agentConfig.providerMode === AI_DEFAULT_PROVIDER_KEY ? null : agentConfig.providerMode) ??
-      featureConfig.preferredProvider
-
-    if (selectedConnector && selectedConnector !== AI_DEFAULT_PROVIDER_KEY) {
-      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
-        selectedConnector
-      )
-      connectors = isUuid
-        ? connectors.filter(c => c.id === selectedConnector)
-        : connectors.filter(c => c.type === selectedConnector && !c.id)
-      if (connectors.length === 0) {
-        throw new BusinessException(
-          400,
-          `${agentDisplayName(agentId)} AI agent connector is not available or not configured`,
-          agentUnreachableKey(agentId)
-        )
-      }
-    }
-
-    // 9. Determine max tokens — agent config overrides feature catalog
-    const maxTokens = agentConfig.maxTokensPerCall ?? featureConfig.maxTokens
-
-    // 10. Execute through connectors in order
-    const startTime = Date.now()
-    const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
-      this.routeGenericTask(c, finalPrompt, maxTokens)
+  private async resolveExecuteAiTaskConnectors(
+    params: ExecuteAiTaskInput,
+    agentConfig: AgentConfigWithDefaults,
+    agentId: string,
+    preferredProvider: string | null
+  ): Promise<ResolvedAiConnector[]> {
+    const allConnectors = await this.findAvailableAiConnectors(params.tenantId)
+    const selectedConnector = resolveSelectedConnector(
+      params.connector, agentConfig.providerMode, AI_DEFAULT_PROVIDER_KEY, preferredProvider
     )
 
-    const response = aiResponse ?? this.buildFallbackGenericResponse(params.featureKey, finalPrompt)
-    const latencyMs = Date.now() - startTime
+    if (!selectedConnector || selectedConnector === AI_DEFAULT_PROVIDER_KEY) {
+      return allConnectors
+    }
 
-    // 11. Record usage — both global budget and per-agent counters
+    const { connectors } = filterConnectorsBySelection({
+      connector: selectedConnector,
+      connectors: allConnectors,
+    })
+
+    if (connectors.length === 0) {
+      throw new BusinessException(
+        400,
+        `${agentDisplayName(agentId)} AI agent connector is not available or not configured`,
+        agentUnreachableKey(agentId)
+      )
+    }
+
+    return connectors
+  }
+
+  private async recordUsageAndAudit(
+    params: ExecuteAiTaskInput,
+    agentId: string,
+    agentConfig: AgentConfigWithDefaults,
+    response: AiResponse,
+    latencyMs: number,
+    finalPrompt: string
+  ): Promise<void> {
+    await this.recordTokenUsage(params, agentId, response)
+    await this.logFeatureAudit(params, response, latencyMs, finalPrompt)
+    this.logFeatureTaskSuccess(params, agentId, agentConfig, response, latencyMs)
+  }
+
+  private async recordTokenUsage(
+    params: ExecuteAiTaskInput,
+    agentId: string,
+    response: AiResponse
+  ): Promise<void> {
     const totalTokens = response.tokensUsed.input + response.tokensUsed.output
     await this.usageBudgetService.recordUsage({
       tenantId: params.tenantId,
@@ -442,8 +532,14 @@ export class AiService {
       userId: params.userId,
     })
     await this.agentConfigService.incrementUsage(params.tenantId, agentId, totalTokens)
+  }
 
-    // 12. Audit log
+  private async logFeatureAudit(
+    params: ExecuteAiTaskInput,
+    response: AiResponse,
+    latencyMs: number,
+    finalPrompt: string
+  ): Promise<void> {
     await this.logAudit({
       id: randomUUID(),
       tenantId: params.tenantId,
@@ -458,7 +554,15 @@ export class AiService {
       prompt: finalPrompt,
       response: response.result,
     })
+  }
 
+  private logFeatureTaskSuccess(
+    params: ExecuteAiTaskInput,
+    agentId: string,
+    agentConfig: AgentConfigWithDefaults,
+    response: AiResponse,
+    latencyMs: number
+  ): void {
     this.appLogger.info(`AI task executed: ${params.featureKey}`, {
       feature: AppLogFeature.AI,
       action: 'executeAiTask',
@@ -477,8 +581,6 @@ export class AiService {
         latencyMs,
       },
     })
-
-    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -493,8 +595,8 @@ export class AiService {
     params: ExecuteAiTaskInput,
     agentConfig: AgentConfigWithDefaults
   ): Promise<void> {
-    const { osintSources } = agentConfig
-    if (!Array.isArray(osintSources) || osintSources.length === 0) {
+    const sourceIds = this.extractOsintSourceIds(agentConfig)
+    if (sourceIds.length === 0) {
       return
     }
 
@@ -503,11 +605,23 @@ export class AiService {
       return
     }
 
-    const sourceIds = osintSources.filter((id): id is string => typeof id === 'string')
-    if (sourceIds.length === 0) {
-      return
-    }
+    await this.performOsintEnrichment(params, iocType, iocValue, sourceIds)
+  }
 
+  private extractOsintSourceIds(agentConfig: AgentConfigWithDefaults): string[] {
+    const { osintSources } = agentConfig
+    if (!Array.isArray(osintSources) || osintSources.length === 0) {
+      return []
+    }
+    return osintSources.filter((id): id is string => typeof id === 'string')
+  }
+
+  private async performOsintEnrichment(
+    params: ExecuteAiTaskInput,
+    iocType: string,
+    iocValue: string,
+    sourceIds: string[]
+  ): Promise<void> {
     try {
       const enrichment = await this.osintExecutorService.enrichIoc(
         params.tenantId,
@@ -531,50 +645,6 @@ export class AiService {
   }
 
   /* ---------------------------------------------------------------- */
-  /* PRIVATE: Agent Quota Check                                        */
-  /* ---------------------------------------------------------------- */
-
-  /**
-   * Checks whether an agent's token usage is within its configured quotas.
-   * Compares current hour/day/month usage against the respective limits.
-   */
-  private checkAgentQuota(agentConfig: AgentConfigWithDefaults): {
-    allowed: boolean
-    period?: string
-    used?: number
-    limit?: number
-  } {
-    if (agentConfig.tokensPerHour > 0 && agentConfig.tokensUsedHour >= agentConfig.tokensPerHour) {
-      return {
-        allowed: false,
-        period: 'hour',
-        used: agentConfig.tokensUsedHour,
-        limit: agentConfig.tokensPerHour,
-      }
-    }
-    if (agentConfig.tokensPerDay > 0 && agentConfig.tokensUsedDay >= agentConfig.tokensPerDay) {
-      return {
-        allowed: false,
-        period: 'day',
-        used: agentConfig.tokensUsedDay,
-        limit: agentConfig.tokensPerDay,
-      }
-    }
-    if (
-      agentConfig.tokensPerMonth > 0 &&
-      agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth
-    ) {
-      return {
-        allowed: false,
-        period: 'month',
-        used: agentConfig.tokensUsedMonth,
-        limit: agentConfig.tokensPerMonth,
-      }
-    }
-    return { allowed: true }
-  }
-
-  /* ---------------------------------------------------------------- */
   /* PRIVATE: Generic Task Routing                                     */
   /* ---------------------------------------------------------------- */
 
@@ -584,49 +654,7 @@ export class AiService {
     maxTokens: number
   ): Promise<AiResponse | undefined> {
     try {
-      switch (connector.type) {
-        case ConnectorType.BEDROCK: {
-          const aiResult = await this.bedrockService.invoke(connector.config, prompt, maxTokens)
-          return {
-            result: aiResult.text,
-            reasoning: ['Processed by AI model via Bedrock'],
-            confidence: 0.9,
-            model: (connector.config.modelId as string) ?? AI_DEFAULT_MODEL,
-            provider: 'bedrock',
-            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
-          }
-        }
-        case ConnectorType.LLM_APIS: {
-          const aiResult = await this.llmApisService.invoke(connector.config, prompt, maxTokens)
-          const modelId = (connector.config.defaultModel as string) ?? 'gpt-4'
-          return {
-            result: aiResult.text,
-            reasoning: ['Processed by AI model via LLM API'],
-            confidence: 0.9,
-            model: modelId,
-            provider: connector.name ? `llm_apis(${connector.name})` : 'llm_apis',
-            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
-          }
-        }
-        case ConnectorType.OPENCLAW_GATEWAY: {
-          const aiResult = await this.openClawGatewayService.invoke(
-            connector.config,
-            prompt,
-            maxTokens,
-            'generic'
-          )
-          return {
-            result: aiResult.text,
-            reasoning: ['Processed by AI model via OpenClaw Gateway'],
-            confidence: 0.9,
-            model: 'openclaw-gateway',
-            provider: 'openclaw_gateway',
-            tokensUsed: { input: aiResult.inputTokens, output: aiResult.outputTokens },
-          }
-        }
-        default:
-          return undefined
-      }
+      return await this.invokeGenericConnector(connector, prompt, maxTokens)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(`Generic AI task routing failed for ${connector.type}: ${errorMessage}`)
@@ -634,42 +662,63 @@ export class AiService {
     }
   }
 
-  /**
-   * Replaces {{key}} placeholders in a prompt template with values from the context object.
-   * If a key is not found in context, the placeholder is left as-is.
-   */
-  private buildPromptFromTemplate(template: string, context: Record<string, unknown>): string {
-    // Replace {{context}} with JSON-stringified full context if no specific keys
-    let result = template
-    if (result.includes('{{context}}')) {
-      result = result.replaceAll('{{context}}', JSON.stringify(context, null, 2))
+  private async invokeGenericConnector(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    maxTokens: number
+  ): Promise<AiResponse | undefined> {
+    switch (connector.type) {
+      case ConnectorType.BEDROCK:
+        return this.invokeGenericBedrock(connector, prompt, maxTokens)
+      case ConnectorType.LLM_APIS:
+        return this.invokeGenericLlmApis(connector, prompt, maxTokens)
+      case ConnectorType.OPENCLAW_GATEWAY:
+        return this.invokeGenericOpenClaw(connector, prompt, maxTokens)
+      default:
+        return undefined
     }
-
-    // Replace specific {{key}} placeholders
-    for (const [key, value] of Object.entries(context)) {
-      const placeholder = `{{${key}}}`
-      if (result.includes(placeholder)) {
-        const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-        result = result.replaceAll(placeholder, stringValue)
-      }
-    }
-
-    return result
   }
 
-  private buildFallbackGenericResponse(featureKey: AiFeatureKey, prompt: string): AiResponse {
-    return {
-      result: `[Rule-based fallback] No AI provider available to process feature "${featureKey}". The request has been logged for manual review.\n\nPrompt preview: ${prompt.slice(0, 200)}...`,
-      reasoning: [
-        'No AI connector available for this tenant',
-        'Returning rule-based fallback response',
-        'Manual review recommended',
-      ],
-      confidence: 0.3,
-      model: 'rule-based',
-      provider: 'rule-based',
-      tokensUsed: { input: 0, output: 0 },
-    }
+  private async invokeGenericBedrock(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    maxTokens: number
+  ): Promise<AiResponse> {
+    const aiResult = await this.bedrockService.invoke(connector.config, prompt, maxTokens)
+    const model = (connector.config.modelId as string) ?? AI_DEFAULT_MODEL
+    return buildGenericAiResponse(
+      aiResult.text, model, 'bedrock', aiResult.inputTokens, aiResult.outputTokens,
+      'Processed by AI model via Bedrock'
+    )
+  }
+
+  private async invokeGenericLlmApis(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    maxTokens: number
+  ): Promise<AiResponse> {
+    const aiResult = await this.llmApisService.invoke(connector.config, prompt, maxTokens)
+    const model = (connector.config.defaultModel as string) ?? 'gpt-4'
+    const provider = connector.name ? `llm_apis(${connector.name})` : 'llm_apis'
+    return buildGenericAiResponse(
+      aiResult.text, model, provider, aiResult.inputTokens, aiResult.outputTokens,
+      'Processed by AI model via LLM API'
+    )
+  }
+
+  private async invokeGenericOpenClaw(
+    connector: ResolvedAiConnector,
+    prompt: string,
+    maxTokens: number
+  ): Promise<AiResponse> {
+    const aiResult = await this.openClawGatewayService.invoke(
+      connector.config, prompt, maxTokens, 'generic'
+    )
+    return buildGenericAiResponse(
+      aiResult.text, 'openclaw-gateway', 'openclaw_gateway',
+      aiResult.inputTokens, aiResult.outputTokens,
+      'Processed by AI model via OpenClaw Gateway'
+    )
   }
 
   /* ---------------------------------------------------------------- */
@@ -681,16 +730,28 @@ export class AiService {
    * The caller cascades through them until one succeeds.
    */
   private async findAvailableAiConnectors(tenantId: string): Promise<ResolvedAiConnector[]> {
+    const resolved = await this.resolveFixedConnectors(tenantId)
+    const dynamicCount = await this.appendDynamicConnectors(tenantId, resolved)
+
+    this.logConnectorResolution(tenantId, resolved, dynamicCount)
+
+    return resolved
+  }
+
+  private async resolveFixedConnectors(tenantId: string): Promise<ResolvedAiConnector[]> {
     const configs = await Promise.all(
       AI_CONNECTOR_PRIORITY.map(async connectorType => {
         const config = await this.connectorsService.getDecryptedConfig(tenantId, connectorType)
         return config ? { type: connectorType, config } : undefined
       })
     )
+    return configs.filter((entry): entry is ResolvedAiConnector => entry !== undefined)
+  }
 
-    const resolved = configs.filter((entry): entry is ResolvedAiConnector => entry !== undefined)
-
-    // Also include dynamic LLM connectors
+  private async appendDynamicConnectors(
+    tenantId: string,
+    resolved: ResolvedAiConnector[]
+  ): Promise<number> {
     const dynamicLlmConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
     for (const dynamic of dynamicLlmConfigs) {
       resolved.push({
@@ -700,9 +761,16 @@ export class AiService {
         config: dynamic.config,
       })
     }
+    return dynamicLlmConfigs.length
+  }
 
+  private logConnectorResolution(
+    tenantId: string,
+    resolved: ResolvedAiConnector[],
+    dynamicCount: number
+  ): void {
     this.appLogger.info(
-      `AI connector resolution: ${String(resolved.length)} of ${String(AI_CONNECTOR_PRIORITY.length)} fixed + ${String(dynamicLlmConfigs.length)} dynamic configured`,
+      `AI connector resolution: ${String(resolved.length)} of ${String(AI_CONNECTOR_PRIORITY.length)} fixed + ${String(dynamicCount)} dynamic configured`,
       {
         feature: AppLogFeature.AI,
         action: 'findAvailableAiConnectors',
@@ -714,12 +782,10 @@ export class AiService {
           checked: AI_CONNECTOR_PRIORITY,
           available: resolved.map(c => c.id ?? c.type),
           missing: AI_CONNECTOR_PRIORITY.filter(t => !resolved.some(r => r.type === t && !r.id)),
-          dynamicCount: dynamicLlmConfigs.length,
+          dynamicCount,
         },
       }
     )
-
-    return resolved
   }
 
   /**
@@ -733,23 +799,38 @@ export class AiService {
     index = 0
   ): Promise<AiResponse | undefined> {
     if (index >= connectors.length) {
-      this.appLogger.warn('AI: all connectors failed, using rule-based fallback', {
-        feature: AppLogFeature.AI,
-        action: 'tryConnectorsInOrder',
-        outcome: AppLogOutcome.WARNING,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AiService',
-        functionName: 'tryConnectorsInOrder',
-        metadata: { triedConnectors: connectors.map(c => c.type) },
-      })
+      this.logAllConnectorsFailed(connectors)
       return undefined
     }
 
     const connector = connectors.at(index)
-    if (!connector) {
-      return undefined
+    if (!connector) return undefined
+
+    this.logConnectorAttempt(connector)
+    const response = await attempt(connector)
+
+    if (response) {
+      this.logConnectorSuccess(connector, response)
+      return response
     }
 
+    this.logConnectorFailure(connector)
+    return this.tryConnectorsInOrder(connectors, attempt, index + 1)
+  }
+
+  private logAllConnectorsFailed(connectors: ResolvedAiConnector[]): void {
+    this.appLogger.warn('AI: all connectors failed, using rule-based fallback', {
+      feature: AppLogFeature.AI,
+      action: 'tryConnectorsInOrder',
+      outcome: AppLogOutcome.WARNING,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'tryConnectorsInOrder',
+      metadata: { triedConnectors: connectors.map(c => c.type) },
+    })
+  }
+
+  private logConnectorAttempt(connector: ResolvedAiConnector): void {
     const providerLabel = connector.name ? `${connector.type}(${connector.name})` : connector.type
     this.appLogger.info(`AI: trying provider ${providerLabel}...`, {
       feature: AppLogFeature.AI,
@@ -763,22 +844,21 @@ export class AiService {
         connectorName: connector.name,
       },
     })
+  }
 
-    const response = await attempt(connector)
+  private logConnectorSuccess(connector: ResolvedAiConnector, response: AiResponse): void {
+    this.appLogger.info(`AI: ${connector.type} succeeded`, {
+      feature: AppLogFeature.AI,
+      action: 'tryConnectorsInOrder',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AiService',
+      functionName: 'tryConnectorsInOrder',
+      metadata: { provider: connector.type, model: response.model },
+    })
+  }
 
-    if (response) {
-      this.appLogger.info(`AI: ${connector.type} succeeded`, {
-        feature: AppLogFeature.AI,
-        action: 'tryConnectorsInOrder',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AiService',
-        functionName: 'tryConnectorsInOrder',
-        metadata: { provider: connector.type, model: response.model },
-      })
-      return response
-    }
-
+  private logConnectorFailure(connector: ResolvedAiConnector): void {
     this.appLogger.warn(`AI: ${connector.type} failed, trying next...`, {
       feature: AppLogFeature.AI,
       action: 'tryConnectorsInOrder',
@@ -788,8 +868,6 @@ export class AiService {
       functionName: 'tryConnectorsInOrder',
       metadata: { provider: connector.type },
     })
-
-    return this.tryConnectorsInOrder(connectors, attempt, index + 1)
   }
 
   /* ---------------------------------------------------------------- */
@@ -1041,35 +1119,15 @@ export class AiService {
     connectorName?: string
   ): Promise<AiResponse | undefined> {
     try {
-      const prompt = buildAgentTaskPrompt({
-        agentName: input.agentName,
-        prompt: input.prompt,
-        soulMd: input.soulMd,
-        tools: input.tools,
-      })
+      const prompt = this.buildAgentTaskPromptFromInput(input)
       const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
       const modelId = (config.defaultModel as string) ?? 'gpt-4'
       return buildLlmApisAgentTaskResponse(
-        aiResult.text,
-        input.agentName,
-        modelId,
-        aiResult.inputTokens,
-        aiResult.outputTokens,
-        connectorName
+        aiResult.text, input.agentName, modelId,
+        aiResult.inputTokens, aiResult.outputTokens, connectorName
       )
     } catch (error) {
-      this.logProviderFailure(
-        'LLM APIs',
-        'runAgentTask',
-        error,
-        input.tenantId,
-        input.actorUserId,
-        {
-          targetResource: 'AiAgent',
-          targetResourceId: input.agentId,
-          feature: AppLogFeature.AI_AGENTS,
-        }
-      )
+      this.logAgentTaskProviderFailure('LLM APIs', error, input)
       return undefined
     }
   }
@@ -1133,19 +1191,11 @@ export class AiService {
     try {
       const prompt = buildInvestigationPrompt(alert, relatedAlerts)
       const aiResult = await this.openClawGatewayService.invoke(
-        config,
-        prompt,
-        AI_OPENCLAW_MAX_TOKENS,
-        'investigate'
+        config, prompt, AI_OPENCLAW_MAX_TOKENS, 'investigate'
       )
       return buildOpenClawInvestigateResponse(
-        aiResult.text,
-        alertId,
-        relatedAlerts.length,
-        alert,
-        relatedAlerts,
-        aiResult.inputTokens,
-        aiResult.outputTokens
+        aiResult.text, alertId, relatedAlerts.length,
+        alert, relatedAlerts, aiResult.inputTokens, aiResult.outputTokens
       )
     } catch (error) {
       this.logProviderFailure('OpenClaw Gateway', 'aiInvestigate', error, user.tenantId, user.sub, {
@@ -1161,39 +1211,45 @@ export class AiService {
     input: AgentTaskExecutionInput
   ): Promise<AiResponse | undefined> {
     try {
-      const prompt = buildAgentTaskPrompt({
-        agentName: input.agentName,
-        prompt: input.prompt,
-        soulMd: input.soulMd,
-        tools: input.tools,
-      })
+      const prompt = this.buildAgentTaskPromptFromInput(input)
       const aiResult = await this.openClawGatewayService.invoke(
-        config,
-        prompt,
-        AI_OPENCLAW_MAX_TOKENS,
-        'agent_task'
+        config, prompt, AI_OPENCLAW_MAX_TOKENS, 'agent_task'
       )
       return buildOpenClawAgentTaskResponse(
-        aiResult.text,
-        input.agentName,
-        aiResult.inputTokens,
-        aiResult.outputTokens
+        aiResult.text, input.agentName, aiResult.inputTokens, aiResult.outputTokens
       )
     } catch (error) {
-      this.logProviderFailure(
-        'OpenClaw Gateway',
-        'runAgentTask',
-        error,
-        input.tenantId,
-        input.actorUserId,
-        {
-          targetResource: 'AiAgent',
-          targetResourceId: input.agentId,
-          feature: AppLogFeature.AI_AGENTS,
-        }
-      )
+      this.logAgentTaskProviderFailure('OpenClaw Gateway', error, input)
       return undefined
     }
+  }
+
+  private buildAgentTaskPromptFromInput(input: AgentTaskExecutionInput): string {
+    return buildAgentTaskPrompt({
+      agentName: input.agentName,
+      prompt: input.prompt,
+      soulMd: input.soulMd,
+      tools: input.tools,
+    })
+  }
+
+  private logAgentTaskProviderFailure(
+    providerName: string,
+    error: unknown,
+    input: AgentTaskExecutionInput
+  ): void {
+    this.logProviderFailure(
+      providerName,
+      'runAgentTask',
+      error,
+      input.tenantId,
+      input.actorUserId,
+      {
+        targetResource: 'AiAgent',
+        targetResourceId: input.agentId,
+        feature: AppLogFeature.AI_AGENTS,
+      }
+    )
   }
 
   private async tryOpenClawExplain(
@@ -1216,28 +1272,6 @@ export class AiService {
     } catch (error) {
       this.logProviderFailure('OpenClaw Gateway', 'aiExplain', error, user.tenantId, user.sub)
       return undefined
-    }
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Fallback Explain (rule-based)                            */
-  /* ---------------------------------------------------------------- */
-
-  private buildFallbackExplainResponse(prompt: string): AiResponse {
-    return {
-      result: generateExplainResponse(prompt),
-      reasoning: [
-        'Parsing the security concept or finding to explain',
-        'Breaking down technical details into analyst-friendly language',
-        'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
-        'Providing contextual examples relevant to the environment',
-        'Including remediation guidance and best practices',
-        'Generating rule-based explanation (AI model not available)',
-      ],
-      confidence: 0.85,
-      model: 'rule-based',
-      provider: 'rule-based',
-      tokensUsed: { input: 0, output: 0 },
     }
   }
 
@@ -1274,30 +1308,8 @@ export class AiService {
 
   private async ensureAiEnabled(tenantId: string): Promise<void> {
     try {
-      const [enabledConnectors, hasDynamicLlm] = await Promise.all([
-        this.aiRepository.findEnabledConnectorByTypes(tenantId, [
-          ConnectorType.BEDROCK,
-          ConnectorType.LLM_APIS,
-          ConnectorType.OPENCLAW_GATEWAY,
-        ]),
-        this.llmConnectorsService.hasEnabledConnectors(tenantId),
-      ])
-
-      if (enabledConnectors.length === 0 && !hasDynamicLlm) {
-        this.appLogger.warn('AI features not enabled for tenant', {
-          feature: AppLogFeature.AI,
-          action: 'ensureAiEnabled',
-          className: 'AiService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.DENIED,
-          tenantId,
-        })
-        throw new BusinessException(
-          403,
-          'No AI connectors are configured or enabled. Set up at least one connector in Connectors settings.',
-          'errors.ai.notEnabled'
-        )
-      }
+      const [enabledConnectors, hasDynamicLlm] = await this.checkAiConnectorAvailability(tenantId)
+      this.assertAnyConnectorEnabled(enabledConnectors, hasDynamicLlm, tenantId)
     } catch (error) {
       if (error instanceof BusinessException) throw error
       this.logger.error('AI gate check failed', error)
@@ -1305,6 +1317,41 @@ export class AiService {
         503,
         'AI service temporarily unavailable',
         'errors.ai.serviceUnavailable'
+      )
+    }
+  }
+
+  private async checkAiConnectorAvailability(
+    tenantId: string
+  ): Promise<[unknown[], boolean]> {
+    return Promise.all([
+      this.aiRepository.findEnabledConnectorByTypes(tenantId, [
+        ConnectorType.BEDROCK,
+        ConnectorType.LLM_APIS,
+        ConnectorType.OPENCLAW_GATEWAY,
+      ]),
+      this.llmConnectorsService.hasEnabledConnectors(tenantId),
+    ])
+  }
+
+  private assertAnyConnectorEnabled(
+    enabledConnectors: unknown[],
+    hasDynamicLlm: boolean,
+    tenantId: string
+  ): void {
+    if (enabledConnectors.length === 0 && !hasDynamicLlm) {
+      this.appLogger.warn('AI features not enabled for tenant', {
+        feature: AppLogFeature.AI,
+        action: 'ensureAiEnabled',
+        className: 'AiService',
+        sourceType: AppLogSourceType.SERVICE,
+        outcome: AppLogOutcome.DENIED,
+        tenantId,
+      })
+      throw new BusinessException(
+        403,
+        'No AI connectors are configured or enabled. Set up at least one connector in Connectors settings.',
+        'errors.ai.notEnabled'
       )
     }
   }

@@ -4,6 +4,7 @@ import { AI_DEFAULT_PROVIDER_KEY } from './agent-config.constants'
 import { AgentConfigRepository } from './agent-config.repository'
 import {
   buildAgentConfigWithDefaults,
+  buildOsintSourceUpdateData,
   buildTokenResetData,
   isValidAgentId,
   redactOsintSource,
@@ -205,18 +206,7 @@ export class AgentConfigService {
       validateUrl(dto.baseUrl)
     }
 
-    let encryptedKey: string | null = null
-    if (dto.apiKey) {
-      const encryptionKey = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
-      if (!encryptionKey) {
-        throw new BusinessException(
-          500,
-          'Encryption key not configured',
-          'errors.agentConfig.encryptionKeyMissing'
-        )
-      }
-      encryptedKey = encrypt(dto.apiKey, encryptionKey)
-    }
+    const encryptedKey = this.encryptApiKey(dto.apiKey)
 
     const record = await this.repository.createOsintSource({
       tenant: { connect: { id: tenantId } },
@@ -248,34 +238,16 @@ export class AgentConfigService {
     dto: UpdateOsintSourceDto,
     actor: string
   ): Promise<OsintSourceRedacted> {
-    const existing = await this.repository.findOsintSource(id, tenantId)
-    if (!existing) {
-      throw new BusinessException(
-        404,
-        'OSINT source not found',
-        'errors.agentConfig.osintSourceNotFound'
-      )
-    }
+    this.validateOsintSourceExists(
+      await this.repository.findOsintSource(id, tenantId)
+    )
 
     if (dto.baseUrl) {
       validateUrl(dto.baseUrl)
     }
 
-    const updateData: Record<string, unknown> = { ...dto }
-    delete updateData.apiKey
-
-    if (dto.apiKey) {
-      const encryptionKey = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
-      if (!encryptionKey) {
-        throw new BusinessException(
-          500,
-          'Encryption key not configured',
-          'errors.agentConfig.encryptionKeyMissing'
-        )
-      }
-      updateData.encryptedApiKey = encrypt(dto.apiKey, encryptionKey)
-    }
-
+    const encryptedKey = dto.apiKey ? this.encryptApiKey(dto.apiKey) : null
+    const updateData = buildOsintSourceUpdateData(dto as Record<string, unknown>, encryptedKey)
     const record = await this.repository.updateOsintSource(id, tenantId, updateData)
 
     this.logSuccess('updateOsintSource', tenantId, { sourceId: id, actor })
@@ -284,14 +256,9 @@ export class AgentConfigService {
   }
 
   async deleteOsintSource(id: string, tenantId: string, actor: string): Promise<void> {
-    const existing = await this.repository.findOsintSource(id, tenantId)
-    if (!existing) {
-      throw new BusinessException(
-        404,
-        'OSINT source not found',
-        'errors.agentConfig.osintSourceNotFound'
-      )
-    }
+    this.validateOsintSourceExists(
+      await this.repository.findOsintSource(id, tenantId)
+    )
 
     await this.repository.deleteOsintSource(id, tenantId)
 
@@ -314,6 +281,24 @@ export class AgentConfigService {
     dto: ResolveApprovalDto,
     actor: string
   ): Promise<AiApprovalRequestRecord> {
+    await this.findAndValidateApproval(id, tenantId)
+
+    const record = await this.repository.updateApprovalStatus(id, tenantId, {
+      status: dto.status,
+      reviewedBy: actor,
+      reviewedAt: new Date(),
+      comment: dto.comment ?? null,
+    })
+
+    this.logSuccess('resolveApproval', tenantId, { approvalId: id, status: dto.status, actor })
+
+    return record
+  }
+
+  private async findAndValidateApproval(
+    id: string,
+    tenantId: string
+  ): Promise<AiApprovalRequestRecord> {
     const existing = await this.repository.findApproval(id, tenantId)
     if (!existing) {
       throw new BusinessException(
@@ -335,16 +320,7 @@ export class AgentConfigService {
       throw new BusinessException(400, 'Approval has expired', 'errors.agentConfig.approvalExpired')
     }
 
-    const record = await this.repository.updateApprovalStatus(id, tenantId, {
-      status: dto.status,
-      reviewedBy: actor,
-      reviewedAt: new Date(),
-      comment: dto.comment ?? null,
-    })
-
-    this.logSuccess('resolveApproval', tenantId, { approvalId: id, status: dto.status, actor })
-
-    return record
+    return existing
   }
 
   // ─── Token Usage Tracking ──────────────────────────────────
@@ -363,6 +339,30 @@ export class AgentConfigService {
   }
 
   // ─── Private Helpers ───────────────────────────────────────
+
+  private encryptApiKey(apiKey: string | undefined): string | null {
+    if (!apiKey) return null
+
+    const encryptionKey = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
+    if (!encryptionKey) {
+      throw new BusinessException(
+        500,
+        'Encryption key not configured',
+        'errors.agentConfig.encryptionKeyMissing'
+      )
+    }
+    return encrypt(apiKey, encryptionKey)
+  }
+
+  private validateOsintSourceExists(source: unknown): void {
+    if (!source) {
+      throw new BusinessException(
+        404,
+        'OSINT source not found',
+        'errors.agentConfig.osintSourceNotFound'
+      )
+    }
+  }
 
   private validateAgentId(agentId: string): void {
     if (!isValidAgentId(agentId)) {

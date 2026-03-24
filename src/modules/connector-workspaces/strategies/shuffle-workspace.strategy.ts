@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { CardVariant, Severity } from '../../../common/enums'
+import { CardVariant } from '../../../common/enums'
 import { ShuffleService } from '../../connectors/services/shuffle.service'
+import {
+  buildErrorSummaryCard,
+  mapShuffleWorkflowToEntity,
+  mapShuffleWorkflowToOverviewEntity,
+  mapShuffleWorkflowToOverviewRecentItem,
+  mapShuffleWorkflowToRecentItem,
+  paginateArray,
+} from '../connector-workspaces.utilities'
 import type {
   ConnectorWorkspaceStrategy,
   WorkspaceSummaryCard,
@@ -30,66 +38,7 @@ export class ShuffleWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []
 
-    try {
-      const workflows = await this.shuffleService.getWorkflows(config)
-
-      summaryCards.push({
-        key: 'workflows',
-        label: 'Workflows',
-        value: workflows.length,
-        icon: 'workflow',
-        variant: workflows.length > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
-      })
-
-      let activeCount = 0
-      for (const wf of workflows.slice(0, 10)) {
-        const w = wf as Record<string, unknown>
-        if (w.is_valid) activeCount++
-
-        if (entitiesPreview.length < 5) {
-          entitiesPreview.push({
-            id: (w.id ?? '') as string,
-            name: (w.name ?? 'Untitled') as string,
-            status: w.is_valid ? 'active' : 'inactive',
-            type: 'workflow',
-            metadata: {
-              actions: (w.actions as unknown[])?.length ?? 0,
-              triggers: (w.triggers as unknown[])?.length ?? 0,
-            },
-          })
-        }
-
-        if (recentItems.length < 5) {
-          recentItems.push({
-            id: (w.id ?? '') as string,
-            title: (w.name ?? 'Workflow') as string,
-            description: w.is_valid ? 'Active' : 'Inactive',
-            timestamp: (w.edited ?? w.created ?? '') as string,
-            severity: w.is_valid ? Severity.INFO : Severity.LOW,
-            type: 'workflow',
-          })
-        }
-      }
-
-      summaryCards.push({
-        key: 'active-workflows',
-        label: 'Active Workflows',
-        value: activeCount,
-        icon: 'check-circle',
-        variant: activeCount > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
-      })
-    } catch (error) {
-      this.logger.warn(
-        `Failed to fetch Shuffle workflows: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-      summaryCards.push({
-        key: 'workflows',
-        label: 'Workflows',
-        value: 'N/A',
-        icon: 'workflow',
-        variant: CardVariant.ERROR,
-      })
-    }
+    await this.fetchOverviewWorkflows(config, summaryCards, recentItems, entitiesPreview)
 
     const quickActions: WorkspaceQuickAction[] = [
       { key: 'test-connection', label: 'Test Connection', icon: 'play' },
@@ -105,20 +54,8 @@ export class ShuffleWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     pageSize: number
   ): Promise<WorkspaceRecentActivityResponse> {
     const workflows = await this.shuffleService.getWorkflows(config)
-    const start = (page - 1) * pageSize
-    const sliced = workflows.slice(start, start + pageSize)
-
-    const items: WorkspaceRecentItem[] = sliced.map(wf => {
-      const w = wf as Record<string, unknown>
-      return {
-        id: (w.id ?? '') as string,
-        title: (w.name ?? 'Workflow') as string,
-        timestamp: (w.edited ?? '') as string,
-        severity: Severity.INFO,
-        type: 'workflow',
-      }
-    })
-
+    const sliced = paginateArray(workflows, page, pageSize)
+    const items = sliced.map(mapShuffleWorkflowToRecentItem)
     return { items, total: workflows.length, page, pageSize }
   }
 
@@ -128,20 +65,8 @@ export class ShuffleWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     pageSize: number
   ): Promise<WorkspaceEntitiesResponse> {
     const workflows = await this.shuffleService.getWorkflows(config)
-    const start = (page - 1) * pageSize
-    const sliced = workflows.slice(start, start + pageSize)
-
-    const entities: WorkspaceEntity[] = sliced.map(wf => {
-      const w = wf as Record<string, unknown>
-      return {
-        id: (w.id ?? '') as string,
-        name: (w.name ?? 'Untitled') as string,
-        status: w.is_valid ? 'active' : 'inactive',
-        type: 'workflow',
-        metadata: { actions: (w.actions as unknown[])?.length ?? 0 },
-      }
-    })
-
+    const sliced = paginateArray(workflows, page, pageSize)
+    const entities = sliced.map(mapShuffleWorkflowToEntity)
     return { entities, total: workflows.length, page, pageSize }
   }
 
@@ -170,22 +95,8 @@ export class ShuffleWorkspaceStrategy implements ConnectorWorkspaceStrategy {
           data: { count: workflows.length },
         }
       }
-      case 'execute-workflow': {
-        const workflowId = params.workflowId as string | undefined
-        if (!workflowId) {
-          return { success: false, message: 'workflowId is required' }
-        }
-        const result = await this.shuffleService.executeWorkflow(
-          config,
-          workflowId,
-          (params.data as Record<string, unknown>) ?? {}
-        )
-        return {
-          success: true,
-          message: `Workflow executed: ${result.executionId}`,
-          data: { executionId: result.executionId },
-        }
-      }
+      case 'execute-workflow':
+        return this.executeWorkflowAction(config, params)
       default:
         return { success: false, message: `Unknown action: ${action}` }
     }
@@ -193,5 +104,75 @@ export class ShuffleWorkspaceStrategy implements ConnectorWorkspaceStrategy {
 
   getAllowedActions(): string[] {
     return ['test-connection', 'refresh-workflows', 'execute-workflow']
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE                                                           */
+  /* ---------------------------------------------------------------- */
+
+  private async fetchOverviewWorkflows(
+    config: Record<string, unknown>,
+    summaryCards: WorkspaceSummaryCard[],
+    recentItems: WorkspaceRecentItem[],
+    entitiesPreview: WorkspaceEntity[]
+  ): Promise<void> {
+    try {
+      const workflows = await this.shuffleService.getWorkflows(config)
+
+      summaryCards.push({
+        key: 'workflows',
+        label: 'Workflows',
+        value: workflows.length,
+        icon: 'workflow',
+        variant: workflows.length > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
+      })
+
+      let activeCount = 0
+      for (const wf of workflows.slice(0, 10)) {
+        const w = wf as Record<string, unknown>
+        if (w.is_valid) activeCount++
+
+        if (entitiesPreview.length < 5) {
+          entitiesPreview.push(mapShuffleWorkflowToOverviewEntity(wf))
+        }
+
+        if (recentItems.length < 5) {
+          recentItems.push(mapShuffleWorkflowToOverviewRecentItem(wf))
+        }
+      }
+
+      summaryCards.push({
+        key: 'active-workflows',
+        label: 'Active Workflows',
+        value: activeCount,
+        icon: 'check-circle',
+        variant: activeCount > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
+      })
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch Shuffle workflows: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+      summaryCards.push(buildErrorSummaryCard('workflows', 'Workflows', 'workflow'))
+    }
+  }
+
+  private async executeWorkflowAction(
+    config: Record<string, unknown>,
+    params: Record<string, unknown>
+  ): Promise<WorkspaceActionResponse> {
+    const workflowId = params.workflowId as string | undefined
+    if (!workflowId) {
+      return { success: false, message: 'workflowId is required' }
+    }
+    const result = await this.shuffleService.executeWorkflow(
+      config,
+      workflowId,
+      (params.data as Record<string, unknown>) ?? {}
+    )
+    return {
+      success: true,
+      message: `Workflow executed: ${result.executionId}`,
+      data: { executionId: result.executionId },
+    }
   }
 }

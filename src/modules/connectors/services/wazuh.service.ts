@@ -8,7 +8,12 @@ import {
 } from '../../../common/enums'
 import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
+import {
+  extractRemoteErrorMessage,
+  extractSearchTotal,
+  extractWazuhVersion,
+  formatRemoteError,
+} from '../connectors.utilities'
 import type { ScrollCollectionParameters, TestResult, WazuhTokenCache } from '../connectors.types'
 
 @Injectable()
@@ -38,76 +43,9 @@ export class WazuhService {
     }
 
     try {
-      const token = await this.authenticate(managerUrl, username, password, config)
-
-      // Verify token by getting manager info
-      const infoResponse = await this.httpClient.fetch(`${managerUrl}/manager/info`, {
-        headers: { Authorization: `Bearer ${token}` },
-        rejectUnauthorized: config.verifyTls !== false,
-        allowPrivateNetwork: true,
-      })
-
-      if (infoResponse.status !== 200) {
-        const remoteError = formatRemoteError(
-          'Wazuh Manager',
-          infoResponse.status,
-          infoResponse.data
-        )
-        this.appLogger.warn('Wazuh Manager info request failed', {
-          feature: AppLogFeature.CONNECTORS,
-          action: 'testConnection',
-          className: 'WazuhService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: {
-            connectorType: ConnectorType.WAZUH,
-            status: infoResponse.status,
-            remoteError: extractRemoteErrorMessage(infoResponse.data),
-          },
-        })
-        return { ok: false, details: remoteError }
-      }
-
-      const info = infoResponse.data as Record<string, unknown>
-      const dataWrapper = (info.data as Record<string, unknown>) ?? info
-      const affectedItems = (dataWrapper.affected_items as Record<string, unknown>[]) ?? []
-      const firstItem = affectedItems[0] ?? dataWrapper
-      const version = ((firstItem as Record<string, unknown>).api_version ??
-        (firstItem as Record<string, unknown>).version ??
-        dataWrapper.api_version ??
-        dataWrapper.version ??
-        'unknown') as string
-
-      this.appLogger.info('Wazuh connection test succeeded', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'WazuhService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.WAZUH, version },
-      })
-
-      return {
-        ok: true,
-        details: `Wazuh Manager v${version} reachable at ${managerUrl}.`,
-      }
+      return await this.executeManagerCheck(config, managerUrl, username, password)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Connection failed'
-      this.logger.warn(`Wazuh connection test failed: ${message}`)
-
-      this.appLogger.error('Wazuh connection test failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'WazuhService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.WAZUH, error: message },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
-      return { ok: false, details: message }
+      return this.handleTestError(error)
     }
   }
 
@@ -127,58 +65,9 @@ export class WazuhService {
       return cached.token
     }
 
-    const res = await this.httpClient.fetch(`${managerUrl}/security/user/authenticate`, {
-      method: HttpMethod.POST,
-      headers: { Authorization: this.httpClient.basicAuth(username, password) },
-      rejectUnauthorized: config.verifyTls !== false,
-      allowPrivateNetwork: true,
-    })
-
-    if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Wazuh authentication failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'authenticate',
-        className: 'WazuhService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
-      throw new Error(formatRemoteError('Wazuh Manager', res.status, res.data))
-    }
-
-    const body = res.data as Record<string, unknown>
-    const data = body.data as Record<string, unknown> | undefined
-    const token = (data?.token ?? body.token) as string
-
-    if (!token) {
-      this.appLogger.warn('Wazuh authentication returned no token', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'authenticate',
-        className: 'WazuhService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {},
-      })
-      throw new Error('Wazuh authentication returned no token')
-    }
-
-    // Cache for 10 minutes
-    this.tokenCache.set(cacheKey, {
-      token,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    })
-
-    this.appLogger.info('Wazuh authentication succeeded', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'authenticate',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'WazuhService',
-      functionName: 'authenticate',
-      metadata: { connectorType: ConnectorType.WAZUH },
-    })
-
+    const token = await this.fetchAuthToken(managerUrl, username, password, config)
+    this.cacheToken(cacheKey, token)
+    this.logActionSuccess('authenticate', {})
     return token
   }
 
@@ -201,32 +90,14 @@ export class WazuhService {
     })
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Failed to fetch Wazuh agents', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'getAgents',
-        className: 'WazuhService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('getAgents', res.status, res.data)
       throw new Error(formatRemoteError('Wazuh Manager', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
     const data = body.data as Record<string, unknown> | undefined
     const agents = (data?.affected_items ?? []) as unknown[]
-
-    this.appLogger.info('Wazuh agents retrieved', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'getAgents',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'WazuhService',
-      functionName: 'getAgents',
-      metadata: { connectorType: ConnectorType.WAZUH, count: agents.length },
-    })
-
+    this.logActionSuccess('getAgents', { count: agents.length })
     return agents
   }
 
@@ -238,23 +109,185 @@ export class WazuhService {
     query: Record<string, unknown>,
     index: string = 'wazuh-alerts-*'
   ): Promise<{ hits: unknown[]; total: number }> {
+    const { indexerUrl, authHeader, tlsOption } = this.resolveIndexerConfig(config)
+    this.validateIndexName(index)
+
+    const res = await this.httpClient.fetch(`${indexerUrl}/${index}/_search`, {
+      method: HttpMethod.POST,
+      headers: { Authorization: authHeader },
+      body: query,
+      rejectUnauthorized: tlsOption,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 200) {
+      this.logRemoteFailure('searchAlerts', res.status, res.data, { index })
+      throw new Error(formatRemoteError('Wazuh Indexer', res.status, res.data))
+    }
+
+    const body = res.data as Record<string, unknown>
+    const hits = body.hits as Record<string, unknown>
+    const total = extractSearchTotal(hits.total as Record<string, unknown> | number)
+    const hitItems = (hits.hits ?? []) as unknown[]
+
+    this.logActionSuccess('searchAlerts', { index, resultCount: hitItems.length, total })
+    return { hits: hitItems, total }
+  }
+
+  /**
+   * Fetch ALL matching alerts using OpenSearch scroll API.
+   * Max 10,000 events as a safety cap.
+   */
+  async searchAllAlerts(
+    config: Record<string, unknown>,
+    query: Record<string, unknown>,
+    index: string = 'wazuh-alerts-*'
+  ): Promise<{ hits: unknown[]; total: number }> {
+    const { indexerUrl, authHeader, tlsOption } = this.resolveIndexerConfig(config)
+    this.validateIndexName(index)
+
+    const { allHits, total, scrollId } = await this.executeInitialScroll(
+      indexerUrl,
+      authHeader,
+      tlsOption,
+      index,
+      query
+    )
+
+    const finalScrollId = await this.collectScrollResults({
+      indexerUrl,
+      authHeader,
+      tlsOption,
+      scrollId,
+      allHits,
+      total,
+      maxEvents: 10_000,
+    })
+
+    this.cleanupScrollContext(indexerUrl, authHeader, tlsOption, finalScrollId)
+    this.logActionSuccess('searchAllAlerts', { index, resultCount: allHits.length, total })
+    return { hits: allHits, total }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Test Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executeManagerCheck(
+    config: Record<string, unknown>,
+    managerUrl: string,
+    username: string,
+    password: string
+  ): Promise<TestResult> {
+    const token = await this.authenticate(managerUrl, username, password, config)
+
+    const infoResponse = await this.httpClient.fetch(`${managerUrl}/manager/info`, {
+      headers: { Authorization: `Bearer ${token}` },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (infoResponse.status !== 200) {
+      this.logRemoteFailure('testConnection', infoResponse.status, infoResponse.data)
+      return {
+        ok: false,
+        details: formatRemoteError('Wazuh Manager', infoResponse.status, infoResponse.data),
+      }
+    }
+
+    const info = infoResponse.data as Record<string, unknown>
+    const version = extractWazuhVersion(info)
+    this.logActionSuccess('testConnection', { version })
+
+    return {
+      ok: true,
+      details: `Wazuh Manager v${version} reachable at ${managerUrl}.`,
+    }
+  }
+
+  private handleTestError(error: unknown): TestResult {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    this.logger.warn(`Wazuh connection test failed: ${message}`)
+
+    this.appLogger.error('Wazuh connection test failed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: 'testConnection',
+      metadata: { connectorType: ConnectorType.WAZUH, error: message },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+
+    return { ok: false, details: message }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Authentication                                           */
+  /* ---------------------------------------------------------------- */
+
+  private async fetchAuthToken(
+    managerUrl: string,
+    username: string,
+    password: string,
+    config: Record<string, unknown>
+  ): Promise<string> {
+    const res = await this.httpClient.fetch(`${managerUrl}/security/user/authenticate`, {
+      method: HttpMethod.POST,
+      headers: { Authorization: this.httpClient.basicAuth(username, password) },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 200) {
+      this.logRemoteFailure('authenticate', res.status, res.data)
+      throw new Error(formatRemoteError('Wazuh Manager', res.status, res.data))
+    }
+
+    const body = res.data as Record<string, unknown>
+    const data = body.data as Record<string, unknown> | undefined
+    const token = (data?.token ?? body.token) as string
+
+    if (!token) {
+      this.logRemoteFailure('authenticate', 200, { message: 'No token in response' })
+      throw new Error('Wazuh authentication returned no token')
+    }
+
+    return token
+  }
+
+  private cacheToken(cacheKey: string, token: string): void {
+    this.tokenCache.set(cacheKey, {
+      token,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Indexer Config & Validation                               */
+  /* ---------------------------------------------------------------- */
+
+  private resolveIndexerConfig(config: Record<string, unknown>): {
+    indexerUrl: string
+    authHeader: string
+    tlsOption: boolean
+  } {
     const indexerUrl = (config.indexerUrl ?? config.opensearchUrl) as string | undefined
     if (!indexerUrl) {
-      this.appLogger.warn('Wazuh Indexer URL not configured', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'searchAlerts',
-        className: 'WazuhService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: {},
-      })
+      this.logRemoteFailure('searchAlerts', 0, { message: 'Indexer URL not configured' })
       throw new Error('Wazuh Indexer URL not configured')
     }
 
-    const username = config.indexerUsername ?? config.username
-    const password = config.indexerPassword ?? config.password
+    const username = (config.indexerUsername ?? config.username) as string
+    const password = (config.indexerPassword ?? config.password) as string
+    const authHeader = this.httpClient.basicAuth(username, password)
+    const tlsOption = config.verifyTls !== false
 
-    // Validate index name to prevent path traversal
+    return { indexerUrl, authHeader, tlsOption }
+  }
+
+  private validateIndexName(index: string): void {
     if (!/^[\w*-]+$/.test(index)) {
       this.appLogger.warn('Invalid Wazuh index name provided', {
         feature: AppLogFeature.CONNECTORS,
@@ -266,89 +299,24 @@ export class WazuhService {
       })
       throw new Error('Invalid index name')
     }
-
-    const res = await this.httpClient.fetch(`${indexerUrl}/${index}/_search`, {
-      method: HttpMethod.POST,
-      headers: {
-        Authorization: this.httpClient.basicAuth(username as string, password as string),
-      },
-      body: query,
-      rejectUnauthorized: config.verifyTls !== false,
-      allowPrivateNetwork: true,
-    })
-
-    if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Wazuh Indexer search failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'searchAlerts',
-        className: 'WazuhService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, index, remoteError: remoteMessage },
-      })
-      throw new Error(formatRemoteError('Wazuh Indexer', res.status, res.data))
-    }
-
-    const body = res.data as Record<string, unknown>
-    const hits = body.hits as Record<string, unknown>
-    const totalObject = hits.total as Record<string, unknown> | number
-    const total = typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
-
-    const hitItems = (hits.hits ?? []) as unknown[]
-
-    this.appLogger.info('Wazuh alert search executed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'searchAlerts',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'WazuhService',
-      functionName: 'searchAlerts',
-      metadata: { connectorType: ConnectorType.WAZUH, index, resultCount: hitItems.length, total },
-    })
-
-    return { hits: hitItems, total }
   }
 
-  /**
-   * Fetch ALL matching alerts using OpenSearch scroll API.
-   * Scrolls through all pages until no more hits are returned.
-   * Max 10,000 events as a safety cap to prevent memory exhaustion.
-   */
-  async searchAllAlerts(
-    config: Record<string, unknown>,
-    query: Record<string, unknown>,
-    index: string = 'wazuh-alerts-*'
-  ): Promise<{ hits: unknown[]; total: number }> {
-    const indexerUrl = (config.indexerUrl ?? config.opensearchUrl) as string | undefined
-    if (!indexerUrl) {
-      throw new Error('Wazuh Indexer URL not configured')
-    }
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Scroll API                                               */
+  /* ---------------------------------------------------------------- */
 
-    const username = config.indexerUsername ?? config.username
-    const password = config.indexerPassword ?? config.password
-
-    if (!/^[\w*-]+$/.test(index)) {
-      throw new Error('Invalid index name')
-    }
-
-    const authHeader = this.httpClient.basicAuth(username as string, password as string)
-    const tlsOption = config.verifyTls !== false
-    const maxEvents = 10_000
-    const scrollBatchSize = 1000
-
-    // Initial search with scroll context (1 minute TTL)
-    const scrollQuery = { ...query, size: scrollBatchSize }
-    const initialResponse = await this.httpClient.fetch(
+  private async executeInitialScroll(
+    indexerUrl: string,
+    authHeader: string,
+    tlsOption: boolean,
+    index: string,
+    query: Record<string, unknown>
+  ): Promise<{ allHits: unknown[]; total: number; scrollId: string | undefined }> {
+    const initialResponse = await this.fetchScrollPage(
       `${indexerUrl}/${index}/_search?scroll=1m`,
-      {
-        method: HttpMethod.POST,
-        headers: { Authorization: authHeader },
-        body: scrollQuery,
-        rejectUnauthorized: tlsOption,
-        allowPrivateNetwork: true,
-        timeoutMs: 30_000,
-      }
+      authHeader,
+      tlsOption,
+      { ...query, size: 1000 }
     )
 
     if (initialResponse.status !== 200) {
@@ -357,57 +325,39 @@ export class WazuhService {
       )
     }
 
-    const initialBody = initialResponse.data as Record<string, unknown>
-    const hitsWrapper = initialBody.hits as Record<string, unknown>
-    const totalObject = hitsWrapper.total as Record<string, unknown> | number
-    const total = typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
-    let scrollId = initialBody._scroll_id as string | undefined
+    return this.parseScrollResponse(initialResponse.data)
+  }
 
+  private async fetchScrollPage(
+    url: string,
+    authHeader: string,
+    tlsOption: boolean,
+    body: Record<string, unknown>
+  ): Promise<{ status: number; data: unknown }> {
+    return this.httpClient.fetch(url, {
+      method: HttpMethod.POST,
+      headers: { Authorization: authHeader },
+      body,
+      rejectUnauthorized: tlsOption,
+      allowPrivateNetwork: true,
+      timeoutMs: 30_000,
+    })
+  }
+
+  private parseScrollResponse(
+    data: unknown
+  ): { allHits: unknown[]; total: number; scrollId: string | undefined } {
+    const body = data as Record<string, unknown>
+    const hitsWrapper = body.hits as Record<string, unknown>
+    const total = extractSearchTotal(hitsWrapper.total as Record<string, unknown> | number)
+    const scrollId = body._scroll_id as string | undefined
     const allHits: unknown[] = [...((hitsWrapper.hits ?? []) as unknown[])]
 
-    // Scroll through remaining pages using recursion to satisfy no-await-in-loop
-    scrollId = await this.collectScrollResults({
-      indexerUrl,
-      authHeader,
-      tlsOption,
-      scrollId,
-      allHits,
-      total,
-      maxEvents,
-    })
-
-    // Clean up scroll context (fire and forget)
-    if (scrollId) {
-      this.httpClient
-        .fetch(`${indexerUrl}/_search/scroll`, {
-          method: HttpMethod.DELETE,
-          headers: { Authorization: authHeader },
-          body: { scroll_id: [scrollId] },
-          rejectUnauthorized: tlsOption,
-          allowPrivateNetwork: true,
-        })
-        .catch(() => {
-          // Scroll cleanup is best-effort
-        })
-    }
-
-    this.appLogger.info('Wazuh full alert search completed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'searchAllAlerts',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'WazuhService',
-      functionName: 'searchAllAlerts',
-      metadata: { connectorType: ConnectorType.WAZUH, index, resultCount: allHits.length, total },
-    })
-
-    return { hits: allHits, total }
+    return { allHits, total, scrollId }
   }
 
   /**
    * Recursively collect scroll results from OpenSearch.
-   * Each iteration depends on the previous scroll_id, making this inherently sequential.
-   * Returns the final scrollId for cleanup.
    */
   private async collectScrollResults(
     parameters: ScrollCollectionParameters
@@ -418,38 +368,92 @@ export class WazuhService {
       return scrollId
     }
 
-    const scrollResponse = await this.httpClient.fetch(`${indexerUrl}/_search/scroll`, {
-      method: HttpMethod.POST,
-      headers: { Authorization: authHeader },
-      body: { scroll: '1m', scroll_id: scrollId },
-      rejectUnauthorized: tlsOption,
-      allowPrivateNetwork: true,
-      timeoutMs: 30_000,
-    })
+    const scrollResponse = await this.fetchScrollPage(
+      `${indexerUrl}/_search/scroll`,
+      authHeader,
+      tlsOption,
+      { scroll: '1m', scroll_id: scrollId }
+    )
 
     if (scrollResponse.status !== 200) {
       return scrollId
     }
 
-    const scrollBody = scrollResponse.data as Record<string, unknown>
+    const nextScrollId = this.appendScrollBatch(scrollResponse.data, allHits)
+
+    return this.collectScrollResults({
+      indexerUrl, authHeader, tlsOption,
+      scrollId: nextScrollId, allHits, total, maxEvents,
+    })
+  }
+
+  private appendScrollBatch(data: unknown, allHits: unknown[]): string | undefined {
+    const scrollBody = data as Record<string, unknown>
     const scrollHits = scrollBody.hits as Record<string, unknown>
     const batch = (scrollHits.hits ?? []) as unknown[]
 
-    if (batch.length === 0) {
-      return scrollBody._scroll_id as string | undefined
+    if (batch.length > 0) {
+      allHits.push(...batch)
     }
 
-    allHits.push(...batch)
-    const nextScrollId = scrollBody._scroll_id as string | undefined
+    return scrollBody._scroll_id as string | undefined
+  }
 
-    return this.collectScrollResults({
-      indexerUrl,
-      authHeader,
-      tlsOption,
-      scrollId: nextScrollId,
-      allHits,
-      total,
-      maxEvents,
+  private cleanupScrollContext(
+    indexerUrl: string,
+    authHeader: string,
+    tlsOption: boolean,
+    scrollId: string | undefined
+  ): void {
+    if (!scrollId) return
+
+    this.httpClient
+      .fetch(`${indexerUrl}/_search/scroll`, {
+        method: HttpMethod.DELETE,
+        headers: { Authorization: authHeader },
+        body: { scroll_id: [scrollId] },
+        rejectUnauthorized: tlsOption,
+        allowPrivateNetwork: true,
+      })
+      .catch(() => {
+        // Scroll cleanup is best-effort
+      })
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logActionSuccess(action: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`Wazuh ${action} succeeded`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'WazuhService',
+      functionName: action,
+      metadata: { connectorType: ConnectorType.WAZUH, ...metadata },
+    })
+  }
+
+  private logRemoteFailure(
+    action: string,
+    status: number,
+    data: unknown,
+    extra?: Record<string, unknown>
+  ): void {
+    this.appLogger.warn(`Wazuh ${action} failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      className: 'WazuhService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      metadata: {
+        connectorType: ConnectorType.WAZUH,
+        status,
+        remoteError: extractRemoteErrorMessage(data),
+        ...extra,
+      },
     })
   }
 }

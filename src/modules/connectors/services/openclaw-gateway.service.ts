@@ -40,52 +40,14 @@ export class OpenClawGatewayService {
       return { ok: false, details: 'OpenClaw Gateway API key not configured' }
     }
 
-    const rawTimeout = (config.timeout as number | undefined) ?? 30_000
-    const timeout = normalizeTimeoutMs(rawTimeout)
-
+    const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 30_000)
     let socket: WebSocket | undefined
+
     try {
       socket = await createOpenClawConnection(baseUrl, apiKey, timeout)
-
-      const healthPayload = await sendOpenClawRequest(socket, 'health', undefined, timeout)
-      const version =
-        healthPayload && typeof healthPayload.version === 'string'
-          ? healthPayload.version
-          : 'unknown'
-
-      this.appLogger.info('OpenClaw Gateway connection test succeeded via WebSocket', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'OpenClawGatewayService',
-        functionName: 'testConnection',
-        metadata: {
-          connectorType: ConnectorType.OPENCLAW_GATEWAY,
-          version,
-        },
-      })
-
-      return {
-        ok: true,
-        details: `OpenClaw Gateway connected. Version: ${version}.`,
-      }
+      return await this.executeHealthCheck(socket, timeout)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Connection failed'
-      this.logger.warn(`OpenClaw Gateway connection test failed: ${message}`)
-
-      this.appLogger.error('OpenClaw Gateway connection test failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'OpenClawGatewayService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.OPENCLAW_GATEWAY, error: message },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
-      return { ok: false, details: message }
+      return this.handleTestError(error)
     } finally {
       safeCloseWebSocket(socket)
     }
@@ -93,7 +55,6 @@ export class OpenClawGatewayService {
 
   /**
    * Invoke an OpenClaw Gateway task via WebSocket.
-   * Sends a prompt and collects the streamed response.
    */
   async invoke(
     config: Record<string, unknown>,
@@ -109,7 +70,6 @@ export class OpenClawGatewayService {
     let socket: WebSocket | undefined
     try {
       socket = await createOpenClawConnection(baseUrl, apiKey, timeout)
-
       const { text, runId } = await sendOpenClawChatAndCollect(
         socket,
         'agent:main:main',
@@ -117,26 +77,89 @@ export class OpenClawGatewayService {
         timeout
       )
 
-      this.appLogger.info('OpenClaw Gateway task invoked via WebSocket', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'invoke',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'OpenClawGatewayService',
-        functionName: 'invoke',
-        metadata: {
-          connectorType: ConnectorType.OPENCLAW_GATEWAY,
-          taskType: resolvedTaskType,
-          maxTokens,
-          inputTokens: 0,
-          outputTokens: 0,
-          taskId: runId,
-        },
-      })
-
+      this.logInvokeSuccess(resolvedTaskType, maxTokens, runId)
       return { text, inputTokens: 0, outputTokens: 0, taskId: runId }
     } finally {
       safeCloseWebSocket(socket)
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Test Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executeHealthCheck(
+    socket: WebSocket,
+    timeout: number
+  ): Promise<TestResult> {
+    const healthPayload = await sendOpenClawRequest(socket, 'health', undefined, timeout)
+    const version =
+      healthPayload && typeof healthPayload.version === 'string'
+        ? healthPayload.version
+        : 'unknown'
+
+    this.logActionSuccess('testConnection', { version })
+
+    return {
+      ok: true,
+      details: `OpenClaw Gateway connected. Version: ${version}.`,
+    }
+  }
+
+  private handleTestError(error: unknown): TestResult {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    this.logger.warn(`OpenClaw Gateway connection test failed: ${message}`)
+
+    this.appLogger.error('OpenClaw Gateway connection test failed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OpenClawGatewayService',
+      functionName: 'testConnection',
+      metadata: { connectorType: ConnectorType.OPENCLAW_GATEWAY, error: message },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+
+    return { ok: false, details: message }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logActionSuccess(action: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`OpenClaw Gateway ${action} succeeded`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OpenClawGatewayService',
+      functionName: action,
+      metadata: { connectorType: ConnectorType.OPENCLAW_GATEWAY, ...metadata },
+    })
+  }
+
+  private logInvokeSuccess(
+    taskType: string,
+    maxTokens: number,
+    taskId?: string
+  ): void {
+    this.appLogger.info('OpenClaw Gateway task invoked via WebSocket', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'invoke',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OpenClawGatewayService',
+      functionName: 'invoke',
+      metadata: {
+        connectorType: ConnectorType.OPENCLAW_GATEWAY,
+        taskType,
+        maxTokens,
+        inputTokens: 0,
+        outputTokens: 0,
+        taskId,
+      },
+    })
   }
 }

@@ -5,6 +5,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { AiService } from '../ai/ai.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { AiResponse } from '../ai/ai.types'
+import type { DetectionRule } from '@prisma/client'
 
 @Injectable()
 export class AiDetectionCopilotService {
@@ -25,7 +26,20 @@ export class AiDetectionCopilotService {
       throw new BusinessException(404, 'Detection rule not found', 'errors.detectionRules.notFound')
     }
 
-    const context: Record<string, unknown> = {
+    const context = this.buildRuleAnalysisContext(rule)
+
+    return this.aiService.executeAiTask({
+      tenantId,
+      userId: user.sub,
+      userEmail: user.email,
+      featureKey: taskType,
+      context,
+      connector,
+    })
+  }
+
+  private buildRuleAnalysisContext(rule: DetectionRule): Record<string, unknown> {
+    return {
       ruleName: rule.name,
       ruleDescription: rule.description ?? '',
       ruleType: rule.ruleType,
@@ -36,15 +50,6 @@ export class AiDetectionCopilotService {
       hitCount: rule.hitCount,
       falsePositiveCount: rule.falsePositiveCount,
     }
-
-    return this.aiService.executeAiTask({
-      tenantId,
-      userId: user.sub,
-      userEmail: user.email,
-      featureKey: taskType,
-      context,
-      connector,
-    })
   }
 
   async draftRule(

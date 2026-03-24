@@ -36,6 +36,23 @@ export class ComplianceService {
   ) {}
 
   /* ---------------------------------------------------------------- */
+  /* LOGGING HELPERS                                                    */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.info(`Compliance: ${action}`, {
+      feature: AppLogFeature.COMPLIANCE,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ComplianceService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
   /* RESOLVE HELPERS                                                    */
   /* ---------------------------------------------------------------- */
 
@@ -171,21 +188,7 @@ export class ComplianceService {
       version: dto.version,
     })
 
-    this.appLogger.info('Framework created', {
-      feature: AppLogFeature.COMPLIANCE,
-      action: 'createFramework',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'ComplianceFramework',
-      targetResourceId: framework.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ComplianceService',
-      functionName: 'createFramework',
-      metadata: { name: framework.name, standard: framework.standard },
-    })
-
+    this.logSuccess('createFramework', user.tenantId, { name: framework.name, standard: framework.standard })
     return buildFrameworkRecord(framework)
   }
 
@@ -213,20 +216,7 @@ export class ComplianceService {
       )
     }
 
-    this.appLogger.info('Framework updated', {
-      feature: AppLogFeature.COMPLIANCE,
-      action: 'updateFramework',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'ComplianceFramework',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ComplianceService',
-      functionName: 'updateFramework',
-    })
-
+    this.logSuccess('updateFramework', user.tenantId, { frameworkId: id })
     return this.getFrameworkById(id, user.tenantId)
   }
 
@@ -243,20 +233,7 @@ export class ComplianceService {
 
     await this.repository.deleteFrameworkWithControls(id, tenantId)
 
-    this.appLogger.info(`Framework ${existing.name} deleted`, {
-      feature: AppLogFeature.COMPLIANCE,
-      action: 'deleteFramework',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'ComplianceFramework',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ComplianceService',
-      functionName: 'deleteFramework',
-      metadata: { name: existing.name },
-    })
-
+    this.logSuccess('deleteFramework', tenantId, { frameworkId: id, name: existing.name, actorEmail: actor })
     return { deleted: true }
   }
 
@@ -303,23 +280,8 @@ export class ComplianceService {
       assessedBy: user.email,
     })
 
-    this.appLogger.info('Control created', {
-      feature: AppLogFeature.COMPLIANCE,
-      action: 'createControl',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'ComplianceControl',
-      targetResourceId: control.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ComplianceService',
-      functionName: 'createControl',
-      metadata: { frameworkId, controlNumber: control.controlNumber },
-    })
-
+    this.logSuccess('createControl', user.tenantId, { frameworkId, controlNumber: control.controlNumber })
     const assessedByName = await this.resolveName(control.assessedBy)
-
     return buildControlRecord(control, assessedByName)
   }
 
@@ -333,53 +295,40 @@ export class ComplianceService {
     dto: UpdateControlDto,
     user: JwtPayload
   ): Promise<ComplianceControlRecord> {
-    // Verify framework exists and belongs to tenant
     await this.getFrameworkById(frameworkId, user.tenantId)
-
-    const existing = await this.repository.findFirstControl({
-      where: { id: controlId, frameworkId },
-    })
-
-    if (!existing) {
-      throw new BusinessException(
-        404,
-        `Control ${controlId} not found`,
-        'errors.compliance.controlNotFound'
-      )
-    }
+    await this.findControlOrThrow(controlId, frameworkId)
 
     await this.repository.updateManyControls({
       where: { id: controlId, frameworkId },
       data: buildControlUpdateData(dto, user.email),
     })
 
-    this.appLogger.info('Control updated', {
-      feature: AppLogFeature.COMPLIANCE,
-      action: 'updateControl',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'ComplianceControl',
-      targetResourceId: controlId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ComplianceService',
-      functionName: 'updateControl',
-      metadata: { frameworkId },
+    this.logSuccess('updateControl', user.tenantId, { frameworkId, controlId })
+    return this.fetchUpdatedControl(controlId, user.tenantId)
+  }
+
+  private async findControlOrThrow(controlId: string, frameworkId: string): Promise<void> {
+    const existing = await this.repository.findFirstControl({
+      where: { id: controlId, frameworkId },
     })
-
-    const updated = await this.repository.findControlByIdAndTenant(controlId, user.tenantId)
-
-    if (!updated) {
+    if (!existing) {
       throw new BusinessException(
-        404,
-        `Control ${controlId} not found after update`,
-        'errors.compliance.controlNotFound'
+        404, `Control ${controlId} not found`, 'errors.compliance.controlNotFound'
       )
     }
+  }
 
+  private async fetchUpdatedControl(
+    controlId: string,
+    tenantId: string
+  ): Promise<ComplianceControlRecord> {
+    const updated = await this.repository.findControlByIdAndTenant(controlId, tenantId)
+    if (!updated) {
+      throw new BusinessException(
+        404, `Control ${controlId} not found after update`, 'errors.compliance.controlNotFound'
+      )
+    }
     const assessedByName = await this.resolveName(updated.assessedBy)
-
     return buildControlRecord(updated, assessedByName)
   }
 

@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { EntitiesRepository } from './entities.repository'
+import {
+  buildEntityListFromAlert,
+  mapMispIocTypeToEntityType,
+} from './entities.utilities'
 import { CaseArtifactType, EntityRelationType, EntityType } from '../../common/enums'
 import type {
   AlertExtractionInput,
@@ -14,15 +18,10 @@ export class EntityExtractionService {
 
   constructor(private readonly entitiesRepository: EntitiesRepository) {}
 
-  /**
-   * Extract entities from an alert and upsert them into the entities table.
-   * Called after alert creation/ingestion. Best-effort — errors are logged, not thrown.
-   */
   async extractFromAlert(alert: AlertExtractionInput): Promise<void> {
     try {
-      const entities = this.buildEntityList(alert)
+      const entities = buildEntityListFromAlert(alert)
 
-      // Upsert each entity (sequential to avoid race conditions on same entity)
       const results = await Promise.allSettled(
         entities.map(entity => this.upsertEntity(alert.tenantId, entity))
       )
@@ -35,7 +34,6 @@ export class EntityExtractionService {
         }
       }
 
-      // Create relationships between extracted entities
       await this.createAlertRelationships(alert.tenantId, entities, alert.source)
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -43,22 +41,12 @@ export class EntityExtractionService {
     }
   }
 
-  /**
-   * Extract an entity from a case artifact.
-   * Maps the artifact type to an entity type and upserts.
-   * Best-effort — errors are logged, not thrown.
-   */
   async extractFromArtifact(params: ArtifactExtractionInput): Promise<void> {
     try {
-      const entityType = this.mapArtifactTypeToEntityType(params.type)
-      if (!entityType) {
-        return
-      }
+      const entityType = this.resolveArtifactEntityType(params.type)
+      if (!entityType) return
 
-      await this.upsertEntity(params.tenantId, {
-        type: entityType,
-        value: params.value,
-      })
+      await this.upsertEntity(params.tenantId, { type: entityType, value: params.value })
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(
@@ -67,22 +55,12 @@ export class EntityExtractionService {
     }
   }
 
-  /**
-   * Extract an entity from a MISP IOC.
-   * Maps the MISP attribute type to an entity type and upserts.
-   * Best-effort — errors are logged, not thrown.
-   */
   async extractFromMispIoc(params: MispIocExtractionInput): Promise<void> {
     try {
-      const entityType = this.mapMispIocTypeToEntityType(params.iocType)
-      if (!entityType) {
-        return
-      }
+      const entityType = mapMispIocTypeToEntityType(params.iocType)
+      if (!entityType) return
 
-      await this.upsertEntity(params.tenantId, {
-        type: entityType,
-        value: params.iocValue,
-      })
+      await this.upsertEntity(params.tenantId, { type: entityType, value: params.iocValue })
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(
@@ -91,7 +69,7 @@ export class EntityExtractionService {
     }
   }
 
-  private mapArtifactTypeToEntityType(artifactType: string): EntityType | null {
+  private resolveArtifactEntityType(artifactType: string): EntityType | null {
     switch (artifactType) {
       case CaseArtifactType.IP:
         return EntityType.IP
@@ -106,64 +84,6 @@ export class EntityExtractionService {
     }
   }
 
-  private mapMispIocTypeToEntityType(iocType: string): EntityType | null {
-    switch (iocType) {
-      case 'ip-src':
-      case 'ip-dst':
-        return EntityType.IP
-      case 'domain':
-        return EntityType.DOMAIN
-      case 'hostname':
-        return EntityType.HOSTNAME
-      case 'email-src':
-      case 'email-dst':
-        return EntityType.EMAIL
-      case 'md5':
-      case 'sha1':
-      case 'sha256':
-        return EntityType.HASH
-      case 'url':
-        return EntityType.URL
-      default:
-        return null
-    }
-  }
-
-  private buildEntityList(alert: AlertExtractionInput): ExtractedEntity[] {
-    const entities: ExtractedEntity[] = []
-
-    if (alert.sourceIp) {
-      entities.push({ type: EntityType.IP, value: alert.sourceIp })
-    }
-
-    if (alert.destinationIp) {
-      entities.push({ type: EntityType.IP, value: alert.destinationIp })
-    }
-
-    if (alert.agentName) {
-      entities.push({
-        type: EntityType.HOSTNAME,
-        value: alert.agentName,
-        displayName: alert.agentName,
-      })
-    }
-
-    const rawEvent = alert.rawEvent as Record<string, unknown> | null
-    if (rawEvent) {
-      const user = this.extractUserFromRawEvent(rawEvent)
-      if (user) {
-        entities.push({ type: EntityType.USER, value: user })
-      }
-
-      const domain = this.extractDomainFromRawEvent(rawEvent)
-      if (domain) {
-        entities.push({ type: EntityType.DOMAIN, value: domain })
-      }
-    }
-
-    return entities
-  }
-
   private async upsertEntity(tenantId: string, entity: ExtractedEntity): Promise<void> {
     try {
       await this.entitiesRepository.upsertByTypeAndValue(tenantId, entity.type, entity.value, {
@@ -176,59 +96,6 @@ export class EntityExtractionService {
     }
   }
 
-  private extractUserFromRawEvent(rawEvent: Record<string, unknown>): string | null {
-    const data = rawEvent['data'] as Record<string, unknown> | undefined
-    if (data) {
-      const { srcuser } = data
-      if (typeof srcuser === 'string' && srcuser.length > 0) {
-        return srcuser
-      }
-
-      const { dstuser } = data
-      if (typeof dstuser === 'string' && dstuser.length > 0) {
-        return dstuser
-      }
-
-      const win = data['win'] as Record<string, unknown> | undefined
-      const eventdata = win?.['eventdata'] as Record<string, unknown> | undefined
-      const targetUserName = eventdata?.['TargetUserName']
-      if (typeof targetUserName === 'string' && targetUserName.length > 0) {
-        return targetUserName
-      }
-
-      const { user } = data
-      if (typeof user === 'string' && user.length > 0) {
-        return user
-      }
-    }
-
-    return null
-  }
-
-  private extractDomainFromRawEvent(rawEvent: Record<string, unknown>): string | null {
-    const data = rawEvent['data'] as Record<string, unknown> | undefined
-    if (data) {
-      const { hostname } = data
-      if (typeof hostname === 'string' && hostname.includes('.')) {
-        return hostname
-      }
-
-      const { query } = data
-      if (typeof query === 'string' && query.includes('.')) {
-        return query
-      }
-
-      const dns = data['dns'] as Record<string, unknown> | undefined
-      const question = dns?.['question'] as Record<string, unknown> | undefined
-      const name = question?.['name']
-      if (typeof name === 'string' && name.includes('.')) {
-        return name
-      }
-    }
-
-    return null
-  }
-
   private async createAlertRelationships(
     tenantId: string,
     entities: ExtractedEntity[],
@@ -238,21 +105,13 @@ export class EntityExtractionService {
     const sourceIp = ips.at(0)
     const destinationIp = ips.at(1)
 
-    if (!sourceIp || !destinationIp || sourceIp.value === destinationIp.value) {
-      return
-    }
+    if (!sourceIp || !destinationIp || sourceIp.value === destinationIp.value) return
 
     try {
-      const fromEntity = await this.entitiesRepository.findByTypeAndValue(
-        tenantId,
-        sourceIp.type,
-        sourceIp.value
-      )
-      const toEntity = await this.entitiesRepository.findByTypeAndValue(
-        tenantId,
-        destinationIp.type,
-        destinationIp.value
-      )
+      const [fromEntity, toEntity] = await Promise.all([
+        this.entitiesRepository.findByTypeAndValue(tenantId, sourceIp.type, sourceIp.value),
+        this.entitiesRepository.findByTypeAndValue(tenantId, destinationIp.type, destinationIp.value),
+      ])
 
       if (fromEntity && toEntity) {
         await this.entitiesRepository.createRelation({

@@ -145,20 +145,11 @@ export class UsersControlService {
     actor: JwtPayload,
     tenantId: string
   ): Promise<{ revokedSessions: number }> {
-    assertUsersControlRole(actor.role)
-    const scopedTenantId = this.getScopedTenantId(actor, tenantId)
+    const scopedTenantId = this.validateAndScopeUser(actor, tenantId)
     const user = await this.findScopedUserOrThrow(userId, scopedTenantId)
     this.assertCanManageTargetUser(actor, user)
-    const targets = await this.repository.findSessionRevocationTargetsBySession(
-      userId,
-      sessionId,
-      scopedTenantId
-    )
 
-    if (targets.length === 0) {
-      throw new BusinessException(404, 'Session not found', 'errors.userControl.sessionNotFound')
-    }
-
+    const targets = await this.findSessionTargetsOrThrow(userId, sessionId, scopedTenantId)
     const revokedSessions = await this.authService.revokeSessionTargets(
       targets,
       RefreshTokenFamilyRevocationReason.FORCE_LOGOUT_SESSION,
@@ -166,10 +157,7 @@ export class UsersControlService {
     )
 
     this.logSuccess('terminateSession', actor, {
-      targetUserId: userId,
-      targetSessionId: sessionId,
-      revokedSessions,
-      scopedTenantId,
+      targetUserId: userId, targetSessionId: sessionId, revokedSessions, scopedTenantId,
     })
 
     return { revokedSessions }
@@ -242,6 +230,27 @@ export class UsersControlService {
         'errors.tenants.cannotModifyGlobalAdmin'
       )
     }
+  }
+
+  private validateAndScopeUser(actor: JwtPayload, tenantId: string): string | undefined {
+    assertUsersControlRole(actor.role)
+    return this.getScopedTenantId(actor, tenantId)
+  }
+
+  private async findSessionTargetsOrThrow(
+    userId: string,
+    sessionId: string,
+    scopedTenantId: string | undefined
+  ): Promise<Awaited<ReturnType<typeof this.repository.findSessionRevocationTargetsBySession>>> {
+    const targets = await this.repository.findSessionRevocationTargetsBySession(
+      userId, sessionId, scopedTenantId
+    )
+
+    if (targets.length === 0) {
+      throw new BusinessException(404, 'Session not found', 'errors.userControl.sessionNotFound')
+    }
+
+    return targets
   }
 
   private logSuccess(action: string, actor: JwtPayload, metadata?: Record<string, unknown>): void {

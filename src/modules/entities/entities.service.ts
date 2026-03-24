@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { EntitiesRepository } from './entities.repository'
-import { buildEntitySearchWhere, buildEntityOrderBy } from './entities.utilities'
+import {
+  buildEntitySearchWhere,
+  buildEntityOrderBy,
+  collectConnectedIds,
+  collectSecondHopData,
+  deduplicateRelations,
+  buildGraphResponse,
+} from './entities.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
@@ -86,67 +93,26 @@ export class EntitiesService {
   async getGraph(tenantId: string, entityId: string): Promise<EntityGraphResponse> {
     const rootEntity = await this.findById(tenantId, entityId)
 
-    // First hop: get direct relations
     const directRelations = await this.entitiesRepository.findRelationsForEntity(entityId, tenantId)
+    const connectedIds = collectConnectedIds(directRelations, entityId)
 
-    // Collect unique connected entity IDs
-    const connectedIds = new Set<string>()
-    for (const relation of directRelations) {
-      connectedIds.add(relation.fromEntityId)
-      connectedIds.add(relation.toEntityId)
-    }
-    connectedIds.delete(entityId)
-
-    // Second hop: get relations from connected entities (independent lookups)
     const secondHopResults = await Promise.all(
       [...connectedIds].map(connId =>
         this.entitiesRepository.findRelationsForEntity(connId, tenantId)
       )
     )
-    const secondHopRelations: typeof directRelations = []
-    const secondHopIds = new Set<string>()
-    for (const relations of secondHopResults) {
-      for (const relation of relations) {
-        secondHopRelations.push(relation)
-        secondHopIds.add(relation.fromEntityId)
-        secondHopIds.add(relation.toEntityId)
-      }
-    }
 
-    // Merge all entity IDs
+    const { secondHopRelations, secondHopIds } = collectSecondHopData(secondHopResults)
     const allEntityIds = new Set([entityId, ...connectedIds, ...secondHopIds])
     const allRelations = [...directRelations, ...secondHopRelations]
+    const uniqueRelations = deduplicateRelations(allRelations)
 
-    // Deduplicate relations by id
-    const uniqueRelations = new Map<string, (typeof allRelations)[number]>()
-    for (const relation of allRelations) {
-      uniqueRelations.set(relation.id, relation)
-    }
-
-    // Fetch all entity records
     const entities = await this.entitiesRepository.findConnectedEntities(
       [...allEntityIds],
       tenantId
     )
 
-    const nodes = entities.map(e => ({
-      id: e.id,
-      type: e.type,
-      value: e.value,
-      displayName: e.displayName,
-      riskScore: e.riskScore,
-    }))
-
-    const edges = [...uniqueRelations.values()].map(r => ({
-      id: r.id,
-      fromEntityId: r.fromEntityId,
-      toEntityId: r.toEntityId,
-      relationType: r.relationType,
-      confidence: r.confidence,
-      source: r.source,
-    }))
-
-    return { rootEntity, nodes, edges }
+    return buildGraphResponse(rootEntity, entities, uniqueRelations)
   }
 
   async getTopRisky(tenantId: string, limit = 10): Promise<EntityRecord[]> {

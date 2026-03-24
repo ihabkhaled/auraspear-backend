@@ -25,6 +25,25 @@ export class AiReportService {
     user: JwtPayload,
     connector?: string
   ): Promise<AiResponse> {
+    this.logExecutiveReportRequest(tenantId, timeRange, user)
+
+    const context = await this.buildExecutiveReportContext(tenantId, timeRange)
+
+    return this.aiService.executeAiTask({
+      tenantId,
+      userId: user.sub,
+      userEmail: user.email,
+      featureKey: AiFeatureKey.REPORT_EXECUTIVE,
+      context,
+      connector,
+    })
+  }
+
+  private logExecutiveReportRequest(
+    tenantId: string,
+    timeRange: string,
+    user: JwtPayload
+  ): void {
     this.appLogger.info('AI executive report requested', {
       feature: AppLogFeature.AI,
       action: 'generateExecutiveReport',
@@ -37,7 +56,12 @@ export class AiReportService {
       actorUserId: user.sub,
       metadata: { timeRange },
     })
+  }
 
+  private async buildExecutiveReportContext(
+    tenantId: string,
+    timeRange: string
+  ): Promise<Record<string, unknown>> {
     const days = Reflect.get(AI_REPORT_TIME_RANGE_DAYS, timeRange) as number | undefined
     const periodDays = days ?? 7
     const since = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
@@ -50,21 +74,14 @@ export class AiReportService {
       this.dashboardsRepository.countCriticalAlertsBetween(tenantId, since, now),
     ])
 
-    return this.aiService.executeAiTask({
-      tenantId,
-      userId: user.sub,
-      userEmail: user.email,
-      featureKey: AiFeatureKey.REPORT_EXECUTIVE,
-      context: {
-        timeRange,
-        periodDays,
-        totalAlerts: alertsCount,
-        resolvedAlerts: resolvedCount,
-        openCases,
-        criticalAlerts,
-        generatedAt: now.toISOString(),
-      },
-      connector,
-    })
+    return {
+      timeRange,
+      periodDays,
+      totalAlerts: alertsCount,
+      resolvedAlerts: resolvedCount,
+      openCases,
+      criticalAlerts,
+      generatedAt: now.toISOString(),
+    }
   }
 }

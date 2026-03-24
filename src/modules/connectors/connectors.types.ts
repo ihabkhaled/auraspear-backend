@@ -154,3 +154,56 @@ export interface OpenClawChatEventPayload {
 }
 
 export type OpenClawWsIncoming = OpenClawWsEvent | OpenClawWsResponse
+
+/* ---------------------------------------------------------------- */
+/* Connector Test Utilities                                          */
+/* ---------------------------------------------------------------- */
+
+/** Parameters for building LLM API request headers. */
+export interface LlmApiHeaders {
+  apiKey: string
+  organizationId?: string
+}
+
+/** Extracted Bedrock config fields. */
+export interface BedrockConfigFields {
+  region: string
+  accessKeyId: string | undefined
+  secretAccessKey: string | undefined
+  modelId: string
+  endpoint: string | undefined
+}
+
+/** Result from Bedrock model invocation. */
+export interface BedrockInvokeResult {
+  text: string
+  inputTokens: number
+  outputTokens: number
+}
+
+/** AWS SDK types for dynamic import. */
+export interface AwsSdkTypes {
+  BedrockRuntimeClient: new (config: unknown) => {
+    send: (command: unknown) => Promise<{ body: Uint8Array }>
+  }
+  InvokeModelCommand: new (input: unknown) => unknown
+}
+
+/** Fields extracted from an LLM connector DTO for update. */
+export interface LlmConnectorUpdateFields {
+  name?: string
+  description?: string | null
+  baseUrl?: string
+  encryptedApiKey?: string
+  defaultModel?: string | null
+  organizationId?: string | null
+  maxTokensParam?: string
+  timeout?: number
+  enabled?: boolean
+}
+
+/** Wazuh version extraction input. */
+export interface WazuhManagerInfoData {
+  data?: Record<string, unknown>
+  [key: string]: unknown
+}

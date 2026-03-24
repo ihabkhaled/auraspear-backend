@@ -185,7 +185,7 @@ describe('VelociraptorService', () => {
       await service.testConnection(BASIC_AUTH_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Velociraptor connection test succeeded',
+        'Velociraptor testConnection succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ connectorType: 'velociraptor' }),
         })
@@ -313,7 +313,7 @@ describe('VelociraptorService', () => {
       await service.runVQL(BASIC_AUTH_CONFIG, 'SELECT a FROM test()')
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Velociraptor VQL query executed',
+        'Velociraptor runVQL succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ rowCount: 2, columnCount: 1 }),
         })
@@ -406,7 +406,7 @@ describe('VelociraptorService', () => {
       await service.getClients(BASIC_AUTH_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Velociraptor clients retrieved',
+        'Velociraptor getClients succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ count: 1 }),
         })

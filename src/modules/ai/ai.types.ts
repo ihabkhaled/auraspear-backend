@@ -87,3 +87,20 @@ export interface CreateAiAuditLogData {
   prompt?: string
   response?: string
 }
+
+export interface QuotaCheckResult {
+  allowed: boolean
+  period?: string
+  used?: number
+  limit?: number
+}
+
+export interface ConnectorFilterInput {
+  connector: string | undefined
+  connectors: ResolvedAiConnector[]
+}
+
+export interface FilteredConnectorsResult {
+  connectors: ResolvedAiConnector[]
+  connectorRequested: boolean
+}

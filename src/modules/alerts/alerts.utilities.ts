@@ -14,34 +14,8 @@ export function buildAlertSearchWhere(
 ): Prisma.AlertWhereInput {
   const where: Prisma.AlertWhereInput = { tenantId }
 
-  if (query.severity) {
-    const severities = query.severity
-      .split(',')
-      .map(s => s.trim())
-      .filter(s => VALID_SEVERITIES.has(s))
-    if (severities.length === 1) {
-      where.severity = severities[0] as AlertSeverity
-    } else if (severities.length > 1) {
-      where.severity = { in: severities as AlertSeverity[] }
-    }
-  }
-
-  if (query.status && VALID_STATUSES.has(query.status)) {
-    where.status = query.status as unknown as PrismaAlertStatus
-  }
-
-  if (query.source) {
-    where.source = query.source
-  }
-
-  if (query.agentName) {
-    where.agentName = { contains: query.agentName, mode: 'insensitive' }
-  }
-
-  if (query.ruleGroup) {
-    where.ruleName = { contains: query.ruleGroup, mode: 'insensitive' }
-  }
-
+  applySeverityFilter(where, query.severity)
+  applyBasicFilters(where, query)
   applyTimeFilter(where, query)
 
   if (query.query && query.query !== '*') {
@@ -49,6 +23,39 @@ export function buildAlertSearchWhere(
   }
 
   return where
+}
+
+function applySeverityFilter(
+  where: Prisma.AlertWhereInput,
+  severity: string | undefined
+): void {
+  if (!severity) return
+
+  const severities = severity
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => VALID_SEVERITIES.has(s))
+
+  if (severities.length === 1) {
+    where.severity = severities[0] as AlertSeverity
+  } else if (severities.length > 1) {
+    where.severity = { in: severities as AlertSeverity[] }
+  }
+}
+
+function applyBasicFilters(where: Prisma.AlertWhereInput, query: SearchAlertsDto): void {
+  if (query.status && VALID_STATUSES.has(query.status)) {
+    where.status = query.status as unknown as PrismaAlertStatus
+  }
+  if (query.source) {
+    where.source = query.source
+  }
+  if (query.agentName) {
+    where.agentName = { contains: query.agentName, mode: 'insensitive' }
+  }
+  if (query.ruleGroup) {
+    where.ruleName = { contains: query.ruleGroup, mode: 'insensitive' }
+  }
 }
 
 /* ---------------------------------------------------------------- */
@@ -133,40 +140,47 @@ export function mapWazuhLevel(
 
 export function buildWazuhUpsertOps(hits: unknown[]): WazuhUpsertOp[] {
   const now = new Date()
+  return hits.map(rawHit => mapSingleWazuhHit(rawHit, now))
+}
 
-  return hits.map(rawHit => {
-    const hit = rawHit as Record<string, unknown>
-    const source = (hit._source ?? hit) as Record<string, unknown>
-    const externalId = (hit._id ?? source.id) as string
+function mapSingleWazuhHit(rawHit: unknown, fallbackTimestamp: Date): WazuhUpsertOp {
+  const hit = rawHit as Record<string, unknown>
+  const source = (hit._source ?? hit) as Record<string, unknown>
+  const externalId = (hit._id ?? source.id) as string
 
-    const rule = source.rule as Record<string, unknown> | undefined
-    const agent = source.agent as Record<string, unknown> | undefined
-    const data = source.data as Record<string, unknown> | undefined
+  const rule = source.rule as Record<string, unknown> | undefined
+  const agent = source.agent as Record<string, unknown> | undefined
+  const data = source.data as Record<string, unknown> | undefined
+  const { mitreTactics, mitreTechniques } = extractMitreFromRule(rule)
 
-    const mitreTechniques: string[] = []
-    const mitreTactics: string[] = []
-    const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
-    if (mitreInfo) {
-      const ids = mitreInfo.id as string[] | undefined
-      const tactics = mitreInfo.tactic as string[] | undefined
-      if (ids) mitreTechniques.push(...ids)
-      if (tactics) mitreTactics.push(...tactics)
-    }
+  return {
+    externalId,
+    rule,
+    agent: agent ?? null,
+    data: data ?? null,
+    source,
+    severity: mapWazuhLevel(rule?.level as number | undefined),
+    mitreTactics,
+    mitreTechniques,
+    timestamp: new Date((source.timestamp ?? fallbackTimestamp) as string),
+  }
+}
 
-    const severity = mapWazuhLevel(rule?.level as number | undefined)
+function extractMitreFromRule(
+  rule: Record<string, unknown> | undefined
+): { mitreTactics: string[]; mitreTechniques: string[] } {
+  const mitreTechniques: string[] = []
+  const mitreTactics: string[] = []
+  const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
 
-    return {
-      externalId,
-      rule,
-      agent: agent ?? null,
-      data: data ?? null,
-      source,
-      severity,
-      mitreTactics,
-      mitreTechniques,
-      timestamp: new Date((source.timestamp ?? now) as string),
-    }
-  })
+  if (mitreInfo) {
+    const ids = mitreInfo.id as string[] | undefined
+    const tactics = mitreInfo.tactic as string[] | undefined
+    if (ids) mitreTechniques.push(...ids)
+    if (tactics) mitreTactics.push(...tactics)
+  }
+
+  return { mitreTactics, mitreTechniques }
 }
 
 /* ---------------------------------------------------------------- */
@@ -183,20 +197,11 @@ export function buildWazuhAlertCreateInput(
   return {
     create: {
       externalId: op.externalId,
-      title: (op.rule?.description ?? op.source.rule_description ?? 'Wazuh Alert') as string,
-      description: JSON.stringify(op.source),
+      ...extractWazuhAlertTextFields(op),
       severity: op.severity as AlertSeverity,
       status: AlertStatus.NEW_ALERT,
       source: 'wazuh',
-      ruleName: (op.rule?.description ?? null) as string | null,
-      ruleId: (op.rule?.id ?? null) as string | null,
-      agentName: ((op.agent as Record<string, unknown> | null)?.name as string | null) ?? null,
-      sourceIp: ((op.data as Record<string, unknown> | null)?.srcip ?? op.source.src_ip ?? null) as
-        | string
-        | null,
-      destinationIp: ((op.data as Record<string, unknown> | null)?.dstip ??
-        op.source.dst_ip ??
-        null) as string | null,
+      ...extractWazuhAlertNetworkFields(op),
       mitreTactics: op.mitreTactics,
       mitreTechniques: op.mitreTechniques,
       rawEvent: op.source as Prisma.InputJsonValue,
@@ -206,6 +211,34 @@ export function buildWazuhAlertCreateInput(
     update: {
       rawEvent: op.source as Prisma.InputJsonValue,
     },
+  }
+}
+
+function extractWazuhAlertTextFields(op: WazuhUpsertOp): {
+  title: string
+  description: string
+  ruleName: string | null
+  ruleId: string | null
+  agentName: string | null
+} {
+  const agentRecord = op.agent as Record<string, unknown> | null
+  return {
+    title: (op.rule?.description ?? op.source.rule_description ?? 'Wazuh Alert') as string,
+    description: JSON.stringify(op.source),
+    ruleName: (op.rule?.description ?? null) as string | null,
+    ruleId: (op.rule?.id ?? null) as string | null,
+    agentName: (agentRecord?.name as string | null) ?? null,
+  }
+}
+
+function extractWazuhAlertNetworkFields(op: WazuhUpsertOp): {
+  sourceIp: string | null
+  destinationIp: string | null
+} {
+  const dataRecord = op.data as Record<string, unknown> | null
+  return {
+    sourceIp: ((dataRecord?.srcip ?? op.source.src_ip ?? null) as string | null),
+    destinationIp: ((dataRecord?.dstip ?? op.source.dst_ip ?? null) as string | null),
   }
 }
 
@@ -255,6 +288,18 @@ export function buildWazuhIngestionQuery(): Record<string, unknown> {
 /* ---------------------------------------------------------------- */
 
 function applyKqlQuery(rawQuery: string, where: Prisma.AlertWhereInput): void {
+  const { freeTextParts } = parseKqlFieldMatches(rawQuery, where)
+  const freeText = freeTextParts.join(' ').trim()
+
+  if (freeText) {
+    applyFreeTextSearch(where, freeText)
+  }
+}
+
+function parseKqlFieldMatches(
+  rawQuery: string,
+  where: Prisma.AlertWhereInput
+): { freeTextParts: string[] } {
   const kqlPattern = /(\w[\w.]*):(?:"([^"]+)"|(\S+))/g
   const freeTextParts: string[] = []
   let lastIndex = 0
@@ -279,53 +324,63 @@ function applyKqlQuery(rawQuery: string, where: Prisma.AlertWhereInput): void {
     .trim()
   if (remaining) freeTextParts.push(remaining)
 
-  const freeText = freeTextParts.join(' ').trim()
-  if (freeText) {
-    where.OR = [
-      { title: { contains: freeText, mode: 'insensitive' } },
-      { description: { contains: freeText, mode: 'insensitive' } },
-      { sourceIp: { contains: freeText } },
-      { destinationIp: { contains: freeText } },
-      { agentName: { contains: freeText, mode: 'insensitive' } },
-      { ruleName: { contains: freeText, mode: 'insensitive' } },
-    ]
-  }
+  return { freeTextParts }
+}
+
+function applyFreeTextSearch(where: Prisma.AlertWhereInput, freeText: string): void {
+  where.OR = [
+    { title: { contains: freeText, mode: 'insensitive' } },
+    { description: { contains: freeText, mode: 'insensitive' } },
+    { sourceIp: { contains: freeText } },
+    { destinationIp: { contains: freeText } },
+    { agentName: { contains: freeText, mode: 'insensitive' } },
+    { ruleName: { contains: freeText, mode: 'insensitive' } },
+  ]
 }
 
 function applyKqlField(field: string, value: string, where: Prisma.AlertWhereInput): void {
-  switch (field) {
-    case 'severity':
-      if (VALID_SEVERITIES.has(value)) {
-        where.severity = value as AlertSeverity
-      }
-      break
-    case 'status':
-      if (VALID_STATUSES.has(value)) {
-        where.status = value as PrismaAlertStatus
-      }
-      break
-    case 'source':
-      where.source = value
-      break
-    case 'agent':
-    case 'agent.name':
-      where.agentName = { contains: value, mode: 'insensitive' }
-      break
-    case 'sourceip':
-    case 'source.ip':
-      where.sourceIp = { contains: value }
-      break
-    case 'destip':
-    case 'dest.ip':
-    case 'destination.ip':
-      where.destinationIp = { contains: value }
-      break
-    case 'rule':
-    case 'rule.name':
-    case 'rulename':
-      where.ruleName = { contains: value, mode: 'insensitive' }
-      break
-    default:
-      break
+  applyKqlValidatedField(field, value, where)
+  applyKqlDirectField(field, value, where)
+}
+
+function applyKqlValidatedField(field: string, value: string, where: Prisma.AlertWhereInput): void {
+  if (field === 'severity' && VALID_SEVERITIES.has(value)) {
+    where.severity = value as AlertSeverity
+  }
+  if (field === 'status' && VALID_STATUSES.has(value)) {
+    where.status = value as PrismaAlertStatus
+  }
+}
+
+function applyKqlDirectField(field: string, value: string, where: Prisma.AlertWhereInput): void {
+  const containsInsensitiveFields = new Map<string, keyof Prisma.AlertWhereInput>([
+    ['agent', 'agentName'],
+    ['agent.name', 'agentName'],
+    ['rule', 'ruleName'],
+    ['rule.name', 'ruleName'],
+    ['rulename', 'ruleName'],
+  ])
+  const containsCaseSensitiveFields = new Map<string, keyof Prisma.AlertWhereInput>([
+    ['sourceip', 'sourceIp'],
+    ['source.ip', 'sourceIp'],
+    ['destip', 'destinationIp'],
+    ['dest.ip', 'destinationIp'],
+    ['destination.ip', 'destinationIp'],
+  ])
+
+  if (field === 'source') {
+    where.source = value
+    return
+  }
+
+  const insensitiveTarget = containsInsensitiveFields.get(field)
+  if (insensitiveTarget) {
+    Object.assign(where, { [insensitiveTarget]: { contains: value, mode: 'insensitive' } })
+    return
+  }
+
+  const sensitiveTarget = containsCaseSensitiveFields.get(field)
+  if (sensitiveTarget) {
+    Object.assign(where, { [sensitiveTarget]: { contains: value } })
   }
 }

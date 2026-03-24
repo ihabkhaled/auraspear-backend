@@ -38,8 +38,6 @@ function createMockRepository() {
     aggregate: jest.fn(),
     findUsersByEmails: jest.fn(),
     findUserNameByEmail: jest.fn(),
-    findUserNameByEmail: jest.fn(),
-    findUsersByEmails: jest.fn(),
     findLastRuleByPrefix: jest.fn(),
   }
 }
@@ -76,7 +74,11 @@ describe('CorrelationService', () => {
     repository = createMockRepository()
     jest.clearAllMocks()
 
-    service = new CorrelationService(repository as never, mockAppLogger as never)
+    service = new CorrelationService(
+      repository as never,
+      mockAppLogger as never,
+      { evaluateRule: jest.fn().mockResolvedValue({ status: 'no_match', eventsCorrelated: 0, durationMs: 0 }) } as never
+    )
   })
 
   // ---------------------------------------------------------------------------
@@ -540,8 +542,10 @@ describe('CorrelationService', () => {
       await service.deleteRule(RULE_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Correlation rule deleted',
+        'Correlation: deleteRule',
         expect.objectContaining({
+          action: 'deleteRule',
+          tenantId: TENANT_ID,
           metadata: expect.objectContaining({ ruleNumber: 'COR-0001' }),
         })
       )

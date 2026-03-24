@@ -137,7 +137,7 @@ describe('ShuffleService', () => {
       await service.testConnection(VALID_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Shuffle connection test succeeded',
+        'Shuffle testConnection succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ connectorType: 'shuffle' }),
         })
@@ -240,7 +240,7 @@ describe('ShuffleService', () => {
       await service.getWorkflows(VALID_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Shuffle workflows retrieved',
+        'Shuffle getWorkflows succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ count: 3 }),
         })
@@ -403,7 +403,7 @@ describe('ShuffleService', () => {
       await service.executeWorkflow(VALID_CONFIG, 'aabb-ccdd', { test: true })
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Shuffle workflow executed',
+        'Shuffle executeWorkflow succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({
             workflowId: 'aabb-ccdd',

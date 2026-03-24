@@ -1,12 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AppLogsRepository } from './app-logs.repository'
-import { SortOrder } from '../../common/enums'
+import { buildAppLogsOrderBy, buildAppLogsWhereClause } from './app-logs.utilities'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
-import { toSortOrder } from '../../common/utils/query.utility'
 import type { PaginatedApplicationLogs, ApplicationLogRecord } from './app-logs.types'
 import type { SearchAppLogsDto } from './dto/search-app-logs.dto'
-import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class AppLogsService {
@@ -15,77 +13,11 @@ export class AppLogsService {
   constructor(private readonly appLogsRepository: AppLogsRepository) {}
 
   async search(dto: SearchAppLogsDto, scopedTenantId?: string): Promise<PaginatedApplicationLogs> {
-    const where: Prisma.ApplicationLogWhereInput = {}
-
-    // Tenant scoping: TENANT_ADMIN sees only their tenant's logs
-    if (scopedTenantId) {
-      where.tenantId = scopedTenantId
-    } else if (dto.tenantId) {
-      where.tenantId = dto.tenantId
-    }
-
-    if (dto.level) {
-      // Support comma-separated levels: "info,warn,error"
-      const levels = dto.level
-        .split(',')
-        .map(l => l.trim())
-        .filter(Boolean)
-      if (levels.length === 1) {
-        where.level = levels[0]
-      } else if (levels.length > 1) {
-        where.level = { in: levels }
-      }
-    }
-
-    if (dto.feature) {
-      where.feature = { contains: dto.feature, mode: 'insensitive' }
-    }
-
-    if (dto.action) {
-      where.action = { contains: dto.action, mode: 'insensitive' }
-    }
-
-    if (dto.functionName) {
-      where.functionName = { contains: dto.functionName, mode: 'insensitive' }
-    }
-
-    if (dto.actorEmail) {
-      where.actorEmail = { contains: dto.actorEmail, mode: 'insensitive' }
-    }
-
-    if (dto.actorUserId) {
-      where.actorUserId = dto.actorUserId
-    }
-
-    if (dto.requestId) {
-      where.requestId = dto.requestId
-    }
-
-    if (dto.sourceType) {
-      where.sourceType = dto.sourceType
-    }
-
-    if (dto.outcome) {
-      where.outcome = dto.outcome
-    }
-
-    if (dto.query) {
-      where.message = { contains: dto.query, mode: 'insensitive' }
-    }
-
-    if (dto.from || dto.to) {
-      where.createdAt = {}
-      if (dto.from) {
-        where.createdAt.gte = new Date(dto.from)
-      }
-      if (dto.to) {
-        where.createdAt.lte = new Date(dto.to)
-      }
-    }
+    const where = buildAppLogsWhereClause(dto, scopedTenantId)
 
     const [data, total] = await this.appLogsRepository.findManyAndCount({
       where,
-      orderBy: this.buildOrderBy(dto.sortBy, dto.sortOrder),
+      orderBy: buildAppLogsOrderBy(dto.sortBy, dto.sortOrder),
       skip: (dto.page - 1) * dto.limit,
       take: dto.limit,
     })
@@ -109,32 +41,5 @@ export class AppLogsService {
     }
 
     return log
-  }
-
-  private buildOrderBy(
-    sortBy?: string,
-    sortOrder?: string
-  ): Prisma.ApplicationLogOrderByWithRelationInput {
-    const order = toSortOrder(sortOrder)
-    switch (sortBy) {
-      case 'createdAt':
-        return { createdAt: order }
-      case 'level':
-        return { level: order }
-      case 'feature':
-        return { feature: order }
-      case 'action':
-        return { action: order }
-      case 'functionName':
-        return { functionName: order }
-      case 'actorEmail':
-        return { actorEmail: order }
-      case 'className':
-        return { className: order }
-      case 'outcome':
-        return { outcome: order }
-      default:
-        return { createdAt: SortOrder.DESC }
-    }
   }
 }

@@ -1,12 +1,18 @@
 import { MAX_REMOTE_ERROR_LENGTH, MINIMUM_TIMEOUT_MS, URL_KEYS } from './connectors.constants'
 import { REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
 import type {
+  AwsSdkTypes,
+  BedrockConfigFields,
   ChatCompletionContentBlock,
   ConnectorResponse,
   ConnectorRow,
   ConnectorStats,
+  LlmApiHeaders,
+  LlmConnectorUpdateFields,
   VelociraptorAuthOptions,
+  WazuhManagerInfoData,
 } from './connectors.types'
+import type { UpdateLlmConnectorDto } from './llm-connectors/dto/update-llm-connector.dto'
 import type { AxiosRequestOptions } from '../../common/modules/axios'
 import type { ConnectorConfig } from '@prisma/client'
 
@@ -28,6 +34,22 @@ export function mapConnectorToResponse(
     lastTestAt: row.lastTestAt,
     lastTestOk: row.lastTestOk,
     lastError: row.lastError,
+  }
+}
+
+export function buildNewConnectorResponse(
+  config: { type: string; name: string; enabled: boolean; authType: string },
+  maskedConfig: Record<string, unknown>
+): ConnectorResponse {
+  return {
+    type: config.type,
+    name: config.name,
+    enabled: config.enabled,
+    authType: config.authType,
+    config: maskedConfig,
+    lastTestAt: null,
+    lastTestOk: null,
+    lastError: null,
   }
 }
 
@@ -363,4 +385,212 @@ export function buildVelociraptorAuthOptions(
   }
 
   return { headers, httpOptions }
+}
+
+/* ---------------------------------------------------------------- */
+/* LLM API HEADERS                                                   */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Builds authorization headers for OpenAI-compatible LLM API requests.
+ */
+export function buildLlmApiHeaders(parameters: LlmApiHeaders): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${parameters.apiKey}`,
+  }
+  if (parameters.organizationId) {
+    headers['OpenAI-Organization'] = parameters.organizationId
+  }
+  return headers
+}
+
+/* ---------------------------------------------------------------- */
+/* BEDROCK CONFIG EXTRACTION                                         */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts and normalizes Bedrock configuration fields from a raw config object.
+ */
+export function extractBedrockConfig(config: Record<string, unknown>): BedrockConfigFields {
+  return {
+    region: (config.region ?? 'us-east-1') as string,
+    accessKeyId: config.accessKeyId as string | undefined,
+    secretAccessKey: config.secretAccessKey as string | undefined,
+    modelId: (config.modelId ?? 'anthropic.claude-3-sonnet-20240229-v1:0') as string,
+    endpoint: config.endpoint as string | undefined,
+  }
+}
+
+/**
+ * Creates a Bedrock InvokeModel command body for the Anthropic Messages API.
+ */
+export function buildBedrockRequestBody(prompt: string, maxTokens: number): string {
+  return JSON.stringify({
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  })
+}
+
+/**
+ * Parses the Bedrock response body and extracts text and token usage.
+ */
+export function parseBedrockResponse(bodyBytes: Uint8Array): {
+  text: string
+  inputTokens: number
+  outputTokens: number
+  stopReason: string
+} {
+  const bodyString = new TextDecoder().decode(bodyBytes)
+  const body = JSON.parse(bodyString) as Record<string, unknown>
+  const content = body.content as Array<{ text: string }> | undefined
+  const usage = body.usage as { input_tokens: number; output_tokens: number } | undefined
+
+  return {
+    text: content?.[0]?.text ?? '',
+    inputTokens: usage?.input_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    stopReason: (body.stop_reason as string) ?? 'ok',
+  }
+}
+
+/**
+ * Dynamically imports the AWS Bedrock SDK.
+ * Returns the SDK classes or throws an informative error.
+ */
+export async function loadAwsBedrockSdk(): Promise<AwsSdkTypes> {
+  try {
+    const moduleName = '@aws-sdk/client-bedrock-runtime'
+    const sdk = (await import(moduleName)) as unknown as Record<string, unknown>
+    return sdk as unknown as AwsSdkTypes
+  } catch {
+    throw new Error(
+      '@aws-sdk/client-bedrock-runtime is not installed. Run: npm install @aws-sdk/client-bedrock-runtime'
+    )
+  }
+}
+
+/**
+ * Checks if an error message indicates a missing AWS SDK module.
+ */
+export function isMissingSdkError(message: string): boolean {
+  return message.includes('Cannot find module') || message.includes('MODULE_NOT_FOUND')
+}
+
+/* ---------------------------------------------------------------- */
+/* LLM CONNECTOR UPDATE FIELDS                                       */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Builds the update data record from an LLM connector update DTO.
+ * Encrypts the API key if provided.
+ */
+export function buildLlmConnectorUpdateData(
+  dto: UpdateLlmConnectorDto,
+  encryptFunction?: (value: string) => string
+): LlmConnectorUpdateFields {
+  const data: LlmConnectorUpdateFields = {}
+
+  if (dto.name !== undefined) data.name = dto.name
+  if (dto.description !== undefined) data.description = dto.description
+  if (dto.baseUrl !== undefined) data.baseUrl = dto.baseUrl
+  if (dto.apiKey !== undefined && encryptFunction) {
+    data.encryptedApiKey = encryptFunction(dto.apiKey)
+  }
+  if (dto.defaultModel !== undefined) data.defaultModel = dto.defaultModel
+  if (dto.organizationId !== undefined) data.organizationId = dto.organizationId
+  if (dto.maxTokensParam !== undefined) data.maxTokensParam = dto.maxTokensParam
+  if (dto.timeout !== undefined) data.timeout = dto.timeout
+  if (dto.enabled !== undefined) data.enabled = dto.enabled
+
+  return data
+}
+
+/* ---------------------------------------------------------------- */
+/* WAZUH VERSION EXTRACTION                                          */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the Wazuh Manager version from the /manager/info response.
+ * Handles the Wazuh v4 API wrapper structure with data.affected_items[].
+ */
+export function extractWazuhVersion(info: WazuhManagerInfoData): string {
+  const dataWrapper = (info.data as Record<string, unknown>) ?? info
+  const affectedItems = (dataWrapper.affected_items as Record<string, unknown>[]) ?? []
+  const firstItem = (affectedItems[0] ?? dataWrapper) as Record<string, unknown>
+
+  return (firstItem.api_version ??
+    firstItem.version ??
+    dataWrapper.api_version ??
+    dataWrapper.version ??
+    'unknown') as string
+}
+
+/* ---------------------------------------------------------------- */
+/* LOGSTASH AUTH HEADERS                                              */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Builds optional basic auth headers for Logstash API requests.
+ */
+export function buildOptionalBasicAuthHeaders(
+  config: Record<string, unknown>,
+  basicAuthFunction: (username: string, password: string) => string
+): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const username = config.username as string | undefined
+  const password = config.password as string | undefined
+  if (username && password) {
+    headers.Authorization = basicAuthFunction(username, password)
+  }
+  return headers
+}
+
+/* ---------------------------------------------------------------- */
+/* MISP CONFIG EXTRACTION                                            */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the MISP base URL from config, preferring mispUrl over baseUrl.
+ */
+export function extractMispBaseUrl(config: Record<string, unknown>): string | undefined {
+  return (config.mispUrl ?? config.baseUrl) as string | undefined
+}
+
+/**
+ * Extracts the MISP auth key from config, supporting legacy field names.
+ */
+export function extractMispAuthKey(config: Record<string, unknown>): string | undefined {
+  return (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string | undefined
+}
+
+/* ---------------------------------------------------------------- */
+/* SHUFFLE CONFIG EXTRACTION                                         */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the Shuffle base URL from config, preferring webhookUrl over baseUrl.
+ */
+export function extractShuffleBaseUrl(config: Record<string, unknown>): string | undefined {
+  return (config.webhookUrl ?? config.baseUrl) as string | undefined
+}
+
+/**
+ * Extracts the Shuffle API key from config, supporting legacy field name.
+ */
+export function extractShuffleApiKey(config: Record<string, unknown>): string | undefined {
+  return (config.apiKey ?? config.shuffleApiKey) as string | undefined
+}
+
+/* ---------------------------------------------------------------- */
+/* OPENSEARCH HIT TOTAL EXTRACTION                                   */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the total hit count from an OpenSearch/Elasticsearch response.
+ * Handles both numeric and object `{ value: number }` formats.
+ */
+export function extractSearchTotal(totalObject: Record<string, unknown> | number): number {
+  return typeof totalObject === 'number' ? totalObject : (totalObject.value as number)
 }

@@ -369,3 +369,37 @@ export function buildCycleNotificationMessage(
   const detail = cycleId === null ? 'removed from cycle' : 'added to a cycle'
   return JSON.stringify({ key: 'caseUpdatedMessage', params: { caseRef: caseNumber, detail } })
 }
+
+/* ---------------------------------------------------------------- */
+/* AI CONTEXT BUILDING                                               */
+/* ---------------------------------------------------------------- */
+
+export function buildCaseAiContext(caseItem: {
+  title: string | null
+  description: string | null
+  severity: string
+  status: string
+  artifacts?: Array<{ type: string; value: string }>
+  tasks?: Array<{ title: string; status: string }>
+  timeline?: Array<{ type: string; description: string; timestamp: Date | null }>
+}): Record<string, unknown> {
+  return {
+    caseTitle: caseItem.title ?? '',
+    caseDescription: caseItem.description ?? '',
+    caseSeverity: caseItem.severity,
+    caseStatus: caseItem.status,
+    artifacts: (caseItem.artifacts ?? []).slice(0, 10).map(a => ({
+      type: a.type,
+      value: a.value,
+    })),
+    tasks: (caseItem.tasks ?? []).slice(0, 10).map(t => ({
+      title: t.title,
+      status: t.status,
+    })),
+    timelineEvents: (caseItem.timeline ?? []).slice(0, 20).map(e => ({
+      type: e.type,
+      description: e.description,
+      timestamp: e.timestamp?.toISOString() ?? '',
+    })),
+  }
+}

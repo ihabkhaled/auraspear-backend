@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AuditLogsRepository } from './audit-logs.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, SortOrder } from '../../common/enums'
+import {
+  buildAuditLogCreateInput,
+  buildAuditLogsOrderBy,
+  buildAuditLogsWhereClause,
+} from './audit-logs.utilities'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
-import { toSortOrder } from '../../common/utils/query.utility'
 import type { AuditLogRecord, CreateAuditLogData, PaginatedAuditLogs } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
-import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class AuditLogsService {
@@ -18,140 +21,109 @@ export class AuditLogsService {
   ) {}
 
   async search(tenantId: string, query: SearchAuditLogsDto): Promise<PaginatedAuditLogs> {
-    const where: Prisma.AuditLogWhereInput = { tenantId }
-
-    if (query.actor) {
-      where.actor = { contains: query.actor, mode: 'insensitive' }
-    }
-
-    if (query.action) {
-      where.action = query.action
-    }
-
-    if (query.resource) {
-      where.resource = query.resource
-    }
-
-    if (query.from || query.to) {
-      where.createdAt = {}
-      if (query.from) {
-        where.createdAt.gte = new Date(query.from)
-      }
-      if (query.to) {
-        where.createdAt.lte = new Date(query.to)
-      }
-    }
+    const where = buildAuditLogsWhereClause(tenantId, query)
 
     try {
       const [data, total] = await this.auditLogsRepository.findManyAndCount({
         where,
-        orderBy: this.buildOrderBy(query.sortBy, query.sortOrder),
+        orderBy: buildAuditLogsOrderBy(query.sortBy, query.sortOrder),
         skip: (query.page - 1) * query.limit,
         take: query.limit,
       })
 
-      this.appLogger.info(`Searched audit logs page=${query.page} total=${total}`, {
-        feature: AppLogFeature.SYSTEM,
-        action: 'search',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuditLogsService',
-        functionName: 'search',
-        metadata: {
-          page: query.page,
-          limit: query.limit,
-          total,
-          actor: query.actor ?? null,
-          filterAction: query.action ?? null,
-          resource: query.resource ?? null,
-        },
-      })
+      this.logSearchSuccess(tenantId, query, total)
 
       return {
         data,
         pagination: buildPaginationMeta(query.page, query.limit, total),
       }
     } catch (error: unknown) {
-      this.appLogger.error('Failed to search audit logs', {
-        feature: AppLogFeature.SYSTEM,
-        action: 'search',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuditLogsService',
-        functionName: 'search',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
+      this.logSearchFailure(tenantId, error)
       throw error
-    }
-  }
-
-  private buildOrderBy(
-    sortBy?: string,
-    sortOrder?: string
-  ): Prisma.AuditLogOrderByWithRelationInput {
-    const order = toSortOrder(sortOrder)
-    switch (sortBy) {
-      case 'createdAt':
-        return { createdAt: order }
-      case 'actor':
-        return { actor: order }
-      case 'action':
-        return { action: order }
-      case 'resource':
-        return { resource: order }
-      default:
-        return { createdAt: SortOrder.DESC }
     }
   }
 
   async create(data: CreateAuditLogData): Promise<AuditLogRecord> {
     try {
-      const entry = await this.auditLogsRepository.create({
-        tenantId: data.tenantId,
-        actor: data.actor,
-        role: data.role,
-        action: data.action,
-        resource: data.resource,
-        resourceId: data.resourceId ?? null,
-        details: data.details ?? null,
-        ipAddress: data.ipAddress ?? null,
-      })
+      const entry = await this.auditLogsRepository.create(buildAuditLogCreateInput(data))
 
       this.logger.log(
         `Audit log created: ${data.action} on ${data.resource} by ${data.actor} in tenant ${data.tenantId}`
       )
-
-      this.appLogger.info(`Created audit log: ${data.action} on ${data.resource}`, {
-        feature: AppLogFeature.SYSTEM,
-        action: 'create',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId: data.tenantId,
-        actorEmail: data.actor,
-        targetResource: data.resource,
-        targetResourceId: data.resourceId ?? undefined,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuditLogsService',
-        functionName: 'create',
-        metadata: { auditAction: data.action, role: data.role },
-      })
+      this.logCreateSuccess(data)
 
       return entry
     } catch (error: unknown) {
-      this.appLogger.error(`Failed to create audit log: ${data.action} on ${data.resource}`, {
-        feature: AppLogFeature.SYSTEM,
-        action: 'create',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: data.tenantId,
-        actorEmail: data.actor,
-        targetResource: data.resource,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'AuditLogsService',
-        functionName: 'create',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
+      this.logCreateFailure(data, error)
       throw error
     }
+  }
+
+  private logSearchSuccess(
+    tenantId: string,
+    query: SearchAuditLogsDto,
+    total: number
+  ): void {
+    this.appLogger.info(`Searched audit logs page=${query.page} total=${total}`, {
+      feature: AppLogFeature.SYSTEM,
+      action: 'search',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuditLogsService',
+      functionName: 'search',
+      metadata: {
+        page: query.page,
+        limit: query.limit,
+        total,
+        actor: query.actor ?? null,
+        filterAction: query.action ?? null,
+        resource: query.resource ?? null,
+      },
+    })
+  }
+
+  private logSearchFailure(tenantId: string, error: unknown): void {
+    this.appLogger.error('Failed to search audit logs', {
+      feature: AppLogFeature.SYSTEM,
+      action: 'search',
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuditLogsService',
+      functionName: 'search',
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+  }
+
+  private logCreateSuccess(data: CreateAuditLogData): void {
+    this.appLogger.info(`Created audit log: ${data.action} on ${data.resource}`, {
+      feature: AppLogFeature.SYSTEM,
+      action: 'create',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: data.tenantId,
+      actorEmail: data.actor,
+      targetResource: data.resource,
+      targetResourceId: data.resourceId ?? undefined,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuditLogsService',
+      functionName: 'create',
+      metadata: { auditAction: data.action, role: data.role },
+    })
+  }
+
+  private logCreateFailure(data: CreateAuditLogData, error: unknown): void {
+    this.appLogger.error(`Failed to create audit log: ${data.action} on ${data.resource}`, {
+      feature: AppLogFeature.SYSTEM,
+      action: 'create',
+      outcome: AppLogOutcome.FAILURE,
+      tenantId: data.tenantId,
+      actorEmail: data.actor,
+      targetResource: data.resource,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'AuditLogsService',
+      functionName: 'create',
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
   }
 }

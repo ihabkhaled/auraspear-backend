@@ -9,6 +9,7 @@ import type {
   AlertTrend,
   AlertTrendEntry,
   AlertTrendRow,
+  AnalyticsRawData,
   ConnectorFailureRow,
   ConnectorRow,
   DashboardAiSessionStatusCounts,
@@ -33,15 +34,20 @@ import type {
   DashboardSeverityCountRow,
   DashboardSoarStatusCounts,
   DashboardSoarStatusRow,
+  DashboardSummary,
   DashboardThreatOperationsMetrics,
   DetectionRulePerformanceRow,
   MitreTechniqueEntry,
   MitreTechniqueRow,
+  OperationsRawData,
   PaginationMetadata,
   PipelineEntry,
+  RecentActivityBuildInput,
   RecentActivityItem,
+  RecentActivityResponse,
   SeverityDistribution,
   SeverityDistributionEntry,
+  SummaryRawData,
   TopAssetRow,
   TopTargetedAsset,
 } from './dashboards.types'
@@ -89,9 +95,21 @@ export function buildAlertTrend(
   startDate?: Date,
   endDate?: Date
 ): AlertTrend {
+  const trendMap = initializeAlertTrendMap(startDate, endDate)
+  populateAlertTrendMap(trendMap, rows, startDate, endDate)
+
+  return {
+    tenantId,
+    days,
+    trend: [...trendMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
+  }
+}
+
+function initializeAlertTrendMap(
+  startDate?: Date,
+  endDate?: Date
+): Map<string, AlertTrendEntry> {
   const trendMap = new Map<string, AlertTrendEntry>()
-  const startKey = startDate ? toUtcDateString(startDate) : null
-  const endKey = endDate ? toUtcDateString(endDate) : null
 
   if (startDate && endDate) {
     const cursor = new Date(startDate)
@@ -103,6 +121,18 @@ export function buildAlertTrend(
     }
   }
 
+  return trendMap
+}
+
+function populateAlertTrendMap(
+  trendMap: Map<string, AlertTrendEntry>,
+  rows: AlertTrendRow[],
+  startDate?: Date,
+  endDate?: Date
+): void {
+  const startKey = startDate ? toUtcDateString(startDate) : null
+  const endKey = endDate ? toUtcDateString(endDate) : null
+
   for (const row of rows) {
     if ((startKey && row.date < startKey) || (endKey && row.date > endKey)) {
       continue
@@ -113,34 +143,33 @@ export function buildAlertTrend(
     }
 
     const entry = trendMap.get(row.date)
-    if (!entry) {
-      continue
-    }
-
-    const count = Number(row.count)
-    switch (row.severity) {
-      case AlertSeverity.CRITICAL:
-        entry.critical = count
-        break
-      case AlertSeverity.HIGH:
-        entry.high = count
-        break
-      case AlertSeverity.MEDIUM:
-        entry.medium = count
-        break
-      case AlertSeverity.LOW:
-        entry.low = count
-        break
-      case AlertSeverity.INFO:
-        entry.info = count
-        break
+    if (entry) {
+      applyAlertSeverityCount(entry, row.severity, Number(row.count))
     }
   }
+}
 
-  return {
-    tenantId,
-    days,
-    trend: [...trendMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
+function applyAlertSeverityCount(
+  entry: AlertTrendEntry,
+  severity: AlertTrendRow['severity'],
+  count: number
+): void {
+  switch (severity) {
+    case AlertSeverity.CRITICAL:
+      entry.critical = count
+      break
+    case AlertSeverity.HIGH:
+      entry.high = count
+      break
+    case AlertSeverity.MEDIUM:
+      entry.medium = count
+      break
+    case AlertSeverity.LOW:
+      entry.low = count
+      break
+    case AlertSeverity.INFO:
+      entry.info = count
+      break
   }
 }
 
@@ -392,4 +421,195 @@ export function buildOperationsOverview(params: {
     automationQuality: params.automationQuality,
     exposureSummary: params.exposureSummary,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* SUMMARY BUILDING                                                  */
+/* ---------------------------------------------------------------- */
+
+export function buildDashboardSummary(
+  tenantId: string,
+  rawData: SummaryRawData
+): DashboardSummary {
+  const avgMs = rawData.avgResolutionTime[0]?.avg_ms ?? 0
+  const mttrMinutes = Math.round(avgMs / 60_000)
+  const mttrCurrentMs = rawData.mttrCurrentWeek[0]?.avg_ms ?? 0
+  const mttrPreviousMs = rawData.mttrPreviousWeek[0]?.avg_ms ?? 0
+
+  return {
+    tenantId,
+    totalAlerts: rawData.alertsCurrentWeek,
+    criticalAlerts: rawData.criticalCurrentWeek,
+    openCases: rawData.openCases,
+    alertsLast24h: rawData.alertsLast24h,
+    resolvedLast24h: rawData.resolvedLast24h,
+    meanTimeToRespond: mttrMinutes > 0 ? `${mttrMinutes}m` : 'N/A',
+    connectedSources: rawData.connectedSources,
+    totalAlertsTrend: calculateTrend(rawData.alertsCurrentWeek, rawData.alertsPreviousWeek),
+    criticalAlertsTrend: calculateTrend(rawData.criticalCurrentWeek, rawData.criticalPreviousWeek),
+    openCasesTrend: calculateTrend(rawData.casesCurrentWeek, rawData.casesPreviousWeek),
+    mttrTrend: calculateTrend(mttrCurrentMs, mttrPreviousMs),
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* ANALYTICS OVERVIEW BUILDING FROM RAW DATA                         */
+/* ---------------------------------------------------------------- */
+
+export function buildAnalyticsOverviewFromRawData(
+  rawData: AnalyticsRawData
+): DashboardAnalyticsOverview {
+  const healthyConnectors = rawData.enabledConnectors.filter(
+    connector => connector.lastTestOk === true
+  ).length
+  const failingConnectors = rawData.enabledConnectors.filter(
+    connector => connector.lastTestOk === false
+  ).length
+  const complianceScore = calculateComplianceScore(
+    rawData.passedControls,
+    rawData.failedControls,
+    rawData.notAssessedControls
+  )
+
+  return buildAnalyticsOverview({
+    tenantId: rawData.tenantId,
+    overview: {
+      alertsLast24h: rawData.alertsLast24h,
+      resolvedLast24h: rawData.resolvedLast24h,
+      openCases: rawData.openCases,
+      openIncidents: rawData.openIncidents,
+      criticalVulnerabilities: rawData.criticalVulnerabilities,
+      connectedSources: rawData.enabledConnectors.length,
+      completedReports: rawData.completedReports,
+    },
+    threatOperations: {
+      totalAlerts7d: rawData.totalAlerts7d,
+      criticalAlerts7d: rawData.criticalAlerts7d,
+      openCases: rawData.openCases,
+      openIncidents: rawData.openIncidents,
+      criticalVulnerabilities: rawData.criticalVulnerabilities,
+      highVulnerabilities: rawData.highVulnerabilities,
+      activeAttackPaths: rawData.activeAttackPaths,
+    },
+    automation: {
+      onlineAgents: rawData.onlineAgents,
+      aiSessions24h: rawData.aiSessions24h,
+      pendingJobs: rawData.pendingJobs,
+      runningJobs: rawData.runningJobs,
+      failedJobs: rawData.failedJobs,
+      healthyConnectors,
+      failingConnectors,
+    },
+    governance: {
+      totalFrameworks: rawData.totalFrameworks,
+      passedControls: rawData.passedControls,
+      failedControls: rawData.failedControls,
+      notAssessedControls: rawData.notAssessedControls,
+      complianceScore,
+      availableTemplates: rawData.availableTemplates,
+    },
+    infrastructure: {
+      enabledConnectors: rawData.enabledConnectors.length,
+      healthyConnectors,
+      failingConnectors,
+      totalJobs: rawData.totalJobs,
+      delayedJobs: rawData.delayedJobs,
+      generatedReports30d: rawData.generatedReports30d,
+    },
+  })
+}
+
+/* ---------------------------------------------------------------- */
+/* OPERATIONS OVERVIEW BUILDING FROM RAW DATA                        */
+/* ---------------------------------------------------------------- */
+
+export function buildOperationsOverviewFromRawData(
+  rawData: OperationsRawData
+): DashboardOperationsOverview {
+  const incidentStatus = rawData.incidentStatusRows.map(row => ({
+    status: row.status,
+    count: row._count,
+  }))
+  const connectorSyncStatusCounts = buildConnectorSyncStatusCounts(rawData.connectorSyncStatusRows)
+  const aiSessionStatusCounts = buildAiSessionStatusCounts(rawData.aiSessionStatusRows)
+  const soarStatusCounts = buildSoarStatusCounts(rawData.soarStatusRows)
+
+  return buildOperationsOverview({
+    tenantId: rawData.tenantId,
+    incidentStatus,
+    caseAging: {
+      openCases: rawData.openCases,
+      unassignedCases: rawData.unassignedCases,
+      agedOverSevenDays: rawData.agedOverSevenDays,
+      agedOverFourteenDays: rawData.agedOverFourteenDays,
+      meanOpenAgeHours: Math.round(rawData.averageOpenCaseAge[0]?.avg_hours ?? 0),
+    },
+    rulePerformance: buildRulePerformanceSummary({
+      activeRules: rawData.activeRules,
+      topRules: rawData.topRules,
+      noisyRules: rawData.noisyRules,
+    }),
+    connectorSync: buildConnectorSyncSummary({
+      statusCounts: connectorSyncStatusCounts,
+      topFailingConnectors: rawData.topFailingConnectors,
+    }),
+    runtimeBacklog: {
+      pendingJobs: rawData.pendingJobs,
+      retryingJobs: rawData.retryingJobs,
+      failedJobs: rawData.failedJobs,
+      staleRunningJobs: rawData.staleRunningJobs,
+      queuedConnectorSyncJobs: rawData.queuedConnectorSyncJobs,
+      queuedReportJobs: rawData.queuedReportJobs,
+    },
+    automationQuality: buildAutomationQuality({
+      aiStatusCounts: aiSessionStatusCounts,
+      averageAiDurationSeconds: Math.round((rawData.averageAiDuration[0]?.avg_ms ?? 0) / 100) / 10,
+      soarStatusCounts,
+      averageSoarCompletionRate:
+        Math.round((rawData.averageSoarCompletionRate[0]?.avg_percentage ?? 0) * 10) / 10,
+    }),
+    exposureSummary: {
+      criticalVulnerabilities: rawData.criticalVulnerabilities,
+      exploitAvailableVulnerabilities: rawData.exploitAvailableVulnerabilities,
+      openCloudFindings: rawData.openCloudFindings,
+      criticalCloudFindings: rawData.criticalCloudFindings,
+      passedControls: rawData.passedControls,
+      failedControls: rawData.failedControls,
+    },
+  })
+}
+
+/* ---------------------------------------------------------------- */
+/* RECENT ACTIVITY BUILDING FROM RAW DATA                            */
+/* ---------------------------------------------------------------- */
+
+export function buildRecentActivityFromRawData(
+  input: RecentActivityBuildInput
+): RecentActivityResponse {
+  const actorMap = new Map(input.actors.map(actor => [actor.id, actor]))
+
+  const data: RecentActivityItem[] = input.notifications.map(notification => {
+    const actor = actorMap.get(notification.actorUserId)
+
+    return {
+      id: notification.id,
+      type: notification.type,
+      actorName: actor?.name ?? 'Unknown',
+      title: notification.title,
+      message: notification.message,
+      createdAt: notification.createdAt,
+      isRead: notification.readAt !== null,
+    }
+  })
+
+  const totalPages = Math.ceil(input.total / input.limit)
+
+  return buildRecentActivityItems(data, {
+    page: 1,
+    limit: input.limit,
+    total: input.total,
+    totalPages,
+    hasNext: totalPages > 1,
+    hasPrev: false,
+  })
 }

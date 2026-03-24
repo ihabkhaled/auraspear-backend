@@ -3,6 +3,7 @@ import { Interval } from '@nestjs/schedule'
 import { JobType } from './enums/job.enums'
 import { SCHEDULE_INTERVAL_MS } from './jobs.constants'
 import { JobService } from './jobs.service'
+import { countScheduleResults, getCurrentScheduleWindow } from './jobs.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { PrismaService } from '../../prisma/prisma.service'
@@ -32,37 +33,9 @@ export class JobSchedulerService {
     try {
       const detectionCount = await this.scheduleDetectionRules()
       const correlationCount = await this.scheduleCorrelationRules()
-
-      if (detectionCount > 0 || correlationCount > 0) {
-        this.appLogger.info(
-          `Scheduled rule execution: ${String(detectionCount)} detection, ${String(correlationCount)} correlation`,
-          {
-            feature: AppLogFeature.JOBS,
-            action: 'scheduleRuleExecution',
-            outcome: AppLogOutcome.SUCCESS,
-            sourceType: AppLogSourceType.CRON,
-            className: 'JobSchedulerService',
-            functionName: 'scheduleRuleExecution',
-            metadata: {
-              detectionRulesEnqueued: detectionCount,
-              correlationRulesEnqueued: correlationCount,
-              intervalMs: SCHEDULE_INTERVAL_MS,
-            },
-          }
-        )
-      }
+      this.logScheduleSuccess(detectionCount, correlationCount)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      this.appLogger.error(`Scheduled rule execution failed: ${errorMessage}`, {
-        feature: AppLogFeature.JOBS,
-        action: 'scheduleRuleExecution',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.CRON,
-        className: 'JobSchedulerService',
-        functionName: 'scheduleRuleExecution',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-        metadata: { error: errorMessage },
-      })
+      this.logScheduleError(error)
     }
   }
 
@@ -72,8 +45,7 @@ export class JobSchedulerService {
       select: { id: true, tenantId: true, name: true },
     })
 
-    const currentWindow = this.getCurrentWindow()
-
+    const currentWindow = getCurrentScheduleWindow()
     const results = await Promise.allSettled(
       activeRules.map(rule =>
         this.jobService.enqueue({
@@ -86,30 +58,8 @@ export class JobSchedulerService {
       )
     )
 
-    let enqueued = 0
-
-    for (const [index, result] of results.entries()) {
-      if (result.status === 'fulfilled') {
-        enqueued += 1
-      } else {
-        const rule = activeRules.at(index)
-        if (rule) {
-          this.appLogger.warn(`Failed to enqueue detection rule ${rule.id}: ${result.reason}`, {
-            feature: AppLogFeature.JOBS,
-            action: 'scheduleDetectionRules',
-            outcome: AppLogOutcome.WARNING,
-            sourceType: AppLogSourceType.CRON,
-            className: 'JobSchedulerService',
-            functionName: 'scheduleDetectionRules',
-            tenantId: rule.tenantId,
-            targetResource: 'DetectionRule',
-            targetResourceId: rule.id,
-            metadata: { ruleName: rule.name, error: String(result.reason) },
-          })
-        }
-      }
-    }
-
+    const { enqueued, rejectedIndices } = countScheduleResults(results)
+    this.logRejectedRules(rejectedIndices, activeRules, 'scheduleDetectionRules', 'DetectionRule')
     return enqueued
   }
 
@@ -119,8 +69,7 @@ export class JobSchedulerService {
       select: { id: true, tenantId: true, title: true },
     })
 
-    const currentWindow = this.getCurrentWindow()
-
+    const currentWindow = getCurrentScheduleWindow()
     const results = await Promise.allSettled(
       activeRules.map(rule =>
         this.jobService.enqueue({
@@ -133,41 +82,77 @@ export class JobSchedulerService {
       )
     )
 
-    let enqueued = 0
-
-    for (const [index, result] of results.entries()) {
-      if (result.status === 'fulfilled') {
-        enqueued += 1
-      } else {
-        const rule = activeRules.at(index)
-        if (rule) {
-          this.appLogger.warn(`Failed to enqueue correlation rule ${rule.id}: ${result.reason}`, {
-            feature: AppLogFeature.JOBS,
-            action: 'scheduleCorrelationRules',
-            outcome: AppLogOutcome.WARNING,
-            sourceType: AppLogSourceType.CRON,
-            className: 'JobSchedulerService',
-            functionName: 'scheduleCorrelationRules',
-            tenantId: rule.tenantId,
-            targetResource: 'CorrelationRule',
-            targetResourceId: rule.id,
-            metadata: { ruleTitle: rule.title, error: String(result.reason) },
-          })
-        }
-      }
-    }
-
+    const { enqueued, rejectedIndices } = countScheduleResults(results)
+    this.logRejectedRules(
+      rejectedIndices,
+      activeRules,
+      'scheduleCorrelationRules',
+      'CorrelationRule'
+    )
     return enqueued
   }
 
-  /**
-   * Returns a time-window key (floored to the nearest 5 minutes) to use as
-   * part of idempotency keys, preventing duplicate jobs within the same window.
-   */
-  private getCurrentWindow(): string {
-    const now = Date.now()
-    const windowMs = SCHEDULE_INTERVAL_MS
-    const windowStart = Math.floor(now / windowMs) * windowMs
-    return String(windowStart)
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logRejectedRules(
+    rejectedIndices: number[],
+    rules: Array<{ id: string; tenantId: string; name?: string; title?: string }>,
+    functionName: string,
+    resourceName: string
+  ): void {
+    for (const index of rejectedIndices) {
+      const rule = rules.at(index)
+      if (rule) {
+        this.appLogger.warn(`Failed to enqueue ${resourceName} ${rule.id}`, {
+          feature: AppLogFeature.JOBS,
+          action: functionName,
+          outcome: AppLogOutcome.WARNING,
+          sourceType: AppLogSourceType.CRON,
+          className: 'JobSchedulerService',
+          functionName,
+          tenantId: rule.tenantId,
+          targetResource: resourceName,
+          targetResourceId: rule.id,
+          metadata: { ruleName: rule.name ?? rule.title },
+        })
+      }
+    }
+  }
+
+  private logScheduleSuccess(detectionCount: number, correlationCount: number): void {
+    if (detectionCount > 0 || correlationCount > 0) {
+      this.appLogger.info(
+        `Scheduled rule execution: ${String(detectionCount)} detection, ${String(correlationCount)} correlation`,
+        {
+          feature: AppLogFeature.JOBS,
+          action: 'scheduleRuleExecution',
+          outcome: AppLogOutcome.SUCCESS,
+          sourceType: AppLogSourceType.CRON,
+          className: 'JobSchedulerService',
+          functionName: 'scheduleRuleExecution',
+          metadata: {
+            detectionRulesEnqueued: detectionCount,
+            correlationRulesEnqueued: correlationCount,
+            intervalMs: SCHEDULE_INTERVAL_MS,
+          },
+        }
+      )
+    }
+  }
+
+  private logScheduleError(error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    this.appLogger.error(`Scheduled rule execution failed: ${errorMessage}`, {
+      feature: AppLogFeature.JOBS,
+      action: 'scheduleRuleExecution',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.CRON,
+      className: 'JobSchedulerService',
+      functionName: 'scheduleRuleExecution',
+      stackTrace: error instanceof Error ? error.stack : undefined,
+      metadata: { error: errorMessage },
+    })
   }
 }

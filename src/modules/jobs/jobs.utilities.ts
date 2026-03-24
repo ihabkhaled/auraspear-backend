@@ -1,5 +1,10 @@
 import { JobStatus } from './enums/job.enums'
-import { BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS, STALE_RUNNING_WINDOW_MS } from './jobs.constants'
+import {
+  BASE_RETRY_DELAY_MS,
+  MAX_RETRY_DELAY_MS,
+  SCHEDULE_INTERVAL_MS,
+  STALE_RUNNING_WINDOW_MS,
+} from './jobs.constants'
 import { JobHandlerType } from './jobs.types'
 import type { JobStatsInput, JobRuntimeStats } from './jobs.types'
 import type { Job } from '@prisma/client'
@@ -51,4 +56,34 @@ export function buildJobStats(params: JobStatsInput): JobRuntimeStats {
 
 export function isJobTerminal(status: JobStatus): boolean {
   return [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED].includes(status)
+}
+
+/**
+ * Returns a time-window key (floored to the nearest schedule interval) for
+ * idempotency keys, preventing duplicate jobs within the same window.
+ */
+export function getCurrentScheduleWindow(): string {
+  const now = Date.now()
+  const windowStart = Math.floor(now / SCHEDULE_INTERVAL_MS) * SCHEDULE_INTERVAL_MS
+  return String(windowStart)
+}
+
+/**
+ * Counts how many settled results were fulfilled vs rejected.
+ */
+export function countScheduleResults(
+  results: PromiseSettledResult<unknown>[]
+): { enqueued: number; rejectedIndices: number[] } {
+  let enqueued = 0
+  const rejectedIndices: number[] = []
+
+  for (const [index, result] of results.entries()) {
+    if (result.status === 'fulfilled') {
+      enqueued += 1
+    } else {
+      rejectedIndices.push(index)
+    }
+  }
+
+  return { enqueued, rejectedIndices }
 }

@@ -7,9 +7,8 @@ import {
   SYNCABLE_TYPES_SET,
 } from './connector-sync.constants'
 import { ConnectorSyncRepository } from './connector-sync.repository'
+import { buildGraylogAlertData, countFulfilledResults } from './connector-sync.utilities'
 import {
-  AlertSeverity,
-  AlertStatus,
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
@@ -22,7 +21,7 @@ import { ConnectorsService } from '../connectors/connectors.service'
 import { GraylogService } from '../connectors/services/graylog.service'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
 import { IntelService } from '../intel/intel.service'
-import type { ConnectorType as PrismaConnectorType, Alert, Prisma } from '@prisma/client'
+import type { ConnectorType as PrismaConnectorType, Alert } from '@prisma/client'
 
 @Injectable()
 export class ConnectorSyncService {
@@ -93,98 +92,48 @@ export class ConnectorSyncService {
       types: SYNCABLE_TYPES,
     })
 
-    if (connectors.length === 0) {
-      return
-    }
+    if (connectors.length === 0) return
 
     this.logger.log(`Sync tick: ${connectors.length} connector(s) eligible`)
 
     const results = await Promise.allSettled(
       connectors.map(async connector => {
-        // Skip if synced too recently
-        if (connector.lastSyncAt) {
-          const elapsed = Date.now() - connector.lastSyncAt.getTime()
-          if (elapsed < MIN_SYNC_GAP_MS) {
-            return
-          }
-        }
-
+        if (this.shouldSkipSync(connector.lastSyncAt)) return
         return this.syncSingleConnector(connector.tenantId, connector.type)
       })
     )
 
-    let succeeded = 0
-    let failed = 0
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        succeeded++
-      } else {
-        failed++
-        this.logger.warn(`Sync failure: ${(result.reason as Error).message}`)
-      }
-    }
-
-    this.logger.log(`Sync tick complete: ${succeeded} succeeded, ${failed} failed`)
+    this.logSyncResults(results)
   }
 
-  private async syncSingleConnector(tenantId: string, type: string): Promise<{ ingested: number }> {
-    this.appLogger.info(`Starting sync for ${type}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'sync',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.CRON,
-      className: 'ConnectorSyncService',
-      functionName: 'syncSingleConnector',
-      metadata: { connectorType: type },
-    })
-
-    let ingested = 0
+  private async syncSingleConnector(
+    tenantId: string,
+    type: string
+  ): Promise<{ ingested: number }> {
+    this.logSyncStart(tenantId, type)
 
     try {
-      switch (type) {
-        case ConnectorType.WAZUH:
-          ingested = await this.syncWazuh(tenantId)
-          break
-        case ConnectorType.GRAYLOG:
-          ingested = await this.syncGraylog(tenantId)
-          break
-        case ConnectorType.MISP:
-          ingested = await this.syncMisp(tenantId)
-          break
-        default:
-          break
-      }
-
-      // Update lastSyncAt timestamp
+      const ingested = await this.dispatchSync(tenantId, type)
       await this.repository.updateConnectorSyncTimestamp(tenantId, type as PrismaConnectorType)
-
-      this.appLogger.info(`Sync completed for ${type}: ${ingested} records`, {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'sync',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.CRON,
-        className: 'ConnectorSyncService',
-        functionName: 'syncSingleConnector',
-        metadata: { connectorType: type, ingested },
-      })
+      this.logSyncComplete(tenantId, type, ingested)
+      return { ingested }
     } catch (error) {
-      this.appLogger.error(`Sync failed for ${type}`, {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'sync',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.CRON,
-        className: 'ConnectorSyncService',
-        functionName: 'syncSingleConnector',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-        metadata: { connectorType: type },
-      })
+      this.logSyncFailure(tenantId, type, error)
       throw error
     }
+  }
 
-    return { ingested }
+  private async dispatchSync(tenantId: string, type: string): Promise<number> {
+    switch (type) {
+      case ConnectorType.WAZUH:
+        return this.syncWazuh(tenantId)
+      case ConnectorType.GRAYLOG:
+        return this.syncGraylog(tenantId)
+      case ConnectorType.MISP:
+        return this.syncMisp(tenantId)
+      default:
+        return 0
+    }
   }
 
   /** Ingest Wazuh alerts using the existing AlertsService method. */
@@ -196,9 +145,7 @@ export class ConnectorSyncService {
   /** Ingest Graylog events as alerts. */
   private async syncGraylog(tenantId: string): Promise<number> {
     const config = await this.connectorsService.getDecryptedConfig(tenantId, 'graylog')
-    if (!config) {
-      return 0
-    }
+    if (!config) return 0
 
     const result = await this.graylogService.searchEvents(config, {
       timerange: { type: 'relative', range: 86400 },
@@ -206,59 +153,32 @@ export class ConnectorSyncService {
       per_page: 500,
     })
 
-    if (result.events.length === 0) {
-      return 0
-    }
+    if (result.events.length === 0) return 0
 
+    return this.upsertGraylogAlerts(tenantId, result.events as Record<string, unknown>[])
+  }
+
+  private async upsertGraylogAlerts(
+    tenantId: string,
+    events: Record<string, unknown>[]
+  ): Promise<number> {
     const BATCH_SIZE = 50
 
     const allResults = await processInBatches<Record<string, unknown>, Alert>(
-      result.events as Record<string, unknown>[],
+      events,
       BATCH_SIZE,
       (rawEvent): Promise<Alert> => {
-        const wrapper = rawEvent as Record<string, unknown>
-        const event = (wrapper.event ?? wrapper) as Record<string, unknown>
-        const externalId = (event.id ?? `graylog-${Date.now()}-${Math.random()}`) as string
-        const message = (event.message ?? event.key ?? 'Graylog Event') as string
-        const priority = (event.priority ?? 2) as number
-        const timestamp = new Date((event.timestamp ?? new Date().toISOString()) as string)
-        const source_ = (event.source ?? '') as string
-
+        const { externalId, createData, updateData } = buildGraylogAlertData(tenantId, rawEvent)
         return this.repository.upsertAlert({
           where: { tenantId_externalId: { tenantId, externalId } },
-          create: {
-            tenantId,
-            externalId,
-            title: message,
-            description: JSON.stringify(event),
-            severity: this.mapGraylogPriority(priority),
-            status: AlertStatus.NEW_ALERT,
-            source: 'graylog',
-            ruleName: (event.event_definition_id ?? null) as string | null,
-            ruleId: (event.event_definition_id ?? null) as string | null,
-            agentName: source_ || null,
-            sourceIp: (event.source_ip ?? null) as string | null,
-            destinationIp: null,
-            mitreTactics: [],
-            mitreTechniques: [],
-            rawEvent: event as Prisma.InputJsonValue,
-            timestamp,
-          },
-          update: {
-            rawEvent: event as Prisma.InputJsonValue,
-          },
+          create: createData,
+          update: updateData,
         })
       }
     )
 
-    const fulfilledAlerts: Alert[] = []
-    for (const batchResult of allResults) {
-      if (batchResult.status === 'fulfilled') {
-        fulfilledAlerts.push(batchResult.value)
-      }
-    }
+    const { fulfilled: fulfilledAlerts } = countFulfilledResults(allResults)
 
-    // Best-effort entity extraction from ingested Graylog alerts
     if (fulfilledAlerts.length > 0) {
       await this.extractEntitiesFromGraylogAlerts(tenantId, fulfilledAlerts)
     }
@@ -268,9 +188,11 @@ export class ConnectorSyncService {
 
   /**
    * Extract entities from Graylog alerts (best-effort).
-   * Follows the same pattern as Wazuh entity extraction in AlertsService.
    */
-  private async extractEntitiesFromGraylogAlerts(tenantId: string, alerts: Alert[]): Promise<void> {
+  private async extractEntitiesFromGraylogAlerts(
+    tenantId: string,
+    alerts: Alert[]
+  ): Promise<void> {
     const results = await Promise.allSettled(
       alerts.map(alert =>
         this.entityExtractionService.extractFromAlert({
@@ -286,16 +208,11 @@ export class ConnectorSyncService {
       )
     )
 
-    let failed = 0
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        failed++
-      }
-    }
+    const { failedCount } = countFulfilledResults(results)
 
-    if (failed > 0) {
+    if (failedCount > 0) {
       this.logger.warn(
-        `Graylog entity extraction: ${failed}/${alerts.length} alerts failed entity extraction`
+        `Graylog entity extraction: ${failedCount}/${alerts.length} alerts failed entity extraction`
       )
     }
   }
@@ -306,11 +223,68 @@ export class ConnectorSyncService {
     return result.eventsUpserted + result.iocsUpserted
   }
 
-  private mapGraylogPriority(priority: number): AlertSeverity {
-    if (priority >= 4) return AlertSeverity.CRITICAL
-    if (priority >= 3) return AlertSeverity.HIGH
-    if (priority >= 2) return AlertSeverity.MEDIUM
-    if (priority >= 1) return AlertSeverity.LOW
-    return AlertSeverity.INFO
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Helpers                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private shouldSkipSync(lastSyncAt: Date | null): boolean {
+    if (!lastSyncAt) return false
+    const elapsed = Date.now() - lastSyncAt.getTime()
+    return elapsed < MIN_SYNC_GAP_MS
+  }
+
+  private logSyncResults(results: PromiseSettledResult<unknown>[]): void {
+    let succeeded = 0
+    let failed = 0
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        succeeded++
+      } else {
+        failed++
+        this.logger.warn(`Sync failure: ${(result.reason as Error).message}`)
+      }
+    }
+
+    this.logger.log(`Sync tick complete: ${succeeded} succeeded, ${failed} failed`)
+  }
+
+  private logSyncStart(tenantId: string, type: string): void {
+    this.appLogger.info(`Starting sync for ${type}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'sync',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.CRON,
+      className: 'ConnectorSyncService',
+      functionName: 'syncSingleConnector',
+      metadata: { connectorType: type },
+    })
+  }
+
+  private logSyncComplete(tenantId: string, type: string, ingested: number): void {
+    this.appLogger.info(`Sync completed for ${type}: ${ingested} records`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'sync',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.CRON,
+      className: 'ConnectorSyncService',
+      functionName: 'syncSingleConnector',
+      metadata: { connectorType: type, ingested },
+    })
+  }
+
+  private logSyncFailure(tenantId: string, type: string, error: unknown): void {
+    this.appLogger.error(`Sync failed for ${type}`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'sync',
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      sourceType: AppLogSourceType.CRON,
+      className: 'ConnectorSyncService',
+      functionName: 'syncSingleConnector',
+      stackTrace: error instanceof Error ? error.stack : undefined,
+      metadata: { connectorType: type },
+    })
   }
 }

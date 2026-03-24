@@ -290,6 +290,8 @@ describe('AttackPathsService', () => {
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
         'Attack path not found',
         expect.objectContaining({
+          action: 'getPathById',
+          className: 'AttackPathsService',
           metadata: expect.objectContaining({
             attackPathId: 'nonexistent',
             tenantId: TENANT_ID,
@@ -409,9 +411,9 @@ describe('AttackPathsService', () => {
       await service.createPath(createDto, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Attack path created',
+        'AttackPath: createPath',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'createPath',
           tenantId: TENANT_ID,
           metadata: expect.objectContaining({ pathNumber: 'AP-0003' }),
         })
@@ -520,11 +522,11 @@ describe('AttackPathsService', () => {
       await service.updatePath(PATH_ID, { title: 'Updated' }, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Attack path updated',
+        'AttackPath: updatePath',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'updatePath',
           tenantId: TENANT_ID,
-          targetResourceId: PATH_ID,
+          metadata: expect.objectContaining({ attackPathId: PATH_ID }),
         })
       )
     })
@@ -565,12 +567,15 @@ describe('AttackPathsService', () => {
       await service.deletePath(PATH_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('AP-0001'),
+        'AttackPath: deletePath',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'deletePath',
           tenantId: TENANT_ID,
-          targetResourceId: PATH_ID,
-          metadata: expect.objectContaining({ pathNumber: 'AP-0001' }),
+          metadata: expect.objectContaining({
+            pathNumber: 'AP-0001',
+            attackPathId: PATH_ID,
+            actorEmail: USER_EMAIL,
+          }),
         })
       )
     })

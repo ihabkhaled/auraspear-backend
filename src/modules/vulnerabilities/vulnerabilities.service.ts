@@ -5,6 +5,8 @@ import {
   buildVulnerabilityOrderBy,
   buildVulnerabilityUpdateData,
   buildVulnerabilityStats,
+  buildVulnerabilityRecord,
+  buildVulnerabilityRecordList,
 } from './vulnerabilities.utilities'
 import {
   AppLogFeature,
@@ -49,101 +51,34 @@ export class VulnerabilitiesService {
     exploitAvailable?: string,
     query?: string
   ): Promise<PaginatedVulnerabilities> {
-    const where = buildVulnerabilityListWhere(
-      tenantId,
-      severity,
-      patchStatus,
-      exploitAvailable,
-      query
-    )
+    const where = buildVulnerabilityListWhere(tenantId, severity, patchStatus, exploitAvailable, query)
 
-    try {
-      const [data, total] = await Promise.all([
-        this.repository.findManyWithTenant(
-          where,
-          buildVulnerabilityOrderBy(sortBy, sortOrder),
-          (page - 1) * limit,
-          limit
-        ),
-        this.repository.count(where),
-      ])
+    const [data, total] = await Promise.all([
+      this.repository.findManyWithTenant(
+        where,
+        buildVulnerabilityOrderBy(sortBy, sortOrder),
+        (page - 1) * limit,
+        limit
+      ),
+      this.repository.count(where),
+    ])
 
-      const records: VulnerabilityRecord[] = data.map(({ tenant, ...rest }) => ({
-        ...rest,
-        tenantName: tenant.name,
-      }))
+    const records = buildVulnerabilityRecordList(data)
+    this.logSuccess('listVulnerabilities', tenantId, { page, limit, total })
 
-      this.appLogger.info(`Listed vulnerabilities page=${page} limit=${limit} total=${total}`, {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'listVulnerabilities',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'listVulnerabilities',
-        metadata: {
-          page,
-          limit,
-          total,
-          severity: severity ?? null,
-          patchStatus: patchStatus ?? null,
-        },
-      })
-
-      return {
-        data: records,
-        pagination: buildPaginationMeta(page, limit, total),
-      }
-    } catch (error: unknown) {
-      this.appLogger.error('Failed to list vulnerabilities', {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'listVulnerabilities',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'listVulnerabilities',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-      throw error
-    }
+    return { data: records, pagination: buildPaginationMeta(page, limit, total) }
   }
 
   async getVulnerabilityById(id: string, tenantId: string): Promise<VulnerabilityRecord> {
     const vulnerability = await this.repository.findByIdAndTenant(id, tenantId)
 
     if (!vulnerability) {
-      this.appLogger.warn(`Vulnerability not found id=${id}`, {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'getVulnerabilityById',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        targetResource: 'Vulnerability',
-        targetResourceId: id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'getVulnerabilityById',
-      })
+      this.logWarn('getVulnerabilityById', tenantId, id)
       throw new BusinessException(404, 'Vulnerability not found', 'errors.vulnerabilities.notFound')
     }
 
-    this.appLogger.info(`Retrieved vulnerability id=${id}`, {
-      feature: AppLogFeature.VULNERABILITIES,
-      action: 'getVulnerabilityById',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Vulnerability',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'VulnerabilitiesService',
-      functionName: 'getVulnerabilityById',
-    })
-
-    const { tenant, ...rest } = vulnerability
-    return {
-      ...rest,
-      tenantName: tenant.name,
-    }
+    this.logSuccess('getVulnerabilityById', tenantId, { vulnerabilityId: id })
+    return buildVulnerabilityRecord(vulnerability)
   }
 
   async createVulnerability(
@@ -153,18 +88,7 @@ export class VulnerabilitiesService {
     const existing = await this.repository.findByCveIdAndTenant(user.tenantId, dto.cveId)
 
     if (existing) {
-      this.appLogger.warn(`Duplicate CVE ID ${dto.cveId} for tenant ${user.tenantId}`, {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'createVulnerability',
-        outcome: AppLogOutcome.DENIED,
-        tenantId: user.tenantId,
-        actorEmail: user.email,
-        targetResource: 'Vulnerability',
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'createVulnerability',
-        metadata: { cveId: dto.cveId },
-      })
+      this.logWarn('createVulnerability', user.tenantId, dto.cveId)
       throw new BusinessException(
         409,
         `Vulnerability with CVE ID ${dto.cveId} already exists`,
@@ -186,25 +110,8 @@ export class VulnerabilitiesService {
       discoveredAt: new Date(),
     })
 
-    this.appLogger.info(`Created vulnerability ${dto.cveId}`, {
-      feature: AppLogFeature.VULNERABILITIES,
-      action: 'createVulnerability',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      targetResource: 'Vulnerability',
-      targetResourceId: vulnerability.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'VulnerabilitiesService',
-      functionName: 'createVulnerability',
-      metadata: { cveId: dto.cveId, severity: dto.severity },
-    })
-
-    const { tenant: createdTenant, ...createdRest } = vulnerability
-    return {
-      ...createdRest,
-      tenantName: createdTenant.name,
-    }
+    this.logSuccess('createVulnerability', user.tenantId, { cveId: dto.cveId, severity: dto.severity })
+    return buildVulnerabilityRecord(vulnerability)
   }
 
   async updateVulnerability(
@@ -215,40 +122,17 @@ export class VulnerabilitiesService {
     const existing = await this.repository.findExistingByIdAndTenant(id, user.tenantId)
 
     if (!existing) {
-      this.appLogger.warn(`Vulnerability not found for update id=${id}`, {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'updateVulnerability',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        actorEmail: user.email,
-        targetResource: 'Vulnerability',
-        targetResourceId: id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'updateVulnerability',
-      })
+      this.logWarn('updateVulnerability', user.tenantId, id)
       throw new BusinessException(404, 'Vulnerability not found', 'errors.vulnerabilities.notFound')
     }
 
-    // If cveId is being changed, check for duplicates
-    if (dto.cveId && dto.cveId !== existing.cveId) {
-      const duplicate = await this.repository.findByCveIdAndTenantExcludingId(
-        user.tenantId,
-        dto.cveId,
-        id
-      )
-      if (duplicate) {
-        throw new BusinessException(
-          409,
-          `Vulnerability with CVE ID ${dto.cveId} already exists`,
-          'errors.vulnerabilities.duplicateCve'
-        )
-      }
-    }
+    await this.validateCveIdUniqueness(dto.cveId, existing.cveId, user.tenantId, id)
 
-    const updateData = buildVulnerabilityUpdateData(dto, existing.patchStatus)
-
-    const vulnerability = await this.repository.updateByIdAndTenant(id, user.tenantId, updateData)
+    const vulnerability = await this.repository.updateByIdAndTenant(
+      id,
+      user.tenantId,
+      buildVulnerabilityUpdateData(dto, existing.patchStatus)
+    )
 
     if (!vulnerability) {
       throw new BusinessException(
@@ -258,25 +142,8 @@ export class VulnerabilitiesService {
       )
     }
 
-    this.appLogger.info(`Updated vulnerability id=${id}`, {
-      feature: AppLogFeature.VULNERABILITIES,
-      action: 'updateVulnerability',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      targetResource: 'Vulnerability',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'VulnerabilitiesService',
-      functionName: 'updateVulnerability',
-      metadata: { updatedFields: Object.keys(dto) },
-    })
-
-    const { tenant: updatedTenant, ...updatedRest } = vulnerability
-    return {
-      ...updatedRest,
-      tenantName: updatedTenant.name,
-    }
+    this.logSuccess('updateVulnerability', user.tenantId, { vulnerabilityId: id, updatedFields: Object.keys(dto) })
+    return buildVulnerabilityRecord(vulnerability)
   }
 
   async deleteVulnerability(
@@ -287,87 +154,80 @@ export class VulnerabilitiesService {
     const existing = await this.repository.findExistingByIdAndTenant(id, tenantId)
 
     if (!existing) {
-      this.appLogger.warn(`Vulnerability not found for deletion id=${id}`, {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'deleteVulnerability',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        actorEmail: email,
-        targetResource: 'Vulnerability',
-        targetResourceId: id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'deleteVulnerability',
-      })
+      this.logWarn('deleteVulnerability', tenantId, id)
       throw new BusinessException(404, 'Vulnerability not found', 'errors.vulnerabilities.notFound')
     }
 
     await this.repository.deleteByIdAndTenant(id, tenantId)
-
-    this.appLogger.info(`Deleted vulnerability id=${id} cveId=${existing.cveId}`, {
-      feature: AppLogFeature.VULNERABILITIES,
-      action: 'deleteVulnerability',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: email,
-      targetResource: 'Vulnerability',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'VulnerabilitiesService',
-      functionName: 'deleteVulnerability',
-      metadata: { cveId: existing.cveId },
-    })
+    this.logSuccess('deleteVulnerability', tenantId, { vulnerabilityId: id, cveId: existing.cveId, email })
 
     return { deleted: true }
   }
 
   async getVulnerabilityStats(tenantId: string): Promise<VulnerabilityStats> {
-    try {
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-      const [criticalCount, highCount, mediumCount, patched30dCount, exploitCount] =
-        await Promise.all([
-          this.repository.count({ tenantId, severity: VulnerabilitySeverity.CRITICAL }),
-          this.repository.count({ tenantId, severity: VulnerabilitySeverity.HIGH }),
-          this.repository.count({ tenantId, severity: VulnerabilitySeverity.MEDIUM }),
-          this.repository.count({
-            tenantId,
-            patchStatus: PatchStatus.MITIGATED,
-            patchedAt: { gte: thirtyDaysAgo },
-          }),
-          this.repository.count({ tenantId, exploitAvailable: true }),
-        ])
+    const [criticalCount, highCount, mediumCount, patched30dCount, exploitCount] =
+      await Promise.all([
+        this.repository.count({ tenantId, severity: VulnerabilitySeverity.CRITICAL }),
+        this.repository.count({ tenantId, severity: VulnerabilitySeverity.HIGH }),
+        this.repository.count({ tenantId, severity: VulnerabilitySeverity.MEDIUM }),
+        this.repository.count({
+          tenantId,
+          patchStatus: PatchStatus.MITIGATED,
+          patchedAt: { gte: thirtyDaysAgo },
+        }),
+        this.repository.count({ tenantId, exploitAvailable: true }),
+      ])
 
-      this.appLogger.info('Retrieved vulnerability stats', {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'getVulnerabilityStats',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'getVulnerabilityStats',
-      })
+    this.logSuccess('getVulnerabilityStats', tenantId, {})
+    return buildVulnerabilityStats(criticalCount, highCount, mediumCount, patched30dCount, exploitCount)
+  }
 
-      return buildVulnerabilityStats(
-        criticalCount,
-        highCount,
-        mediumCount,
-        patched30dCount,
-        exploitCount
+  private async validateCveIdUniqueness(
+    newCveId: string | undefined,
+    existingCveId: string,
+    tenantId: string,
+    excludeId: string
+  ): Promise<void> {
+    if (!newCveId || newCveId === existingCveId) return
+
+    const duplicate = await this.repository.findByCveIdAndTenantExcludingId(tenantId, newCveId, excludeId)
+    if (duplicate) {
+      throw new BusinessException(
+        409,
+        `Vulnerability with CVE ID ${newCveId} already exists`,
+        'errors.vulnerabilities.duplicateCve'
       )
-    } catch (error: unknown) {
-      this.appLogger.error('Failed to retrieve vulnerability stats', {
-        feature: AppLogFeature.VULNERABILITIES,
-        action: 'getVulnerabilityStats',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'VulnerabilitiesService',
-        functionName: 'getVulnerabilityStats',
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-      throw error
     }
+  }
+
+  private logSuccess(action: string, tenantId: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`Vulnerability: ${action}`, {
+      feature: AppLogFeature.VULNERABILITIES,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'VulnerabilitiesService',
+      functionName: action,
+      targetResource: 'Vulnerability',
+      metadata,
+    })
+  }
+
+  private logWarn(action: string, tenantId: string, resourceId: string): void {
+    this.appLogger.warn(`Vulnerability not found: ${action}`, {
+      feature: AppLogFeature.VULNERABILITIES,
+      action,
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      targetResource: 'Vulnerability',
+      targetResourceId: resourceId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'VulnerabilitiesService',
+      functionName: action,
+    })
   }
 }

@@ -145,32 +145,16 @@ describe('Route Access Validation', () => {
   /* ---------------------------------------------------------------- */
 
   describe('Read-only role boundaries', () => {
-    const writePermissions = ALL_PERMISSIONS.filter(
-      p =>
-        p.includes('.create') ||
-        p.includes('.update') ||
-        p.includes('.delete') ||
-        p.includes('.execute') ||
-        p.includes('.toggle') ||
-        p.includes('.sync') ||
-        p.includes('.test') ||
-        p.includes('.manage') ||
-        p.includes('.assign') ||
-        p.includes('.block') ||
-        p.includes('.restore') ||
-        p.includes('.addComment') ||
-        p.includes('.deleteComment') ||
-        p.includes('.addTask') ||
-        p.includes('.updateTask') ||
-        p.includes('.deleteTask') ||
-        p.includes('.addArtifact') ||
-        p.includes('.deleteArtifact') ||
-        p.includes('.addTimeline') ||
-        p.includes('.changeStatus') ||
-        p.includes('.investigate') ||
-        p.includes('.acknowledge') ||
-        p.includes('.close') ||
-        p.includes('.escalate')
+    const writeSuffixes = [
+      '.create', '.update', '.delete', '.execute', '.toggle', '.sync',
+      '.test', '.manage', '.assign', '.block', '.restore',
+      '.addComment', '.deleteComment', '.addTask', '.updateTask',
+      '.deleteTask', '.addArtifact', '.deleteArtifact', '.addTimeline',
+      '.changeStatus', '.investigate', '.acknowledge', '.close', '.escalate',
+    ]
+
+    const writePermissions = ALL_PERMISSIONS.filter(p =>
+      writeSuffixes.some(suffix => p.includes(suffix))
     )
 
     // Exclude profile.update and settings.update from write check — these are universal

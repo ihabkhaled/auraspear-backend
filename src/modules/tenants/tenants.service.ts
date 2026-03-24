@@ -45,6 +45,7 @@ import type {
   PaginatedResult,
   CheckEmailResult,
   ImpersonationSessionResult,
+  FindOrCreateUserResult,
 } from './tenants.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { TenantMembership, User } from '@prisma/client'
@@ -168,28 +169,38 @@ export class TenantsService {
     status?: string
   ): Promise<PaginatedResult<UserRecord>> {
     try {
-      const where = buildUserSearchWhere(tenantId, search, role, status)
-      const [memberships, total] = await this.tenantsRepository.findMembershipsWithUsers({
-        where,
-        orderBy: buildUserOrderBy(sortBy, sortOrder),
-        skip: (page - 1) * limit,
-        take: limit,
-      })
-
-      this.logSuccess('findUsers', tenantId, undefined, {
-        page,
-        limit,
-        total,
-        hasSearch: Boolean(search),
-      })
-      return {
-        data: memberships.map(mapMembershipToUserRecord),
-        pagination: buildPagination(page, limit, total),
-      }
+      return await this.executeFindUsers(tenantId, page, limit, search, sortBy, sortOrder, role, status)
     } catch (error) {
       this.logger.error(`Failed to fetch users for tenant ${tenantId}`, error)
       this.logError('findUsers', error, { tenantId })
       throw error
+    }
+  }
+
+  private async executeFindUsers(
+    tenantId: string,
+    page: number,
+    limit: number,
+    search?: string,
+    sortBy?: string,
+    sortOrder?: string,
+    role?: string,
+    status?: string
+  ): Promise<PaginatedResult<UserRecord>> {
+    const where = buildUserSearchWhere(tenantId, search, role, status)
+    const [memberships, total] = await this.tenantsRepository.findMembershipsWithUsers({
+      where,
+      orderBy: buildUserOrderBy(sortBy, sortOrder),
+      skip: (page - 1) * limit,
+      take: limit,
+    })
+
+    this.logSuccess('findUsers', tenantId, undefined, {
+      page, limit, total, hasSearch: Boolean(search),
+    })
+    return {
+      data: memberships.map(mapMembershipToUserRecord),
+      pagination: buildPagination(page, limit, total),
     }
   }
 
@@ -240,31 +251,9 @@ export class TenantsService {
     const normalizedEmail = dto.email.toLowerCase().trim()
 
     try {
-      const { user: existingUser, membership: existingMembership } =
-        await this.tenantsRepository.findUserWithTenantMembership(normalizedEmail, tenantId)
-
-      this.guardProtectedUser('assignUser', tenantId, existingUser)
-      this.guardAlreadyInTenant('assignUser', tenantId, existingMembership, normalizedEmail)
-      this.guardNewUserFields('assignUser', tenantId, dto, Boolean(existingUser))
-
-      const passwordHash = dto.password
-        ? await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
-        : undefined
-      const result = await this.tenantsRepository.findOrCreateUserWithMembership(
-        tenantId,
-        normalizedEmail,
-        dto.role as string,
-        passwordHash ? { name: dto.name?.trim() ?? '', passwordHash } : undefined
-      )
-
+      const result = await this.performAssignment(tenantId, normalizedEmail, dto)
       this.logSuccess('assignUser', tenantId, result.user.id, { role: result.membership.role })
-      await this.notifyTenantAssigned(
-        tenantId,
-        result.user.id,
-        result.membership.role,
-        callerId,
-        callerEmail
-      )
+      await this.notifyTenantAssigned(tenantId, result.user.id, result.membership.role, callerId, callerEmail)
       return mapFindOrCreateResultToUserRecord(result)
     } catch (error) {
       return this.handleUserMutationError(error, 'assignUser', tenantId, normalizedEmail)
@@ -333,22 +322,25 @@ export class TenantsService {
     const updated = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
     this.logSuccess('updateUser', tenantId, userId, { updatedFields: Object.keys(dto) }, callerId)
 
-    if (dto.role !== undefined && dto.role !== previousRole) {
-      await this.notificationsService.notifyRoleChanged(
-        tenantId,
-        userId,
-        previousRole,
-        dto.role,
-        callerId,
-        callerEmail
-      )
-      this.notificationsService.emitPermissionsUpdated(
-        tenantId,
-        userId,
-        PermissionUpdateReason.ROLE_UPDATED
-      )
-    }
+    await this.notifyRoleChangeIfNeeded(tenantId, userId, previousRole, dto.role, callerId, callerEmail)
     return mapMembershipToUserRecord(updated)
+  }
+
+  private async notifyRoleChangeIfNeeded(
+    tenantId: string,
+    userId: string,
+    previousRole: string,
+    newRole: string | undefined,
+    callerId: string,
+    callerEmail: string
+  ): Promise<void> {
+    if (newRole === undefined || newRole === previousRole) return
+    await this.notificationsService.notifyRoleChanged(
+      tenantId, userId, previousRole, newRole, callerId, callerEmail
+    )
+    this.notificationsService.emitPermissionsUpdated(
+      tenantId, userId, PermissionUpdateReason.ROLE_UPDATED
+    )
   }
 
   /* ---------------------------------------------------------------- */
@@ -431,39 +423,31 @@ export class TenantsService {
     callerEmail: string
   ): Promise<UserRecord> {
     this.guardSelfAction(
-      'blockUser',
-      'Cannot block your own account',
-      'errors.tenants.cannotBlockSelf',
-      tenantId,
-      callerId,
-      userId
+      'blockUser', 'Cannot block your own account',
+      'errors.tenants.cannotBlockSelf', tenantId, callerId, userId
     )
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'blockUser')
     this.guardProtectedUserAction('blockUser', tenantId, userId, membership.user)
     this.guardGlobalAdminModification('blockUser', tenantId, userId, membership.role, callerRole)
-
-    if (isAlreadySuspended(membership.status)) {
-      this.logWarn('blockUser', tenantId, { userId })
-      throw new BusinessException(
-        400,
-        'User is already blocked',
-        'errors.tenants.userAlreadyBlocked'
-      )
-    }
+    this.guardNotAlreadySuspended(membership.status, tenantId, userId)
 
     const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
-      userId,
-      tenantId,
-      MembershipStatus.SUSPENDED
+      userId, tenantId, MembershipStatus.SUSPENDED
     )
     this.logSuccess('blockUser', tenantId, userId, undefined, callerId)
     await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
     this.notificationsService.emitPermissionsUpdated(
-      tenantId,
-      userId,
-      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+      tenantId, userId, PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
     )
     return mapMembershipToUserRecord(updated)
+  }
+
+  private guardNotAlreadySuspended(status: string, tenantId: string, userId: string): void {
+    if (!isAlreadySuspended(status)) return
+    this.logWarn('blockUser', tenantId, { userId })
+    throw new BusinessException(
+      400, 'User is already blocked', 'errors.tenants.userAlreadyBlocked'
+    )
   }
 
   /* ---------------------------------------------------------------- */
@@ -512,44 +496,17 @@ export class TenantsService {
     this.guardNestedImpersonation(caller)
     this.guardSelfImpersonation(caller, userId, tenantId)
 
-    const tenant = await this.findTenantOrThrow(tenantId)
-    const targetUser = await this.findTargetUserOrThrow(userId, tenantId)
-    this.guardImpersonateProtectedUser(targetUser, tenantId)
-
-    const targetMembership = await this.findActiveMembershipOrThrow(
-      userId,
+    const { tenant, targetUser, targetMembership } = await this.resolveImpersonationTarget(
       tenantId,
-      targetUser.email
-    )
-    this.guardRoleHierarchy(caller, targetMembership.role as UserRole, tenantId, userId)
-
-    const targetPayload = this.buildImpersonationPayload(
-      targetUser,
-      tenant,
-      targetMembership,
+      userId,
       caller
     )
+
+    const targetPayload = this.buildImpersonationPayload(targetUser, tenant, targetMembership, caller)
     const session = await this.authService.issueSession(targetUser.id, tenantId, targetPayload)
 
     this.logImpersonation(tenantId, caller, targetUser, targetMembership.role)
-    return {
-      accessToken: session.accessToken,
-      refreshToken: session.refreshToken,
-      user: {
-        sub: targetUser.id,
-        email: targetUser.email,
-        tenantId,
-        tenantSlug: tenant.slug,
-        role: targetMembership.role,
-      },
-      impersonator: {
-        sub: caller.sub,
-        email: caller.email,
-        role: caller.role,
-        tenantId: caller.tenantId,
-        tenantSlug: caller.tenantSlug,
-      },
-    }
+    return this.buildImpersonationResult(session, targetUser, tenant, targetMembership, caller)
   }
 
   /* ---------------------------------------------------------------- */
@@ -615,6 +572,56 @@ export class TenantsService {
       )
     }
     return membership
+  }
+
+  private async resolveImpersonationTarget(
+    tenantId: string,
+    userId: string,
+    caller: JwtPayload
+  ): Promise<{
+    tenant: { id: string; slug: string; name: string }
+    targetUser: { id: string; email: string; name: string; isProtected: boolean }
+    targetMembership: { role: string; status: string }
+  }> {
+    const tenant = await this.findTenantOrThrow(tenantId)
+    const targetUser = await this.findTargetUserOrThrow(userId, tenantId)
+    this.guardImpersonateProtectedUser(targetUser, tenantId)
+
+    const targetMembership = await this.findActiveMembershipOrThrow(
+      userId,
+      tenantId,
+      targetUser.email
+    )
+    this.guardRoleHierarchy(caller, targetMembership.role as UserRole, tenantId, userId)
+
+    return { tenant, targetUser, targetMembership }
+  }
+
+  private buildImpersonationResult(
+    session: { accessToken: string; refreshToken: string },
+    targetUser: { id: string; email: string },
+    tenant: { slug: string },
+    targetMembership: { role: string },
+    caller: JwtPayload
+  ): ImpersonationSessionResult {
+    return {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      user: {
+        sub: targetUser.id,
+        email: targetUser.email,
+        tenantId: caller.tenantId,
+        tenantSlug: tenant.slug,
+        role: targetMembership.role,
+      },
+      impersonator: {
+        sub: caller.sub,
+        email: caller.email,
+        role: caller.role,
+        tenantId: caller.tenantId,
+        tenantSlug: caller.tenantSlug,
+      },
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -706,9 +713,10 @@ export class TenantsService {
     action: string,
     tenantId: string,
     membership: unknown,
-    _email: string
+    email: string
   ): void {
     if (membership) {
+      this.logWarn(action, tenantId, { email })
       throw new BusinessException(
         409,
         'User is already a member of this tenant',
@@ -837,6 +845,30 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
   /* PRIVATE: Mutation Helpers                                         */
   /* ---------------------------------------------------------------- */
+
+  private async performAssignment(
+    tenantId: string,
+    normalizedEmail: string,
+    dto: AssignUserDto
+  ): Promise<FindOrCreateUserResult> {
+    const { user: existingUser, membership: existingMembership } =
+      await this.tenantsRepository.findUserWithTenantMembership(normalizedEmail, tenantId)
+
+    this.guardProtectedUser('assignUser', tenantId, existingUser)
+    this.guardAlreadyInTenant('assignUser', tenantId, existingMembership, normalizedEmail)
+    this.guardNewUserFields('assignUser', tenantId, dto, Boolean(existingUser))
+
+    const passwordHash = dto.password
+      ? await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
+      : undefined
+
+    return this.tenantsRepository.findOrCreateUserWithMembership(
+      tenantId,
+      normalizedEmail,
+      dto.role as string,
+      passwordHash ? { name: dto.name?.trim() ?? '', passwordHash } : undefined
+    )
+  }
 
   private async applyUserUpdates(
     userId: string,

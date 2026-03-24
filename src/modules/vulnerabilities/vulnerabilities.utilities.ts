@@ -1,7 +1,7 @@
 import { VALID_PATCH_STATUSES, VALID_SEVERITIES } from './vulnerabilities.constants'
 import { PatchStatus, SortOrder } from '../../common/enums'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
-import type { VulnerabilityStats } from './vulnerabilities.types'
+import type { VulnerabilityRecord, VulnerabilityStats } from './vulnerabilities.types'
 import type {
   Prisma,
   VulnerabilitySeverity as PrismaVulnerabilitySeverity,
@@ -146,4 +146,24 @@ export function buildVulnerabilityStats(
     patched30d: patched30dCount,
     exploitAvailable: exploitCount,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* RECORD MAPPING                                                    */
+/* ---------------------------------------------------------------- */
+
+export function buildVulnerabilityRecord(
+  vulnerability: { tenant: { name: string } } & Record<string, unknown>
+): VulnerabilityRecord {
+  const { tenant, ...rest } = vulnerability
+  return {
+    ...rest,
+    tenantName: tenant.name,
+  } as VulnerabilityRecord
+}
+
+export function buildVulnerabilityRecordList(
+  data: Array<{ tenant: { name: string } } & Record<string, unknown>>
+): VulnerabilityRecord[] {
+  return data.map(vulnerability => buildVulnerabilityRecord(vulnerability))
 }

@@ -141,6 +141,8 @@ export default tseslint.config(
       'no-param-reassign': ['warn', { props: false }],
       // Use { ...obj } instead of Object.assign()
       'prefer-object-spread': 'error',
+      // Cyclomatic complexity — max 15 branches per function
+      complexity: ['warn', { max: 15 }],
       // NEVER use string literal union types — define an enum instead
       'no-restricted-syntax': [
         'error',
@@ -395,6 +397,27 @@ export default tseslint.config(
             'Do not declare standalone functions in logic files. Move to <module>.utilities.ts or src/common/utils/.',
         },
       ],
+    },
+  },
+
+  // ── Service files: thin orchestrators, no long methods ────────────────────
+  // Service methods must be short (max 30 lines) and simple (max 10 branches).
+  // Extract cohesive logic blocks to <module>.utilities.ts. Services read like
+  // a recipe: validate → call util → call repo → return.
+  {
+    files: ['src/**/*.service.ts'],
+    rules: {
+      'max-lines-per-function': [
+        'warn',
+        {
+          max: 30,
+          skipBlankLines: true,
+          skipComments: true,
+          IIFEs: false,
+        },
+      ],
+      // Stricter cyclomatic complexity for services — orchestrators should be flat
+      complexity: ['warn', { max: 10 }],
     },
   },
 

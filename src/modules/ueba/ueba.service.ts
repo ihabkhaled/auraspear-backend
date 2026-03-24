@@ -7,6 +7,8 @@ import {
   buildAnomalyOrderBy,
   buildModelListWhere,
   buildModelOrderBy,
+  mapEntityWithCount,
+  mapAnomalyWithEntity,
 } from './ueba.utilities'
 import {
   AppLogFeature,
@@ -64,18 +66,9 @@ export class UebaService {
       this.repository.countEntities(where),
     ])
 
-    const data: UebaEntityRecord[] = entities.map(e => {
-      const { _count, ...rest } = e
-      return {
-        ...rest,
-        anomalyCount: _count.anomalies,
-      }
-    })
+    const data = entities.map(mapEntityWithCount) as UebaEntityRecord[]
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
-    }
+    return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
   /* ---------------------------------------------------------------- */
@@ -99,11 +92,7 @@ export class UebaService {
       throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
     }
 
-    const { _count, ...rest } = entity
-    return {
-      ...rest,
-      anomalyCount: _count.anomalies,
-    }
+    return mapEntityWithCount(entity) as UebaEntityRecord
   }
 
   /* ---------------------------------------------------------------- */
@@ -141,11 +130,7 @@ export class UebaService {
       metadata: { entityId: entity.id, tenantId },
     })
 
-    const { _count, ...rest } = entity
-    return {
-      ...rest,
-      anomalyCount: _count.anomalies,
-    }
+    return mapEntityWithCount(entity) as UebaEntityRecord
   }
 
   /* ---------------------------------------------------------------- */
@@ -157,13 +142,7 @@ export class UebaService {
     tenantId: string,
     dto: UpdateEntityDto
   ): Promise<UebaEntityRecord> {
-    const existing = await this.repository.findFirstEntityWithCount({
-      where: { id, tenantId },
-    })
-
-    if (!existing) {
-      throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
-    }
+    await this.assertEntityExists(id, tenantId)
 
     const updated = await this.repository.updateEntity({
       where: { id, tenantId },
@@ -171,27 +150,11 @@ export class UebaService {
     })
 
     if (!updated) {
-      throw new BusinessException(
-        404,
-        `UEBA entity ${id} not found after update`,
-        'errors.ueba.entityNotFound'
-      )
+      throw new BusinessException(404, `UEBA entity ${id} not found after update`, 'errors.ueba.entityNotFound')
     }
 
-    this.appLogger.info('UEBA entity updated', {
-      feature: AppLogFeature.UEBA,
-      action: 'updateEntity',
-      className: 'UebaService',
-      sourceType: AppLogSourceType.SERVICE,
-      outcome: AppLogOutcome.SUCCESS,
-      metadata: { entityId: id, tenantId },
-    })
-
-    const { _count, ...rest } = updated
-    return {
-      ...rest,
-      anomalyCount: _count.anomalies,
-    }
+    this.logEntityAction('updateEntity', id, tenantId)
+    return mapEntityWithCount(updated) as UebaEntityRecord
   }
 
   /* ---------------------------------------------------------------- */
@@ -226,17 +189,7 @@ export class UebaService {
   /* ---------------------------------------------------------------- */
 
   async resolveAnomaly(id: string, tenantId: string): Promise<UebaAnomalyRecord> {
-    const existing = await this.repository.findFirstAnomaly({
-      where: { id, tenantId },
-    })
-
-    if (!existing) {
-      throw new BusinessException(
-        404,
-        `UEBA anomaly ${id} not found`,
-        'errors.ueba.anomalyNotFound'
-      )
-    }
+    await this.assertAnomalyExists(id, tenantId)
 
     const updated = await this.repository.updateAnomaly({
       where: { id, tenantId },
@@ -244,28 +197,11 @@ export class UebaService {
     })
 
     if (!updated) {
-      throw new BusinessException(
-        404,
-        `UEBA anomaly ${id} not found after update`,
-        'errors.ueba.anomalyNotFound'
-      )
+      throw new BusinessException(404, `UEBA anomaly ${id} not found after update`, 'errors.ueba.anomalyNotFound')
     }
 
-    this.appLogger.info('UEBA anomaly resolved', {
-      feature: AppLogFeature.UEBA,
-      action: 'resolveAnomaly',
-      className: 'UebaService',
-      sourceType: AppLogSourceType.SERVICE,
-      outcome: AppLogOutcome.SUCCESS,
-      metadata: { anomalyId: id, tenantId },
-    })
-
-    const { entity, ...rest } = updated
-    return {
-      ...rest,
-      entityName: entity.entityName,
-      entityType: entity.entityType,
-    }
+    this.logAnomalyAction('resolveAnomaly', id, tenantId)
+    return mapAnomalyWithEntity(updated) as UebaAnomalyRecord
   }
 
   /* ---------------------------------------------------------------- */
@@ -294,19 +230,9 @@ export class UebaService {
       this.repository.countAnomalies(where),
     ])
 
-    const data: UebaAnomalyRecord[] = anomalies.map(a => {
-      const { entity, ...rest } = a
-      return {
-        ...rest,
-        entityName: entity.entityName,
-        entityType: entity.entityType,
-      }
-    })
+    const data = anomalies.map(mapAnomalyWithEntity) as UebaAnomalyRecord[]
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
-    }
+    return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
   /* ---------------------------------------------------------------- */
@@ -364,5 +290,51 @@ export class UebaService {
       anomalies24h,
       activeModels,
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE HELPERS                                                    */
+  /* ---------------------------------------------------------------- */
+
+  private async assertEntityExists(id: string, tenantId: string): Promise<void> {
+    const existing = await this.repository.findFirstEntityWithCount({
+      where: { id, tenantId },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `UEBA entity ${id} not found`, 'errors.ueba.entityNotFound')
+    }
+  }
+
+  private async assertAnomalyExists(id: string, tenantId: string): Promise<void> {
+    const existing = await this.repository.findFirstAnomaly({
+      where: { id, tenantId },
+    })
+
+    if (!existing) {
+      throw new BusinessException(404, `UEBA anomaly ${id} not found`, 'errors.ueba.anomalyNotFound')
+    }
+  }
+
+  private logEntityAction(action: string, entityId: string, tenantId: string): void {
+    this.appLogger.info(`UEBA entity ${action.replace('Entity', '')}d`, {
+      feature: AppLogFeature.UEBA,
+      action,
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { entityId, tenantId },
+    })
+  }
+
+  private logAnomalyAction(action: string, anomalyId: string, tenantId: string): void {
+    this.appLogger.info(`UEBA anomaly ${action.replace('Anomaly', '')}d`, {
+      feature: AppLogFeature.UEBA,
+      action,
+      className: 'UebaService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.SUCCESS,
+      metadata: { anomalyId, tenantId },
+    })
   }
 }

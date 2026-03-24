@@ -307,3 +307,55 @@ export function countFulfilled(results: Array<PromiseSettledResult<unknown>>): n
   }
   return count
 }
+
+export function countRejected(results: Array<PromiseSettledResult<unknown>>): number {
+  let count = 0
+  for (const r of results) {
+    if (r.status === 'rejected') count++
+  }
+  return count
+}
+
+/* ---------------------------------------------------------------- */
+/* AI CONTEXT BUILDING                                               */
+/* ---------------------------------------------------------------- */
+
+export function buildIocEnrichContext(ioc: {
+  iocType: string
+  iocValue: string
+  source: string | null
+  tags: string[]
+  firstSeen: Date | null
+  lastSeen: Date | null
+  active: boolean
+}): Record<string, unknown> {
+  return {
+    iocType: ioc.iocType,
+    iocValue: ioc.iocValue,
+    source: ioc.source ?? '',
+    tags: ioc.tags ?? [],
+    firstSeen: ioc.firstSeen?.toISOString() ?? '',
+    lastSeen: ioc.lastSeen?.toISOString() ?? '',
+    active: ioc.active,
+  }
+}
+
+export function buildAdvisoryContext(iocs: Array<{
+  iocType: string
+  iocValue: string
+  source: string | null
+  tags: string[]
+  firstSeen: Date | null
+  lastSeen: Date | null
+}>): Record<string, unknown> {
+  return {
+    iocs: iocs.map(ioc => ({
+      iocType: ioc.iocType,
+      iocValue: ioc.iocValue,
+      source: ioc.source ?? '',
+      tags: ioc.tags ?? [],
+      firstSeen: ioc.firstSeen?.toISOString() ?? '',
+      lastSeen: ioc.lastSeen?.toISOString() ?? '',
+    })),
+  }
+}

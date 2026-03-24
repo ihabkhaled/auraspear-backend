@@ -68,7 +68,19 @@ export class PromptRegistryService {
       isActive: true,
     })
 
-    this.appLogger.info(`Prompt template created: ${dto.name} v${String(nextVersion)}`, {
+    this.logPromptCreated(template.id, dto, nextVersion, tenantId, actorEmail)
+
+    return this.toResponse(template)
+  }
+
+  private logPromptCreated(
+    templateId: string,
+    dto: CreatePromptDto,
+    version: number,
+    tenantId: string,
+    actorEmail: string
+  ): void {
+    this.appLogger.info(`Prompt template created: ${dto.name} v${String(version)}`, {
       feature: AppLogFeature.AI_PROMPTS,
       action: 'create',
       outcome: AppLogOutcome.SUCCESS,
@@ -78,11 +90,9 @@ export class PromptRegistryService {
       tenantId,
       actorEmail,
       targetResource: 'AiPromptTemplate',
-      targetResourceId: template.id,
-      metadata: { taskType: dto.taskType, version: nextVersion },
+      targetResourceId: templateId,
+      metadata: { taskType: dto.taskType, version },
     })
-
-    return this.toResponse(template)
   }
 
   async update(

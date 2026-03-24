@@ -1,6 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { CardVariant, Severity } from '../../../common/enums'
+import { CardVariant } from '../../../common/enums'
 import { LogstashService } from '../../connectors/services/logstash.service'
+import {
+  buildErrorSummaryCard,
+  buildLogstashPipelineStatsItem,
+  buildLogstashStatsSummaryCards,
+  mapLogstashActivityItem,
+  mapLogstashPipelineToEntity,
+  mapLogstashPipelineToOverviewEntity,
+  paginateArray,
+} from '../connector-workspaces.utilities'
 import type {
   ConnectorWorkspaceStrategy,
   WorkspaceSummaryCard,
@@ -30,103 +39,8 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []
 
-    try {
-      const { pipelines } = await this.logstashService.getPipelines(config)
-      const pipelineNames = Object.keys(pipelines)
-
-      summaryCards.push({
-        key: 'pipelines',
-        label: 'Pipelines',
-        value: pipelineNames.length,
-        icon: 'git-branch',
-        variant: pipelineNames.length > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
-      })
-
-      for (const [name, pipelineValue] of Object.entries(pipelines).slice(0, 5)) {
-        const pipeline = pipelineValue as Record<string, unknown> | undefined
-        entitiesPreview.push({
-          id: name,
-          name,
-          status: 'active',
-          type: 'pipeline',
-          metadata: {
-            workers: pipeline?.workers,
-            batchSize: pipeline?.batch_size,
-          },
-        })
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to fetch Logstash pipelines: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-      summaryCards.push({
-        key: 'pipelines',
-        label: 'Pipelines',
-        value: 'N/A',
-        icon: 'git-branch',
-        variant: CardVariant.ERROR,
-      })
-    }
-
-    try {
-      const { pipelines: stats } = await this.logstashService.getPipelineStats(config)
-
-      let totalEventsIn = 0
-      let totalEventsOut = 0
-      let totalEventsFiltered = 0
-
-      for (const [name, statValue] of Object.entries(stats)) {
-        const stat = statValue as Record<string, unknown> | undefined
-        const events = stat?.events as Record<string, unknown> | undefined
-
-        const eventIn = (events?.in ?? 0) as number
-        const eventOut = (events?.out ?? 0) as number
-        const eventFiltered = (events?.filtered ?? 0) as number
-
-        totalEventsIn += eventIn
-        totalEventsOut += eventOut
-        totalEventsFiltered += eventFiltered
-
-        recentItems.push({
-          id: name,
-          title: `Pipeline: ${name}`,
-          description: `In: ${eventIn} | Out: ${eventOut} | Filtered: ${eventFiltered}`,
-          timestamp: new Date().toISOString(),
-          severity: Severity.INFO,
-          type: 'pipeline-stats',
-          metadata: { eventsIn: eventIn, eventsOut: eventOut, eventsFiltered: eventFiltered },
-        })
-      }
-
-      summaryCards.push({
-        key: 'events-in',
-        label: 'Events In (total)',
-        value: totalEventsIn,
-        icon: 'arrow-down',
-        variant: CardVariant.INFO,
-      })
-
-      summaryCards.push({
-        key: 'events-out',
-        label: 'Events Out (total)',
-        value: totalEventsOut,
-        icon: 'arrow-up',
-        variant: CardVariant.INFO,
-      })
-
-      const dropped = totalEventsIn - totalEventsOut - totalEventsFiltered
-      summaryCards.push({
-        key: 'events-dropped',
-        label: 'Events Dropped (est.)',
-        value: Math.max(0, dropped),
-        icon: 'alert-circle',
-        variant: dropped > 0 ? CardVariant.WARNING : CardVariant.SUCCESS,
-      })
-    } catch (error) {
-      this.logger.warn(
-        `Failed to fetch Logstash stats: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-    }
+    await this.fetchOverviewPipelines(config, summaryCards, entitiesPreview)
+    await this.fetchOverviewStats(config, summaryCards, recentItems)
 
     const quickActions: WorkspaceQuickAction[] = [
       { key: 'refresh-stats', label: 'Refresh Stats', icon: 'refresh-cw' },
@@ -145,22 +59,11 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const allItems: WorkspaceRecentItem[] = []
 
     for (const [name, statValue] of Object.entries(stats)) {
-      const stat = statValue as Record<string, unknown> | undefined
-      const events = stat?.events as Record<string, unknown> | undefined
-
-      allItems.push({
-        id: name,
-        title: `Pipeline: ${name}`,
-        description: `In: ${events?.in ?? 0} | Out: ${events?.out ?? 0}`,
-        timestamp: new Date().toISOString(),
-        severity: Severity.INFO,
-        type: 'pipeline-stats',
-      })
+      allItems.push(mapLogstashActivityItem(name, statValue))
     }
 
-    const start = (page - 1) * pageSize
     return {
-      items: allItems.slice(start, start + pageSize),
+      items: paginateArray(allItems, page, pageSize),
       total: allItems.length,
       page,
       pageSize,
@@ -174,23 +77,10 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
   ): Promise<WorkspaceEntitiesResponse> {
     const { pipelines } = await this.logstashService.getPipelines(config)
     const pipelineEntries = Object.entries(pipelines)
-    const start = (page - 1) * pageSize
-    const sliced = pipelineEntries.slice(start, start + pageSize)
-
-    const entities: WorkspaceEntity[] = sliced.map(([name, pipelineValue]) => {
-      const pipeline = pipelineValue as Record<string, unknown> | undefined
-      return {
-        id: name,
-        name,
-        status: 'active',
-        type: 'pipeline',
-        metadata: {
-          workers: pipeline?.workers,
-          batchSize: pipeline?.batch_size,
-          batchDelay: pipeline?.batch_delay,
-        },
-      }
-    })
+    const sliced = paginateArray(pipelineEntries, page, pageSize)
+    const entities = sliced.map(([name, pipelineValue]) =>
+      mapLogstashPipelineToEntity(name, pipelineValue)
+    )
 
     return { entities, total: pipelineEntries.length, page, pageSize }
   }
@@ -225,5 +115,70 @@ export class LogstashWorkspaceStrategy implements ConnectorWorkspaceStrategy {
 
   getAllowedActions(): string[] {
     return ['refresh-stats', 'test-connection']
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Overview data fetching                                   */
+  /* ---------------------------------------------------------------- */
+
+  private async fetchOverviewPipelines(
+    config: Record<string, unknown>,
+    summaryCards: WorkspaceSummaryCard[],
+    entitiesPreview: WorkspaceEntity[]
+  ): Promise<void> {
+    try {
+      const { pipelines } = await this.logstashService.getPipelines(config)
+      const pipelineNames = Object.keys(pipelines)
+
+      summaryCards.push({
+        key: 'pipelines',
+        label: 'Pipelines',
+        value: pipelineNames.length,
+        icon: 'git-branch',
+        variant: pipelineNames.length > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
+      })
+
+      for (const [name, pipelineValue] of Object.entries(pipelines).slice(0, 5)) {
+        entitiesPreview.push(mapLogstashPipelineToOverviewEntity(name, pipelineValue))
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch Logstash pipelines: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+      summaryCards.push(buildErrorSummaryCard('pipelines', 'Pipelines', 'git-branch'))
+    }
+  }
+
+  private async fetchOverviewStats(
+    config: Record<string, unknown>,
+    summaryCards: WorkspaceSummaryCard[],
+    recentItems: WorkspaceRecentItem[]
+  ): Promise<void> {
+    try {
+      const { pipelines: stats } = await this.logstashService.getPipelineStats(config)
+
+      let totalEventsIn = 0
+      let totalEventsOut = 0
+      let totalEventsFiltered = 0
+
+      for (const [name, statValue] of Object.entries(stats)) {
+        const { item, eventsIn, eventsOut, eventsFiltered } = buildLogstashPipelineStatsItem(
+          name,
+          statValue
+        )
+        totalEventsIn += eventsIn
+        totalEventsOut += eventsOut
+        totalEventsFiltered += eventsFiltered
+        recentItems.push(item)
+      }
+
+      summaryCards.push(
+        ...buildLogstashStatsSummaryCards(totalEventsIn, totalEventsOut, totalEventsFiltered)
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch Logstash stats: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+    }
   }
 }

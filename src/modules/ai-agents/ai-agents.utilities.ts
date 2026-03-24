@@ -1,6 +1,7 @@
 import { SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { AgentWithRelations, AiAgentRecord } from './ai-agents.types'
+import type { UpdateAgentToolDto } from './dto/agent-tool.dto'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
 import type { Prisma } from '@prisma/client'
 
@@ -95,4 +96,22 @@ export function buildAgentUpdateData(dto: UpdateAgentDto): Record<string, unknow
   if (dto.soulMd !== undefined) data['soulMd'] = dto.soulMd
 
   return data
+}
+
+/* ---------------------------------------------------------------- */
+/* TOOL UPDATE DATA BUILDING                                         */
+/* ---------------------------------------------------------------- */
+
+export function buildToolUpdateData(dto: UpdateAgentToolDto): Record<string, unknown> {
+  const updateData: Record<string, unknown> = {}
+  if (dto.name !== undefined) {
+    updateData['name'] = dto.name
+  }
+  if (dto.description !== undefined) {
+    updateData['description'] = dto.description
+  }
+  if (dto.schema !== undefined) {
+    updateData['schema'] = JSON.parse(JSON.stringify(dto.schema))
+  }
+  return updateData
 }

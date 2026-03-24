@@ -8,7 +8,12 @@ import {
 } from '../../../common/enums'
 import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { extractRemoteErrorMessage, formatRemoteError } from '../connectors.utilities'
+import {
+  extractMispAuthKey,
+  extractMispBaseUrl,
+  extractRemoteErrorMessage,
+  formatRemoteError,
+} from '../connectors.utilities'
 import type { TestResult } from '../connectors.types'
 
 @Injectable()
@@ -25,77 +30,20 @@ export class MispService {
    * GET /servers/getPyMISPVersion.json with Authorization header.
    */
   async testConnection(config: Record<string, unknown>): Promise<TestResult> {
-    const baseUrl = (config.mispUrl ?? config.baseUrl) as string | undefined
+    const baseUrl = extractMispBaseUrl(config)
     if (!baseUrl) {
       return { ok: false, details: 'MISP URL not configured' }
     }
 
-    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
-    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string | undefined
+    const authKey = extractMispAuthKey(config)
     if (!authKey) {
       return { ok: false, details: 'MISP auth key not configured' }
     }
 
     try {
-      const res = await this.httpClient.fetch(`${baseUrl}/servers/getPyMISPVersion.json`, {
-        headers: {
-          Authorization: authKey,
-          Accept: 'application/json',
-        },
-        rejectUnauthorized: config.verifyTls !== false,
-        allowPrivateNetwork: true,
-      })
-
-      if (res.status !== 200) {
-        const remoteError = formatRemoteError('MISP', res.status, res.data)
-        this.appLogger.warn('MISP connection test returned non-200', {
-          feature: AppLogFeature.CONNECTORS,
-          action: 'testConnection',
-          className: 'MispService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: {
-            connectorType: ConnectorType.MISP,
-            status: res.status,
-            remoteError: extractRemoteErrorMessage(res.data),
-          },
-        })
-        return { ok: false, details: remoteError }
-      }
-
-      const body = res.data as Record<string, unknown>
-      const version = body.version as string | undefined
-
-      this.appLogger.info('MISP connection test succeeded', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'MispService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.MISP, version: version ?? 'unknown' },
-      })
-
-      return {
-        ok: true,
-        details: `MISP reachable at ${baseUrl}. PyMISP version: ${version ?? 'unknown'}.`,
-      }
+      return await this.executeVersionCheck(config, baseUrl, authKey)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Connection failed'
-      this.logger.warn(`MISP connection test failed: ${message}`)
-
-      this.appLogger.error('MISP connection test failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'MispService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.MISP, error: message },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
-      return { ok: false, details: message }
+      return this.handleTestError(error)
     }
   }
 
@@ -103,47 +51,25 @@ export class MispService {
    * Get recent events from MISP.
    */
   async getEvents(config: Record<string, unknown>, limit: number = 20): Promise<unknown[]> {
-    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
-    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
+    const baseUrl = extractMispBaseUrl(config) as string
+    const authKey = extractMispAuthKey(config) as string
 
     const res = await this.httpClient.fetch(
       `${baseUrl}/events/index?limit=${limit}&sort=date&direction=desc`,
       {
-        headers: {
-          Authorization: authKey,
-          Accept: 'application/json',
-        },
+        headers: { Authorization: authKey, Accept: 'application/json' },
         rejectUnauthorized: config.verifyTls !== false,
         allowPrivateNetwork: true,
       }
     )
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('MISP events fetch failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'getEvents',
-        className: 'MispService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, limit, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('getEvents', res.status, res.data, { limit })
       throw new Error(formatRemoteError('MISP', res.status, res.data))
     }
 
     const events = (res.data ?? []) as unknown[]
-
-    this.appLogger.info('MISP events retrieved', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'getEvents',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'MispService',
-      functionName: 'getEvents',
-      metadata: { connectorType: ConnectorType.MISP, limit, count: events.length },
-    })
-
+    this.logActionSuccess('getEvents', { limit, count: events.length })
     return events
   }
 
@@ -154,49 +80,26 @@ export class MispService {
     config: Record<string, unknown>,
     searchParameters: Record<string, unknown>
   ): Promise<unknown[]> {
-    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
-    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
+    const baseUrl = extractMispBaseUrl(config) as string
+    const authKey = extractMispAuthKey(config) as string
 
     const res = await this.httpClient.fetch(`${baseUrl}/attributes/restSearch`, {
       method: HttpMethod.POST,
-      headers: {
-        Authorization: authKey,
-        Accept: 'application/json',
-      },
+      headers: { Authorization: authKey, Accept: 'application/json' },
       body: searchParameters,
       rejectUnauthorized: config.verifyTls !== false,
       allowPrivateNetwork: true,
     })
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('MISP attribute search failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'searchAttributes',
-        className: 'MispService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('searchAttributes', res.status, res.data)
       throw new Error(formatRemoteError('MISP', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
     const response = body.response as Record<string, unknown> | undefined
-    const attribute = response?.Attribute as unknown[] | undefined
-    const results = attribute ?? []
-
-    this.appLogger.info('MISP attribute search executed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'searchAttributes',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'MispService',
-      functionName: 'searchAttributes',
-      metadata: { connectorType: ConnectorType.MISP, resultCount: results.length },
-    })
-
+    const results = (response?.Attribute as unknown[]) ?? []
+    this.logActionSuccess('searchAttributes', { resultCount: results.length })
     return results
   }
 
@@ -204,11 +107,80 @@ export class MispService {
    * Get a single MISP event by ID.
    */
   async getEvent(config: Record<string, unknown>, eventId: string): Promise<unknown> {
-    const baseUrl = (config.mispUrl ?? config.baseUrl) as string
-    // authKey is the canonical key; mispAuthKey and apiKey are legacy fallbacks
-    const authKey = (config.authKey ?? config.mispAuthKey ?? config.apiKey) as string
+    this.validateEventId(eventId)
 
-    // Validate eventId to prevent path traversal
+    const baseUrl = extractMispBaseUrl(config) as string
+    const authKey = extractMispAuthKey(config) as string
+
+    const res = await this.httpClient.fetch(`${baseUrl}/events/view/${eventId}`, {
+      headers: { Authorization: authKey, Accept: 'application/json' },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 200) {
+      this.logRemoteFailure('getEvent', res.status, res.data, { eventId })
+      throw new Error(formatRemoteError('MISP', res.status, res.data))
+    }
+
+    const body = res.data as Record<string, unknown>
+    this.logActionSuccess('getEvent', { eventId })
+    return body.Event ?? body
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Test Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executeVersionCheck(
+    config: Record<string, unknown>,
+    baseUrl: string,
+    authKey: string
+  ): Promise<TestResult> {
+    const res = await this.httpClient.fetch(`${baseUrl}/servers/getPyMISPVersion.json`, {
+      headers: { Authorization: authKey, Accept: 'application/json' },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 200) {
+      this.logRemoteFailure('testConnection', res.status, res.data)
+      return { ok: false, details: formatRemoteError('MISP', res.status, res.data) }
+    }
+
+    const body = res.data as Record<string, unknown>
+    const version = (body.version as string) ?? 'unknown'
+    this.logActionSuccess('testConnection', { version })
+
+    return {
+      ok: true,
+      details: `MISP reachable at ${baseUrl}. PyMISP version: ${version}.`,
+    }
+  }
+
+  private handleTestError(error: unknown): TestResult {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    this.logger.warn(`MISP connection test failed: ${message}`)
+
+    this.appLogger.error('MISP connection test failed', {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'MispService',
+      functionName: 'testConnection',
+      metadata: { connectorType: ConnectorType.MISP, error: message },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+
+    return { ok: false, details: message }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Validation & Logging                                     */
+  /* ---------------------------------------------------------------- */
+
+  private validateEventId(eventId: string): void {
     if (!/^\d+$/.test(eventId)) {
       this.appLogger.warn('Invalid MISP event ID provided', {
         feature: AppLogFeature.CONNECTORS,
@@ -220,41 +192,38 @@ export class MispService {
       })
       throw new Error('Invalid MISP event ID')
     }
+  }
 
-    const res = await this.httpClient.fetch(`${baseUrl}/events/view/${eventId}`, {
-      headers: {
-        Authorization: authKey,
-        Accept: 'application/json',
-      },
-      rejectUnauthorized: config.verifyTls !== false,
-      allowPrivateNetwork: true,
-    })
-
-    if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('MISP event fetch failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'getEvent',
-        className: 'MispService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, eventId, remoteError: remoteMessage },
-      })
-      throw new Error(formatRemoteError('MISP', res.status, res.data))
-    }
-
-    const body = res.data as Record<string, unknown>
-
-    this.appLogger.info('MISP event retrieved', {
+  private logActionSuccess(action: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`MISP ${action} succeeded`, {
       feature: AppLogFeature.CONNECTORS,
-      action: 'getEvent',
+      action,
       outcome: AppLogOutcome.SUCCESS,
       sourceType: AppLogSourceType.SERVICE,
       className: 'MispService',
-      functionName: 'getEvent',
-      metadata: { connectorType: ConnectorType.MISP, eventId },
+      functionName: action,
+      metadata: { connectorType: ConnectorType.MISP, ...metadata },
     })
+  }
 
-    return body.Event ?? body
+  private logRemoteFailure(
+    action: string,
+    status: number,
+    data: unknown,
+    extra?: Record<string, unknown>
+  ): void {
+    this.appLogger.warn(`MISP ${action} failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      className: 'MispService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      metadata: {
+        connectorType: ConnectorType.MISP,
+        status,
+        remoteError: extractRemoteErrorMessage(data),
+        ...extra,
+      },
+    })
   }
 }

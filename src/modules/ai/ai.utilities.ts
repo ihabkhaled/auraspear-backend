@@ -1,6 +1,14 @@
 import { AiProvider, AiResponseModel } from './ai.enums'
 import { AlertSeverity } from '../../common/enums'
-import type { AgentTaskPromptParameters, AgentTaskResponseParameters, AiResponse } from './ai.types'
+import type {
+  AgentTaskPromptParameters,
+  AgentTaskResponseParameters,
+  AiResponse,
+  ConnectorFilterInput,
+  FilteredConnectorsResult,
+  QuotaCheckResult,
+} from './ai.types'
+import type { AgentConfigWithDefaults } from '../agent-config/agent-config.types'
 import type { Alert } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -162,8 +170,11 @@ export function generateDataDrivenInvestigation(
 ): string {
   const verdict = computeVerdict(alert.severity)
   const relatedSection = buildRelatedSection(relatedAlerts)
-  const immediateRisk = computeImmediateRisk(alert.severity)
-  const relatedRisk = computeRelatedRisk(relatedAlerts.length)
+  const summarySection = buildSummarySection(alert)
+  const findingsSection = buildKeyFindings(alert, relatedAlerts.length)
+  const riskSection = buildRiskSection(alert, relatedAlerts.length)
+  const mitreSection = buildMitreSection(alert)
+  const actionsSection = buildRecommendedActions(alert, relatedAlerts.length)
 
   return `## AI Investigation Report
 
@@ -171,32 +182,81 @@ export function generateDataDrivenInvestigation(
 **Severity:** ${alert.severity.toUpperCase()}
 **Verdict:** ${verdict}
 
-**Summary:**
-This ${alert.severity}-severity alert was triggered by rule ${sanitizeForMarkdown(alert.ruleName ?? 'Unknown')} (${sanitizeForMarkdown(alert.ruleId ?? 'N/A')}).${alert.sourceIp ? ` Source IP: \`${alert.sourceIp}\`.` : ''}${alert.destinationIp ? ` Destination IP: \`${alert.destinationIp}\`.` : ''}${alert.agentName ? ` Agent: ${sanitizeForMarkdown(alert.agentName)}.` : ''}
+${summarySection}
 
-**Key Findings:**
-${alert.sourceIp ? `1. Source IP \`${alert.sourceIp}\` detected in this event` : '1. No source IP recorded'}
-${relatedAlerts.length > 0 ? `2. ${relatedAlerts.length} related alert(s) found in the last 48 hours` : '2. No related alerts found in the last 48 hours'}
-${alert.mitreTechniques.length > 0 ? `3. MITRE ATT&CK techniques identified: ${alert.mitreTechniques.join(', ')}` : '3. No MITRE ATT&CK techniques mapped'}
-${alert.agentName ? `4. Alert originated from agent: ${sanitizeForMarkdown(alert.agentName)}` : '4. No agent information available'}
+${findingsSection}
 
-**Risk Assessment:**
-- Immediate Risk: ${immediateRisk}
-- Related Activity: ${relatedRisk}
-- MITRE Coverage: ${alert.mitreTechniques.length > 0 ? `${alert.mitreTechniques.length} technique(s) mapped` : 'None mapped'}
+${riskSection}
 
-**MITRE ATT&CK Mapping:**
-${alert.mitreTactics.length > 0 ? `- Tactics: ${alert.mitreTactics.join(', ')}` : '- No tactics identified'}
-${alert.mitreTechniques.length > 0 ? `- Techniques: ${alert.mitreTechniques.join(', ')}` : '- No techniques identified'}
+${mitreSection}
 
-**Recommended Actions:**
-1. ${alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH ? 'Escalate immediately to incident response team' : 'Review alert context and determine if escalation is needed'}
-2. ${alert.sourceIp ? `Investigate source IP \`${alert.sourceIp}\` for additional activity` : 'Identify the source of this activity'}
-3. ${relatedAlerts.length > 0 ? 'Review related alerts for attack pattern correlation' : 'Monitor for follow-up alerts from the same source'}
-4. ${alert.agentName ? `Check endpoint health for agent ${sanitizeForMarkdown(alert.agentName)}` : 'Verify the affected system status'}
-5. Document findings and update case if applicable
+${actionsSection}
 
 ${relatedSection}`
+}
+
+function buildSummarySection(alert: Alert): string {
+  let summary = `**Summary:**\nThis ${alert.severity}-severity alert was triggered by rule ${sanitizeForMarkdown(alert.ruleName ?? 'Unknown')} (${sanitizeForMarkdown(alert.ruleId ?? 'N/A')}).`
+  if (alert.sourceIp) summary += ` Source IP: \`${alert.sourceIp}\`.`
+  if (alert.destinationIp) summary += ` Destination IP: \`${alert.destinationIp}\`.`
+  if (alert.agentName) summary += ` Agent: ${sanitizeForMarkdown(alert.agentName)}.`
+  return summary
+}
+
+function buildKeyFindings(alert: Alert, relatedCount: number): string {
+  const finding1 = alert.sourceIp
+    ? `1. Source IP \`${alert.sourceIp}\` detected in this event`
+    : '1. No source IP recorded'
+  const finding2 = relatedCount > 0
+    ? `2. ${relatedCount} related alert(s) found in the last 48 hours`
+    : '2. No related alerts found in the last 48 hours'
+  const finding3 = alert.mitreTechniques.length > 0
+    ? `3. MITRE ATT&CK techniques identified: ${alert.mitreTechniques.join(', ')}`
+    : '3. No MITRE ATT&CK techniques mapped'
+  const finding4 = alert.agentName
+    ? `4. Alert originated from agent: ${sanitizeForMarkdown(alert.agentName)}`
+    : '4. No agent information available'
+
+  return `**Key Findings:**\n${finding1}\n${finding2}\n${finding3}\n${finding4}`
+}
+
+function buildRiskSection(alert: Alert, relatedCount: number): string {
+  const immediateRisk = computeImmediateRisk(alert.severity)
+  const relatedRisk = computeRelatedRisk(relatedCount)
+  const mitreCoverage = alert.mitreTechniques.length > 0
+    ? `${alert.mitreTechniques.length} technique(s) mapped`
+    : 'None mapped'
+
+  return `**Risk Assessment:**\n- Immediate Risk: ${immediateRisk}\n- Related Activity: ${relatedRisk}\n- MITRE Coverage: ${mitreCoverage}`
+}
+
+function buildMitreSection(alert: Alert): string {
+  const tactics = alert.mitreTactics.length > 0
+    ? `- Tactics: ${alert.mitreTactics.join(', ')}`
+    : '- No tactics identified'
+  const techniques = alert.mitreTechniques.length > 0
+    ? `- Techniques: ${alert.mitreTechniques.join(', ')}`
+    : '- No techniques identified'
+
+  return `**MITRE ATT&CK Mapping:**\n${tactics}\n${techniques}`
+}
+
+function buildRecommendedActions(alert: Alert, relatedCount: number): string {
+  const isHighSeverity = alert.severity === AlertSeverity.CRITICAL || alert.severity === AlertSeverity.HIGH
+  const action1 = isHighSeverity
+    ? 'Escalate immediately to incident response team'
+    : 'Review alert context and determine if escalation is needed'
+  const action2 = alert.sourceIp
+    ? `Investigate source IP \`${alert.sourceIp}\` for additional activity`
+    : 'Identify the source of this activity'
+  const action3 = relatedCount > 0
+    ? 'Review related alerts for attack pattern correlation'
+    : 'Monitor for follow-up alerts from the same source'
+  const action4 = alert.agentName
+    ? `Check endpoint health for agent ${sanitizeForMarkdown(alert.agentName)}`
+    : 'Verify the affected system status'
+
+  return `**Recommended Actions:**\n1. ${action1}\n2. ${action2}\n3. ${action3}\n4. ${action4}\n5. Document findings and update case if applicable`
 }
 
 function computeVerdict(severity: string): string {
@@ -709,4 +769,189 @@ export function buildFallbackAgentTaskResponse(params: AgentTaskResponseParamete
     provider: AiProvider.RULE_BASED,
     tokensUsed: { input: 0, output: 0 },
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* AGENT QUOTA CHECK                                                 */
+/* ---------------------------------------------------------------- */
+
+export function checkAgentQuota(agentConfig: AgentConfigWithDefaults): QuotaCheckResult {
+  if (agentConfig.tokensPerHour > 0 && agentConfig.tokensUsedHour >= agentConfig.tokensPerHour) {
+    return {
+      allowed: false,
+      period: 'hour',
+      used: agentConfig.tokensUsedHour,
+      limit: agentConfig.tokensPerHour,
+    }
+  }
+  if (agentConfig.tokensPerDay > 0 && agentConfig.tokensUsedDay >= agentConfig.tokensPerDay) {
+    return {
+      allowed: false,
+      period: 'day',
+      used: agentConfig.tokensUsedDay,
+      limit: agentConfig.tokensPerDay,
+    }
+  }
+  if (
+    agentConfig.tokensPerMonth > 0 &&
+    agentConfig.tokensUsedMonth >= agentConfig.tokensPerMonth
+  ) {
+    return {
+      allowed: false,
+      period: 'month',
+      used: agentConfig.tokensUsedMonth,
+      limit: agentConfig.tokensPerMonth,
+    }
+  }
+  return { allowed: true }
+}
+
+/* ---------------------------------------------------------------- */
+/* PROMPT TEMPLATE RENDERING                                         */
+/* ---------------------------------------------------------------- */
+
+export function buildPromptFromTemplate(
+  template: string,
+  context: Record<string, unknown>
+): string {
+  let result = template
+  if (result.includes('{{context}}')) {
+    result = result.replaceAll('{{context}}', JSON.stringify(context, null, 2))
+  }
+
+  for (const [key, value] of Object.entries(context)) {
+    const placeholder = `{{${key}}}`
+    if (result.includes(placeholder)) {
+      const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+      result = result.replaceAll(placeholder, stringValue)
+    }
+  }
+
+  return result
+}
+
+/* ---------------------------------------------------------------- */
+/* CONNECTOR FILTERING                                               */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Filters connectors based on a requested connector key.
+ * If a specific connector is requested, filters the list to match.
+ * Returns the filtered list and whether a specific connector was requested.
+ */
+export function filterConnectorsBySelection(
+  input: ConnectorFilterInput
+): FilteredConnectorsResult {
+  if (!input.connector || input.connector === 'default') {
+    return { connectors: input.connectors, connectorRequested: false }
+  }
+
+  const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
+    input.connector
+  )
+  const filtered = isUuid
+    ? input.connectors.filter(c => c.id === input.connector)
+    : input.connectors.filter(c => c.type === input.connector && !c.id)
+
+  return { connectors: filtered, connectorRequested: true }
+}
+
+/* ---------------------------------------------------------------- */
+/* FALLBACK GENERIC RESPONSE                                         */
+/* ---------------------------------------------------------------- */
+
+export function buildFallbackGenericResponse(featureKey: string, prompt: string): AiResponse {
+  return {
+    result: `[Rule-based fallback] No AI provider available to process feature "${featureKey}". The request has been logged for manual review.\n\nPrompt preview: ${prompt.slice(0, 200)}...`,
+    reasoning: [
+      'No AI connector available for this tenant',
+      'Returning rule-based fallback response',
+      'Manual review recommended',
+    ],
+    confidence: 0.3,
+    model: 'rule-based',
+    provider: 'rule-based',
+    tokensUsed: { input: 0, output: 0 },
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* FALLBACK EXPLAIN RESPONSE                                         */
+/* ---------------------------------------------------------------- */
+
+export function buildFallbackExplainResponse(prompt: string): AiResponse {
+  return {
+    result: generateExplainResponse(prompt),
+    reasoning: [
+      'Parsing the security concept or finding to explain',
+      'Breaking down technical details into analyst-friendly language',
+      'Mapping to MITRE ATT&CK tactics, techniques, and procedures',
+      'Providing contextual examples relevant to the environment',
+      'Including remediation guidance and best practices',
+      'Generating rule-based explanation (AI model not available)',
+    ],
+    confidence: 0.85,
+    model: 'rule-based',
+    provider: 'rule-based',
+    tokensUsed: { input: 0, output: 0 },
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* GENERIC AI RESPONSE BUILDER                                       */
+/* ---------------------------------------------------------------- */
+
+export function buildGenericAiResponse(
+  aiText: string,
+  model: string,
+  provider: string,
+  inputTokens: number,
+  outputTokens: number,
+  reasoning: string
+): AiResponse {
+  return {
+    result: aiText,
+    reasoning: [reasoning],
+    confidence: 0.9,
+    model,
+    provider,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* FINAL PROMPT ASSEMBLY                                             */
+/* ---------------------------------------------------------------- */
+
+export function assembleFinalPrompt(
+  promptContent: string,
+  context: Record<string, unknown>,
+  systemPrompt: string | null,
+  promptSuffix: string | null
+): string {
+  let finalPrompt = buildPromptFromTemplate(promptContent, context)
+  if (systemPrompt) {
+    finalPrompt = `${systemPrompt}\n\n${finalPrompt}`
+  }
+  if (promptSuffix) {
+    finalPrompt = `${finalPrompt}\n\n${promptSuffix}`
+  }
+  return finalPrompt
+}
+
+/* ---------------------------------------------------------------- */
+/* CONNECTOR SELECTION FOR EXECUTE AI TASK                           */
+/* ---------------------------------------------------------------- */
+
+export function resolveSelectedConnector(
+  explicitConnector: string | undefined,
+  agentProviderMode: string,
+  defaultProviderKey: string,
+  preferredProvider: string | null
+): string | null {
+  return (
+    explicitConnector ??
+    (agentProviderMode === defaultProviderKey ? null : agentProviderMode) ??
+    preferredProvider
+  )
 }

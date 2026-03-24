@@ -1,4 +1,4 @@
-import { DEFAULT_PREFERENCES } from './users.constants'
+import { DEFAULT_PREFERENCES, PREFERENCE_FIELD_KEYS } from './users.constants'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UserProfile, UserWithMemberships } from './users.types'
 
@@ -23,63 +23,33 @@ export function mapUserToProfile(user: UserWithMemberships): UserProfile {
 /* ---------------------------------------------------------------- */
 
 export function buildPreferenceUpdateData(dto: UpdatePreferencesDto): Record<string, unknown> {
-  const data: Record<string, unknown> = {}
-  if (dto.theme !== undefined) data['theme'] = dto.theme
-  if (dto.language !== undefined) data['language'] = dto.language
-  if (dto.dashboardDensity !== undefined) data['dashboardDensity'] = dto.dashboardDensity
-  if (dto.collapsedDashboardPanels !== undefined) {
-    data['collapsedDashboardPanels'] = dto.collapsedDashboardPanels
+  const dataMap = new Map<string, unknown>()
+  const dtoMap = new Map<string, unknown>(
+    Object.entries(dto as Record<string, unknown>)
+  )
+
+  for (const key of PREFERENCE_FIELD_KEYS) {
+    const value = dtoMap.get(key)
+    if (value !== undefined) {
+      dataMap.set(key, value)
+    }
   }
-  if (dto.notificationsEmail !== undefined) data['notificationsEmail'] = dto.notificationsEmail
-  if (dto.notificationsInApp !== undefined) data['notificationsInApp'] = dto.notificationsInApp
-  if (dto.notifyCriticalAlerts !== undefined) {
-    data['notifyCriticalAlerts'] = dto.notifyCriticalAlerts
-  }
-  if (dto.notifyHighAlerts !== undefined) data['notifyHighAlerts'] = dto.notifyHighAlerts
-  if (dto.notifyCaseAssignments !== undefined) {
-    data['notifyCaseAssignments'] = dto.notifyCaseAssignments
-  }
-  if (dto.notifyIncidentUpdates !== undefined) {
-    data['notifyIncidentUpdates'] = dto.notifyIncidentUpdates
-  }
-  if (dto.notifyComplianceAlerts !== undefined) {
-    data['notifyComplianceAlerts'] = dto.notifyComplianceAlerts
-  }
-  if (dto.notifyCaseUpdates !== undefined) data['notifyCaseUpdates'] = dto.notifyCaseUpdates
-  if (dto.notifyCaseComments !== undefined) data['notifyCaseComments'] = dto.notifyCaseComments
-  if (dto.notifyCaseActivity !== undefined) data['notifyCaseActivity'] = dto.notifyCaseActivity
-  if (dto.notifyUserManagement !== undefined) {
-    data['notifyUserManagement'] = dto.notifyUserManagement
-  }
-  if (dto.retentionAlerts !== undefined) data['retentionAlerts'] = dto.retentionAlerts
-  if (dto.retentionLogs !== undefined) data['retentionLogs'] = dto.retentionLogs
-  if (dto.retentionIncidents !== undefined) data['retentionIncidents'] = dto.retentionIncidents
-  if (dto.retentionAuditLogs !== undefined) data['retentionAuditLogs'] = dto.retentionAuditLogs
-  return data
+
+  return Object.fromEntries(dataMap)
 }
 
 export function buildPreferenceCreateData(dto: UpdatePreferencesDto): typeof DEFAULT_PREFERENCES {
-  return {
-    theme: dto.theme ?? DEFAULT_PREFERENCES.theme,
-    language: dto.language ?? DEFAULT_PREFERENCES.language,
-    dashboardDensity: dto.dashboardDensity ?? DEFAULT_PREFERENCES.dashboardDensity,
-    collapsedDashboardPanels:
-      dto.collapsedDashboardPanels ?? DEFAULT_PREFERENCES.collapsedDashboardPanels,
-    notificationsEmail: dto.notificationsEmail ?? DEFAULT_PREFERENCES.notificationsEmail,
-    notificationsInApp: dto.notificationsInApp ?? DEFAULT_PREFERENCES.notificationsInApp,
-    notifyCriticalAlerts: dto.notifyCriticalAlerts ?? DEFAULT_PREFERENCES.notifyCriticalAlerts,
-    notifyHighAlerts: dto.notifyHighAlerts ?? DEFAULT_PREFERENCES.notifyHighAlerts,
-    notifyCaseAssignments: dto.notifyCaseAssignments ?? DEFAULT_PREFERENCES.notifyCaseAssignments,
-    notifyIncidentUpdates: dto.notifyIncidentUpdates ?? DEFAULT_PREFERENCES.notifyIncidentUpdates,
-    notifyComplianceAlerts:
-      dto.notifyComplianceAlerts ?? DEFAULT_PREFERENCES.notifyComplianceAlerts,
-    notifyCaseUpdates: dto.notifyCaseUpdates ?? DEFAULT_PREFERENCES.notifyCaseUpdates,
-    notifyCaseComments: dto.notifyCaseComments ?? DEFAULT_PREFERENCES.notifyCaseComments,
-    notifyCaseActivity: dto.notifyCaseActivity ?? DEFAULT_PREFERENCES.notifyCaseActivity,
-    notifyUserManagement: dto.notifyUserManagement ?? DEFAULT_PREFERENCES.notifyUserManagement,
-    retentionAlerts: dto.retentionAlerts ?? DEFAULT_PREFERENCES.retentionAlerts,
-    retentionLogs: dto.retentionLogs ?? DEFAULT_PREFERENCES.retentionLogs,
-    retentionIncidents: dto.retentionIncidents ?? DEFAULT_PREFERENCES.retentionIncidents,
-    retentionAuditLogs: dto.retentionAuditLogs ?? DEFAULT_PREFERENCES.retentionAuditLogs,
+  const dtoMap = new Map<string, unknown>(
+    Object.entries(dto as Record<string, unknown>)
+  )
+  const defaultsMap = new Map<string, unknown>(
+    Object.entries(DEFAULT_PREFERENCES as Record<string, unknown>)
+  )
+  const resultMap = new Map<string, unknown>()
+
+  for (const key of PREFERENCE_FIELD_KEYS) {
+    resultMap.set(key, dtoMap.get(key) ?? defaultsMap.get(key))
   }
+
+  return Object.fromEntries(resultMap) as typeof DEFAULT_PREFERENCES
 }

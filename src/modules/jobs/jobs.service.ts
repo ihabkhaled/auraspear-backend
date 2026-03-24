@@ -11,6 +11,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enu
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import type { EnqueueParameters, JobRuntimeStats, ListJobsOptions } from './jobs.types'
+import type { AppLogContext } from '../../common/services/app-logger.types'
 import type { Job, Prisma } from '@prisma/client'
 
 @Injectable()
@@ -23,33 +24,8 @@ export class JobService {
   ) {}
 
   async enqueue(params: EnqueueParameters): Promise<Job> {
-    // Idempotency check
-    if (params.idempotencyKey) {
-      const existing = await this.jobRepository.findByIdempotencyKey(
-        params.tenantId,
-        params.idempotencyKey
-      )
-      if (existing) {
-        this.appLogger.debug(`Job deduplicated by idempotency key`, {
-          feature: AppLogFeature.JOBS,
-          action: 'enqueue',
-          outcome: AppLogOutcome.SKIPPED,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'JobService',
-          functionName: 'enqueue',
-          tenantId: params.tenantId,
-          targetResource: 'Job',
-          targetResourceId: existing.id,
-          metadata: {
-            jobType: params.type,
-            idempotencyKey: params.idempotencyKey,
-            existingJobId: existing.id,
-            existingStatus: existing.status,
-          },
-        })
-        return existing
-      }
-    }
+    const existing = await this.checkIdempotency(params)
+    if (existing) return existing
 
     const job = await this.jobRepository.create({
       tenantId: params.tenantId,
@@ -61,25 +37,7 @@ export class JobService {
       createdBy: params.createdBy,
     })
 
-    this.appLogger.info(`Job enqueued: ${params.type}`, {
-      feature: AppLogFeature.JOBS,
-      action: 'enqueue',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'JobService',
-      functionName: 'enqueue',
-      tenantId: params.tenantId,
-      targetResource: 'Job',
-      targetResourceId: job.id,
-      metadata: {
-        jobType: params.type,
-        maxAttempts: params.maxAttempts ?? 3,
-        scheduledAt: params.scheduledAt?.toISOString() ?? null,
-        createdBy: params.createdBy ?? null,
-        hasPayload: Boolean(params.payload),
-      },
-    })
-
+    this.logEnqueued(params, job)
     return job
   }
 
@@ -146,52 +104,7 @@ export class JobService {
       completedAt: retrying ? null : new Date(),
     })
 
-    if (retrying) {
-      this.appLogger.warn(
-        `Job ${jobId} failed, scheduling retry ${String(nextAttempt)}/${String(maxAttempts)}`,
-        {
-          feature: AppLogFeature.JOBS,
-          action: 'markFailed',
-          outcome: AppLogOutcome.WARNING,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'JobService',
-          functionName: 'markFailed',
-          tenantId,
-          targetResource: 'Job',
-          targetResourceId: jobId,
-          metadata: {
-            attempt: nextAttempt,
-            maxAttempts,
-            error,
-            newStatus,
-            willRetry: true,
-          },
-        }
-      )
-    } else {
-      this.appLogger.error(
-        `Job ${jobId} failed permanently after ${String(maxAttempts)} attempts`,
-        {
-          feature: AppLogFeature.JOBS,
-          action: 'markFailed',
-          outcome: AppLogOutcome.FAILURE,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'JobService',
-          functionName: 'markFailed',
-          tenantId,
-          targetResource: 'Job',
-          targetResourceId: jobId,
-          metadata: {
-            attempt: nextAttempt,
-            maxAttempts,
-            error,
-            newStatus,
-            willRetry: false,
-          },
-        }
-      )
-    }
-
+    this.logMarkFailed(jobId, tenantId, error, nextAttempt, maxAttempts, retrying, newStatus)
     return { retrying }
   }
 
@@ -327,5 +240,116 @@ export class JobService {
     })
 
     return this.getJobOrThrow(id, tenantId)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Helpers                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private async checkIdempotency(params: EnqueueParameters): Promise<Job | null> {
+    if (!params.idempotencyKey) return null
+
+    const existing = await this.jobRepository.findByIdempotencyKey(
+      params.tenantId,
+      params.idempotencyKey
+    )
+
+    if (existing) {
+      this.appLogger.debug('Job deduplicated by idempotency key', {
+        feature: AppLogFeature.JOBS,
+        action: 'enqueue',
+        outcome: AppLogOutcome.SKIPPED,
+        sourceType: AppLogSourceType.SERVICE,
+        className: 'JobService',
+        functionName: 'enqueue',
+        tenantId: params.tenantId,
+        targetResource: 'Job',
+        targetResourceId: existing.id,
+        metadata: {
+          jobType: params.type,
+          idempotencyKey: params.idempotencyKey,
+          existingJobId: existing.id,
+          existingStatus: existing.status,
+        },
+      })
+    }
+
+    return existing ?? null
+  }
+
+  private logEnqueued(params: EnqueueParameters, job: Job): void {
+    this.appLogger.info(`Job enqueued: ${params.type}`, {
+      feature: AppLogFeature.JOBS,
+      action: 'enqueue',
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'enqueue',
+      tenantId: params.tenantId,
+      targetResource: 'Job',
+      targetResourceId: job.id,
+      metadata: {
+        jobType: params.type,
+        maxAttempts: params.maxAttempts ?? 3,
+        scheduledAt: params.scheduledAt?.toISOString() ?? null,
+        createdBy: params.createdBy ?? null,
+        hasPayload: Boolean(params.payload),
+      },
+    })
+  }
+
+  private logMarkFailed(
+    jobId: string,
+    tenantId: string,
+    error: string,
+    nextAttempt: number,
+    maxAttempts: number,
+    retrying: boolean,
+    newStatus: string
+  ): void {
+    const logContext = this.buildMarkFailedContext(
+      jobId, tenantId, error, nextAttempt, maxAttempts, retrying, newStatus
+    )
+
+    if (retrying) {
+      this.appLogger.warn(
+        `Job ${jobId} failed, scheduling retry ${String(nextAttempt)}/${String(maxAttempts)}`,
+        logContext
+      )
+    } else {
+      this.appLogger.error(
+        `Job ${jobId} failed permanently after ${String(maxAttempts)} attempts`,
+        logContext
+      )
+    }
+  }
+
+  private buildMarkFailedContext(
+    jobId: string,
+    tenantId: string,
+    error: string,
+    nextAttempt: number,
+    maxAttempts: number,
+    retrying: boolean,
+    newStatus: string
+  ): AppLogContext {
+    return {
+      feature: AppLogFeature.JOBS,
+      action: 'markFailed',
+      outcome: retrying ? AppLogOutcome.WARNING : AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'JobService',
+      functionName: 'markFailed',
+      tenantId,
+      targetResource: 'Job',
+      targetResourceId: jobId,
+      metadata: {
+        attempt: nextAttempt,
+        maxAttempts,
+        error,
+        newStatus,
+        willRetry: retrying,
+      },
+    }
   }
 }

@@ -147,11 +147,19 @@ export class DetectionRulesService {
     user: JwtPayload
   ): Promise<DetectionRuleRecord> {
     await this.getRuleById(id, user.tenantId)
+    await this.applyRuleUpdate(id, user.tenantId, buildRuleUpdateData(dto))
 
-    const updateData = buildRuleUpdateData(dto)
+    this.logRuleAction('updateRule', 'Detection rule updated', id, user)
+    return this.getRuleById(id, user.tenantId)
+  }
 
+  private async applyRuleUpdate(
+    id: string,
+    tenantId: string,
+    updateData: Prisma.DetectionRuleUpdateManyMutationInput
+  ): Promise<void> {
     const updated = await this.repository.updateMany({
-      where: { id, tenantId: user.tenantId },
+      where: { id, tenantId },
       data: updateData,
     })
 
@@ -162,22 +170,6 @@ export class DetectionRulesService {
         'errors.detectionRules.notFound'
       )
     }
-
-    this.appLogger.info('Detection rule updated', {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'updateRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'DetectionRule',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'updateRule',
-    })
-
-    return this.getRuleById(id, user.tenantId)
   }
 
   /* ---------------------------------------------------------------- */
@@ -188,20 +180,7 @@ export class DetectionRulesService {
     await this.getRuleById(id, user.tenantId)
 
     const newStatus = enabled ? DetectionRuleStatus.ACTIVE : DetectionRuleStatus.DISABLED
-    const updateData: Prisma.DetectionRuleUpdateManyMutationInput = { status: newStatus }
-
-    const updated = await this.repository.updateMany({
-      where: { id, tenantId: user.tenantId },
-      data: updateData,
-    })
-
-    if (updated.count === 0) {
-      throw new BusinessException(
-        404,
-        `Detection rule ${id} not found`,
-        'errors.detectionRules.notFound'
-      )
-    }
+    await this.applyRuleStatusUpdate(id, user.tenantId, newStatus)
 
     this.appLogger.info('Detection rule toggled', {
       feature: AppLogFeature.DETECTION_RULES,
@@ -219,6 +198,14 @@ export class DetectionRulesService {
     })
 
     return this.getRuleById(id, user.tenantId)
+  }
+
+  private async applyRuleStatusUpdate(
+    id: string,
+    tenantId: string,
+    status: DetectionRuleStatus
+  ): Promise<void> {
+    await this.applyRuleUpdate(id, tenantId, { status })
   }
 
   /* ---------------------------------------------------------------- */
@@ -260,34 +247,11 @@ export class DetectionRulesService {
     const rule = await this.getRuleById(id, tenantId)
 
     const result = await this.executor.evaluateRule(
-      {
-        id: rule.id,
-        name: rule.name,
-        severity: rule.severity,
-        conditions: rule.conditions,
-      },
+      { id: rule.id, name: rule.name, severity: rule.severity, conditions: rule.conditions },
       events
     )
 
-    this.appLogger.info('Detection rule simulation executed', {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'simulateRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail,
-      targetResource: 'DetectionRule',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'simulateRule',
-      metadata: {
-        inputCount: events.length,
-        matchCount: result.matchCount,
-        status: result.status,
-        durationMs: result.durationMs,
-      },
-    })
-
+    this.logSimulationResult(id, tenantId, actorEmail, events.length, result)
     return result
   }
 
@@ -305,5 +269,57 @@ export class DetectionRulesService {
     ])
 
     return buildDetectionRuleStats(total, active, testing, disabled, aggregates)
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logRuleAction(
+    action: string,
+    message: string,
+    ruleId: string,
+    user: JwtPayload
+  ): void {
+    this.appLogger.info(message, {
+      feature: AppLogFeature.DETECTION_RULES,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'DetectionRule',
+      targetResourceId: ruleId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DetectionRulesService',
+      functionName: action,
+    })
+  }
+
+  private logSimulationResult(
+    ruleId: string,
+    tenantId: string,
+    actorEmail: string,
+    inputCount: number,
+    result: DetectionExecutionResult
+  ): void {
+    this.appLogger.info('Detection rule simulation executed', {
+      feature: AppLogFeature.DETECTION_RULES,
+      action: 'simulateRule',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      actorEmail,
+      targetResource: 'DetectionRule',
+      targetResourceId: ruleId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'DetectionRulesService',
+      functionName: 'simulateRule',
+      metadata: {
+        inputCount,
+        matchCount: result.matchCount,
+        status: result.status,
+        durationMs: result.durationMs,
+      },
+    })
   }
 }

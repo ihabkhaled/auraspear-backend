@@ -10,14 +10,18 @@ import {
 } from './osint-executor.constants'
 import {
   appendQueryParameters,
+  attachVtAnalysisUrl,
   buildExecutionConfig,
+  buildErrorQueryResult,
   buildFailedQueryResult,
   buildOsintRequest,
+  buildSuccessQueryResult,
   extractResponseData,
-  resolveErrorMessageKey,
+  extractVtAnalysisUrl,
+  extractVtPollStatus,
+  redactSensitiveHeaders,
   resolveHttpErrorMessageKey,
   resolveTestIocType,
-  truncateResponseData,
 } from './osint-executor.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, HttpMethod } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
@@ -25,7 +29,12 @@ import { AxiosService } from '../../common/modules/axios/axios.service'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { decrypt } from '../../common/utils/encryption.utility'
 import { AgentConfigRepository } from '../agent-config/agent-config.repository'
-import type { OsintEnrichmentResult, OsintQueryResult } from './osint-executor.types'
+import type {
+  OsintEnrichmentResult,
+  OsintQueryResult,
+  OsintRequestConfig,
+  OsintSourceExecutionConfig,
+} from './osint-executor.types'
 import type { OsintTestResult } from '../agent-config/agent-config.types'
 
 @Injectable()
@@ -42,8 +51,6 @@ export class OsintExecutorService {
 
   /**
    * Query a single OSINT source with an IoC value.
-   * Loads the source config, decrypts API key, builds the request, executes it,
-   * and updates the source's health status.
    */
   async querySource(
     tenantId: string,
@@ -53,7 +60,29 @@ export class OsintExecutorService {
   ): Promise<OsintQueryResult> {
     const startTime = Date.now()
 
+    const sourceOrFailure = await this.resolveAndValidateSource(sourceId, tenantId, startTime)
+    if ('success' in sourceOrFailure) return sourceOrFailure
+
+    const source = sourceOrFailure
+    const decryptedApiKey = this.decryptSourceApiKey(source.encryptedApiKey)
+    const executionConfig = buildExecutionConfig(source, decryptedApiKey)
+    const requestConfig = buildOsintRequest(executionConfig, iocType, iocValue)
+    const finalUrl = appendQueryParameters(requestConfig.url, requestConfig.queryParameters)
+
+    this.logOsintRequest(requestConfig, finalUrl, source, iocType, iocValue, executionConfig)
+
+    return this.executeQueryWithErrorHandling(
+      finalUrl, requestConfig, executionConfig, source, sourceId, tenantId, iocType, startTime
+    )
+  }
+
+  private async resolveAndValidateSource(
+    sourceId: string,
+    tenantId: string,
+    startTime: number
+  ): Promise<OsintQueryResult | NonNullable<Awaited<ReturnType<typeof this.agentConfigRepository.findOsintSource>>>> {
     const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
+
     if (!source?.isEnabled) {
       return buildFailedQueryResult(
         sourceId,
@@ -66,133 +95,34 @@ export class OsintExecutorService {
 
     if (!this.checkRateLimit(sourceId)) {
       return buildFailedQueryResult(
-        sourceId,
-        source.name,
-        source.sourceType,
-        'Rate limit exceeded',
-        Date.now() - startTime
+        sourceId, source.name, source.sourceType, 'Rate limit exceeded', Date.now() - startTime
       )
     }
 
-    const decryptedApiKey = this.decryptSourceApiKey(source.encryptedApiKey)
-    const executionConfig = buildExecutionConfig(source, decryptedApiKey)
-    const requestConfig = buildOsintRequest(executionConfig, iocType, iocValue)
-    const finalUrl = appendQueryParameters(requestConfig.url, requestConfig.queryParameters)
+    return source
+  }
 
-    // Log full request details (redact API key from headers)
-    const safeHeaders = { ...requestConfig.headers }
-    for (const key of Object.keys(safeHeaders)) {
-      if (
-        key.toLowerCase().includes('key') ||
-        key.toLowerCase().includes('auth') ||
-        key.toLowerCase() === 'authorization'
-      ) {
-        Reflect.set(safeHeaders, key, '***REDACTED***')
-      }
-    }
-    this.logger.log(
-      `OSINT request: ${requestConfig.method} ${finalUrl} | source=${source.name} (${source.sourceType}) | ioc=${iocType}:${iocValue} | authType=${source.authType} | headers=${JSON.stringify(safeHeaders)} | hasBody=${String(requestConfig.body !== null)} | timeout=${String(executionConfig.timeout)}ms`
-    )
-
+  private async executeQueryWithErrorHandling(
+    finalUrl: string,
+    requestConfig: OsintRequestConfig,
+    executionConfig: OsintSourceExecutionConfig,
+    source: { name: string; sourceType: string },
+    sourceId: string,
+    tenantId: string,
+    iocType: string,
+    startTime: number
+  ): Promise<OsintQueryResult> {
     try {
-      const response = await this.executeWithRetry(() =>
-        this.executeSourceRequest(
-          finalUrl,
-          requestConfig.method,
-          requestConfig.headers,
-          requestConfig.body,
-          executionConfig.timeout
-        )
+      return await this.executeQueryAndBuildResult(
+        finalUrl, requestConfig, executionConfig, source, sourceId, tenantId, iocType, startTime
       )
-
-      let finalData = response.data
-      let didPollAnalysis = false
-
-      // VT URL/file submissions return an analysis stub (data.type === "analysis")
-      // with a links.self URL that must be polled to get actual scan results.
-      // Direct results (data.type === "file"/"domain"/"ip_address") already have attributes.
-      if (source.sourceType === 'virustotal') {
-        const analysisUrl = this.extractVtAnalysisUrl(response.data)
-        if (analysisUrl) {
-          this.logger.log(`VT analysis stub detected — polling: ${analysisUrl}`)
-          finalData = await this.pollVtAnalysis(
-            analysisUrl,
-            requestConfig.headers,
-            executionConfig.timeout
-          )
-          didPollAnalysis = true
-        }
-      }
-
-      // If we polled an analysis, the result structure is different —
-      // don't apply the original responsePath (e.g. "data.attributes") since
-      // the polled response is already the extracted analysis result.
-      const data = didPollAnalysis
-        ? finalData
-        : extractResponseData(finalData, executionConfig.responsePath)
-
-      const responseTimeMs = Date.now() - startTime
-
-      this.logger.log(
-        `OSINT response: ${String(response.status)} | source=${source.name} | ${String(responseTimeMs)}ms | polled=${String(didPollAnalysis)} | dataExtracted=${String(data !== null && data !== undefined)}`
-      )
-
-      await this.agentConfigRepository.updateOsintSourceHealth(sourceId, tenantId, true, null)
-
-      this.logQuerySuccess(tenantId, sourceId, source.name, iocType, responseTimeMs)
-
-      return {
-        sourceId,
-        sourceName: source.name,
-        sourceType: source.sourceType,
-        success: true,
-        data: truncateResponseData(data),
-        rawResponse: truncateResponseData(finalData),
-        error: null,
-        statusCode: response.status,
-        messageKey: null,
-        responseTimeMs,
-        queriedAt: new Date().toISOString(),
-      }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      const statusCode = (error as { statusCode?: number }).statusCode ?? null
-      const messageKey =
-        (error as { messageKey?: string }).messageKey ?? resolveErrorMessageKey(errorMessage)
-      const responseTimeMs = Date.now() - startTime
-
-      this.logger.warn(
-        `OSINT error: source=${source.name} (${source.sourceType}) | url=${finalUrl} | status=${String(statusCode)} | ${String(responseTimeMs)}ms | error=${errorMessage} | messageKey=${messageKey}`
-      )
-
-      await this.agentConfigRepository.updateOsintSourceHealth(
-        sourceId,
-        tenantId,
-        false,
-        errorMessage
-      )
-
-      this.logQueryFailure(tenantId, sourceId, source.name, iocType, errorMessage)
-
-      return {
-        sourceId,
-        sourceName: source.name,
-        sourceType: source.sourceType,
-        success: false,
-        data: null,
-        rawResponse: null,
-        error: errorMessage,
-        statusCode,
-        messageKey,
-        responseTimeMs,
-        queriedAt: new Date().toISOString(),
-      }
+      return this.handleQueryError(error, source, sourceId, tenantId, iocType, finalUrl, startTime)
     }
   }
 
   /**
    * Enrich an IoC by querying multiple OSINT sources in parallel.
-   * Uses batched concurrency to avoid overwhelming upstream sources.
    */
   async enrichIoc(
     tenantId: string,
@@ -201,7 +131,6 @@ export class OsintExecutorService {
     sourceIds: string[]
   ): Promise<OsintEnrichmentResult> {
     const results = await this.executeBatchedQueries(tenantId, iocType, iocValue, sourceIds)
-
     const successCount = results.filter(r => r.success).length
 
     this.logEnrichmentComplete(tenantId, iocType, iocValue, sourceIds.length, successCount)
@@ -218,10 +147,252 @@ export class OsintExecutorService {
   }
 
   /**
-   * Execute OSINT queries in batches of OSINT_CONCURRENCY_LIMIT to avoid
-   * overwhelming sources with too many parallel requests.
-   * Uses recursive batching to avoid await-in-loop lint warning.
+   * Test an OSINT source by executing a real query with a safe test IoC.
    */
+  async testSource(sourceId: string, tenantId: string, actor: string): Promise<OsintTestResult> {
+    const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
+    if (!source) {
+      throw new BusinessException(
+        404, 'OSINT source not found', 'errors.agentConfig.osintSourceNotFound'
+      )
+    }
+
+    const testIocType = resolveTestIocType(source.sourceType)
+    const testIocValue = Reflect.get(OSINT_TEST_IOC_VALUES, testIocType) as string
+
+    const startTime = Date.now()
+    const queryResult = await this.querySource(tenantId, sourceId, testIocType, testIocValue)
+    const responseTime = Date.now() - startTime
+
+    this.logTestResult(source.name, queryResult.success, tenantId, actor, sourceId)
+
+    return {
+      success: queryResult.success,
+      statusCode: queryResult.statusCode ?? null,
+      responseTime,
+      error: queryResult.error,
+      messageKey: queryResult.messageKey ?? null,
+    }
+  }
+
+  /**
+   * Fetch VT analysis results from a given analysis URL.
+   */
+  async fetchAnalysisResults(tenantId: string, analysisUrl: string): Promise<unknown> {
+    this.validateAnalysisUrl(analysisUrl)
+
+    const vtSource = await this.findEnabledVtSource(tenantId)
+    const apiKey = this.decryptSourceApiKey(vtSource.encryptedApiKey)
+    if (!apiKey) {
+      throw new BusinessException(500, 'Failed to decrypt API key', 'errors.osint.authFailed')
+    }
+
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (vtSource.headerName) {
+      headers[vtSource.headerName] = apiKey
+    }
+
+    const response = await this.axiosService.fetch(analysisUrl, {
+      method: HttpMethod.GET,
+      headers,
+      timeoutMs: vtSource.timeout,
+    })
+
+    if (response.status >= 400) {
+      throw new BusinessException(
+        response.status,
+        `VT analysis fetch failed: ${String(response.status)}`,
+        resolveHttpErrorMessageKey(response.status)
+      )
+    }
+
+    return response.data
+  }
+
+  /**
+   * Upload a file to a VirusTotal-compatible OSINT source for scanning.
+   */
+  async uploadFileForScan(
+    tenantId: string,
+    sourceId: string,
+    file: Express.Multer.File
+  ): Promise<OsintQueryResult> {
+    this.validateFileUploadInput(file, sourceId)
+
+    const startTime = Date.now()
+    const source = await this.findEnabledOsintSource(sourceId, tenantId)
+    const apiKey = this.decryptSourceApiKey(source.encryptedApiKey)
+    const baseUrl = (source.baseUrl ?? '').replace(/\/+$/, '')
+
+    const { form, headers } = await this.buildFileUploadRequest(file, source, apiKey)
+
+    try {
+      return await this.executeFileUpload(
+        baseUrl, headers, form, source, sourceId, tenantId, file.originalname, startTime
+      )
+    } catch (error: unknown) {
+      return this.handleFileUploadError(
+        error, source, sourceId, tenantId, file.originalname, startTime
+      )
+    }
+  }
+
+  /**
+   * Polls the VT analysis endpoint until the analysis is complete or timeout.
+   * Uses recursion instead of a loop to avoid await-in-loop lint warning.
+   */
+  private async pollVtAnalysis(
+    analysisUrl: string,
+    headers: Record<string, string>,
+    timeoutMs: number,
+    attempt = 0
+  ): Promise<unknown> {
+    const maxPolls = 5
+    const pollDelayMs = 3_000
+
+    if (attempt >= maxPolls) {
+      this.logger.warn('VT analysis polling timed out — returning last known state')
+      return {
+        status: 'queued',
+        message: 'Analysis still in progress. Check VT dashboard for results.',
+      }
+    }
+
+    const getHeaders = { ...headers }
+    delete getHeaders['Content-Type']
+
+    await new Promise<void>(resolve => {
+      setTimeout(resolve, pollDelayMs)
+    })
+
+    try {
+      return await this.executePollAttempt(analysisUrl, getHeaders, headers, timeoutMs, attempt)
+    } catch (error: unknown) {
+      this.logger.warn(
+        `VT analysis poll error: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+      return this.pollVtAnalysis(analysisUrl, headers, timeoutMs, attempt + 1)
+    }
+  }
+
+  // ─── Private: Query Execution Pipeline ─────────────────────────
+
+  private async executeQueryAndBuildResult(
+    finalUrl: string,
+    requestConfig: OsintRequestConfig,
+    executionConfig: OsintSourceExecutionConfig,
+    source: { name: string; sourceType: string },
+    sourceId: string,
+    tenantId: string,
+    iocType: string,
+    startTime: number
+  ): Promise<OsintQueryResult> {
+    const response = await this.executeWithRetry(() =>
+      this.executeSourceRequest(
+        finalUrl, requestConfig.method, requestConfig.headers, requestConfig.body,
+        executionConfig.timeout
+      )
+    )
+
+    const finalData = response.data
+    const vtAnalysisUrl = extractVtAnalysisUrl(response.data)
+    attachVtAnalysisUrl(finalData, source.sourceType, vtAnalysisUrl)
+
+    const data = extractResponseData(finalData, executionConfig.responsePath)
+    const responseTimeMs = Date.now() - startTime
+
+    this.logger.log(
+      `OSINT response: ${String(response.status)} | source=${source.name} | ${String(responseTimeMs)}ms | dataExtracted=${String(data !== null && data !== undefined)}`
+    )
+
+    await this.agentConfigRepository.updateOsintSourceHealth(sourceId, tenantId, true, null)
+    this.logQuerySuccess(tenantId, sourceId, source.name, iocType, responseTimeMs)
+
+    return buildSuccessQueryResult(
+      sourceId, source.name, source.sourceType, data, finalData, response.status, responseTimeMs
+    )
+  }
+
+  private async handleQueryError(
+    error: unknown,
+    source: { name: string; sourceType: string },
+    sourceId: string,
+    tenantId: string,
+    iocType: string,
+    finalUrl: string,
+    startTime: number
+  ): Promise<OsintQueryResult> {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const statusCode = (error as { statusCode?: number }).statusCode ?? null
+    const responseTimeMs = Date.now() - startTime
+
+    this.logger.warn(
+      `OSINT error: source=${source.name} (${source.sourceType}) | url=${finalUrl} | status=${String(statusCode)} | ${String(responseTimeMs)}ms | error=${errorMessage}`
+    )
+
+    await this.agentConfigRepository.updateOsintSourceHealth(sourceId, tenantId, false, errorMessage)
+    this.logQueryFailure(tenantId, sourceId, source.name, iocType, errorMessage)
+
+    return buildErrorQueryResult(sourceId, source.name, source.sourceType, error, responseTimeMs)
+  }
+
+  // ─── Private: File Upload Pipeline ─────────────────────────────
+
+  private async executeFileUpload(
+    baseUrl: string,
+    headers: Record<string, string>,
+    form: unknown,
+    source: { name: string; sourceType: string; responsePath: string | null; timeout: number },
+    sourceId: string,
+    tenantId: string,
+    fileName: string,
+    startTime: number
+  ): Promise<OsintQueryResult> {
+    const response = await this.axiosService.fetch(`${baseUrl}/files`, {
+      method: HttpMethod.POST, headers, body: form, timeoutMs: source.timeout,
+    })
+    const responseTimeMs = Date.now() - startTime
+
+    if (response.status >= 400) {
+      return buildFailedQueryResult(sourceId, source.name, source.sourceType, `HTTP ${String(response.status)} from file upload`, responseTimeMs)
+    }
+
+    return this.buildFileUploadSuccess(response.data, source, sourceId, tenantId, fileName, responseTimeMs, response.status)
+  }
+
+  private buildFileUploadSuccess(
+    rawData: unknown,
+    source: { name: string; sourceType: string; responsePath: string | null },
+    sourceId: string, tenantId: string, fileName: string, responseTimeMs: number, status: number
+  ): OsintQueryResult {
+    const finalData = rawData
+    attachVtAnalysisUrl(finalData, source.sourceType, extractVtAnalysisUrl(rawData))
+    const data = extractResponseData(finalData, source.responsePath)
+    this.logFileUpload(true, source.name, tenantId, sourceId, fileName, responseTimeMs)
+
+    return buildSuccessQueryResult(sourceId, source.name, source.sourceType, data, finalData, status, responseTimeMs)
+  }
+
+  private handleFileUploadError(
+    error: unknown,
+    source: { name: string; sourceType: string },
+    sourceId: string,
+    tenantId: string,
+    fileName: string,
+    startTime: number
+  ): OsintQueryResult {
+    const responseTimeMs = Date.now() - startTime
+    const errorMessage = error instanceof Error ? error.message : 'File upload failed'
+
+    this.logFileUpload(false, source.name, tenantId, sourceId, fileName, responseTimeMs, errorMessage)
+
+    return buildFailedQueryResult(
+      sourceId, source.name, source.sourceType, errorMessage, responseTimeMs
+    )
+  }
+
+  // ─── Private: Batch Execution ──────────────────────────────────
+
   private async executeBatchedQueries(
     tenantId: string,
     iocType: string,
@@ -251,81 +422,13 @@ export class OsintExecutorService {
     if (remaining.length === 0) return results
 
     const remainingResults = await this.executeBatchedQueries(
-      tenantId,
-      iocType,
-      iocValue,
-      remaining
+      tenantId, iocType, iocValue, remaining
     )
     return [...results, ...remainingResults]
   }
 
-  /**
-   * Test an OSINT source by executing a real query with a safe test IoC.
-   * Returns the test result including status code, response time, and error info.
-   */
-  async testSource(sourceId: string, tenantId: string, actor: string): Promise<OsintTestResult> {
-    const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
-    if (!source) {
-      throw new BusinessException(
-        404,
-        'OSINT source not found',
-        'errors.agentConfig.osintSourceNotFound'
-      )
-    }
+  // ─── Private: Request Execution ────────────────────────────────
 
-    const testIocType = resolveTestIocType(source.sourceType)
-    const testIocValue = Reflect.get(OSINT_TEST_IOC_VALUES, testIocType) as string
-
-    const startTime = Date.now()
-    const queryResult = await this.querySource(tenantId, sourceId, testIocType, testIocValue)
-    const responseTime = Date.now() - startTime
-
-    this.appLogger.info(`OSINT source tested: ${source.name}`, {
-      feature: AppLogFeature.AI_CONFIG,
-      action: 'testOsintSource',
-      outcome: queryResult.success ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
-      tenantId,
-      actorEmail: actor,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'OsintExecutorService',
-      functionName: 'testSource',
-      metadata: { sourceId, sourceName: source.name, success: queryResult.success },
-    })
-
-    return {
-      success: queryResult.success,
-      statusCode: queryResult.statusCode ?? null,
-      responseTime,
-      error: queryResult.error,
-      messageKey: queryResult.messageKey ?? null,
-    }
-  }
-
-  // ─── Private Helpers ──────────────────────────────────────────
-
-  /**
-   * Check and enforce per-source rate limiting.
-   * Returns true if the request is allowed, false if rate-limited.
-   */
-  private checkRateLimit(sourceId: string): boolean {
-    const now = Date.now()
-    const entry = this.rateLimitMap.get(sourceId)
-    if (!entry || now > entry.resetAt) {
-      this.rateLimitMap.set(sourceId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
-      return true
-    }
-    if (entry.count >= DEFAULT_RATE_LIMIT_PER_MINUTE) {
-      return false
-    }
-    entry.count++
-    return true
-  }
-
-  /**
-   * Execute a request function with exponential backoff retry for transient errors.
-   * Retries on HTTP 429 (rate limited) and 5xx (server errors).
-   * Uses recursion instead of a loop to avoid await-in-loop lint warning.
-   */
   private async executeWithRetry(
     requestFunction: () => Promise<{ status: number; data: unknown }>,
     attempt = 0
@@ -345,6 +448,121 @@ export class OsintExecutorService {
       throw error
     }
   }
+
+  private async executeSourceRequest(
+    url: string,
+    method: string,
+    headers: Record<string, string>,
+    body: Record<string, unknown> | string | null,
+    timeoutMs: number
+  ): Promise<{ status: number; data: unknown }> {
+    const response = await this.axiosService.fetch(url, {
+      method: method === HttpMethod.POST ? HttpMethod.POST : HttpMethod.GET,
+      headers,
+      body: body ?? undefined,
+      timeoutMs,
+    })
+
+    if (response.status >= 400) {
+      this.logHttpError(method, url, response)
+      const messageKey = resolveHttpErrorMessageKey(response.status)
+      const error = new Error(`HTTP ${String(response.status)} response from OSINT source`)
+      Object.assign(error, { statusCode: response.status, messageKey })
+      throw error
+    }
+
+    return { status: response.status, data: response.data }
+  }
+
+  private async executePollAttempt(
+    analysisUrl: string,
+    getHeaders: Record<string, string>,
+    originalHeaders: Record<string, string>,
+    timeoutMs: number,
+    attempt: number
+  ): Promise<unknown> {
+    const maxPolls = 5
+    const response = await this.axiosService.fetch(analysisUrl, {
+      method: HttpMethod.GET,
+      headers: getHeaders,
+      timeoutMs,
+    })
+
+    if (response.status >= 400) {
+      this.logger.warn(`VT analysis poll failed: ${String(response.status)}`)
+      return this.pollVtAnalysis(analysisUrl, originalHeaders, timeoutMs, attempt + 1)
+    }
+
+    const status = extractVtPollStatus(response.data)
+
+    if (status === 'completed') {
+      return response.data
+    }
+
+    this.logger.log(
+      `VT analysis poll ${String(attempt + 1)}/${String(maxPolls)}: status=${status ?? 'unknown'}`
+    )
+    return this.pollVtAnalysis(analysisUrl, originalHeaders, timeoutMs, attempt + 1)
+  }
+
+  // ─── Private: Validation ───────────────────────────────────────
+
+  private validateAnalysisUrl(analysisUrl: string): void {
+    if (!analysisUrl || typeof analysisUrl !== 'string') {
+      throw new BusinessException(400, 'analysisUrl is required', 'errors.osint.analysisUrlRequired')
+    }
+    if (!analysisUrl.startsWith('https://www.virustotal.com/api/v3/analyses/')) {
+      throw new BusinessException(400, 'Invalid analysis URL', 'errors.osint.badRequest')
+    }
+  }
+
+  private validateFileUploadInput(file: Express.Multer.File, sourceId: string): void {
+    if (!file) {
+      throw new BusinessException(400, 'File is required', 'errors.osint.fileRequired')
+    }
+    if (!sourceId) {
+      throw new BusinessException(400, 'sourceId is required', 'errors.osint.sourceIdRequired')
+    }
+  }
+
+  private async findEnabledVtSource(
+    tenantId: string
+  ): Promise<{ encryptedApiKey: string | null; headerName: string | null; timeout: number }> {
+    const sources = await this.agentConfigRepository.findAllOsintSources(tenantId)
+    const vtSource = sources.find(s => s.sourceType === 'virustotal' && s.isEnabled)
+
+    if (!vtSource) {
+      throw new BusinessException(404, 'No enabled VirusTotal source', 'errors.osint.sourceNotFound')
+    }
+
+    return vtSource
+  }
+
+  private async findEnabledOsintSource(
+    sourceId: string,
+    tenantId: string
+  ): Promise<{
+    name: string
+    sourceType: string
+    baseUrl: string | null
+    encryptedApiKey: string | null
+    headerName: string | null
+    responsePath: string | null
+    timeout: number
+  }> {
+    const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
+
+    if (!source) {
+      throw new BusinessException(404, 'OSINT source not found', 'errors.osint.sourceNotFound')
+    }
+    if (!source.isEnabled) {
+      throw new BusinessException(403, 'OSINT source is disabled', 'errors.osint.sourceDisabled')
+    }
+
+    return source
+  }
+
+  // ─── Private: Helpers ──────────────────────────────────────────
 
   private decryptSourceApiKey(encryptedApiKey: string | null): string | null {
     if (!encryptedApiKey) {
@@ -367,35 +585,65 @@ export class OsintExecutorService {
     }
   }
 
-  private async executeSourceRequest(
-    url: string,
-    method: string,
-    headers: Record<string, string>,
-    body: Record<string, unknown> | string | null,
-    timeoutMs: number
-  ): Promise<{ status: number; data: unknown }> {
-    const response = await this.axiosService.fetch(url, {
-      method: method === HttpMethod.POST ? HttpMethod.POST : HttpMethod.GET,
-      headers,
-      body: body ?? undefined,
-      timeoutMs,
-    })
+  private checkRateLimit(sourceId: string): boolean {
+    const now = Date.now()
+    const entry = this.rateLimitMap.get(sourceId)
+    if (!entry || now > entry.resetAt) {
+      this.rateLimitMap.set(sourceId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+      return true
+    }
+    if (entry.count >= DEFAULT_RATE_LIMIT_PER_MINUTE) {
+      return false
+    }
+    entry.count++
+    return true
+  }
 
-    if (response.status >= 400) {
-      const responseBody =
-        typeof response.data === 'string'
-          ? response.data.slice(0, 500)
-          : JSON.stringify(response.data).slice(0, 500)
-      this.logger.warn(
-        `OSINT HTTP error: ${method} ${url} → ${String(response.status)} | body=${responseBody}`
-      )
-      const messageKey = resolveHttpErrorMessageKey(response.status)
-      const error = new Error(`HTTP ${String(response.status)} response from OSINT source`)
-      Object.assign(error, { statusCode: response.status, messageKey })
-      throw error
+  private async buildFileUploadRequest(
+    file: Express.Multer.File,
+    source: { headerName: string | null },
+    apiKey: string | null
+  ): Promise<{ form: unknown; headers: Record<string, string> }> {
+    const FormData = (await import('form-data')).default
+    const form = new FormData()
+    form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype })
+
+    const headers: Record<string, string> = { ...form.getHeaders() }
+    if (source.headerName && apiKey) {
+      headers[source.headerName] = apiKey
     }
 
-    return { status: response.status, data: response.data }
+    return { form, headers }
+  }
+
+  // ─── Private: Logging ──────────────────────────────────────────
+
+  private logOsintRequest(
+    requestConfig: OsintRequestConfig,
+    finalUrl: string,
+    source: { name: string; sourceType: string; authType: string },
+    iocType: string,
+    iocValue: string,
+    executionConfig: OsintSourceExecutionConfig
+  ): void {
+    const safeHeaders = redactSensitiveHeaders(requestConfig.headers)
+    this.logger.log(
+      `OSINT request: ${requestConfig.method} ${finalUrl} | source=${source.name} (${source.sourceType}) | ioc=${iocType}:${iocValue} | authType=${source.authType} | headers=${JSON.stringify(safeHeaders)} | hasBody=${String(requestConfig.body !== null)} | timeout=${String(executionConfig.timeout)}ms`
+    )
+  }
+
+  private logHttpError(
+    method: string,
+    url: string,
+    response: { status: number; data: unknown }
+  ): void {
+    const responseBody =
+      typeof response.data === 'string'
+        ? response.data.slice(0, 500)
+        : JSON.stringify(response.data).slice(0, 500)
+    this.logger.warn(
+      `OSINT HTTP error: ${method} ${url} → ${String(response.status)} | body=${responseBody}`
+    )
   }
 
   private logQuerySuccess(
@@ -458,298 +706,53 @@ export class OsintExecutorService {
     )
   }
 
-  /**
-   * Fetch VT analysis results from a given analysis URL.
-   * The frontend calls this when the initial response was an analysis stub.
-   * Validates the URL is a legitimate VT analysis URL to prevent SSRF.
-   */
-  async fetchAnalysisResults(tenantId: string, analysisUrl: string): Promise<unknown> {
-    if (!analysisUrl || typeof analysisUrl !== 'string') {
-      throw new BusinessException(
-        400,
-        'analysisUrl is required',
-        'errors.osint.analysisUrlRequired'
-      )
-    }
-    if (!analysisUrl.startsWith('https://www.virustotal.com/api/v3/analyses/')) {
-      throw new BusinessException(400, 'Invalid analysis URL', 'errors.osint.badRequest')
-    }
-
-    // Find a VT source for this tenant to get the API key
-    const sources = await this.agentConfigRepository.findAllOsintSources(tenantId)
-    const vtSource = sources.find(s => s.sourceType === 'virustotal' && s.isEnabled)
-
-    if (!vtSource) {
-      throw new BusinessException(
-        404,
-        'No enabled VirusTotal source',
-        'errors.osint.sourceNotFound'
-      )
-    }
-
-    const apiKey = this.decryptSourceApiKey(vtSource.encryptedApiKey)
-    if (!apiKey) {
-      throw new BusinessException(500, 'Failed to decrypt API key', 'errors.osint.authFailed')
-    }
-
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (vtSource.headerName) {
-      headers[vtSource.headerName] = apiKey
-    }
-
-    const response = await this.axiosService.fetch(analysisUrl, {
-      method: HttpMethod.GET,
-      headers,
-      timeoutMs: vtSource.timeout,
+  private logTestResult(
+    sourceName: string,
+    success: boolean,
+    tenantId: string,
+    actor: string,
+    sourceId: string
+  ): void {
+    this.appLogger.info(`OSINT source tested: ${sourceName}`, {
+      feature: AppLogFeature.AI_CONFIG,
+      action: 'testOsintSource',
+      outcome: success ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
+      tenantId,
+      actorEmail: actor,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OsintExecutorService',
+      functionName: 'testSource',
+      metadata: { sourceId, sourceName, success },
     })
-
-    if (response.status >= 400) {
-      throw new BusinessException(
-        response.status,
-        `VT analysis fetch failed: ${String(response.status)}`,
-        resolveHttpErrorMessageKey(response.status)
-      )
-    }
-
-    return response.data
   }
 
-  /**
-   * Extracts the VT analysis URL from a VT URL/file submission response.
-   * Only matches analysis stubs where data.type === "analysis".
-   * Direct results (data.type === "file" / "domain" / "ip_address") have
-   * data.attributes.last_analysis_results and should NOT be followed up.
-   */
-  private extractVtAnalysisUrl(responseData: unknown): string | null {
-    if (typeof responseData !== 'object' || responseData === null) {
-      return null
-    }
-
-    const data = Reflect.get(responseData as Record<string, unknown>, 'data')
-    if (typeof data !== 'object' || data === null) {
-      return null
-    }
-
-    const links = Reflect.get(data as Record<string, unknown>, 'links')
-    if (typeof links !== 'object' || links === null) {
-      return null
-    }
-
-    const selfUrl = Reflect.get(links as Record<string, unknown>, 'self')
-    if (typeof selfUrl !== 'string') {
-      return null
-    }
-
-    // Only /analyses/ URLs need polling — they are stubs from URL/file submissions.
-    // Direct results (/files/, /domains/, /ip_addresses/) already have full data.
-    return selfUrl.startsWith('https://www.virustotal.com/api/v3/analyses/') ? selfUrl : null
-  }
-
-  /**
-   * Polls the VT analysis endpoint until the analysis is complete or timeout.
-   * VT analysis takes a few seconds to complete — we poll up to 5 times with 3s delay.
-   * Uses recursion instead of a loop to avoid await-in-loop lint warning.
-   */
-  private async pollVtAnalysis(
-    analysisUrl: string,
-    headers: Record<string, string>,
-    timeoutMs: number,
-    attempt = 0
-  ): Promise<unknown> {
-    const maxPolls = 5
-    const pollDelayMs = 3_000
-
-    if (attempt >= maxPolls) {
-      this.logger.warn('VT analysis polling timed out — returning last known state')
-      return {
-        status: 'queued',
-        message: 'Analysis still in progress. Check VT dashboard for results.',
-      }
-    }
-
-    const getHeaders = { ...headers }
-    delete getHeaders['Content-Type']
-
-    await new Promise<void>(resolve => {
-      setTimeout(resolve, pollDelayMs)
-    })
-
-    try {
-      const response = await this.axiosService.fetch(analysisUrl, {
-        method: HttpMethod.GET,
-        headers: getHeaders,
-        timeoutMs,
-      })
-
-      if (response.status >= 400) {
-        this.logger.warn(`VT analysis poll failed: ${String(response.status)}`)
-        return this.pollVtAnalysis(analysisUrl, headers, timeoutMs, attempt + 1)
-      }
-
-      const data = Reflect.get((response.data as Record<string, unknown>) ?? {}, 'data') as
-        | Record<string, unknown>
-        | undefined
-
-      const attributes = data
-        ? (Reflect.get(data, 'attributes') as Record<string, unknown> | undefined)
-        : undefined
-
-      const status = attributes
-        ? (Reflect.get(attributes, 'status') as string | undefined)
-        : undefined
-
-      if (status === 'completed') {
-        return response.data
-      }
-
-      this.logger.log(
-        `VT analysis poll ${String(attempt + 1)}/${String(maxPolls)}: status=${status ?? 'unknown'}`
-      )
-      return this.pollVtAnalysis(analysisUrl, headers, timeoutMs, attempt + 1)
-    } catch (error: unknown) {
-      this.logger.warn(
-        `VT analysis poll error: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-      return this.pollVtAnalysis(analysisUrl, headers, timeoutMs, attempt + 1)
-    }
-  }
-
-  /**
-   * Upload a file to a VirusTotal-compatible OSINT source for scanning.
-   * Sends the file as multipart/form-data to the source's /files endpoint.
-   */
-  async uploadFileForScan(
+  private logFileUpload(
+    success: boolean,
+    sourceName: string,
     tenantId: string,
     sourceId: string,
-    file: Express.Multer.File
-  ): Promise<OsintQueryResult> {
-    if (!file) {
-      throw new BusinessException(400, 'File is required', 'errors.osint.fileRequired')
-    }
-    if (!sourceId) {
-      throw new BusinessException(400, 'sourceId is required', 'errors.osint.sourceIdRequired')
-    }
-
-    const startTime = Date.now()
-    const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
-
-    if (!source) {
-      throw new BusinessException(404, 'OSINT source not found', 'errors.osint.sourceNotFound')
-    }
-
-    if (!source.isEnabled) {
-      throw new BusinessException(403, 'OSINT source is disabled', 'errors.osint.sourceDisabled')
-    }
-
-    const apiKey = this.decryptSourceApiKey(source.encryptedApiKey)
-    const baseUrl = (source.baseUrl ?? '').replace(/\/+$/, '')
-
-    const FormData = (await import('form-data')).default
-    const form = new FormData()
-    form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype })
-
-    const headers: Record<string, string> = {
-      ...form.getHeaders(),
-    }
-
-    if (source.headerName && apiKey) {
-      headers[source.headerName] = apiKey
-    }
-
-    try {
-      const response = await this.axiosService.fetch(`${baseUrl}/files`, {
-        method: HttpMethod.POST,
-        headers,
-        body: form,
-        timeoutMs: source.timeout,
-      })
-
-      const responseTimeMs = Date.now() - startTime
-
-      if (response.status >= 400) {
-        return buildFailedQueryResult(
-          sourceId,
-          source.name,
-          source.sourceType,
-          `HTTP ${String(response.status)} from file upload`,
-          responseTimeMs
-        )
-      }
-
-      // VT file uploads return an analysis stub (data.type === "analysis")
-      // Poll the analysis URL to get the actual scan results
-      let finalData = response.data
-      let didPollAnalysis = false
-      const analysisUrl = this.extractVtAnalysisUrl(response.data)
-      if (analysisUrl) {
-        this.logger.log(`VT file analysis stub detected — polling: ${analysisUrl}`)
-        const authHeaders: Record<string, string> = {}
-        if (source.headerName && apiKey) {
-          authHeaders[source.headerName] = apiKey
-        }
-        finalData = await this.pollVtAnalysis(analysisUrl, authHeaders, source.timeout)
-        didPollAnalysis = true
-      }
-
-      // Skip responsePath extraction for polled results — different structure
-      const data = didPollAnalysis ? finalData : extractResponseData(finalData, source.responsePath)
-
-      this.appLogger.info(`OSINT file upload succeeded: ${source.name}`, {
+    fileName: string,
+    responseTimeMs: number,
+    errorMessage?: string
+  ): void {
+    this.appLogger.info(
+      `OSINT file upload ${success ? 'succeeded' : 'failed'}: ${sourceName}`,
+      {
         feature: AppLogFeature.AI_CONFIG,
         action: 'osintFileUpload',
-        outcome: AppLogOutcome.SUCCESS,
+        outcome: success ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
         tenantId,
         sourceType: AppLogSourceType.SERVICE,
         className: 'OsintExecutorService',
         functionName: 'uploadFileForScan',
         metadata: {
           sourceId,
-          sourceName: source.name,
-          fileName: file.originalname,
+          sourceName,
+          fileName,
           responseTimeMs,
+          ...(errorMessage ? { error: errorMessage } : {}),
         },
-      })
-
-      return {
-        sourceId,
-        sourceName: source.name,
-        sourceType: source.sourceType,
-        success: true,
-        data: truncateResponseData(data),
-        rawResponse: truncateResponseData(finalData),
-        error: null,
-        statusCode: response.status,
-        messageKey: null,
-        responseTimeMs,
-        queriedAt: new Date().toISOString(),
       }
-    } catch (error: unknown) {
-      const responseTimeMs = Date.now() - startTime
-      const errorMessage = error instanceof Error ? error.message : 'File upload failed'
-
-      this.appLogger.info(`OSINT file upload failed: ${source.name}`, {
-        feature: AppLogFeature.AI_CONFIG,
-        action: 'osintFileUpload',
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'OsintExecutorService',
-        functionName: 'uploadFileForScan',
-        metadata: {
-          sourceId,
-          sourceName: source.name,
-          fileName: file.originalname,
-          error: errorMessage,
-        },
-      })
-
-      return buildFailedQueryResult(
-        sourceId,
-        source.name,
-        source.sourceType,
-        errorMessage,
-        responseTimeMs
-      )
-    }
+    )
   }
 }

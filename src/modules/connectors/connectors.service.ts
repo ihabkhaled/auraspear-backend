@@ -4,6 +4,7 @@ import { ConnectorsRepository } from './connectors.repository'
 import {
   buildConnectorStats,
   buildConnectorUpdateData,
+  buildNewConnectorResponse,
   extractUrlFields,
   mapConnectorToResponse,
   mergeConfigWithRedacted,
@@ -60,13 +61,20 @@ export class ConnectorsService {
     private readonly openClawGatewayService: OpenClawGatewayService,
     private readonly appLogger: AppLoggerService
   ) {
+    this.encryptionKey = this.validateEncryptionKey()
+    this.testServiceMap = this.buildTestServiceMap()
+  }
+
+  private validateEncryptionKey(): string {
     const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
     if (key?.length !== 64 || !/^[\da-f]+$/i.test(key)) {
       throw new Error('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
     }
-    this.encryptionKey = key
+    return key
+  }
 
-    this.testServiceMap = new Map<string, ConnectorTestable>([
+  private buildTestServiceMap(): Map<string, ConnectorTestable> {
+    return new Map<string, ConnectorTestable>([
       ['wazuh', this.wazuhService],
       ['graylog', this.graylogService],
       ['logstash', this.logstashService],
@@ -139,16 +147,7 @@ export class ConnectorsService {
       connectorName: dto.name,
       authType: dto.authType,
     })
-    return {
-      type: config.type,
-      name: config.name,
-      enabled: config.enabled,
-      authType: config.authType,
-      config: maskSecrets(validatedConfig),
-      lastTestAt: null,
-      lastTestOk: null,
-      lastError: null,
-    }
+    return buildNewConnectorResponse(config, maskSecrets(validatedConfig))
   }
 
   /* ---------------------------------------------------------------- */
@@ -356,43 +355,43 @@ export class ConnectorsService {
     tenantId: string
   ): Promise<{ ok: boolean; details: string; latencyMs: number }> {
     const start = Date.now()
-    let ok = false
-    let details = ''
+    const service = this.testServiceMap.get(type)
 
-    try {
-      const service = this.testServiceMap.get(type)
-      if (service) {
-        const { ok: resultOk, details: resultDetails } = await service.testConnection(config)
-        ok = resultOk
-        details = resultDetails
-      } else {
-        details = `Unknown connector type: ${type}`
-      }
-    } catch (error) {
-      details = sanitizeErrorDetails(error)
-      const errorMessage = error instanceof Error ? error.message : 'unknown'
-      const latencyMs = Date.now() - start
-      this.logger.error(
-        `Connector ${type} test failed for tenant ${tenantId} after ${latencyMs}ms: ${errorMessage}`
-      )
-      this.appLogger.error(`Connector ${type} connection test failed`, {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'ConnectorsService',
-        functionName: 'runConnectionTest',
-        tenantId,
-        metadata: {
-          connectorType: type,
-          error: errorMessage,
-          latencyMs,
-        },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
+    if (!service) {
+      return { ok: false, details: `Unknown connector type: ${type}`, latencyMs: Date.now() - start }
     }
 
-    return { ok, details, latencyMs: Date.now() - start }
+    try {
+      const { ok, details } = await service.testConnection(config)
+      return { ok, details, latencyMs: Date.now() - start }
+    } catch (error) {
+      const details = sanitizeErrorDetails(error)
+      this.logConnectionTestError(type, tenantId, error, Date.now() - start)
+      return { ok: false, details, latencyMs: Date.now() - start }
+    }
+  }
+
+  private logConnectionTestError(
+    type: string,
+    tenantId: string,
+    error: unknown,
+    latencyMs: number
+  ): void {
+    const errorMessage = error instanceof Error ? error.message : 'unknown'
+    this.logger.error(
+      `Connector ${type} test failed for tenant ${tenantId} after ${latencyMs}ms: ${errorMessage}`
+    )
+    this.appLogger.error(`Connector ${type} connection test failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'ConnectorsService',
+      functionName: 'runConnectionTest',
+      tenantId,
+      metadata: { connectorType: type, error: errorMessage, latencyMs },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
   }
 
   /* ---------------------------------------------------------------- */
@@ -400,26 +399,30 @@ export class ConnectorsService {
   /* ---------------------------------------------------------------- */
 
   private decryptConfig(encryptedConfig: string): Record<string, unknown> {
-    let config: Record<string, unknown>
+    const config = this.parseOrDecryptConfig(encryptedConfig)
+    if (!config) {
+      this.logger.warn('Failed to decrypt connector config, returning empty')
+      this.logWarn('decryptConfig', '', '')
+      return {}
+    }
+    return normalizeConnectorConfig(config)
+  }
 
+  private parseOrDecryptConfig(encryptedConfig: string): Record<string, unknown> | null {
     try {
       const raw = JSON.parse(encryptedConfig) as Record<string, unknown>
       if ('placeholder' in raw) return raw
-      config = raw
+      return raw
     } catch {
       // Not plain JSON — try decrypting
-      try {
-        const decrypted = decrypt(encryptedConfig, this.encryptionKey)
-        config = JSON.parse(decrypted) as Record<string, unknown>
-      } catch {
-        this.logger.warn('Failed to decrypt connector config, returning empty')
-        this.logWarn('decryptConfig', '', '')
-        return {}
-      }
     }
 
-    // Normalize deprecated keys (verifyTLS → verifyTls, mispAuthKey → authKey, etc.)
-    return normalizeConnectorConfig(config)
+    try {
+      const decrypted = decrypt(encryptedConfig, this.encryptionKey)
+      return JSON.parse(decrypted) as Record<string, unknown>
+    } catch {
+      return null
+    }
   }
 
   /* ---------------------------------------------------------------- */

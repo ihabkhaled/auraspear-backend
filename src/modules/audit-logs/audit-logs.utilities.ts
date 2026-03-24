@@ -1,0 +1,75 @@
+import { SortOrder } from '../../common/enums'
+import { toSortOrder } from '../../common/utils/query.utility'
+import type { CreateAuditLogData } from './audit-logs.types'
+import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
+import type { Prisma } from '@prisma/client'
+
+export function buildAuditLogsWhereClause(
+  tenantId: string,
+  query: SearchAuditLogsDto
+): Prisma.AuditLogWhereInput {
+  const where: Prisma.AuditLogWhereInput = { tenantId }
+
+  if (query.actor) {
+    where.actor = { contains: query.actor, mode: 'insensitive' }
+  }
+
+  if (query.action) {
+    where.action = query.action
+  }
+
+  if (query.resource) {
+    where.resource = query.resource
+  }
+
+  if (query.from || query.to) {
+    const dateFilter: Prisma.DateTimeFilter = {}
+
+    if (query.from) {
+      dateFilter.gte = new Date(query.from)
+    }
+
+    if (query.to) {
+      dateFilter.lte = new Date(query.to)
+    }
+
+    where.createdAt = dateFilter
+  }
+
+  return where
+}
+
+export function buildAuditLogsOrderBy(
+  sortBy?: string,
+  sortOrder?: string
+): Prisma.AuditLogOrderByWithRelationInput {
+  const order = toSortOrder(sortOrder)
+
+  switch (sortBy) {
+    case 'createdAt':
+      return { createdAt: order }
+    case 'actor':
+      return { actor: order }
+    case 'action':
+      return { action: order }
+    case 'resource':
+      return { resource: order }
+    default:
+      return { createdAt: SortOrder.DESC }
+  }
+}
+
+export function buildAuditLogCreateInput(
+  data: CreateAuditLogData
+): Prisma.AuditLogUncheckedCreateInput {
+  return {
+    tenantId: data.tenantId,
+    actor: data.actor,
+    role: data.role,
+    action: data.action,
+    resource: data.resource,
+    resourceId: data.resourceId ?? null,
+    details: data.details ?? null,
+    ipAddress: data.ipAddress ?? null,
+  }
+}

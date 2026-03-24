@@ -81,6 +81,9 @@ describe('TokenBlacklistService', () => {
         'Failed to blacklist token',
         expect.objectContaining({
           action: 'blacklist',
+          className: 'TokenBlacklistService',
+          functionName: 'blacklist',
+          sourceType: 'service',
           stackTrace: expect.stringContaining('ECONNREFUSED'),
         })
       )
@@ -95,7 +98,9 @@ describe('TokenBlacklistService', () => {
         'Failed to blacklist token',
         expect.objectContaining({
           action: 'blacklist',
-          stackTrace: undefined,
+          className: 'TokenBlacklistService',
+          functionName: 'blacklist',
+          sourceType: 'service',
         })
       )
     })

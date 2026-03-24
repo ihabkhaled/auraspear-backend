@@ -7,3 +7,14 @@ export interface ErrorResponse {
   timestamp: string
   path: string
 }
+
+export interface ParsedExceptionResult {
+  status: number
+  message: string | string[]
+  error: string
+  messageKey: string | undefined
+  errors: string[] | undefined
+  logAction: 'none' | 'warn' | 'error' | 'errorWithStack' | 'unknownError'
+  logMessage: string | undefined
+  logStack: string | undefined
+}

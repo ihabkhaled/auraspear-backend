@@ -1,4 +1,4 @@
-import { Permission } from '../../common/enums'
+import { Permission, UserSessionBrowser } from '../../common/enums'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 
 export const USERS_CONTROL_MODULE = 'usersControl'
@@ -25,3 +25,12 @@ export const USERS_CONTROL_ASSIGNABLE_ROLES = [
   UserRole.GLOBAL_ADMIN,
   UserRole.TENANT_ADMIN,
 ] as const
+
+export const BROWSER_PATTERNS: ReadonlyArray<readonly [RegExp, UserSessionBrowser]> = [
+  [/SamsungBrowser/i, UserSessionBrowser.SAMSUNG_INTERNET],
+  [/Edg/i, UserSessionBrowser.EDGE],
+  [/OPR|Opera/i, UserSessionBrowser.OPERA],
+  [/Firefox/i, UserSessionBrowser.FIREFOX],
+  [/Chrome|CriOS/i, UserSessionBrowser.CHROME],
+  [/Safari/i, UserSessionBrowser.SAFARI],
+]

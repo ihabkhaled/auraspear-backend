@@ -1,12 +1,11 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import * as bcrypt from 'bcryptjs'
 import {
-  AUTH_BCRYPT_SALT_ROUNDS,
   PLATFORM_ADMIN_EMAIL,
   PLATFORM_ADMIN_NAME,
 } from './auth.constants'
 import { PlatformAdminBootstrapRepository } from './platform-admin-bootstrap.repository'
+import { resolvePasswordHash } from './platform-admin-bootstrap.utilities'
 
 @Injectable()
 export class PlatformAdminBootstrapService implements OnModuleInit {
@@ -31,20 +30,10 @@ export class PlatformAdminBootstrapService implements OnModuleInit {
     }
 
     const existingAdmin = await this.repository.findPlatformAdminByEmail(PLATFORM_ADMIN_EMAIL)
-    const existingPasswordHash = existingAdmin?.passwordHash
-    let passwordHash: string
-
-    if (existingPasswordHash === undefined || existingPasswordHash === null) {
-      passwordHash = await bcrypt.hash(configuredPassword, AUTH_BCRYPT_SALT_ROUNDS)
-    } else {
-      const matchesConfiguredPassword = await bcrypt.compare(
-        configuredPassword,
-        existingPasswordHash
-      )
-      passwordHash = matchesConfiguredPassword
-        ? existingPasswordHash
-        : await bcrypt.hash(configuredPassword, AUTH_BCRYPT_SALT_ROUNDS)
-    }
+    const passwordHash = await resolvePasswordHash(
+      configuredPassword,
+      existingAdmin?.passwordHash
+    )
 
     const platformAdmin = await this.repository.upsertPlatformAdmin({
       email: PLATFORM_ADMIN_EMAIL,
@@ -53,11 +42,14 @@ export class PlatformAdminBootstrapService implements OnModuleInit {
     })
 
     await this.repository.upsertUserPreference(platformAdmin.id)
+    await this.ensureMembershipsForAllTenants(platformAdmin.id)
+  }
 
+  private async ensureMembershipsForAllTenants(userId: string): Promise<void> {
     const tenantIds = await this.repository.findAllTenantIds()
     await Promise.all(
       tenantIds.map(tenantId =>
-        this.repository.upsertGlobalAdminMembership(platformAdmin.id, tenantId)
+        this.repository.upsertGlobalAdminMembership(userId, tenantId)
       )
     )
 

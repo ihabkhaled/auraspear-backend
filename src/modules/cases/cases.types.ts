@@ -82,6 +82,18 @@ export interface MentionableUser {
   email: string
 }
 
+export interface AddCommentResult {
+  id: string
+  caseId: string
+  authorId: string
+  body: string
+  isEdited: boolean
+  isDeleted: boolean
+  createdAt: Date
+  updatedAt: Date
+  mentions: Array<{ userId: string }>
+}
+
 export interface CaseStats {
   total: number
   open: number

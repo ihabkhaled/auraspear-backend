@@ -75,36 +75,48 @@ export function buildIncidentUpdateData(
   existingStatus: string,
   existingResolvedAt: Date | null
 ): Record<string, unknown> {
-  const updateData: Record<string, unknown> = {}
+  const updateData = collectDefinedFields(dto)
+  applyResolvedAtTransition(updateData, dto.status, existingResolvedAt)
+  return updateData
+}
 
-  if (dto.title !== undefined) updateData['title'] = dto.title
-  if (dto.description !== undefined) updateData['description'] = dto.description
-  if (dto.severity !== undefined) updateData['severity'] = dto.severity
-  if (dto.status !== undefined) updateData['status'] = dto.status
-  if (dto.category !== undefined) updateData['category'] = dto.category
-  if (dto.assigneeId !== undefined) updateData['assigneeId'] = dto.assigneeId
-  if (dto.linkedAlertIds !== undefined) updateData['linkedAlertIds'] = dto.linkedAlertIds
-  if (dto.linkedCaseId !== undefined) updateData['linkedCaseId'] = dto.linkedCaseId
-  if (dto.mitreTactics !== undefined) updateData['mitreTactics'] = dto.mitreTactics
-  if (dto.mitreTechniques !== undefined) updateData['mitreTechniques'] = dto.mitreTechniques
+function collectDefinedFields(dto: UpdateIncidentDto): Record<string, unknown> {
+  const dtoMap = new Map<string, unknown>(Object.entries(dto))
+  const result = new Map<string, unknown>()
+  const fieldNames: Array<keyof UpdateIncidentDto> = [
+    'title', 'description', 'severity', 'status', 'category',
+    'assigneeId', 'linkedAlertIds', 'linkedCaseId', 'mitreTactics', 'mitreTechniques',
+  ]
 
-  // Handle resolvedAt for status transitions
+  for (const field of fieldNames) {
+    const value = dtoMap.get(field)
+    if (value !== undefined) {
+      result.set(field, value)
+    }
+  }
+
+  return Object.fromEntries(result)
+}
+
+function applyResolvedAtTransition(
+  updateData: Record<string, unknown>,
+  status: string | undefined,
+  existingResolvedAt: Date | null
+): void {
   if (
-    (dto.status === IncidentStatus.RESOLVED || dto.status === IncidentStatus.CLOSED) &&
+    (status === IncidentStatus.RESOLVED || status === IncidentStatus.CLOSED) &&
     !existingResolvedAt
   ) {
     updateData['resolvedAt'] = new Date()
   }
-  // Clear resolvedAt if re-opening
+
   if (
-    dto.status === IncidentStatus.OPEN ||
-    dto.status === IncidentStatus.IN_PROGRESS ||
-    dto.status === IncidentStatus.CONTAINED
+    status === IncidentStatus.OPEN ||
+    status === IncidentStatus.IN_PROGRESS ||
+    status === IncidentStatus.CONTAINED
   ) {
     updateData['resolvedAt'] = null
   }
-
-  return updateData
 }
 
 /* ---------------------------------------------------------------- */
@@ -127,7 +139,24 @@ export function describeIncidentChanges(
     return `Status changed from ${existing.status} to ${dto.status} by ${actorLabel}`
   }
 
+  const changes = collectFieldChanges(dto, existing)
+
+  return changes.length > 0
+    ? `Incident updated by ${actorLabel}: ${changes.join(', ')}`
+    : `Incident updated by ${actorLabel}`
+}
+
+function collectFieldChanges(
+  dto: UpdateIncidentDto,
+  existing: {
+    title: string
+    description: string | null
+    severity: string
+    category: string
+  }
+): string[] {
   const changes: string[] = []
+
   if (dto.title !== undefined && dto.title !== existing.title) {
     changes.push(`title changed to "${dto.title}"`)
   }
@@ -144,9 +173,7 @@ export function describeIncidentChanges(
     changes.push('assignee updated')
   }
 
-  return changes.length > 0
-    ? `Incident updated by ${actorLabel}: ${changes.join(', ')}`
-    : `Incident updated by ${actorLabel}`
+  return changes
 }
 
 /* ---------------------------------------------------------------- */

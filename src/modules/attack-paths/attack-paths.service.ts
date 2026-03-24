@@ -111,25 +111,8 @@ export class AttackPathsService {
       },
     })
 
-    this.appLogger.info('Attack path created', {
-      feature: AppLogFeature.ATTACK_PATHS,
-      action: 'createPath',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AttackPath',
-      targetResourceId: result.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AttackPathsService',
-      functionName: 'createPath',
-      metadata: { pathNumber: result.pathNumber, severity: result.severity },
-    })
-
-    return {
-      ...result,
-      tenantName: result.tenant.name,
-    }
+    this.logSuccess('createPath', user.tenantId, { pathNumber: result.pathNumber, severity: result.severity })
+    return { ...result, tenantName: result.tenant.name }
   }
 
   /* ---------------------------------------------------------------- */
@@ -149,32 +132,10 @@ export class AttackPathsService {
     })
 
     if (updated.count === 0) {
-      this.appLogger.warn('Attack path not found during update', {
-        feature: AppLogFeature.ATTACK_PATHS,
-        action: 'updatePath',
-        className: 'AttackPathsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        metadata: { attackPathId: id },
-      })
       throw new BusinessException(404, `Attack path ${id} not found`, 'errors.attackPaths.notFound')
     }
 
-    this.appLogger.info('Attack path updated', {
-      feature: AppLogFeature.ATTACK_PATHS,
-      action: 'updatePath',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AttackPath',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AttackPathsService',
-      functionName: 'updatePath',
-    })
-
+    this.logSuccess('updatePath', user.tenantId, { attackPathId: id })
     return this.getPathById(id, user.tenantId)
   }
 
@@ -187,21 +148,26 @@ export class AttackPathsService {
 
     await this.repository.deleteMany({ id, tenantId })
 
-    this.appLogger.info(`Attack path ${existing.pathNumber} deleted`, {
+    this.logSuccess('deletePath', tenantId, { attackPathId: id, pathNumber: existing.pathNumber, actorEmail: actor })
+    return { deleted: true }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* LOGGING HELPERS                                                    */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.info(`AttackPath: ${action}`, {
       feature: AppLogFeature.ATTACK_PATHS,
-      action: 'deletePath',
+      action,
       outcome: AppLogOutcome.SUCCESS,
       tenantId,
-      actorEmail: actor,
       targetResource: 'AttackPath',
-      targetResourceId: id,
       sourceType: AppLogSourceType.SERVICE,
       className: 'AttackPathsService',
-      functionName: 'deletePath',
-      metadata: { pathNumber: existing.pathNumber },
+      functionName: action,
+      metadata,
     })
-
-    return { deleted: true }
   }
 
   /* ---------------------------------------------------------------- */

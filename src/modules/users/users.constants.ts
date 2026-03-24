@@ -23,3 +23,25 @@ export const DEFAULT_PREFERENCES = {
   retentionIncidents: '365',
   retentionAuditLogs: '365',
 }
+
+export const PREFERENCE_FIELD_KEYS: ReadonlyArray<keyof typeof DEFAULT_PREFERENCES> = [
+  'theme',
+  'language',
+  'dashboardDensity',
+  'collapsedDashboardPanels',
+  'notificationsEmail',
+  'notificationsInApp',
+  'notifyCriticalAlerts',
+  'notifyHighAlerts',
+  'notifyCaseAssignments',
+  'notifyIncidentUpdates',
+  'notifyComplianceAlerts',
+  'notifyCaseUpdates',
+  'notifyCaseComments',
+  'notifyCaseActivity',
+  'notifyUserManagement',
+  'retentionAlerts',
+  'retentionLogs',
+  'retentionIncidents',
+  'retentionAuditLogs',
+]

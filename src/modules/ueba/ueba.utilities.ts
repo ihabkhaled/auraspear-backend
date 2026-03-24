@@ -123,6 +123,37 @@ export function buildModelListWhere(
   return where
 }
 
+/* ---------------------------------------------------------------- */
+/* RECORD MAPPING                                                    */
+/* ---------------------------------------------------------------- */
+
+export function mapEntityWithCount(entity: {
+  _count: { anomalies: number }
+  [key: string]: unknown
+}): Record<string, unknown> & { anomalyCount: number } {
+  const { _count, ...rest } = entity
+  return {
+    ...rest,
+    anomalyCount: _count.anomalies,
+  }
+}
+
+export function mapAnomalyWithEntity(anomaly: {
+  entity: { entityName: string; entityType: string }
+  [key: string]: unknown
+}): Record<string, unknown> & { entityName: string; entityType: string } {
+  const { entity, ...rest } = anomaly
+  return {
+    ...rest,
+    entityName: entity.entityName,
+    entityType: entity.entityType,
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* ML MODEL QUERY BUILDING                                           */
+/* ---------------------------------------------------------------- */
+
 export function buildModelOrderBy(
   sortBy?: string,
   sortOrder?: string

@@ -1,4 +1,14 @@
+import * as connectorsUtilities from '../../src/modules/connectors/connectors.utilities'
 import { BedrockService } from '../../src/modules/connectors/services/bedrock.service'
+
+jest.mock('../../src/modules/connectors/connectors.utilities', () => ({
+  ...jest.requireActual('../../src/modules/connectors/connectors.utilities'),
+  loadAwsBedrockSdk: jest.fn(),
+}))
+
+const mockLoadAwsBedrockSdk = connectorsUtilities.loadAwsBedrockSdk as jest.MockedFunction<
+  typeof connectorsUtilities.loadAwsBedrockSdk
+>
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -44,12 +54,22 @@ function encodeBody(body: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(body))
 }
 
+function mockSdkWith(sendResult: MockSendResult) {
+  const { MockBedrockRuntimeClient, MockInvokeModelCommand, mockSend } = buildMockSdk(sendResult)
+
+  mockLoadAwsBedrockSdk.mockResolvedValue({
+    BedrockRuntimeClient: MockBedrockRuntimeClient,
+    InvokeModelCommand: MockInvokeModelCommand,
+  } as never)
+
+  return { MockBedrockRuntimeClient, MockInvokeModelCommand, mockSend }
+}
+
 describe('BedrockService', () => {
   let service: BedrockService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    jest.restoreAllMocks()
     service = createService()
   })
 
@@ -60,14 +80,7 @@ describe('BedrockService', () => {
   describe('testConnection', () => {
     it('should return ok: true when Bedrock is accessible', async () => {
       const responseBody = { stop_reason: 'end_turn' }
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
-        body: encodeBody(responseBody),
-      })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
+      mockSdkWith({ body: encodeBody(responseBody) })
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -79,14 +92,9 @@ describe('BedrockService', () => {
     })
 
     it('should use default region when not specified', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockBedrockRuntimeClient } = mockSdkWith({
         body: encodeBody({ stop_reason: 'end_turn' }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const config = {
         accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
@@ -103,14 +111,9 @@ describe('BedrockService', () => {
     })
 
     it('should use default model when not specified', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({ stop_reason: 'ok' }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const config = {
         accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
@@ -154,14 +157,7 @@ describe('BedrockService', () => {
     })
 
     it('should handle missing stop_reason in response', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
-        body: encodeBody({}),
-      })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
+      mockSdkWith({ body: encodeBody({}) })
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -170,13 +166,11 @@ describe('BedrockService', () => {
     })
 
     it('should handle AWS SDK errors gracefully', async () => {
-      jest
-        .spyOn(service as never, 'loadAwsSdk')
-        .mockRejectedValue(
-          new Error(
-            '@aws-sdk/client-bedrock-runtime is not installed. Run: npm install @aws-sdk/client-bedrock-runtime'
-          )
+      mockLoadAwsBedrockSdk.mockRejectedValue(
+        new Error(
+          '@aws-sdk/client-bedrock-runtime is not installed. Run: npm install @aws-sdk/client-bedrock-runtime'
         )
+      )
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -184,9 +178,9 @@ describe('BedrockService', () => {
     })
 
     it('should detect missing SDK module and return install instructions', async () => {
-      jest
-        .spyOn(service as never, 'loadAwsSdk')
-        .mockRejectedValue(new Error('Cannot find module @aws-sdk/client-bedrock-runtime'))
+      mockLoadAwsBedrockSdk.mockRejectedValue(
+        new Error('Cannot find module @aws-sdk/client-bedrock-runtime')
+      )
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -196,8 +190,7 @@ describe('BedrockService', () => {
     })
 
     it('should detect MODULE_NOT_FOUND error and return install instructions', async () => {
-      const moduleError = new Error('MODULE_NOT_FOUND')
-      jest.spyOn(service as never, 'loadAwsSdk').mockRejectedValue(moduleError)
+      mockLoadAwsBedrockSdk.mockRejectedValue(new Error('MODULE_NOT_FOUND'))
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -206,7 +199,7 @@ describe('BedrockService', () => {
     })
 
     it('should handle non-Error thrown values', async () => {
-      jest.spyOn(service as never, 'loadAwsSdk').mockRejectedValue('unknown error')
+      mockLoadAwsBedrockSdk.mockRejectedValue('unknown error')
 
       const result = await service.testConnection(VALID_CONFIG)
 
@@ -222,7 +215,7 @@ describe('BedrockService', () => {
       const mockSend = jest.fn().mockRejectedValue(new Error('AccessDeniedException'))
       MockBedrockRuntimeClient.mockImplementation(() => ({ send: mockSend }))
 
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
+      mockLoadAwsBedrockSdk.mockResolvedValue({
         BedrockRuntimeClient: MockBedrockRuntimeClient,
         InvokeModelCommand: MockInvokeModelCommand,
       } as never)
@@ -234,14 +227,7 @@ describe('BedrockService', () => {
     })
 
     it('should log success on successful connection', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
-        body: encodeBody({ stop_reason: 'end_turn' }),
-      })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
+      mockSdkWith({ body: encodeBody({ stop_reason: 'end_turn' }) })
 
       await service.testConnection(VALID_CONFIG)
 
@@ -257,7 +243,7 @@ describe('BedrockService', () => {
     })
 
     it('should log error on failed connection', async () => {
-      jest.spyOn(service as never, 'loadAwsSdk').mockRejectedValue(new Error('Network failure'))
+      mockLoadAwsBedrockSdk.mockRejectedValue(new Error('Network failure'))
 
       await service.testConnection(VALID_CONFIG)
 
@@ -273,14 +259,9 @@ describe('BedrockService', () => {
     })
 
     it('should pass credentials to BedrockRuntimeClient', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockBedrockRuntimeClient } = mockSdkWith({
         body: encodeBody({ stop_reason: 'end_turn' }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.testConnection(VALID_CONFIG)
 
@@ -294,14 +275,9 @@ describe('BedrockService', () => {
     })
 
     it('should send a minimal test prompt with max_tokens 10', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({ stop_reason: 'end_turn' }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.testConnection(VALID_CONFIG)
 
@@ -325,14 +301,7 @@ describe('BedrockService', () => {
         content: [{ text: 'Hello, this is the response.' }],
         usage: { input_tokens: 5, output_tokens: 12 },
       }
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
-        body: encodeBody(responseBody),
-      })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
+      mockSdkWith({ body: encodeBody(responseBody) })
 
       const result = await service.invoke(VALID_CONFIG, 'Tell me about security')
 
@@ -342,17 +311,12 @@ describe('BedrockService', () => {
     })
 
     it('should use default maxTokens of 1024', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({
           content: [{ text: 'Response' }],
           usage: { input_tokens: 3, output_tokens: 1 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.invoke(VALID_CONFIG, 'Hello')
 
@@ -364,17 +328,12 @@ describe('BedrockService', () => {
     })
 
     it('should use custom maxTokens when provided', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({
           content: [{ text: 'Response' }],
           usage: { input_tokens: 3, output_tokens: 1 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.invoke(VALID_CONFIG, 'Hello', 2048)
 
@@ -386,14 +345,9 @@ describe('BedrockService', () => {
     })
 
     it('should return empty text when content is missing', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      mockSdkWith({
         body: encodeBody({ usage: { input_tokens: 5, output_tokens: 0 } }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const result = await service.invoke(VALID_CONFIG, 'Hello')
 
@@ -401,14 +355,9 @@ describe('BedrockService', () => {
     })
 
     it('should return zero token counts when usage is missing', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      mockSdkWith({
         body: encodeBody({ content: [{ text: 'No usage' }] }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const result = await service.invoke(VALID_CONFIG, 'Hello')
 
@@ -418,17 +367,12 @@ describe('BedrockService', () => {
     })
 
     it('should use default region when not specified', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockBedrockRuntimeClient } = mockSdkWith({
         body: encodeBody({
           content: [{ text: 'R' }],
           usage: { input_tokens: 1, output_tokens: 1 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const config = {
         accessKeyId: 'AKID',
@@ -443,17 +387,12 @@ describe('BedrockService', () => {
     })
 
     it('should use default model when not specified', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({
           content: [{ text: 'R' }],
           usage: { input_tokens: 1, output_tokens: 1 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       const config = {
         accessKeyId: 'AKID',
@@ -470,17 +409,12 @@ describe('BedrockService', () => {
     })
 
     it('should send prompt as user message in request body', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      const { MockInvokeModelCommand } = mockSdkWith({
         body: encodeBody({
           content: [{ text: 'R' }],
           usage: { input_tokens: 1, output_tokens: 1 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.invoke(VALID_CONFIG, 'Analyze this IOC')
 
@@ -494,17 +428,12 @@ describe('BedrockService', () => {
     })
 
     it('should log success after invocation', async () => {
-      const { MockBedrockRuntimeClient, MockInvokeModelCommand } = buildMockSdk({
+      mockSdkWith({
         body: encodeBody({
           content: [{ text: 'R' }],
           usage: { input_tokens: 10, output_tokens: 20 },
         }),
       })
-
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
-        BedrockRuntimeClient: MockBedrockRuntimeClient,
-        InvokeModelCommand: MockInvokeModelCommand,
-      } as never)
 
       await service.invoke(VALID_CONFIG, 'Hello', 512)
 
@@ -530,7 +459,7 @@ describe('BedrockService', () => {
       const mockSend = jest.fn().mockRejectedValue(new Error('ThrottlingException'))
       MockBedrockRuntimeClient.mockImplementation(() => ({ send: mockSend }))
 
-      jest.spyOn(service as never, 'loadAwsSdk').mockResolvedValue({
+      mockLoadAwsBedrockSdk.mockResolvedValue({
         BedrockRuntimeClient: MockBedrockRuntimeClient,
         InvokeModelCommand: MockInvokeModelCommand,
       } as never)
@@ -540,12 +469,13 @@ describe('BedrockService', () => {
   })
 
   /* ------------------------------------------------------------------ */
-  /* loadAwsSdk (dynamic import)                                         */
+  /* loadAwsBedrockSdk (dynamic import via utility)                      */
   /* ------------------------------------------------------------------ */
 
-  describe('loadAwsSdk', () => {
+  describe('loadAwsBedrockSdk', () => {
     it('should log warning and throw when SDK is not installed', async () => {
-      jest.spyOn(service as never, 'loadAwsSdk').mockRestore()
+      // Restore the real implementation for this test to exercise the actual dynamic import
+      mockLoadAwsBedrockSdk.mockRestore()
 
       // The dynamic import will fail in the test environment since the SDK
       // is not installed. We test the error path directly.

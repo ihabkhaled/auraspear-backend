@@ -146,54 +146,81 @@ export class HuntsService {
     wazuhConfig: Record<string, unknown>
   ): Promise<HuntSessionRecord> {
     const result = await this.wazuhService.searchAllAlerts(wazuhConfig, esQuery)
+    const eventData = await this.processHuntEvents(result.hits, session.id)
 
-    const eventData = mapHitsToEventData(result.hits, session.id)
+    const updated = await this.completeHuntSession(
+      session, eventData, result, dto, tenantId, esQuery
+    )
+
+    this.logAction('runHunt', tenantId, email, session.id, {
+      eventsFound: result.total, query: dto.query, timeRange: dto.timeRange,
+    })
+    return updated
+  }
+
+  private async processHuntEvents(
+    hits: unknown[],
+    sessionId: string
+  ): Promise<ReturnType<typeof mapHitsToEventData>> {
+    const eventData = mapHitsToEventData(hits, sessionId)
     if (eventData.length > 0) {
       await processChunked(eventData, 50, chunk => this.huntsRepository.createManyEvents(chunk))
     }
+    return eventData
+  }
 
-    const uniqueIpCount = countUniqueIps(eventData)
-    const { mitreTactics, mitreTechniques } = extractMitreFromHits(result.hits)
-    const threatScoreValue = computeThreatScore(eventData, uniqueIpCount, mitreTechniques.length)
-
-    const reasoning = buildHuntReasoning(
-      dto.timeRange,
-      result.total,
-      uniqueIpCount,
-      mitreTechniques,
-      threatScoreValue
-    )
-    const aiAnalysis = generateHuntAnalysis(
-      dto.query,
-      result.total,
-      uniqueIpCount,
-      mitreTechniques,
-      eventData
-    )
+  private async completeHuntSession(
+    session: { id: string; status: HuntSessionStatus },
+    eventData: ReturnType<typeof mapHitsToEventData>,
+    result: { hits: unknown[]; total: number },
+    dto: RunHuntDto,
+    tenantId: string,
+    esQuery: Record<string, unknown>
+  ): Promise<HuntSessionRecord> {
+    const analysisData = this.buildHuntAnalysisData(eventData, result, dto)
 
     this.assertValidTransition(session.status, HuntSessionStatus.completed)
-    const updated = await this.huntsRepository.updateSessionCompletedWithEvents({
+    return this.huntsRepository.updateSessionCompletedWithEvents({
       id: session.id,
       tenantId,
       status: HuntSessionStatus.completed,
       completedAt: new Date(),
       eventsFound: result.total,
-      uniqueIps: uniqueIpCount,
-      threatScore: threatScoreValue,
-      mitreTactics,
-      mitreTechniques,
+      uniqueIps: analysisData.uniqueIpCount,
+      threatScore: analysisData.threatScoreValue,
+      mitreTactics: analysisData.mitreTactics,
+      mitreTechniques: analysisData.mitreTechniques,
       timeRange: dto.timeRange,
       executedQuery: esQuery as Prisma.InputJsonValue,
-      reasoning,
-      aiAnalysis,
+      reasoning: analysisData.reasoning,
+      aiAnalysis: analysisData.aiAnalysis,
     })
+  }
 
-    this.logAction('runHunt', tenantId, email, session.id, {
-      eventsFound: result.total,
-      query: dto.query,
-      timeRange: dto.timeRange,
-    })
-    return updated
+  private buildHuntAnalysisData(
+    eventData: ReturnType<typeof mapHitsToEventData>,
+    result: { hits: unknown[]; total: number },
+    dto: RunHuntDto
+  ): {
+    uniqueIpCount: number
+    threatScoreValue: number
+    mitreTactics: string[]
+    mitreTechniques: string[]
+    reasoning: string[]
+    aiAnalysis: string
+  } {
+    const uniqueIpCount = countUniqueIps(eventData)
+    const { mitreTactics, mitreTechniques } = extractMitreFromHits(result.hits)
+    const threatScoreValue = computeThreatScore(eventData, uniqueIpCount, mitreTechniques.length)
+
+    const reasoning = buildHuntReasoning(
+      dto.timeRange, result.total, uniqueIpCount, mitreTechniques, threatScoreValue
+    )
+    const aiAnalysis = generateHuntAnalysis(
+      dto.query, result.total, uniqueIpCount, mitreTechniques, eventData
+    )
+
+    return { uniqueIpCount, threatScoreValue, mitreTactics, mitreTechniques, reasoning, aiAnalysis }
   }
 
   /* ---------------------------------------------------------------- */
@@ -203,7 +230,7 @@ export class HuntsService {
   private async handleMissingConnector(
     session: { id: string; status: HuntSessionStatus },
     tenantId: string,
-    _email: string
+    email: string
   ): Promise<never> {
     this.assertValidTransition(session.status, HuntSessionStatus.error)
     await this.huntsRepository.updateSessionStatus({
@@ -217,7 +244,7 @@ export class HuntsService {
       ],
     })
 
-    this.logWarn('runHunt', tenantId, session.id)
+    this.logWarn('runHunt', tenantId, session.id, { email })
     throw new BusinessException(
       422,
       'Wazuh/OpenSearch connector is not configured for this tenant',
@@ -229,7 +256,7 @@ export class HuntsService {
     error: unknown,
     session: { id: string; status: HuntSessionStatus },
     tenantId: string,
-    _email: string,
+    email: string,
     _query: string
   ): Promise<never> {
     if (error instanceof BusinessException) throw error
@@ -239,7 +266,7 @@ export class HuntsService {
         ? error.message || 'Could not connect to Wazuh Indexer — verify the service is running'
         : 'Unknown error during hunt query'
 
-    this.logger.error(`Hunt query failed for session ${session.id}: ${errorMessage}`)
+    this.logger.error(`Hunt query failed for session ${session.id}: ${errorMessage}`, { email })
 
     this.assertValidTransition(session.status, HuntSessionStatus.error)
     await this.huntsRepository.updateSessionStatus({
@@ -316,7 +343,12 @@ export class HuntsService {
     })
   }
 
-  private logWarn(action: string, tenantId: string, resourceId?: string): void {
+  private logWarn(
+    action: string,
+    tenantId: string,
+    resourceId?: string,
+    metadata?: Record<string, unknown>
+  ): void {
     this.appLogger.warn(`Hunt action failed: ${action}`, {
       feature: AppLogFeature.HUNTS,
       action,
@@ -327,6 +359,7 @@ export class HuntsService {
       functionName: action,
       targetResource: 'HuntSession',
       targetResourceId: resourceId,
+      ...metadata,
     })
   }
 }

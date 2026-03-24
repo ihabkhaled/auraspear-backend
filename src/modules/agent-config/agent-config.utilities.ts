@@ -119,3 +119,21 @@ export function buildTokenResetData(period: TokenResetPeriod): Record<string, un
 export function isValidAgentId(agentId: string): boolean {
   return Object.values(AiAgentId).includes(agentId as AiAgentId)
 }
+
+/* ---------------------------------------------------------------- */
+/* OSINT SOURCE UPDATE DATA BUILDING                                 */
+/* ---------------------------------------------------------------- */
+
+export function buildOsintSourceUpdateData(
+  dto: Record<string, unknown>,
+  encryptedKey: string | null
+): Record<string, unknown> {
+  const updateData: Record<string, unknown> = { ...dto }
+  delete updateData.apiKey
+
+  if (encryptedKey !== null) {
+    updateData.encryptedApiKey = encryptedKey
+  }
+
+  return updateData
+}

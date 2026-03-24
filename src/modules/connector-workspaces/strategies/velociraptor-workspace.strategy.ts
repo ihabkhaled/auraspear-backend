@@ -1,6 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { CardVariant, Severity } from '../../../common/enums'
+import { CardVariant } from '../../../common/enums'
 import { VelociraptorService } from '../../connectors/services/velociraptor.service'
+import {
+  buildErrorSummaryCard,
+  isVelociraptorClientOnline,
+  mapVelociraptorClientToEntity,
+  mapVelociraptorClientToOverviewEntity,
+  mapVelociraptorClientToRecentItem,
+  paginateArray,
+  sortVelociraptorClientsByLastSeen,
+} from '../connector-workspaces.utilities'
 import type {
   ConnectorWorkspaceStrategy,
   WorkspaceSummaryCard,
@@ -30,65 +39,7 @@ export class VelociraptorWorkspaceStrategy implements ConnectorWorkspaceStrategy
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []
 
-    try {
-      const clients = await this.velociraptorService.getClients(config)
-      const onlineCount = clients.filter(c => {
-        const cl = c as Record<string, unknown>
-        return cl.last_seen_at && Date.now() - Number(cl.last_seen_at) < 300_000_000
-      }).length
-
-      summaryCards.push(
-        {
-          key: 'total-clients',
-          label: 'Total Clients',
-          value: clients.length,
-          icon: 'laptop',
-          variant: CardVariant.INFO,
-        },
-        {
-          key: 'online-clients',
-          label: 'Online Clients',
-          value: onlineCount,
-          icon: 'wifi',
-          variant: onlineCount > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
-        }
-      )
-
-      for (const client of clients.slice(0, 5)) {
-        const cl = client as Record<string, unknown>
-        const info = (cl.os_info ?? {}) as Record<string, unknown>
-
-        entitiesPreview.push({
-          id: (cl.client_id ?? '') as string,
-          name: (info.fqdn ?? info.hostname ?? cl.client_id ?? 'Unknown') as string,
-          status: cl.last_seen_at ? 'seen' : 'unknown',
-          type: 'client',
-          lastSeen: cl.last_seen_at
-            ? new Date(Number(cl.last_seen_at) / 1000).toISOString()
-            : undefined,
-          metadata: { os: info.system, release: info.release, clientId: cl.client_id },
-        })
-
-        recentItems.push({
-          id: (cl.client_id ?? '') as string,
-          title: `Client: ${(info.fqdn ?? info.hostname ?? cl.client_id) as string}`,
-          timestamp: cl.last_seen_at ? new Date(Number(cl.last_seen_at) / 1000).toISOString() : '',
-          severity: Severity.INFO,
-          type: 'client-activity',
-        })
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to fetch Velociraptor clients: ${error instanceof Error ? error.message : 'unknown'}`
-      )
-      summaryCards.push({
-        key: 'total-clients',
-        label: 'Total Clients',
-        value: 'N/A',
-        icon: 'laptop',
-        variant: CardVariant.ERROR,
-      })
-    }
+    await this.fetchOverviewClients(config, summaryCards, recentItems, entitiesPreview)
 
     const quickActions: WorkspaceQuickAction[] = [
       { key: 'test-connection', label: 'Test Connection', icon: 'play' },
@@ -104,26 +55,9 @@ export class VelociraptorWorkspaceStrategy implements ConnectorWorkspaceStrategy
     pageSize: number
   ): Promise<WorkspaceRecentActivityResponse> {
     const clients = await this.velociraptorService.getClients(config)
-    const sorted = [...clients].sort((a, b) => {
-      const aTime = Number((a as Record<string, unknown>).last_seen_at ?? 0)
-      const bTime = Number((b as Record<string, unknown>).last_seen_at ?? 0)
-      return bTime - aTime
-    })
-    const start = (page - 1) * pageSize
-    const sliced = sorted.slice(start, start + pageSize)
-
-    const items: WorkspaceRecentItem[] = sliced.map(client => {
-      const cl = client as Record<string, unknown>
-      const info = (cl.os_info ?? {}) as Record<string, unknown>
-      return {
-        id: (cl.client_id ?? '') as string,
-        title: `Client: ${(info.fqdn ?? info.hostname ?? cl.client_id) as string}`,
-        timestamp: cl.last_seen_at ? new Date(Number(cl.last_seen_at) / 1000).toISOString() : '',
-        severity: Severity.INFO,
-        type: 'client-activity',
-      }
-    })
-
+    const sorted = sortVelociraptorClientsByLastSeen(clients)
+    const sliced = paginateArray(sorted, page, pageSize)
+    const items = sliced.map(mapVelociraptorClientToRecentItem)
     return { items, total: clients.length, page, pageSize }
   }
 
@@ -133,24 +67,8 @@ export class VelociraptorWorkspaceStrategy implements ConnectorWorkspaceStrategy
     pageSize: number
   ): Promise<WorkspaceEntitiesResponse> {
     const clients = await this.velociraptorService.getClients(config)
-    const start = (page - 1) * pageSize
-    const sliced = clients.slice(start, start + pageSize)
-
-    const entities: WorkspaceEntity[] = sliced.map(client => {
-      const cl = client as Record<string, unknown>
-      const info = (cl.os_info ?? {}) as Record<string, unknown>
-      return {
-        id: (cl.client_id ?? '') as string,
-        name: (info.fqdn ?? info.hostname ?? cl.client_id ?? 'Unknown') as string,
-        status: cl.last_seen_at ? 'seen' : 'unknown',
-        type: 'client',
-        lastSeen: cl.last_seen_at
-          ? new Date(Number(cl.last_seen_at) / 1000).toISOString()
-          : undefined,
-        metadata: { os: info.system, clientId: cl.client_id },
-      }
-    })
-
+    const sliced = paginateArray(clients, page, pageSize)
+    const entities = sliced.map(mapVelociraptorClientToEntity)
     return { entities, total: clients.length, page, pageSize }
   }
 
@@ -186,5 +104,48 @@ export class VelociraptorWorkspaceStrategy implements ConnectorWorkspaceStrategy
 
   getAllowedActions(): string[] {
     return ['test-connection', 'refresh-clients']
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE                                                           */
+  /* ---------------------------------------------------------------- */
+
+  private async fetchOverviewClients(
+    config: Record<string, unknown>,
+    summaryCards: WorkspaceSummaryCard[],
+    recentItems: WorkspaceRecentItem[],
+    entitiesPreview: WorkspaceEntity[]
+  ): Promise<void> {
+    try {
+      const clients = await this.velociraptorService.getClients(config)
+      const onlineCount = clients.filter(isVelociraptorClientOnline).length
+
+      summaryCards.push(
+        {
+          key: 'total-clients',
+          label: 'Total Clients',
+          value: clients.length,
+          icon: 'laptop',
+          variant: CardVariant.INFO,
+        },
+        {
+          key: 'online-clients',
+          label: 'Online Clients',
+          value: onlineCount,
+          icon: 'wifi',
+          variant: onlineCount > 0 ? CardVariant.SUCCESS : CardVariant.WARNING,
+        }
+      )
+
+      for (const client of clients.slice(0, 5)) {
+        entitiesPreview.push(mapVelociraptorClientToOverviewEntity(client))
+        recentItems.push(mapVelociraptorClientToRecentItem(client))
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch Velociraptor clients: ${error instanceof Error ? error.message : 'unknown'}`
+      )
+      summaryCards.push(buildErrorSummaryCard('total-clients', 'Total Clients', 'laptop'))
+    }
   }
 }

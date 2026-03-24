@@ -403,7 +403,7 @@ describe('ConnectorWorkspacesService', () => {
       await service.getOverview(TENANT_ID, CONNECTOR_TYPE)
 
       expect(mockAppLogger.debug).toHaveBeenCalledWith(
-        'Fetching connector workspace overview',
+        'Fetching connector workspace getOverview',
         expect.objectContaining({
           action: 'getOverview',
           tenantId: TENANT_ID,
@@ -494,7 +494,7 @@ describe('ConnectorWorkspacesService', () => {
       await service.getRecentActivity(TENANT_ID, CONNECTOR_TYPE, page, pageSize)
 
       expect(mockAppLogger.debug).toHaveBeenCalledWith(
-        'Fetching connector workspace recent activity',
+        'Fetching connector workspace getRecentActivity',
         expect.objectContaining({
           action: 'getRecentActivity',
           tenantId: TENANT_ID,
@@ -584,7 +584,7 @@ describe('ConnectorWorkspacesService', () => {
       await service.getEntities(TENANT_ID, CONNECTOR_TYPE, page, pageSize)
 
       expect(mockAppLogger.debug).toHaveBeenCalledWith(
-        'Fetching connector workspace entities',
+        'Fetching connector workspace getEntities',
         expect.objectContaining({
           action: 'getEntities',
           tenantId: TENANT_ID,
@@ -683,7 +683,7 @@ describe('ConnectorWorkspacesService', () => {
       expect(strategy.search).toHaveBeenCalledWith(mockConfig, searchRequest)
     })
 
-    it('should log info message for search', async () => {
+    it('should log debug message for search', async () => {
       setupHappyPath()
       strategy.search.mockResolvedValue({
         results: [],
@@ -694,8 +694,8 @@ describe('ConnectorWorkspacesService', () => {
 
       await service.search(TENANT_ID, CONNECTOR_TYPE, searchRequest)
 
-      expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Executing connector workspace search',
+      expect(mockAppLogger.debug).toHaveBeenCalledWith(
+        'Fetching connector workspace search',
         expect.objectContaining({
           action: 'search',
           tenantId: TENANT_ID,

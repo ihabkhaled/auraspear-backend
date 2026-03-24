@@ -1,5 +1,10 @@
 import { toSortOrder } from '../../common/utils/query.utility'
-import type { CorrelationRuleInput, CorrelationStats } from './correlation.types'
+import type {
+  CorrelationEvent,
+  CorrelationRuleInput,
+  CorrelationStats,
+  RuleRecord,
+} from './correlation.types'
 import type { UpdateRuleDto } from './dto/update-rule.dto'
 import type { Prisma } from '@prisma/client'
 
@@ -149,4 +154,50 @@ export function buildCorrelationStats(
     fired24h: fired24hResult._sum?.hitCount ?? 0,
     linkedToIncidents: linkedResult._sum?.linkedIncidents ?? 0,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* RULE RECORD MAPPING                                               */
+/* ---------------------------------------------------------------- */
+
+export function buildRuleRecord(
+  rule: { tenant: { name: string } } & Record<string, unknown>,
+  createdByName: string | null
+): RuleRecord {
+  const { tenant, ...rest } = rule
+  return {
+    ...rest,
+    createdByName,
+    tenantName: tenant.name,
+  } as RuleRecord
+}
+
+export function buildRuleRecordList(
+  rules: Array<{ tenant: { name: string }; createdBy: string } & Record<string, unknown>>,
+  creatorMap: Map<string, string>
+): RuleRecord[] {
+  return rules.map(rule => {
+    const { tenant, ...rest } = rule
+    return {
+      ...rest,
+      createdByName: creatorMap.get(rule.createdBy) ?? null,
+      tenantName: tenant.name,
+    } as RuleRecord
+  })
+}
+
+export function buildCorrelationEvents(
+  events: Record<string, unknown>[]
+): CorrelationEvent[] {
+  return events.map(event => ({
+    type:
+      typeof Reflect.get(event, 'type') === 'string'
+        ? (Reflect.get(event, 'type') as string)
+        : 'unknown',
+    timestamp:
+      typeof Reflect.get(event, 'timestamp') === 'string'
+        ? (Reflect.get(event, 'timestamp') as string)
+        : new Date().toISOString(),
+    data: event,
+  }))
 }

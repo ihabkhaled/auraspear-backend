@@ -284,25 +284,18 @@ export class DataExplorerService {
   async syncVelociraptorMetadata(tenantId: string): Promise<{ endpoints: number; hunts: number }> {
     const config = await this.getConfig(tenantId, ConnectorType.VELOCIRAPTOR)
     const job = await this.createSyncJob(tenantId, ConnectorType.VELOCIRAPTOR)
-    let totalSynced = 0
-    let totalFailed = 0
 
     try {
-      const endpointResult = await this.syncVelociraptorEndpoints(tenantId, config)
-      const huntResult = await this.syncVelociraptorHunts(tenantId, config)
+      const [endpointResult, huntResult] = await Promise.all([
+        this.syncVelociraptorEndpoints(tenantId, config),
+        this.syncVelociraptorHunts(tenantId, config),
+      ])
 
-      totalSynced = endpointResult.synced + huntResult.synced
-      totalFailed = endpointResult.failed + huntResult.failed
-      await this.completeSyncJob(job.id, tenantId, totalSynced, totalFailed)
-
-      this.logAction('syncVelociraptorMetadata', tenantId, {
-        endpoints: endpointResult.synced,
-        hunts: huntResult.synced,
-        failed: totalFailed,
-      })
+      await this.completeSyncJob(job.id, tenantId, endpointResult.synced + huntResult.synced, endpointResult.failed + huntResult.failed)
+      this.logAction('syncVelociraptorMetadata', tenantId, { endpoints: endpointResult.synced, hunts: huntResult.synced })
       return { endpoints: endpointResult.synced, hunts: huntResult.synced }
     } catch (error) {
-      await this.failSyncJob(job.id, tenantId, totalFailed, error)
+      await this.failSyncJob(job.id, tenantId, 0, error)
       throw error
     }
   }
@@ -565,36 +558,41 @@ export class DataExplorerService {
     jobId: string
   ): Promise<void> {
     try {
-      switch (connectorType) {
-        case ConnectorType.GRAFANA: {
-          await this.syncGrafanaDashboards(tenantId)
-          break
-        }
-        case ConnectorType.VELOCIRAPTOR: {
-          await this.syncVelociraptorMetadata(tenantId)
-          break
-        }
-        case ConnectorType.SHUFFLE: {
-          await this.syncShuffleWorkflows(tenantId)
-          break
-        }
-        case ConnectorType.LOGSTASH: {
-          await this.syncLogstashLogs(tenantId)
-          break
-        }
-        default: {
-          await this.failSyncJob(
-            jobId,
-            tenantId,
-            0,
-            new Error(`Sync not supported for ${connectorType}`)
-          )
-        }
-      }
+      await this.dispatchSyncByType(tenantId, connectorType, jobId)
     } catch (error) {
       this.logger.error(
         `Sync job ${jobId} failed: ${error instanceof Error ? error.message : 'unknown'}`
       )
+    }
+  }
+
+  private async dispatchSyncByType(
+    tenantId: string,
+    connectorType: ConnectorType,
+    jobId: string
+  ): Promise<void> {
+    switch (connectorType) {
+      case ConnectorType.GRAFANA: {
+        await this.syncGrafanaDashboards(tenantId)
+        break
+      }
+      case ConnectorType.VELOCIRAPTOR: {
+        await this.syncVelociraptorMetadata(tenantId)
+        break
+      }
+      case ConnectorType.SHUFFLE: {
+        await this.syncShuffleWorkflows(tenantId)
+        break
+      }
+      case ConnectorType.LOGSTASH: {
+        await this.syncLogstashLogs(tenantId)
+        break
+      }
+      default: {
+        await this.failSyncJob(
+          jobId, tenantId, 0, new Error(`Sync not supported for ${connectorType}`)
+        )
+      }
     }
   }
 

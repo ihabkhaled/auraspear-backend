@@ -10,6 +10,7 @@ import {
   collectAlertIPs,
   computeIOCStats,
   countFulfilled,
+  countRejected,
   matchAlertsToIOCs,
 } from './intel.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
@@ -218,38 +219,37 @@ export class IntelService {
     rawAttributes: unknown[]
   ): Promise<void> {
     const results = await Promise.allSettled(
-      rawAttributes.map(rawAttribute => {
-        const attribute = rawAttribute as Record<string, unknown>
-        const iocType = String(attribute['type'] ?? 'unknown')
-        const iocValue = String(attribute['value'] ?? '')
-        const eventId = attribute['event_id'] as string | undefined
-        const source = eventId ? `MISP-${eventId}` : 'MISP'
-
-        if (!iocValue) {
-          return Promise.resolve()
-        }
-
-        return this.entityExtractionService.extractFromMispIoc({
-          tenantId,
-          iocType,
-          iocValue,
-          source,
-        })
-      })
+      rawAttributes.map(rawAttribute =>
+        this.extractSingleMispIocEntity(tenantId, rawAttribute)
+      )
     )
 
-    let failed = 0
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        failed++
-      }
-    }
-
+    const failed = countRejected(results)
     if (failed > 0) {
       this.logger.warn(
         `MISP entity extraction: ${failed}/${rawAttributes.length} IOCs failed entity extraction`
       )
     }
+  }
+
+  private async extractSingleMispIocEntity(
+    tenantId: string,
+    rawAttribute: unknown
+  ): Promise<void> {
+    const attribute = rawAttribute as Record<string, unknown>
+    const iocType = String(attribute['type'] ?? 'unknown')
+    const iocValue = String(attribute['value'] ?? '')
+    const eventId = attribute['event_id'] as string | undefined
+    const source = eventId ? `MISP-${eventId}` : 'MISP'
+
+    if (!iocValue) return
+
+    await this.entityExtractionService.extractFromMispIoc({
+      tenantId,
+      iocType,
+      iocValue,
+      source,
+    })
   }
 
   private handleSyncError(error: unknown, tenantId: string): never {

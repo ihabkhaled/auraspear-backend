@@ -41,6 +41,24 @@ export class SoarService {
   ) {}
 
   /* ---------------------------------------------------------------- */
+  /* LOGGING HELPERS                                                    */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.info(`SOAR: ${action}`, {
+      feature: AppLogFeature.SOAR,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'SoarPlaybook',
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'SoarService',
+      functionName: action,
+      metadata,
+    })
+  }
+
+  /* ---------------------------------------------------------------- */
   /* RESOLVE HELPERS                                                    */
   /* ---------------------------------------------------------------- */
 
@@ -155,23 +173,8 @@ export class SoarService {
       createdBy: user.email,
     })
 
-    this.appLogger.info('Playbook created', {
-      feature: AppLogFeature.SOAR,
-      action: 'createPlaybook',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'SoarPlaybook',
-      targetResourceId: playbook.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SoarService',
-      functionName: 'createPlaybook',
-      metadata: { name: playbook.name, triggerType: playbook.triggerType },
-    })
-
+    this.logSuccess('createPlaybook', user.tenantId, { name: playbook.name, triggerType: playbook.triggerType })
     const createdByName = await this.resolveCreatorName(playbook.createdBy)
-
     return buildPlaybookRecord(playbook, createdByName)
   }
 
@@ -195,20 +198,7 @@ export class SoarService {
       throw new BusinessException(404, `Playbook ${id} not found`, 'errors.soar.playbookNotFound')
     }
 
-    this.appLogger.info('Playbook updated', {
-      feature: AppLogFeature.SOAR,
-      action: 'updatePlaybook',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'SoarPlaybook',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SoarService',
-      functionName: 'updatePlaybook',
-    })
-
+    this.logSuccess('updatePlaybook', user.tenantId, { playbookId: id })
     return this.getPlaybookById(id, user.tenantId)
   }
 
@@ -221,20 +211,7 @@ export class SoarService {
 
     await this.repository.deleteManyPlaybooks({ id, tenantId })
 
-    this.appLogger.info(`Playbook ${existing.name} deleted`, {
-      feature: AppLogFeature.SOAR,
-      action: 'deletePlaybook',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'SoarPlaybook',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SoarService',
-      functionName: 'deletePlaybook',
-      metadata: { name: existing.name },
-    })
-
+    this.logSuccess('deletePlaybook', tenantId, { playbookId: id, name: existing.name, actorEmail: actor })
     return { deleted: true }
   }
 
@@ -297,23 +274,8 @@ export class SoarService {
       triggeredBy: user.email,
     })
 
-    this.appLogger.info('Playbook execution started', {
-      feature: AppLogFeature.SOAR,
-      action: 'executePlaybook',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'SoarExecution',
-      targetResourceId: execution.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SoarService',
-      functionName: 'executePlaybook',
-      metadata: { playbookId: id, playbookName: playbook.name },
-    })
-
+    this.logSuccess('executePlaybook', user.tenantId, { playbookId: id, playbookName: playbook.name })
     const triggeredByName = await this.resolveCreatorName(execution.triggeredBy)
-
     return buildExecutionRecord(execution, triggeredByName)
   }
 
@@ -322,6 +284,25 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async getSoarStats(tenantId: string): Promise<SoarStats> {
+    const counts = await this.fetchSoarStatCounts(tenantId)
+    return buildSoarStats(
+      counts.totalPlaybooks,
+      counts.activePlaybooks,
+      counts.totalExecutions,
+      counts.successfulExecutions,
+      counts.failedExecutions,
+      counts.avgExecutionTimeMs
+    )
+  }
+
+  private async fetchSoarStatCounts(tenantId: string): Promise<{
+    totalPlaybooks: number
+    activePlaybooks: number
+    totalExecutions: number
+    successfulExecutions: number
+    failedExecutions: number
+    avgExecutionTimeMs: number | null
+  }> {
     const [
       totalPlaybooks,
       activePlaybooks,
@@ -331,29 +312,16 @@ export class SoarService {
       avgExecutionTimeMs,
     ] = await Promise.all([
       this.repository.countPlaybooks({ tenantId }),
-      this.repository.countPlaybooks({
-        tenantId,
-        status: SoarPlaybookStatus.ACTIVE,
-      }),
+      this.repository.countPlaybooks({ tenantId, status: SoarPlaybookStatus.ACTIVE }),
       this.repository.countExecutions({ tenantId }),
-      this.repository.countExecutions({
-        tenantId,
-        status: SoarExecutionStatus.COMPLETED,
-      }),
-      this.repository.countExecutions({
-        tenantId,
-        status: SoarExecutionStatus.FAILED,
-      }),
+      this.repository.countExecutions({ tenantId, status: SoarExecutionStatus.COMPLETED }),
+      this.repository.countExecutions({ tenantId, status: SoarExecutionStatus.FAILED }),
       this.repository.getAvgExecutionTimeMs(tenantId),
     ])
 
-    return buildSoarStats(
-      totalPlaybooks,
-      activePlaybooks,
-      totalExecutions,
-      successfulExecutions,
-      failedExecutions,
-      avgExecutionTimeMs
-    )
+    return {
+      totalPlaybooks, activePlaybooks, totalExecutions,
+      successfulExecutions, failedExecutions, avgExecutionTimeMs,
+    }
   }
 }

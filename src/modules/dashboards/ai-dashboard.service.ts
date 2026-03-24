@@ -24,18 +24,7 @@ export class AiDashboardService {
     user: JwtPayload,
     connector?: string
   ): Promise<AiResponse> {
-    this.appLogger.info('AI anomaly explanation requested', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'explainAnomaly',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: AI_DASHBOARD_SERVICE_CLASS_NAME,
-      functionName: 'explainAnomaly',
-      tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      metadata: { metric: input.metric },
-    })
+    this.logAiDashboardAction('explainAnomaly', tenantId, user, { metric: input.metric })
 
     const changePercent =
       input.previousValue > 0
@@ -63,17 +52,7 @@ export class AiDashboardService {
     user: JwtPayload,
     connector?: string
   ): Promise<AiResponse> {
-    this.appLogger.info('AI daily summary requested', {
-      feature: AppLogFeature.DASHBOARD,
-      action: 'generateDailySummary',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: AI_DASHBOARD_SERVICE_CLASS_NAME,
-      functionName: 'generateDailySummary',
-      tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-    })
+    this.logAiDashboardAction('generateDailySummary', tenantId, user)
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
 
@@ -95,6 +74,26 @@ export class AiDashboardService {
         date: new Date().toISOString().split('T').at(0) ?? '',
       },
       connector,
+    })
+  }
+
+  private logAiDashboardAction(
+    action: string,
+    tenantId: string,
+    user: JwtPayload,
+    metadata?: Record<string, string>
+  ): void {
+    this.appLogger.info(`AI ${action} requested`, {
+      feature: AppLogFeature.DASHBOARD,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      sourceType: AppLogSourceType.SERVICE,
+      className: AI_DASHBOARD_SERVICE_CLASS_NAME,
+      functionName: action,
+      tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      metadata,
     })
   }
 }

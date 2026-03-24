@@ -3,6 +3,7 @@ import type {
   AccountEntity,
   CloudAccountRecord,
   CloudFindingRecord,
+  CloudSecurityStats,
   FindingEntity,
 } from './cloud-security.types'
 import type { UpdateAccountDto } from './dto/update-account.dto'
@@ -128,6 +129,32 @@ export function buildAccountRecord(account: AccountEntity): CloudAccountRecord {
     complianceScore: account.complianceScore,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
+  }
+}
+
+export function buildCloudSecurityStats(
+  totalAccounts: number,
+  connectedAccounts: number,
+  disconnectedAccounts: number,
+  errorAccounts: number,
+  totalFindings: number,
+  openFindings: number,
+  resolvedFindings: number,
+  suppressedFindings: number,
+  criticalFindings: number,
+  highFindings: number
+): CloudSecurityStats {
+  return {
+    totalAccounts,
+    connectedAccounts,
+    disconnectedAccounts,
+    errorAccounts,
+    totalFindings,
+    openFindings,
+    resolvedFindings,
+    suppressedFindings,
+    criticalFindings,
+    highFindings,
   }
 }
 

@@ -24,3 +24,15 @@ export type AxiosRequestOptionsWithoutBody = Omit<AxiosRequestOptions, 'method' 
 
 /** Options for methods that send a request body (POST, PUT, PATCH, DELETE). */
 export type AxiosRequestOptionsWithBody = Omit<AxiosRequestOptions, 'method'>
+
+export interface ResolvedFetchOptions {
+  method: HttpMethod
+  headers: Record<string, string>
+  body: unknown
+  timeoutMs: number
+  rejectUnauthorized: boolean
+  allowPrivateNetwork: boolean
+  clientCert: string | undefined
+  clientKey: string | undefined
+  caCert: string | undefined
+}

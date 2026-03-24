@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { USAGE_BUDGET_SERVICE_CLASS_NAME } from './usage-budget.constants'
 import { UsageBudgetRepository } from './usage-budget.repository'
+import { buildMonthlyUsageResponse, buildUsageSummaryResponse } from './usage-budget.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { FeatureCatalogService } from '../feature-catalog/feature-catalog.service'
@@ -47,45 +48,7 @@ export class UsageBudgetService {
     endDate: Date
   ): Promise<UsageSummaryResponse> {
     const rows = await this.repository.getUsageSummary(tenantId, startDate, endDate)
-
-    let totalInput = 0
-    let totalOutput = 0
-    let totalCost = 0
-    let totalRequests = 0
-
-    const entries = rows.map(row => {
-      const inputTokens = Number(row.total_input)
-      const outputTokens = Number(row.total_output)
-      const cost = Number(row.total_cost)
-      const requestCount = Number(row.request_count)
-
-      totalInput += inputTokens
-      totalOutput += outputTokens
-      totalCost += cost
-      totalRequests += requestCount
-
-      return {
-        featureKey: row.feature_key,
-        provider: row.provider,
-        totalInputTokens: inputTokens,
-        totalOutputTokens: outputTokens,
-        totalCost: cost,
-        requestCount,
-      }
-    })
-
-    return {
-      tenantId,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      entries,
-      totals: {
-        inputTokens: totalInput,
-        outputTokens: totalOutput,
-        cost: totalCost,
-        requests: totalRequests,
-      },
-    }
+    return buildUsageSummaryResponse(tenantId, startDate, endDate, rows)
   }
 
   async getMonthlyUsage(tenantId: string): Promise<MonthlyUsageResponse> {
@@ -95,20 +58,7 @@ export class UsageBudgetService {
     const monthLabel = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
     const rows = await this.repository.getMonthlyUsage(tenantId, monthStart, monthEnd)
-    const row = rows.at(0)
-
-    const inputTokens = row ? Number(row.total_input) : 0
-    const outputTokens = row ? Number(row.total_output) : 0
-
-    return {
-      tenantId,
-      month: monthLabel,
-      inputTokens,
-      outputTokens,
-      totalTokens: inputTokens + outputTokens,
-      estimatedCost: row ? Number(row.total_cost) : 0,
-      requestCount: row ? Number(row.request_count) : 0,
-    }
+    return buildMonthlyUsageResponse(tenantId, monthLabel, rows.at(0))
   }
 
   async checkBudget(tenantId: string, featureKey: AiFeatureKey): Promise<BudgetCheckResult> {

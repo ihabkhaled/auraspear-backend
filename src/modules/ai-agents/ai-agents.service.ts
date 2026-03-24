@@ -5,6 +5,7 @@ import {
   buildAgentListWhere,
   buildAgentOrderBy,
   buildAgentUpdateData,
+  buildToolUpdateData,
 } from './ai-agents.utilities'
 import {
   AiAgentSessionStatus,
@@ -32,7 +33,7 @@ import type { UpdateAgentDto } from './dto/update-agent.dto'
 import type { UpdateSoulDto } from './dto/update-soul.dto'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { PaginatedResponse } from '../../common/interfaces/pagination.interface'
-import type { AiAgentSession, AiAgentTool } from '@prisma/client'
+import type { AiAgent, AiAgentSession, AiAgentTool } from '@prisma/client'
 
 @Injectable()
 export class AiAgentsService {
@@ -70,7 +71,18 @@ export class AiAgentsService {
       this.repository.count(where),
     ])
 
-    const data = agents.map(agent => {
+    const data = this.mapAgentListItems(agents)
+
+    return {
+      data,
+      pagination: buildPaginationMeta(page, limit, total),
+    }
+  }
+
+  private mapAgentListItems(
+    agents: Array<AiAgent & { _count: { tools: number; sessions: number } }>
+  ): PaginatedAgents['data'] {
+    return agents.map(agent => {
       const { _count, ...rest } = agent
       return {
         ...rest,
@@ -79,11 +91,6 @@ export class AiAgentsService {
         sessionsCount: _count.sessions,
       }
     })
-
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
-    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -113,18 +120,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async createAgent(dto: CreateAgentDto, user: JwtPayload): Promise<AiAgentRecord> {
-    const existingAgent = await this.repository.findFirstSelect(
-      { tenantId: user.tenantId, name: dto.name },
-      { id: true }
-    )
-
-    if (existingAgent) {
-      throw new BusinessException(
-        409,
-        `Agent with name "${dto.name}" already exists`,
-        'errors.aiAgents.nameAlreadyExists'
-      )
-    }
+    await this.validateAgentNameUnique(user.tenantId, dto.name)
 
     const newAgent = await this.repository.createWithDetails({
       tenantId: user.tenantId,
@@ -154,6 +150,25 @@ export class AiAgentsService {
     return buildAgentRecord(newAgent as unknown as AgentWithRelations)
   }
 
+  private async validateAgentNameUnique(
+    tenantId: string,
+    name: string,
+    excludeId?: string
+  ): Promise<void> {
+    const where: Record<string, unknown> = { tenantId, name }
+    if (excludeId) {
+      where.id = { not: excludeId }
+    }
+    const existing = await this.repository.findFirstSelect(where, { id: true })
+    if (existing) {
+      throw new BusinessException(
+        409,
+        `Agent with name "${name}" already exists`,
+        'errors.aiAgents.nameAlreadyExists'
+      )
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* UPDATE                                                            */
   /* ---------------------------------------------------------------- */
@@ -162,22 +177,7 @@ export class AiAgentsService {
     await this.getAgentById(id, user.tenantId)
 
     if (dto.name !== undefined) {
-      const duplicate = await this.repository.findFirstSelect(
-        {
-          tenantId: user.tenantId,
-          name: dto.name,
-          id: { not: id },
-        },
-        { id: true }
-      )
-
-      if (duplicate) {
-        throw new BusinessException(
-          409,
-          `Agent with name "${dto.name}" already exists`,
-          'errors.aiAgents.nameAlreadyExists'
-        )
-      }
+      await this.validateAgentNameUnique(user.tenantId, dto.name, id)
     }
 
     const updated = await this.repository.updateWithDetails({
@@ -398,22 +398,18 @@ export class AiAgentsService {
       status: AiAgentSessionStatus.RUNNING,
     })
 
-    const job = await this.jobService.enqueue({
-      tenantId: user.tenantId,
-      type: JobType.AI_AGENT_TASK,
-      payload: {
-        agentId: id,
-        sessionId: session.id,
-        prompt: dto.prompt,
-        actorUserId: user.sub,
-        actorEmail: user.email,
-        connector: dto.connector,
-      },
-      maxAttempts: 2,
-      idempotencyKey: `ai-agent:${id}:${session.id}`,
-      createdBy: user.email,
-    })
+    const job = await this.enqueueAgentJob(id, session.id, dto, user)
+    this.logRunAgentSuccess(id, session.id, job.id, user)
 
+    return { queued: true, jobId: job.id, sessionId: session.id }
+  }
+
+  private logRunAgentSuccess(
+    agentId: string,
+    sessionId: string,
+    jobId: string,
+    user: JwtPayload
+  ): void {
     this.appLogger.info('AI Agent execution queued', {
       feature: AppLogFeature.AI_AGENTS,
       action: 'runAgent',
@@ -422,18 +418,35 @@ export class AiAgentsService {
       actorEmail: user.email,
       actorUserId: user.sub,
       targetResource: 'AiAgent',
-      targetResourceId: id,
+      targetResourceId: agentId,
       sourceType: AppLogSourceType.SERVICE,
       className: 'AiAgentsService',
       functionName: 'runAgent',
-      metadata: { sessionId: session.id, jobId: job.id },
+      metadata: { sessionId, jobId },
     })
+  }
 
-    return {
-      queued: true,
-      jobId: job.id,
-      sessionId: session.id,
-    }
+  private async enqueueAgentJob(
+    agentId: string,
+    sessionId: string,
+    dto: ExecuteAgentDto,
+    user: JwtPayload
+  ): Promise<{ id: string }> {
+    return this.jobService.enqueue({
+      tenantId: user.tenantId,
+      type: JobType.AI_AGENT_TASK,
+      payload: {
+        agentId,
+        sessionId,
+        prompt: dto.prompt,
+        actorUserId: user.sub,
+        actorEmail: user.email,
+        connector: dto.connector,
+      },
+      maxAttempts: 2,
+      idempotencyKey: `ai-agent:${agentId}:${sessionId}`,
+      createdBy: user.email,
+    })
   }
 
   /* ---------------------------------------------------------------- */
@@ -446,19 +459,7 @@ export class AiAgentsService {
     user: JwtPayload
   ): Promise<AiAgentTool> {
     const agent = await this.getAgentById(agentId, user.tenantId)
-
-    const existingTool = await this.repository.findFirstTool({
-      agentId,
-      name: dto.name,
-    })
-
-    if (existingTool) {
-      throw new BusinessException(
-        409,
-        `Tool with name "${dto.name}" already exists on this agent`,
-        'errors.aiAgents.toolNameAlreadyExists'
-      )
-    }
+    await this.validateToolNameUnique(agentId, dto.name)
 
     const tool = await this.repository.createTool({
       agentId,
@@ -496,44 +497,10 @@ export class AiAgentsService {
     user: JwtPayload
   ): Promise<AiAgentTool> {
     await this.getAgentById(agentId, user.tenantId)
+    await this.validateToolExists(toolId, agentId)
+    await this.validateToolNameUnique(agentId, dto.name, toolId)
 
-    const existingTool = await this.repository.findFirstTool({ id: toolId, agentId })
-
-    if (!existingTool) {
-      throw new BusinessException(
-        404,
-        `Tool ${toolId} not found on agent ${agentId}`,
-        'errors.aiAgents.toolNotFound'
-      )
-    }
-
-    if (dto.name !== undefined) {
-      const duplicate = await this.repository.findFirstTool({
-        agentId,
-        name: dto.name,
-        id: { not: toolId },
-      })
-
-      if (duplicate) {
-        throw new BusinessException(
-          409,
-          `Tool with name "${dto.name}" already exists on this agent`,
-          'errors.aiAgents.toolNameAlreadyExists'
-        )
-      }
-    }
-
-    const updateData: Record<string, unknown> = {}
-    if (dto.name !== undefined) {
-      updateData['name'] = dto.name
-    }
-    if (dto.description !== undefined) {
-      updateData['description'] = dto.description
-    }
-    if (dto.schema !== undefined) {
-      updateData['schema'] = JSON.parse(JSON.stringify(dto.schema))
-    }
-    const updated = await this.repository.updateTool({ id: toolId }, updateData)
+    const updated = await this.repository.updateTool({ id: toolId }, buildToolUpdateData(dto))
 
     this.appLogger.info(`Tool "${updated.name}" updated on agent ${agentId}`, {
       feature: AppLogFeature.AI_AGENTS,
@@ -553,6 +520,39 @@ export class AiAgentsService {
     return updated
   }
 
+  private async validateToolExists(toolId: string, agentId: string): Promise<void> {
+    const existingTool = await this.repository.findFirstTool({ id: toolId, agentId })
+    if (!existingTool) {
+      throw new BusinessException(
+        404,
+        `Tool ${toolId} not found on agent ${agentId}`,
+        'errors.aiAgents.toolNotFound'
+      )
+    }
+  }
+
+  private async validateToolNameUnique(
+    agentId: string,
+    name: string | undefined,
+    excludeToolId?: string
+  ): Promise<void> {
+    if (name === undefined) return
+
+    const where: Record<string, unknown> = { agentId, name }
+    if (excludeToolId) {
+      where.id = { not: excludeToolId }
+    }
+
+    const duplicate = await this.repository.findFirstTool(where)
+    if (duplicate) {
+      throw new BusinessException(
+        409,
+        `Tool with name "${name}" already exists on this agent`,
+        'errors.aiAgents.toolNameAlreadyExists'
+      )
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* DELETE TOOL                                                       */
   /* ---------------------------------------------------------------- */
@@ -564,20 +564,11 @@ export class AiAgentsService {
     actorEmail: string
   ): Promise<{ deleted: boolean }> {
     await this.getAgentById(agentId, tenantId)
-
-    const existingTool = await this.repository.findFirstTool({ id: toolId, agentId })
-
-    if (!existingTool) {
-      throw new BusinessException(
-        404,
-        `Tool ${toolId} not found on agent ${agentId}`,
-        'errors.aiAgents.toolNotFound'
-      )
-    }
+    await this.validateToolExists(toolId, agentId)
 
     await this.repository.deleteTool({ id: toolId })
 
-    this.appLogger.info(`Tool "${existingTool.name}" deleted from agent ${agentId}`, {
+    this.appLogger.info(`Tool deleted from agent ${agentId}`, {
       feature: AppLogFeature.AI_AGENTS,
       action: 'deleteTool',
       outcome: AppLogOutcome.SUCCESS,
@@ -588,7 +579,7 @@ export class AiAgentsService {
       sourceType: AppLogSourceType.SERVICE,
       className: 'AiAgentsService',
       functionName: 'deleteTool',
-      metadata: { agentId, toolName: existingTool.name },
+      metadata: { agentId },
     })
 
     return { deleted: true }

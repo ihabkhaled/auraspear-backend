@@ -6,6 +6,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { decrypt, encrypt } from '../../../common/utils/encryption.utility'
+import { buildLlmConnectorUpdateData } from '../connectors.utilities'
 import { LlmApisService } from '../services/llm-apis.service'
 import type { CreateLlmConnectorDto } from './dto/create-llm-connector.dto'
 import type { UpdateLlmConnectorDto } from './dto/update-llm-connector.dto'
@@ -94,40 +95,13 @@ export class LlmConnectorsService {
   ): Promise<LlmConnectorResponse> {
     const existing = await this.findOrThrow(id, tenantId, 'update')
 
-    // Check name uniqueness if name is being changed
     if (dto.name !== undefined && dto.name !== existing.name) {
       await this.guardUniqueName(tenantId, dto.name, id)
     }
 
-    const updateData: Record<string, unknown> = {}
-
-    if (dto.name !== undefined) {
-      updateData.name = dto.name
-    }
-    if (dto.description !== undefined) {
-      updateData.description = dto.description
-    }
-    if (dto.baseUrl !== undefined) {
-      updateData.baseUrl = dto.baseUrl
-    }
-    if (dto.apiKey !== undefined) {
-      updateData.encryptedApiKey = encrypt(dto.apiKey, this.encryptionKey)
-    }
-    if (dto.defaultModel !== undefined) {
-      updateData.defaultModel = dto.defaultModel
-    }
-    if (dto.organizationId !== undefined) {
-      updateData.organizationId = dto.organizationId
-    }
-    if (dto.maxTokensParam !== undefined) {
-      updateData.maxTokensParam = dto.maxTokensParam
-    }
-    if (dto.timeout !== undefined) {
-      updateData.timeout = dto.timeout
-    }
-    if (dto.enabled !== undefined) {
-      updateData.enabled = dto.enabled
-    }
+    const updateData = buildLlmConnectorUpdateData(dto, value =>
+      encrypt(value, this.encryptionKey)
+    )
 
     const updated = await this.repository.updateAndReturn(id, tenantId, updateData)
     if (!updated) {
@@ -181,28 +155,51 @@ export class LlmConnectorsService {
   ): Promise<{ id: string; ok: boolean; details: string; testedAt: string }> {
     const connector = await this.findOrThrow(id, tenantId, 'testConnection')
     const config = this.buildDecryptedConfig(connector)
+    const { ok, details, latencyMs } = await this.executeTest(connector.name, config)
 
+    const testedAt = new Date()
+    await this.persistTestResult(id, tenantId, ok, details, testedAt)
+    this.logTestOutcome(tenantId, id, ok, latencyMs, details)
+
+    return { id, ok, details, testedAt: testedAt.toISOString() }
+  }
+
+  private async executeTest(
+    connectorName: string,
+    config: Record<string, unknown>
+  ): Promise<{ ok: boolean; details: string; latencyMs: number }> {
     const start = Date.now()
-    let ok = false
-    let details = ''
-
     try {
       const result = await this.llmApisService.testConnection(config)
-      ;({ ok, details } = result)
+      return { ok: result.ok, details: result.details, latencyMs: Date.now() - start }
     } catch (error) {
-      details = error instanceof Error ? error.message : 'Connection test failed'
-      this.logger.warn(`LLM connector test failed for ${connector.name}: ${details}`)
+      const details = error instanceof Error ? error.message : 'Connection test failed'
+      this.logger.warn(`LLM connector test failed for ${connectorName}: ${details}`)
+      return { ok: false, details, latencyMs: Date.now() - start }
     }
+  }
 
-    const latencyMs = Date.now() - start
-    const testedAt = new Date()
-
+  private async persistTestResult(
+    id: string,
+    tenantId: string,
+    ok: boolean,
+    details: string,
+    testedAt: Date
+  ): Promise<void> {
     await this.repository.updateTestResult(id, tenantId, {
       lastTestAt: testedAt,
       lastTestOk: ok,
       lastError: ok ? null : details.slice(0, 500),
     })
+  }
 
+  private logTestOutcome(
+    tenantId: string,
+    id: string,
+    ok: boolean,
+    latencyMs: number,
+    details: string
+  ): void {
     if (ok) {
       this.logSuccess('testConnection', tenantId, id, { latencyMs, ok })
     } else {
@@ -212,8 +209,6 @@ export class LlmConnectorsService {
         details: details.slice(0, 300),
       })
     }
-
-    return { id, ok, details, testedAt: testedAt.toISOString() }
   }
 
   /* ---------------------------------------------------------------- */

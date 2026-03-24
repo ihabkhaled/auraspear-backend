@@ -38,6 +38,7 @@ import { AlertsRepository } from '../alerts/alerts.repository'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import type {
+  AddCommentResult,
   CaseCommentResponse,
   CaseRecord,
   MentionableUser,
@@ -61,6 +62,7 @@ import type {
   CaseArtifact,
   CaseComment,
   CaseNote,
+  CaseSeverity,
   CaseTask,
   CaseTimeline,
 } from '@prisma/client'
@@ -119,39 +121,43 @@ export class CasesService {
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-    const [
-      total,
-      open,
-      inProgress,
-      closed,
-      critical,
-      high,
-      medium,
-      low,
-      closedLast30d,
-      avgResolutionHours,
-    ] = await Promise.all([
-      this.casesRepository.countTotal(tenantId),
-      this.casesRepository.countByStatus(tenantId, CaseStatus.OPEN),
-      this.casesRepository.countByStatus(tenantId, CaseStatus.IN_PROGRESS),
-      this.casesRepository.countByStatus(tenantId, CaseStatus.CLOSED),
-      this.casesRepository.countBySeverity(tenantId, 'critical'),
-      this.casesRepository.countBySeverity(tenantId, 'high'),
-      this.casesRepository.countBySeverity(tenantId, 'medium'),
-      this.casesRepository.countBySeverity(tenantId, 'low'),
+    const [statusCounts, severityCounts, closedLast30d, avgResolutionHours] = await Promise.all([
+      this.fetchStatusCounts(tenantId),
+      this.fetchSeverityCounts(tenantId),
       this.casesRepository.countClosedSince(tenantId, thirtyDaysAgo),
       this.casesRepository.getAvgResolutionHours(tenantId),
     ])
 
     return {
-      total,
-      open,
-      inProgress,
-      closed,
-      bySeverity: { critical, high, medium, low },
+      ...statusCounts,
+      bySeverity: severityCounts,
       closedLast30d,
       avgResolutionHours,
     }
+  }
+
+  private async fetchStatusCounts(
+    tenantId: string
+  ): Promise<{ total: number; open: number; inProgress: number; closed: number }> {
+    const [total, open, inProgress, closed] = await Promise.all([
+      this.casesRepository.countTotal(tenantId),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.OPEN),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.IN_PROGRESS),
+      this.casesRepository.countByStatus(tenantId, CaseStatus.CLOSED),
+    ])
+    return { total, open, inProgress, closed }
+  }
+
+  private async fetchSeverityCounts(
+    tenantId: string
+  ): Promise<{ critical: number; high: number; medium: number; low: number }> {
+    const [critical, high, medium, low] = await Promise.all([
+      this.casesRepository.countBySeverity(tenantId, 'critical'),
+      this.casesRepository.countBySeverity(tenantId, 'high'),
+      this.casesRepository.countBySeverity(tenantId, 'medium'),
+      this.casesRepository.countBySeverity(tenantId, 'low'),
+    ])
+    return { critical, high, medium, low }
   }
 
   /* ---------------------------------------------------------------- */
@@ -214,23 +220,7 @@ export class CasesService {
     }
     this.guardStatusChangePermission(dto, existing, user, id)
 
-    const actorLabel = await this.resolveActorLabel(user)
-    const timelineDescription = await this.buildUpdateTimelineDescription(
-      dto,
-      existing,
-      isReopening,
-      actorLabel
-    )
-    const timelineType = resolveTimelineType(
-      dto.status !== undefined && dto.status !== existing.status
-    )
-    const updateData = buildCaseUpdateData(dto, isReopening)
-
-    const result = await this.executeUpdateCase(id, user.tenantId, updateData, {
-      type: timelineType,
-      actor: user.email,
-      description: timelineDescription,
-    })
+    const result = await this.performCaseUpdate(id, dto, existing, isReopening, user)
 
     this.logSuccess('updateCase', user, 'Case', id, {
       caseNumber: existing.caseNumber,
@@ -239,6 +229,28 @@ export class CasesService {
 
     await this.sendUpdateNotifications(dto, existing, user, id)
     return this.enrichCaseRecord(result)
+  }
+
+  private async performCaseUpdate(
+    id: string,
+    dto: UpdateCaseDto,
+    existing: CaseRecord,
+    isReopening: boolean,
+    user: JwtPayload
+  ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>>> {
+    const actorLabel = await this.resolveActorLabel(user)
+    const timelineDescription = await this.buildUpdateTimelineDescription(
+      dto, existing, isReopening, actorLabel
+    )
+    const timelineType = resolveTimelineType(
+      dto.status !== undefined && dto.status !== existing.status
+    )
+
+    return this.executeUpdateCase(id, user.tenantId, buildCaseUpdateData(dto, isReopening), {
+      type: timelineType,
+      actor: user.email,
+      description: timelineDescription,
+    })
   }
 
   /* ---------------------------------------------------------------- */
@@ -253,23 +265,7 @@ export class CasesService {
       await this.validateOwnerInTenant(ownerUserId, user.tenantId)
     }
 
-    const actorLabel = await this.resolveActorLabel(user)
-    const timelineDescription = await this.buildAssignTimelineDescription(
-      ownerUserId,
-      existing.ownerUserId,
-      actorLabel
-    )
-
-    const result = await this.executeUpdateCase(
-      id,
-      user.tenantId,
-      { ownerUserId },
-      {
-        type: CaseTimelineType.UPDATED,
-        actor: user.email,
-        description: timelineDescription,
-      }
-    )
+    const result = await this.executeAssignCase(id, ownerUserId, existing, user)
 
     this.logSuccess('assignCase', user, 'Case', id, {
       caseNumber: existing.caseNumber,
@@ -277,33 +273,7 @@ export class CasesService {
       newOwner: ownerUserId,
     })
 
-    if (ownerUserId && ownerUserId !== existing.ownerUserId) {
-      await this.notificationsService.notifyCaseActivity(
-        user.tenantId,
-        id,
-        existing.caseNumber,
-        ownerUserId,
-        NotificationType.CASE_ASSIGNED,
-        JSON.stringify({
-          key: 'caseAssignedMessage',
-          params: { caseRef: existing.caseNumber },
-        }),
-        user.sub,
-        user.email
-      )
-    }
-
-    if (!ownerUserId && existing.ownerUserId) {
-      await this.notificationsService.notifyCaseUnassigned(
-        user.tenantId,
-        id,
-        existing.caseNumber,
-        existing.ownerUserId,
-        user.sub,
-        user.email
-      )
-    }
-
+    await this.notifyAssignmentChange(ownerUserId, existing, user, id)
     return this.enrichCaseRecord(result)
   }
 
@@ -412,45 +382,19 @@ export class CasesService {
   ): Promise<CaseCommentResponse> {
     const existing = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      existing.status,
-      'addCaseComment',
-      user,
-      caseId,
-      'Cannot add comments to a closed case'
+      existing.status, 'addCaseComment', user, caseId, 'Cannot add comments to a closed case'
     )
 
     const uniqueMentionIds = [...new Set(dto.mentionedUserIds)]
     this.validateSelfMention(uniqueMentionIds, user.sub)
     await this.validateMentionedUsers(uniqueMentionIds, user.tenantId)
 
-    const comment = await this.casesRepository.addCommentTransaction(
-      caseId,
-      user.sub,
-      dto.body,
-      uniqueMentionIds,
-      {
-        type: CaseTimelineType.COMMENT_ADDED,
-        actor: user.email,
-        description: JSON.stringify({
-          key: 'commentAdded',
-          params: { content: truncateBody(dto.body) },
-        }),
-      }
-    )
+    const comment = await this.executeAddComment(caseId, user, dto.body, uniqueMentionIds)
 
     this.logSuccess('addCaseComment', user, 'CaseComment', comment.id, {
-      caseId,
-      caseNumber: existing.caseNumber,
-      mentionCount: uniqueMentionIds.length,
+      caseId, caseNumber: existing.caseNumber, mentionCount: uniqueMentionIds.length,
     })
-    await this.sendCommentNotifications(
-      user,
-      caseId,
-      existing,
-      comment.id,
-      uniqueMentionIds,
-      dto.body
-    )
+    await this.sendCommentNotifications(user, caseId, existing, comment.id, uniqueMentionIds, dto.body)
     return this.mapCommentToResponse(comment, user.sub)
   }
 
@@ -524,47 +468,15 @@ export class CasesService {
   async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload): Promise<CaseTask> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      caseRecord.status,
-      'createTask',
-      user,
-      caseId,
-      'Cannot add tasks to a closed case'
+      caseRecord.status, 'createTask', user, caseId, 'Cannot add tasks to a closed case'
     )
 
-    const task = await this.casesRepository.createTask({
-      caseId,
-      title: dto.title,
-      status: dto.status ?? CaseTaskStatus.PENDING,
-      assignee: dto.assignee ?? null,
-    })
-    const actorLabel = await this.resolveActorLabel(user)
-    await this.casesRepository.createTimeline({
-      caseId,
-      type: CaseTimelineType.UPDATED,
-      actor: user.email,
-      description: JSON.stringify({
-        key: 'taskAdded',
-        params: { taskTitle: dto.title, actorLabel },
-      }),
-    })
+    const task = await this.executeCreateTask(caseId, dto, user)
 
     this.logSuccess('createTask', user, 'CaseTask', task.id, {
-      caseId,
-      caseNumber: caseRecord.caseNumber,
+      caseId, caseNumber: caseRecord.caseNumber,
     })
-    await this.notificationsService.notifyCaseActivity(
-      user.tenantId,
-      caseId,
-      caseRecord.caseNumber,
-      caseRecord.ownerUserId,
-      NotificationType.CASE_TASK_ADDED,
-      JSON.stringify({
-        key: 'caseTaskMessage',
-        params: { caseRef: caseRecord.caseNumber, taskTitle: dto.title },
-      }),
-      user.sub,
-      user.email
-    )
+    await this.notifyTaskAdded(user, caseId, caseRecord, dto.title)
     return task
   }
 
@@ -628,63 +540,17 @@ export class CasesService {
   ): Promise<CaseArtifact> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      caseRecord.status,
-      'createArtifact',
-      user,
-      caseId,
-      'Cannot add artifacts to a closed case'
+      caseRecord.status, 'createArtifact', user, caseId, 'Cannot add artifacts to a closed case'
     )
     await this.ensureNoDuplicateArtifact(caseId, dto)
 
-    const artifact = await this.casesRepository.createArtifact({
-      caseId,
-      type: dto.type,
-      value: dto.value,
-      source: dto.source ?? 'manual',
-    })
-    const actorLabel = await this.resolveActorLabel(user)
-    await this.casesRepository.createTimeline({
-      caseId,
-      type: CaseTimelineType.UPDATED,
-      actor: user.email,
-      description: JSON.stringify({
-        key: 'artifactAdded',
-        params: { artifactValue: `${dto.type}:${dto.value}`, actorLabel },
-      }),
-    })
-
-    // Best-effort entity extraction from the artifact
-    this.entityExtractionService
-      .extractFromArtifact({
-        tenantId: user.tenantId,
-        type: dto.type,
-        value: dto.value,
-        source: dto.source ?? 'manual',
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        this.logger.warn(
-          `Entity extraction failed for artifact ${dto.type}:${dto.value}: ${message}`
-        )
-      })
+    const artifact = await this.executeCreateArtifact(caseId, dto, user)
+    this.triggerArtifactEntityExtraction(user.tenantId, dto)
 
     this.logSuccess('createArtifact', user, 'CaseArtifact', artifact.id, {
-      caseId,
-      caseNumber: caseRecord.caseNumber,
+      caseId, caseNumber: caseRecord.caseNumber,
     })
-    await this.notificationsService.notifyCaseActivity(
-      user.tenantId,
-      caseId,
-      caseRecord.caseNumber,
-      caseRecord.ownerUserId,
-      NotificationType.CASE_ARTIFACT_ADDED,
-      JSON.stringify({
-        key: 'caseArtifactMessage',
-        params: { caseRef: caseRecord.caseNumber, artifactValue: `${dto.type}:${dto.value}` },
-      }),
-      user.sub,
-      user.email
-    )
+    await this.notifyArtifactAdded(user, caseId, caseRecord, dto)
     return artifact
   }
 
@@ -1020,29 +886,13 @@ export class CasesService {
     linkedAlerts: string[],
     user: JwtPayload
   ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['createCaseTransaction']>>>> {
+    const caseData = this.buildCreateCaseData(dto, linkedAlerts, user)
+    const alertTimeline = this.buildAlertLinkedTimeline(linkedAlerts, user.email)
+
     const result = await this.casesRepository.createCaseTransaction(
-      {
-        tenantId: user.tenantId,
-        cycleId: dto.cycleId,
-        title: dto.title,
-        description: dto.description,
-        severity: dto.severity,
-        status: CaseStatus.OPEN,
-        ownerUserId: dto.ownerUserId ?? null,
-        createdBy: user.email,
-        linkedAlerts,
-      },
+      caseData,
       { type: CaseTimelineType.CREATED, actor: user.email, description: '' },
-      linkedAlerts.length > 0
-        ? {
-            type: CaseTimelineType.ALERT_LINKED,
-            actor: user.email,
-            description: JSON.stringify({
-              key: 'alertsLinkedAtCreation',
-              params: { count: String(linkedAlerts.length) },
-            }),
-          }
-        : undefined
+      alertTimeline
     )
 
     if (!result) {
@@ -1054,6 +904,49 @@ export class CasesService {
     }
 
     return result
+  }
+
+  private buildCreateCaseData(
+    dto: CreateCaseDto,
+    linkedAlerts: string[],
+    user: JwtPayload
+  ): {
+    tenantId: string
+    cycleId?: string | null
+    title: string
+    description: string
+    severity: CaseSeverity
+    status: CaseStatus
+    ownerUserId?: string | null
+    createdBy: string
+    linkedAlerts: string[]
+  } {
+    return {
+      tenantId: user.tenantId,
+      cycleId: dto.cycleId,
+      title: dto.title,
+      description: dto.description,
+      severity: dto.severity as CaseSeverity,
+      status: CaseStatus.OPEN,
+      ownerUserId: dto.ownerUserId ?? null,
+      createdBy: user.email,
+      linkedAlerts,
+    }
+  }
+
+  private buildAlertLinkedTimeline(
+    linkedAlerts: string[],
+    actor: string
+  ): { type: string; actor: string; description: string } | undefined {
+    if (linkedAlerts.length === 0) return undefined
+    return {
+      type: CaseTimelineType.ALERT_LINKED,
+      actor,
+      description: JSON.stringify({
+        key: 'alertsLinkedAtCreation',
+        params: { count: String(linkedAlerts.length) },
+      }),
+    }
   }
 
   private async executeUpdateCase(
@@ -1178,6 +1071,51 @@ export class CasesService {
   }
 
   /* ---------------------------------------------------------------- */
+  /* PRIVATE: Assignment Execution                                     */
+  /* ---------------------------------------------------------------- */
+
+  private async executeAssignCase(
+    id: string,
+    ownerUserId: string | null,
+    existing: CaseRecord,
+    user: JwtPayload
+  ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>>> {
+    const actorLabel = await this.resolveActorLabel(user)
+    const timelineDescription = await this.buildAssignTimelineDescription(
+      ownerUserId, existing.ownerUserId, actorLabel
+    )
+
+    return this.executeUpdateCase(id, user.tenantId, { ownerUserId }, {
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: timelineDescription,
+    })
+  }
+
+  private async notifyAssignmentChange(
+    ownerUserId: string | null,
+    existing: CaseRecord,
+    user: JwtPayload,
+    caseId: string
+  ): Promise<void> {
+    if (ownerUserId && ownerUserId !== existing.ownerUserId) {
+      await this.notificationsService.notifyCaseActivity(
+        user.tenantId, caseId, existing.caseNumber, ownerUserId,
+        NotificationType.CASE_ASSIGNED,
+        JSON.stringify({ key: 'caseAssignedMessage', params: { caseRef: existing.caseNumber } }),
+        user.sub, user.email
+      )
+    }
+
+    if (!ownerUserId && existing.ownerUserId) {
+      await this.notificationsService.notifyCaseUnassigned(
+        user.tenantId, caseId, existing.caseNumber,
+        existing.ownerUserId, user.sub, user.email
+      )
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* PRIVATE: Notification Dispatchers                                 */
   /* ---------------------------------------------------------------- */
 
@@ -1294,24 +1232,170 @@ export class CasesService {
     mentionIds: string[],
     body: string
   ): Promise<void> {
-    if (mentionIds.length > 0) {
-      await this.notificationsService.createMentionNotifications(
-        user.tenantId,
-        caseId,
-        commentId,
-        mentionIds,
-        user
-      )
-    }
+    await this.sendMentionNotifications(user, caseId, commentId, mentionIds)
+    await this.notifyCaseCommentAdded(user, caseId, existing, body)
+  }
+
+  private async sendMentionNotifications(
+    user: JwtPayload,
+    caseId: string,
+    commentId: string,
+    mentionIds: string[]
+  ): Promise<void> {
+    if (mentionIds.length === 0) return
+    await this.notificationsService.createMentionNotifications(
+      user.tenantId, caseId, commentId, mentionIds, user
+    )
+  }
+
+  private async notifyCaseCommentAdded(
+    user: JwtPayload,
+    caseId: string,
+    existing: CaseRecord,
+    body: string
+  ): Promise<void> {
     await this.notificationsService.notifyCaseActivity(
-      user.tenantId,
-      caseId,
-      existing.caseNumber,
-      existing.ownerUserId,
+      user.tenantId, caseId, existing.caseNumber, existing.ownerUserId,
       NotificationType.CASE_COMMENT_ADDED,
       JSON.stringify({
         key: 'caseCommentMessage',
         params: { caseRef: existing.caseNumber, content: truncateBody(body) },
+      }),
+      user.sub, user.email
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Task Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executeCreateTask(
+    caseId: string,
+    dto: CreateTaskDto,
+    user: JwtPayload
+  ): Promise<CaseTask> {
+    const task = await this.casesRepository.createTask({
+      caseId,
+      title: dto.title,
+      status: dto.status ?? CaseTaskStatus.PENDING,
+      assignee: dto.assignee ?? null,
+    })
+    const actorLabel = await this.resolveActorLabel(user)
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: JSON.stringify({
+        key: 'taskAdded',
+        params: { taskTitle: dto.title, actorLabel },
+      }),
+    })
+    return task
+  }
+
+  private async notifyTaskAdded(
+    user: JwtPayload,
+    caseId: string,
+    caseRecord: CaseRecord,
+    taskTitle: string
+  ): Promise<void> {
+    await this.notificationsService.notifyCaseActivity(
+      user.tenantId,
+      caseId,
+      caseRecord.caseNumber,
+      caseRecord.ownerUserId,
+      NotificationType.CASE_TASK_ADDED,
+      JSON.stringify({
+        key: 'caseTaskMessage',
+        params: { caseRef: caseRecord.caseNumber, taskTitle },
+      }),
+      user.sub,
+      user.email
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Comment Helpers                                          */
+  /* ---------------------------------------------------------------- */
+
+  private async executeAddComment(
+    caseId: string,
+    user: JwtPayload,
+    body: string,
+    mentionIds: string[]
+  ): Promise<AddCommentResult> {
+    return this.casesRepository.addCommentTransaction(
+      caseId, user.sub, body, mentionIds,
+      {
+        type: CaseTimelineType.COMMENT_ADDED,
+        actor: user.email,
+        description: JSON.stringify({
+          key: 'commentAdded',
+          params: { content: truncateBody(body) },
+        }),
+      }
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Artifact Helpers                                         */
+  /* ---------------------------------------------------------------- */
+
+  private async executeCreateArtifact(
+    caseId: string,
+    dto: CreateArtifactDto,
+    user: JwtPayload
+  ): Promise<CaseArtifact> {
+    const artifact = await this.casesRepository.createArtifact({
+      caseId,
+      type: dto.type,
+      value: dto.value,
+      source: dto.source ?? 'manual',
+    })
+    const actorLabel = await this.resolveActorLabel(user)
+    await this.casesRepository.createTimeline({
+      caseId,
+      type: CaseTimelineType.UPDATED,
+      actor: user.email,
+      description: JSON.stringify({
+        key: 'artifactAdded',
+        params: { artifactValue: `${dto.type}:${dto.value}`, actorLabel },
+      }),
+    })
+    return artifact
+  }
+
+  private triggerArtifactEntityExtraction(tenantId: string, dto: CreateArtifactDto): void {
+    this.entityExtractionService
+      .extractFromArtifact({
+        tenantId,
+        type: dto.type,
+        value: dto.value,
+        source: dto.source ?? 'manual',
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        this.logger.warn(
+          `Entity extraction failed for artifact ${dto.type}:${dto.value}: ${message}`
+        )
+      })
+  }
+
+  private async notifyArtifactAdded(
+    user: JwtPayload,
+    caseId: string,
+    caseRecord: CaseRecord,
+    dto: CreateArtifactDto
+  ): Promise<void> {
+    await this.notificationsService.notifyCaseActivity(
+      user.tenantId,
+      caseId,
+      caseRecord.caseNumber,
+      caseRecord.ownerUserId,
+      NotificationType.CASE_ARTIFACT_ADDED,
+      JSON.stringify({
+        key: 'caseArtifactMessage',
+        params: { caseRef: caseRecord.caseNumber, artifactValue: `${dto.type}:${dto.value}` },
       }),
       user.sub,
       user.email
@@ -1323,17 +1407,7 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   private async mapCommentToResponse(
-    comment: {
-      id: string
-      caseId: string
-      authorId: string
-      body: string
-      isEdited: boolean
-      isDeleted: boolean
-      createdAt: Date
-      updatedAt: Date
-      mentions: Array<{ userId: string }>
-    },
+    comment: AddCommentResult,
     _requestUserId: string
   ): Promise<CaseCommentResponse> {
     const allUserIds = [comment.authorId, ...comment.mentions.map(m => m.userId)]

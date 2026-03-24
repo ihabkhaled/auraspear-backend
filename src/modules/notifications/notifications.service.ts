@@ -347,24 +347,38 @@ export class NotificationsService {
 
     await Promise.all(
       recipientIds.map(async recipientUserId =>
-        this.createAndEmitNotification({
-          tenantId,
-          type: NotificationType.MENTION,
-          actorUserId: actor.sub,
-          actorEmail: actor.email,
-          recipientUserId,
-          title: getNotificationTitle(NotificationType.MENTION),
-          message: JSON.stringify({
-            key: 'mentionMessage',
-            params: { actorName, caseRef: caseNumber },
-          }),
-          entityType: NotificationEntityType.CASE_COMMENT,
-          entityId: commentId,
-          caseId,
-          caseCommentId: commentId,
-        })
+        this.emitMentionNotification(
+          tenantId, caseId, commentId, recipientUserId, actorName, actor, caseNumber
+        )
       )
     )
+  }
+
+  private async emitMentionNotification(
+    tenantId: string,
+    caseId: string,
+    commentId: string,
+    recipientUserId: string,
+    actorName: string,
+    actor: JwtPayload,
+    caseNumber: string
+  ): Promise<void> {
+    await this.createAndEmitNotification({
+      tenantId,
+      type: NotificationType.MENTION,
+      actorUserId: actor.sub,
+      actorEmail: actor.email,
+      recipientUserId,
+      title: getNotificationTitle(NotificationType.MENTION),
+      message: JSON.stringify({
+        key: 'mentionMessage',
+        params: { actorName, caseRef: caseNumber },
+      }),
+      entityType: NotificationEntityType.CASE_COMMENT,
+      entityId: commentId,
+      caseId,
+      caseCommentId: commentId,
+    })
   }
 
   /* ---------------------------------------------------------------- */
@@ -374,43 +388,11 @@ export class NotificationsService {
   private async createAndEmitNotification(params: CreateNotificationParameters): Promise<void> {
     if (params.recipientUserId === params.actorUserId) return
 
-    const preferences = await this.notificationsRepository.findUserPreference(
-      params.recipientUserId
-    )
-    if (!isNotificationAllowedByPreference(preferences, params.type)) {
-      this.appLogger.info('Notification suppressed by user preference', {
-        feature: AppLogFeature.NOTIFICATIONS,
-        action: 'createNotification',
-        outcome: AppLogOutcome.SUCCESS,
-        tenantId: params.tenantId,
-        actorEmail: params.actorEmail,
-        actorUserId: params.actorUserId,
-        targetResource: 'Notification',
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'NotificationsService',
-        functionName: 'createAndEmitNotification',
-        metadata: {
-          type: params.type,
-          recipientUserId: params.recipientUserId,
-          reason: 'user_preference_disabled',
-        },
-      })
-      return
-    }
+    const isAllowed = await this.checkNotificationPreference(params)
+    if (!isAllowed) return
 
     const actorName = await this.resolveActorName(params.actorUserId, params.actorEmail)
-    await this.notificationsRepository.createNotification({
-      tenantId: params.tenantId,
-      type: params.type,
-      actorUserId: params.actorUserId,
-      recipientUserId: params.recipientUserId,
-      title: params.title,
-      message: params.message,
-      entityType: params.entityType,
-      entityId: params.entityId,
-      caseId: params.caseId ?? null,
-      caseCommentId: params.caseCommentId ?? null,
-    })
+    await this.persistNotification(params)
 
     const payload = buildNotificationPayload(
       params.entityId,
@@ -436,6 +418,36 @@ export class NotificationsService {
     )
   }
 
+  private async checkNotificationPreference(
+    params: CreateNotificationParameters
+  ): Promise<boolean> {
+    const preferences = await this.notificationsRepository.findUserPreference(
+      params.recipientUserId
+    )
+
+    if (!isNotificationAllowedByPreference(preferences, params.type)) {
+      this.logPreferenceSuppressed(params)
+      return false
+    }
+
+    return true
+  }
+
+  private async persistNotification(params: CreateNotificationParameters): Promise<void> {
+    await this.notificationsRepository.createNotification({
+      tenantId: params.tenantId,
+      type: params.type,
+      actorUserId: params.actorUserId,
+      recipientUserId: params.recipientUserId,
+      title: params.title,
+      message: params.message,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      caseId: params.caseId ?? null,
+      caseCommentId: params.caseCommentId ?? null,
+    })
+  }
+
   /* ---------------------------------------------------------------- */
   /* PRIVATE: WebSocket Emission                                       */
   /* ---------------------------------------------------------------- */
@@ -457,6 +469,26 @@ export class NotificationsService {
   private async resolveActorName(actorUserId: string, fallbackEmail: string): Promise<string> {
     const user = await this.notificationsRepository.findUserById(actorUserId)
     return user?.name ?? fallbackEmail
+  }
+
+  private logPreferenceSuppressed(params: CreateNotificationParameters): void {
+    this.appLogger.info('Notification suppressed by user preference', {
+      feature: AppLogFeature.NOTIFICATIONS,
+      action: 'createNotification',
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: params.tenantId,
+      actorEmail: params.actorEmail,
+      actorUserId: params.actorUserId,
+      targetResource: 'Notification',
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'NotificationsService',
+      functionName: 'createAndEmitNotification',
+      metadata: {
+        type: params.type,
+        recipientUserId: params.recipientUserId,
+        reason: 'user_preference_disabled',
+      },
+    })
   }
 
   private logSuccess(

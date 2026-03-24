@@ -473,3 +473,161 @@ export function resolveErrorMessageKey(errorMessage: string): string {
   }
   return 'errors.osint.queryFailed'
 }
+
+/* ---------------------------------------------------------------- */
+/* HEADER REDACTION                                                   */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Redacts sensitive header values (API keys, auth tokens) for safe logging.
+ */
+export function redactSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const safeHeaders = { ...headers }
+  for (const key of Object.keys(safeHeaders)) {
+    if (
+      key.toLowerCase().includes('key') ||
+      key.toLowerCase().includes('auth') ||
+      key.toLowerCase() === 'authorization'
+    ) {
+      Reflect.set(safeHeaders, key, '***REDACTED***')
+    }
+  }
+  return safeHeaders
+}
+
+/* ---------------------------------------------------------------- */
+/* VT ANALYSIS URL EXTRACTION                                        */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the VT analysis URL from a VT URL/file submission response.
+ * Only matches analysis stubs where data.links.self points to /analyses/.
+ */
+export function extractVtAnalysisUrl(responseData: unknown): string | null {
+  if (typeof responseData !== 'object' || responseData === null) {
+    return null
+  }
+
+  const data = Reflect.get(responseData as Record<string, unknown>, 'data')
+  if (typeof data !== 'object' || data === null) {
+    return null
+  }
+
+  const links = Reflect.get(data as Record<string, unknown>, 'links')
+  if (typeof links !== 'object' || links === null) {
+    return null
+  }
+
+  const selfUrl = Reflect.get(links as Record<string, unknown>, 'self')
+  if (typeof selfUrl !== 'string') {
+    return null
+  }
+
+  return selfUrl.startsWith('https://www.virustotal.com/api/v3/analyses/') ? selfUrl : null
+}
+
+/* ---------------------------------------------------------------- */
+/* VT ANALYSIS URL ATTACHMENT                                        */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Attaches a VT analysis URL to the response data if the response is still queued.
+ */
+export function attachVtAnalysisUrl(
+  finalData: unknown,
+  sourceType: string,
+  analysisUrl: string | null
+): void {
+  if (sourceType !== 'virustotal' || !analysisUrl) return
+
+  const isStillQueued =
+    typeof finalData === 'object' &&
+    finalData !== null &&
+    (Reflect.get(finalData as Record<string, unknown>, 'status') === 'queued' || analysisUrl)
+
+  if (isStillQueued) {
+    ;(finalData as Record<string, unknown>)['analysisUrl'] = analysisUrl
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* QUERY RESULT BUILDERS                                             */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Builds a successful query result from response data.
+ */
+export function buildSuccessQueryResult(
+  sourceId: string,
+  sourceName: string,
+  sourceType: string,
+  data: unknown,
+  rawResponse: unknown,
+  statusCode: number,
+  responseTimeMs: number
+): OsintQueryResult {
+  return {
+    sourceId,
+    sourceName,
+    sourceType,
+    success: true,
+    data: truncateResponseData(data),
+    rawResponse: truncateResponseData(rawResponse),
+    error: null,
+    statusCode,
+    messageKey: null,
+    responseTimeMs,
+    queriedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Builds an error query result from a caught error.
+ */
+export function buildErrorQueryResult(
+  sourceId: string,
+  sourceName: string,
+  sourceType: string,
+  error: unknown,
+  responseTimeMs: number
+): OsintQueryResult {
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+  const statusCode = (error as { statusCode?: number }).statusCode ?? null
+  const messageKey =
+    (error as { messageKey?: string }).messageKey ?? resolveErrorMessageKey(errorMessage)
+
+  return {
+    sourceId,
+    sourceName,
+    sourceType,
+    success: false,
+    data: null,
+    rawResponse: null,
+    error: errorMessage,
+    statusCode,
+    messageKey,
+    responseTimeMs,
+    queriedAt: new Date().toISOString(),
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* VT POLL STATUS EXTRACTION                                         */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Extracts the VT analysis status from a poll response.
+ */
+export function extractVtPollStatus(responseData: unknown): string | undefined {
+  const data = Reflect.get((responseData as Record<string, unknown>) ?? {}, 'data') as
+    | Record<string, unknown>
+    | undefined
+
+  const attributes = data
+    ? (Reflect.get(data, 'attributes') as Record<string, unknown> | undefined)
+    : undefined
+
+  return attributes
+    ? (Reflect.get(attributes, 'status') as string | undefined)
+    : undefined
+}

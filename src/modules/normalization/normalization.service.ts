@@ -109,20 +109,7 @@ export class NormalizationService {
     dto: CreatePipelineDto,
     user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
-    const duplicates = await this.repository.findManyPipelines({
-      where: { tenantId: user.tenantId, name: dto.name },
-      skip: 0,
-      take: 1,
-      orderBy: { createdAt: SortOrder.DESC },
-    })
-
-    if (duplicates.length > 0) {
-      throw new BusinessException(
-        409,
-        `Pipeline with name "${dto.name}" already exists`,
-        'errors.normalization.pipelineAlreadyExists'
-      )
-    }
+    await this.ensureNoDuplicatePipelineName(user.tenantId, dto.name)
 
     const pipeline = await this.repository.createPipeline({
       tenantId: user.tenantId,
@@ -152,6 +139,26 @@ export class NormalizationService {
     return buildPipelineRecord(pipeline)
   }
 
+  private async ensureNoDuplicatePipelineName(
+    tenantId: string,
+    name: string
+  ): Promise<void> {
+    const duplicates = await this.repository.findManyPipelines({
+      where: { tenantId, name },
+      skip: 0,
+      take: 1,
+      orderBy: { createdAt: SortOrder.DESC },
+    })
+
+    if (duplicates.length > 0) {
+      throw new BusinessException(
+        409,
+        `Pipeline with name "${name}" already exists`,
+        'errors.normalization.pipelineAlreadyExists'
+      )
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* UPDATE                                                            */
   /* ---------------------------------------------------------------- */
@@ -162,12 +169,18 @@ export class NormalizationService {
     user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
     await this.getPipelineById(id, user.tenantId)
+    await this.applyPipelineUpdate(id, user.tenantId, buildPipelineUpdateData(dto))
 
-    const updated = await this.repository.updateManyPipelinesByIdAndTenant(
-      id,
-      user.tenantId,
-      buildPipelineUpdateData(dto)
-    )
+    this.logPipelineAction('updatePipeline', 'Normalization pipeline updated', id, user)
+    return this.getPipelineById(id, user.tenantId)
+  }
+
+  private async applyPipelineUpdate(
+    id: string,
+    tenantId: string,
+    updateData: Record<string, unknown>
+  ): Promise<void> {
+    const updated = await this.repository.updateManyPipelinesByIdAndTenant(id, tenantId, updateData)
 
     if (updated.count === 0) {
       throw new BusinessException(
@@ -176,22 +189,6 @@ export class NormalizationService {
         'errors.normalization.notFound'
       )
     }
-
-    this.appLogger.info('Normalization pipeline updated', {
-      feature: AppLogFeature.NORMALIZATION,
-      action: 'updatePipeline',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'NormalizationPipeline',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NormalizationService',
-      functionName: 'updatePipeline',
-    })
-
-    return this.getPipelineById(id, user.tenantId)
   }
 
   /* ---------------------------------------------------------------- */
@@ -247,7 +244,6 @@ export class NormalizationService {
     actorEmail: string
   ): Promise<NormalizationOutput> {
     const pipeline = await this.getPipelineById(id, tenantId)
-
     const steps = extractPipelineSteps(pipeline.parserConfig, pipeline.fieldMappings)
 
     const output = await this.executor.executePipeline(
@@ -255,6 +251,42 @@ export class NormalizationService {
       events
     )
 
+    this.logDryRunResult(id, tenantId, actorEmail, events.length, output)
+    return output
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logPipelineAction(
+    action: string,
+    message: string,
+    pipelineId: string,
+    user: JwtPayload
+  ): void {
+    this.appLogger.info(message, {
+      feature: AppLogFeature.NORMALIZATION,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId: user.tenantId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+      targetResource: 'NormalizationPipeline',
+      targetResourceId: pipelineId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'NormalizationService',
+      functionName: action,
+    })
+  }
+
+  private logDryRunResult(
+    pipelineId: string,
+    tenantId: string,
+    actorEmail: string,
+    inputCount: number,
+    output: NormalizationOutput
+  ): void {
     this.appLogger.info('Normalization pipeline dry-run executed', {
       feature: AppLogFeature.NORMALIZATION,
       action: 'dryRunPipeline',
@@ -262,18 +294,16 @@ export class NormalizationService {
       tenantId,
       actorEmail,
       targetResource: 'NormalizationPipeline',
-      targetResourceId: id,
+      targetResourceId: pipelineId,
       sourceType: AppLogSourceType.SERVICE,
       className: 'NormalizationService',
       functionName: 'dryRunPipeline',
       metadata: {
-        inputCount: events.length,
+        inputCount,
         outputCount: output.result.outputCount,
         droppedCount: output.result.droppedCount,
         durationMs: output.result.durationMs,
       },
     })
-
-    return output
   }
 }

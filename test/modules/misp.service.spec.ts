@@ -171,7 +171,7 @@ describe('MispService', () => {
       await service.testConnection(VALID_CONFIG)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'MISP connection test succeeded',
+        'MISP testConnection succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({
             connectorType: 'misp',
@@ -291,7 +291,7 @@ describe('MispService', () => {
       await service.getEvents(VALID_CONFIG, 10)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'MISP events retrieved',
+        'MISP getEvents succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ limit: 10, count: 1 }),
         })
@@ -377,7 +377,7 @@ describe('MispService', () => {
       await service.searchAttributes(VALID_CONFIG, { value: 'test' })
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'MISP attribute search executed',
+        'MISP searchAttributes succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ resultCount: 2 }),
         })
@@ -496,7 +496,7 @@ describe('MispService', () => {
       await service.getEvent(VALID_CONFIG, '1')
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'MISP event retrieved',
+        'MISP getEvent succeeded',
         expect.objectContaining({
           metadata: expect.objectContaining({ eventId: '1' }),
         })

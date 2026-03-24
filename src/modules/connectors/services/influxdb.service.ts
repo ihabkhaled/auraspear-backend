@@ -36,61 +36,9 @@ export class InfluxDBService {
     }
 
     try {
-      const res = await this.httpClient.fetch(`${baseUrl}/ping`, {
-        headers: { Authorization: `Token ${token}` },
-        rejectUnauthorized: config.verifyTls !== false,
-        allowPrivateNetwork: true,
-      })
-
-      if (res.status !== 204 && res.status !== 200) {
-        const remoteError = formatRemoteError('InfluxDB', res.status, res.data)
-        this.appLogger.warn('InfluxDB connection test returned non-success', {
-          feature: AppLogFeature.CONNECTORS,
-          action: 'testConnection',
-          className: 'InfluxDBService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: {
-            connectorType: ConnectorType.INFLUXDB,
-            status: res.status,
-            remoteError: extractRemoteErrorMessage(res.data),
-          },
-        })
-        return { ok: false, details: remoteError }
-      }
-
-      const version = res.headers['x-influxdb-version'] ?? 'unknown'
-
-      this.appLogger.info('InfluxDB connection test succeeded', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'InfluxDBService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.INFLUXDB, version },
-      })
-
-      return {
-        ok: true,
-        details: `InfluxDB v${version} reachable at ${baseUrl}.`,
-      }
+      return await this.executePingCheck(config, baseUrl, token)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Connection failed'
-      this.logger.warn(`InfluxDB connection test failed: ${message}`)
-
-      this.appLogger.error('InfluxDB connection test failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'InfluxDBService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.INFLUXDB, error: message },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
-      return { ok: false, details: message }
+      return this.handleTestError(error)
     }
   }
 
@@ -118,28 +66,11 @@ export class InfluxDBService {
     )
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('InfluxDB Flux query failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'query',
-        className: 'InfluxDBService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('query', res.status, res.data)
       throw new Error(formatRemoteError('InfluxDB', res.status, res.data))
     }
 
-    this.appLogger.info('InfluxDB Flux query executed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'query',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'InfluxDBService',
-      functionName: 'query',
-      metadata: { connectorType: ConnectorType.INFLUXDB, org },
-    })
-
+    this.logActionSuccess('query', { org })
     return res.data as string
   }
 
@@ -157,31 +88,91 @@ export class InfluxDBService {
     })
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Failed to fetch InfluxDB buckets', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'getBuckets',
-        className: 'InfluxDBService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('getBuckets', res.status, res.data)
       throw new Error(formatRemoteError('InfluxDB', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
     const buckets = (body.buckets ?? []) as unknown[]
+    this.logActionSuccess('getBuckets', { count: buckets.length })
+    return buckets
+  }
 
-    this.appLogger.info('InfluxDB buckets retrieved', {
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Test Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executePingCheck(
+    config: Record<string, unknown>,
+    baseUrl: string,
+    token: string
+  ): Promise<TestResult> {
+    const res = await this.httpClient.fetch(`${baseUrl}/ping`, {
+      headers: { Authorization: `Token ${token}` },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 204 && res.status !== 200) {
+      this.logRemoteFailure('testConnection', res.status, res.data)
+      return { ok: false, details: formatRemoteError('InfluxDB', res.status, res.data) }
+    }
+
+    const version = res.headers['x-influxdb-version'] ?? 'unknown'
+    this.logActionSuccess('testConnection', { version })
+
+    return {
+      ok: true,
+      details: `InfluxDB v${version} reachable at ${baseUrl}.`,
+    }
+  }
+
+  private handleTestError(error: unknown): TestResult {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    this.logger.warn(`InfluxDB connection test failed: ${message}`)
+
+    this.appLogger.error('InfluxDB connection test failed', {
       feature: AppLogFeature.CONNECTORS,
-      action: 'getBuckets',
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'InfluxDBService',
+      functionName: 'testConnection',
+      metadata: { connectorType: ConnectorType.INFLUXDB, error: message },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+
+    return { ok: false, details: message }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logActionSuccess(action: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`InfluxDB ${action} succeeded`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
       outcome: AppLogOutcome.SUCCESS,
       sourceType: AppLogSourceType.SERVICE,
       className: 'InfluxDBService',
-      functionName: 'getBuckets',
-      metadata: { connectorType: ConnectorType.INFLUXDB, count: buckets.length },
+      functionName: action,
+      metadata: { connectorType: ConnectorType.INFLUXDB, ...metadata },
     })
+  }
 
-    return buckets
+  private logRemoteFailure(action: string, status: number, data: unknown): void {
+    this.appLogger.warn(`InfluxDB ${action} failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      className: 'InfluxDBService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      metadata: {
+        connectorType: ConnectorType.INFLUXDB,
+        status,
+        remoteError: extractRemoteErrorMessage(data),
+      },
+    })
   }
 }

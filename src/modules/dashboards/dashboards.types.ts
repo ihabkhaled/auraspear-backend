@@ -351,6 +351,88 @@ export type DashboardSoarStatusRow = StatusCountRow<SoarExecutionStatus>
 
 export type DashboardConnectorSyncStatusRow = StatusCountRow<SyncJobStatus>
 
+export interface SummaryRawData {
+  openCases: number
+  alertsLast24h: number
+  resolvedLast24h: number
+  avgResolutionTime: AvgMsRow[]
+  alertsCurrentWeek: number
+  criticalCurrentWeek: number
+  casesCurrentWeek: number
+  mttrCurrentWeek: AvgMsRow[]
+  alertsPreviousWeek: number
+  criticalPreviousWeek: number
+  casesPreviousWeek: number
+  mttrPreviousWeek: AvgMsRow[]
+  connectedSources: number
+}
+
+export interface AnalyticsRawData {
+  tenantId: string
+  alertsLast24h: number
+  resolvedLast24h: number
+  openCases: number
+  openIncidents: number
+  criticalVulnerabilities: number
+  highVulnerabilities: number
+  activeAttackPaths: number
+  onlineAgents: number
+  aiSessions24h: number
+  pendingJobs: number
+  runningJobs: number
+  failedJobs: number
+  totalJobs: number
+  delayedJobs: number
+  totalFrameworks: number
+  passedControls: number
+  failedControls: number
+  notAssessedControls: number
+  completedReports: number
+  generatedReports30d: number
+  availableTemplates: number
+  totalAlerts7d: number
+  criticalAlerts7d: number
+  enabledConnectors: ConnectorRow[]
+}
+
+export interface OperationsRawData {
+  tenantId: string
+  incidentStatusRows: DashboardIncidentStatusCountRow[]
+  openCases: number
+  unassignedCases: number
+  agedOverSevenDays: number
+  agedOverFourteenDays: number
+  averageOpenCaseAge: AvgHoursRow[]
+  activeRules: number
+  topRules: DetectionRulePerformanceRow[]
+  noisyRules: DetectionRulePerformanceRow[]
+  connectorSyncStatusRows: DashboardConnectorSyncStatusRow[]
+  topFailingConnectors: ConnectorFailureRow[]
+  pendingJobs: number
+  retryingJobs: number
+  failedJobs: number
+  staleRunningJobs: number
+  queuedConnectorSyncJobs: number
+  queuedReportJobs: number
+  aiSessionStatusRows: DashboardAiSessionStatusRow[]
+  averageAiDuration: AvgMsRow[]
+  soarStatusRows: DashboardSoarStatusRow[]
+  averageSoarCompletionRate: AvgPercentageRow[]
+  criticalVulnerabilities: number
+  exploitAvailableVulnerabilities: number
+  openCloudFindings: number
+  criticalCloudFindings: number
+  passedControls: number
+  failedControls: number
+}
+
+export interface RecentActivityBuildInput {
+  notifications: RecentNotificationRow[]
+  actors: Array<{ id: string; name: string | null }>
+  total: number
+  limit: number
+}
+
 export interface TenantAlertCounts {
   tenantId: string
   tenantName: string
@@ -366,4 +448,15 @@ export interface TenantCaseCounts {
 export interface TenantHuntCounts {
   tenantId: string
   activeHunts: number
+}
+
+export interface TenantAggregateInput {
+  tenantId: string
+  tenantName: string
+  alertCount: number
+  criticalAlerts: number
+  openCases: number
+  activeHunts: number
+  connectorHealth: number
+  aiUsage: number
 }

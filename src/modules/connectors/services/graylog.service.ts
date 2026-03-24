@@ -37,65 +37,9 @@ export class GraylogService {
     }
 
     try {
-      const res = await this.httpClient.fetch(`${baseUrl}/api/system/cluster/nodes`, {
-        headers: {
-          Authorization: this.httpClient.basicAuth(username, password),
-          'X-Requested-By': 'AuraSpear',
-        },
-        rejectUnauthorized: config.verifyTls !== false,
-        allowPrivateNetwork: true,
-      })
-
-      if (res.status !== 200) {
-        const remoteError = formatRemoteError('Graylog', res.status, res.data)
-        this.appLogger.warn('Graylog connection test returned non-200', {
-          feature: AppLogFeature.CONNECTORS,
-          action: 'testConnection',
-          className: 'GraylogService',
-          sourceType: AppLogSourceType.SERVICE,
-          outcome: AppLogOutcome.FAILURE,
-          metadata: {
-            connectorType: ConnectorType.GRAYLOG,
-            status: res.status,
-            remoteError: extractRemoteErrorMessage(res.data),
-          },
-        })
-        return { ok: false, details: remoteError }
-      }
-
-      const body = res.data as Record<string, unknown>
-      const nodes = (body.nodes ?? body.total) as number | undefined
-
-      this.appLogger.info('Graylog connection test succeeded', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'GraylogService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.GRAYLOG, nodes },
-      })
-
-      return {
-        ok: true,
-        details: `Graylog reachable at ${baseUrl}. Nodes: ${nodes ?? 'unknown'}.`,
-      }
+      return await this.executeClusterCheck(config, baseUrl, username, password)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Connection failed'
-      this.logger.warn(`Graylog connection test failed: ${message}`)
-
-      this.appLogger.error('Graylog connection test failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'testConnection',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'GraylogService',
-        functionName: 'testConnection',
-        metadata: { connectorType: ConnectorType.GRAYLOG, error: message },
-        stackTrace: error instanceof Error ? error.stack : undefined,
-      })
-
-      return { ok: false, details: message }
+      return this.handleTestError(error)
     }
   }
 
@@ -122,32 +66,14 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Graylog events search failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'searchEvents',
-        className: 'GraylogService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('searchEvents', res.status, res.data)
       throw new Error(formatRemoteError('Graylog', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
     const events = (body.events ?? []) as unknown[]
     const total = (body.total_results ?? 0) as number
-
-    this.appLogger.info('Graylog event search executed', {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'searchEvents',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'GraylogService',
-      functionName: 'searchEvents',
-      metadata: { connectorType: ConnectorType.GRAYLOG, resultCount: events.length, total },
-    })
-
+    this.logActionSuccess('searchEvents', { resultCount: events.length, total })
     return { events, total }
   }
 
@@ -169,31 +95,96 @@ export class GraylogService {
     })
 
     if (res.status !== 200) {
-      const remoteMessage = extractRemoteErrorMessage(res.data)
-      this.appLogger.warn('Graylog event definitions fetch failed', {
-        feature: AppLogFeature.CONNECTORS,
-        action: 'getEventDefinitions',
-        className: 'GraylogService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { status: res.status, remoteError: remoteMessage },
-      })
+      this.logRemoteFailure('getEventDefinitions', res.status, res.data)
       throw new Error(formatRemoteError('Graylog', res.status, res.data))
     }
 
     const body = res.data as Record<string, unknown>
     const definitions = (body.event_definitions ?? []) as unknown[]
+    this.logActionSuccess('getEventDefinitions', { count: definitions.length })
+    return definitions
+  }
 
-    this.appLogger.info('Graylog event definitions retrieved', {
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Test Helpers                                             */
+  /* ---------------------------------------------------------------- */
+
+  private async executeClusterCheck(
+    config: Record<string, unknown>,
+    baseUrl: string,
+    username: string,
+    password: string
+  ): Promise<TestResult> {
+    const res = await this.httpClient.fetch(`${baseUrl}/api/system/cluster/nodes`, {
+      headers: {
+        Authorization: this.httpClient.basicAuth(username, password),
+        'X-Requested-By': 'AuraSpear',
+      },
+      rejectUnauthorized: config.verifyTls !== false,
+      allowPrivateNetwork: true,
+    })
+
+    if (res.status !== 200) {
+      this.logRemoteFailure('testConnection', res.status, res.data)
+      return { ok: false, details: formatRemoteError('Graylog', res.status, res.data) }
+    }
+
+    const body = res.data as Record<string, unknown>
+    const nodes = (body.nodes ?? body.total) as number | undefined
+    this.logActionSuccess('testConnection', { nodes })
+
+    return {
+      ok: true,
+      details: `Graylog reachable at ${baseUrl}. Nodes: ${nodes ?? 'unknown'}.`,
+    }
+  }
+
+  private handleTestError(error: unknown): TestResult {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    this.logger.warn(`Graylog connection test failed: ${message}`)
+
+    this.appLogger.error('Graylog connection test failed', {
       feature: AppLogFeature.CONNECTORS,
-      action: 'getEventDefinitions',
+      action: 'testConnection',
+      outcome: AppLogOutcome.FAILURE,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'GraylogService',
+      functionName: 'testConnection',
+      metadata: { connectorType: ConnectorType.GRAYLOG, error: message },
+      stackTrace: error instanceof Error ? error.stack : undefined,
+    })
+
+    return { ok: false, details: message }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Logging                                                  */
+  /* ---------------------------------------------------------------- */
+
+  private logActionSuccess(action: string, metadata: Record<string, unknown>): void {
+    this.appLogger.info(`Graylog ${action} succeeded`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
       outcome: AppLogOutcome.SUCCESS,
       sourceType: AppLogSourceType.SERVICE,
       className: 'GraylogService',
-      functionName: 'getEventDefinitions',
-      metadata: { connectorType: ConnectorType.GRAYLOG, count: definitions.length },
+      functionName: action,
+      metadata: { connectorType: ConnectorType.GRAYLOG, ...metadata },
     })
+  }
 
-    return definitions
+  private logRemoteFailure(action: string, status: number, data: unknown): void {
+    this.appLogger.warn(`Graylog ${action} failed`, {
+      feature: AppLogFeature.CONNECTORS,
+      action,
+      className: 'GraylogService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      metadata: {
+        connectorType: ConnectorType.GRAYLOG,
+        status,
+        remoteError: extractRemoteErrorMessage(data),
+      },
+    })
   }
 }

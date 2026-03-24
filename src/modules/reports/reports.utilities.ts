@@ -1,9 +1,14 @@
-import { SortOrder } from '../../common/enums'
+import { generateReportPdf } from './pdf-generator.utility'
+import { ReportFormat, SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdateReportDto } from './dto/update-report.dto'
 import type {
+  GeneratedReportContent,
+  ReportContentSection,
+  ReportDownloadResponse,
   ReportRecord,
   ReportStats,
+  ReportTableSection,
   ReportTemplateRecord,
   ReportTemplateWithTenant,
   ReportWithRelations,
@@ -179,4 +184,188 @@ export function buildReportStats(
     generatingReports,
     availableTemplates,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* REPORT DOWNLOAD / FORMAT CONVERSION                               */
+/* ---------------------------------------------------------------- */
+
+export async function buildReportDownloadResponse(
+  reportName: string,
+  format: string,
+  content: GeneratedReportContent
+): Promise<ReportDownloadResponse> {
+  const safeName = reportName.replaceAll(/[^a-zA-Z0-9_-]/g, '_')
+
+  switch (format) {
+    case ReportFormat.PDF: {
+      const pdfBuffer = await generateReportPdf(content)
+      return { filename: `${safeName}.pdf`, contentType: 'application/pdf', content: pdfBuffer }
+    }
+    case ReportFormat.CSV:
+      return {
+        filename: `${safeName}.csv`,
+        contentType: 'text/csv; charset=utf-8',
+        content: convertReportToCsv(content),
+      }
+    case ReportFormat.HTML:
+      return {
+        filename: `${safeName}.html`,
+        contentType: 'text/html; charset=utf-8',
+        content: convertReportToHtml(content),
+      }
+    default:
+      return {
+        filename: `${safeName}.json`,
+        contentType: 'application/json; charset=utf-8',
+        content: JSON.stringify(content, null, 2),
+      }
+  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function convertSectionToCsvLines(section: ReportContentSection): string[] {
+  const lines: string[] = []
+
+  lines.push(`# ${section.title}`)
+  if (section.description) {
+    lines.push(section.description)
+  }
+
+  if (section.metrics) {
+    lines.push('Metric,Value')
+    for (const metric of section.metrics) {
+      lines.push(`"${String(metric.label)}","${String(metric.value)}"`)
+    }
+  }
+
+  if (section.tables) {
+    for (const table of section.tables) {
+      lines.push(...convertTableToCsvLines(table))
+    }
+  }
+
+  lines.push('')
+  return lines
+}
+
+function convertTableToCsvLines(table: ReportTableSection): string[] {
+  const lines: string[] = ['', `## ${table.title}`]
+
+  lines.push(table.columns.map(c => `"${c}"`).join(','))
+  for (const row of table.rows) {
+    const values = table.columns.map(col => {
+      const cellValue = Reflect.get(row, col) as string | number | boolean | null
+      return `"${String(cellValue ?? '')}"`
+    })
+    lines.push(values.join(','))
+  }
+
+  return lines
+}
+
+function convertReportToCsv(content: GeneratedReportContent): string {
+  const lines: string[] = [
+    `Report: ${content.reportName}`,
+    `Type: ${content.reportType}`,
+    `Generated: ${content.generatedAt}`,
+    `Date Range: ${content.dateRange.from} to ${content.dateRange.to}`,
+    '',
+  ]
+
+  for (const section of content.sections) {
+    lines.push(...convertSectionToCsvLines(section))
+  }
+
+  return lines.join('\n')
+}
+
+function convertSectionToHtml(section: ReportContentSection): string {
+  let html = `<section><h2>${escapeHtml(section.title)}</h2>`
+
+  if (section.description) {
+    html += `<p>${escapeHtml(section.description)}</p>`
+  }
+
+  if (section.metrics) {
+    html += '<div class="metrics">'
+    for (const metric of section.metrics) {
+      html += `<div class="metric"><span class="label">${escapeHtml(String(metric.label))}</span><span class="value">${escapeHtml(String(metric.value))}</span></div>`
+    }
+    html += '</div>'
+  }
+
+  if (section.tables) {
+    for (const table of section.tables) {
+      html += convertTableToHtml(table)
+    }
+  }
+
+  html += '</section>'
+  return html
+}
+
+function convertTableToHtml(table: ReportTableSection): string {
+  let html = `<h3>${escapeHtml(table.title)}</h3><table><thead><tr>`
+
+  for (const col of table.columns) {
+    html += `<th>${escapeHtml(col)}</th>`
+  }
+  html += '</tr></thead><tbody>'
+
+  for (const row of table.rows) {
+    html += '<tr>'
+    for (const col of table.columns) {
+      const cellValue = Reflect.get(row, col) as string | number | boolean | null
+      html += `<td>${escapeHtml(String(cellValue ?? ''))}</td>`
+    }
+    html += '</tr>'
+  }
+
+  html += '</tbody></table>'
+  return html
+}
+
+function convertReportToHtml(content: GeneratedReportContent): string {
+  const sectionHtml = content.sections.map(convertSectionToHtml).join('\n')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(content.reportName)}</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 2rem; background: #0f172a; color: #e2e8f0; }
+h1 { color: #22d3ee; border-bottom: 2px solid #22d3ee; padding-bottom: 0.5rem; }
+h2 { color: #67e8f9; margin-top: 2rem; }
+h3 { color: #a5f3fc; }
+.meta { color: #94a3b8; margin-bottom: 2rem; }
+.metrics { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.metric { background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem; min-width: 150px; }
+.metric .label { display: block; color: #94a3b8; font-size: 0.875rem; text-transform: uppercase; }
+.metric .value { display: block; font-size: 1.5rem; font-weight: 700; color: #f1f5f9; margin-top: 0.25rem; }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+th { background: #1e293b; color: #94a3b8; padding: 0.75rem; text-align: left; font-size: 0.875rem; text-transform: uppercase; border-bottom: 2px solid #334155; }
+td { padding: 0.75rem; border-bottom: 1px solid #1e293b; }
+tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+section { margin-bottom: 2rem; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(content.reportName)}</h1>
+<div class="meta">
+<p>Type: ${escapeHtml(content.reportType)} | Generated: ${escapeHtml(content.generatedAt)}</p>
+<p>Period: ${escapeHtml(content.dateRange.from)} to ${escapeHtml(content.dateRange.to)}</p>
+</div>
+${sectionHtml}
+</body>
+</html>`
 }

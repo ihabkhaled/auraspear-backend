@@ -21,31 +21,33 @@ export class AiNormalizationService {
     connector?: string
   ): Promise<AiResponse> {
     const pipeline = await this.normalizationService.getPipelineById(pipelineId, tenantId)
-
-    const steps = extractPipelineSteps(pipeline.parserConfig, pipeline.fieldMappings)
-
-    // Execute a dry-run to get normalized output for the sample events
     const { normalizedEvents } = await this.normalizationService.dryRunPipeline(
-      pipelineId,
-      tenantId,
-      sampleEvents,
-      userEmail
+      pipelineId, tenantId, sampleEvents, userEmail
     )
 
-    const context: Record<string, unknown> = {
+    const context = this.buildVerifyContext(pipeline, sampleEvents, normalizedEvents)
+
+    return this.aiService.executeAiTask({
+      tenantId, userId, userEmail,
+      featureKey: AiFeatureKey.NORMALIZATION_VERIFY,
+      context, connector,
+    })
+  }
+
+  private buildVerifyContext(
+    pipeline: { name: string; parserConfig: unknown; fieldMappings: unknown },
+    sampleEvents: Record<string, unknown>[],
+    normalizedEvents: Record<string, unknown>[]
+  ): Record<string, unknown> {
+    const steps = extractPipelineSteps(
+      pipeline.parserConfig as Record<string, unknown>,
+      pipeline.fieldMappings as Record<string, unknown>
+    )
+    return {
       pipelineName: pipeline.name,
       pipelineConfig: JSON.stringify(steps),
       sampleEvents: JSON.stringify(sampleEvents.slice(0, 5)),
       normalizedOutput: JSON.stringify(normalizedEvents.slice(0, 5)),
     }
-
-    return this.aiService.executeAiTask({
-      tenantId,
-      userId,
-      userEmail,
-      featureKey: AiFeatureKey.NORMALIZATION_VERIFY,
-      context,
-      connector,
-    })
   }
 }

@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { BROWSER_PATTERNS } from './users-control.constants'
 import { UsersControlSessionSortField, UsersControlUserSortField } from './users-control.enums'
 import { type SortOrder, UserSessionBrowser, UserSessionStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
@@ -18,28 +19,10 @@ function detectBrowser(userAgent: string | null): UserSessionBrowser {
     return UserSessionBrowser.UNKNOWN
   }
 
-  if (/SamsungBrowser/i.test(userAgent)) {
-    return UserSessionBrowser.SAMSUNG_INTERNET
-  }
-
-  if (/Edg/i.test(userAgent)) {
-    return UserSessionBrowser.EDGE
-  }
-
-  if (/OPR|Opera/i.test(userAgent)) {
-    return UserSessionBrowser.OPERA
-  }
-
-  if (/Firefox/i.test(userAgent)) {
-    return UserSessionBrowser.FIREFOX
-  }
-
-  if (/Chrome|CriOS/i.test(userAgent)) {
-    return UserSessionBrowser.CHROME
-  }
-
-  if (/Safari/i.test(userAgent)) {
-    return UserSessionBrowser.SAFARI
+  for (const [pattern, browser] of BROWSER_PATTERNS) {
+    if (pattern.test(userAgent)) {
+      return browser
+    }
   }
 
   return UserSessionBrowser.UNKNOWN
@@ -206,20 +189,39 @@ export function mapUsersControlSummary(
   }
 }
 
+function getLatestSessionDate(
+  sessions: UsersControlUserRecord['sessions']
+): Date | null {
+  const sorted = [...sessions].sort(
+    (left, right) => right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+  )
+  return sorted[0]?.lastSeenAt ?? null
+}
+
+function getActiveSessions(
+  sessions: UsersControlUserRecord['sessions']
+): UsersControlUserRecord['sessions'] {
+  return sessions.filter(session => session.status === UserSessionStatus.ACTIVE)
+}
+
+function countOnlineSessions(activeSessions: UsersControlUserRecord['sessions']): number {
+  return activeSessions.filter(session =>
+    isUserSessionOnline(session.lastSeenAt, session.status as UserSessionStatus)
+  ).length
+}
+
+function hasGlobalAdminMembership(
+  memberships: UsersControlUserRecord['memberships']
+): boolean {
+  return memberships.some(membership => membership.role === UserRole.GLOBAL_ADMIN)
+}
+
 export function mapUsersControlUser(
   user: UsersControlUserRecord,
   tenantId?: string
 ): UsersControlUserListItem {
   const scopedMembership = getScopedMembership(user.memberships, tenantId)
-  const activeSessions = user.sessions.filter(
-    session => session.status === UserSessionStatus.ACTIVE
-  )
-  const latestSession = [...user.sessions].sort(
-    (left, right) => right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
-  )[0]
-  const onlineSessions = activeSessions.filter(session =>
-    isUserSessionOnline(session.lastSeenAt, session.status as UserSessionStatus)
-  )
+  const activeSessions = getActiveSessions(user.sessions)
 
   return {
     id: user.id,
@@ -232,16 +234,54 @@ export function mapUsersControlUser(
     tenantName: scopedMembership?.tenant.name ?? null,
     tenantCount: user.memberships.length,
     lastLoginAt: user.lastLoginAt,
-    lastSeenAt: latestSession?.lastSeenAt ?? null,
-    isOnline: onlineSessions.length > 0,
+    lastSeenAt: getLatestSessionDate(user.sessions),
+    isOnline: countOnlineSessions(activeSessions) > 0,
     activeSessionCount: activeSessions.length,
     totalSessionCount: user.sessions.length,
     sessionPlatforms: buildSessionPlatforms(user.sessions),
     isProtected: user.isProtected,
-    hasGlobalAdminMembership: user.memberships.some(
-      membership => membership.role === UserRole.GLOBAL_ADMIN
-    ),
+    hasGlobalAdminMembership: hasGlobalAdminMembership(user.memberships),
     mfaEnabled: user.mfaEnabled,
+  }
+}
+
+function toNullableDate(value: Date | string | null): Date | null {
+  if (!value) return null
+  return value instanceof Date ? value : new Date(value)
+}
+
+function getUserSortComparator(
+  sortBy: UsersControlUserSortField,
+  sortOrder: SortOrder
+): (left: UsersControlUserListItem, right: UsersControlUserListItem) => number {
+  switch (sortBy) {
+    case UsersControlUserSortField.EMAIL:
+      return (left, right): number => compareNullableStrings(left.email, right.email, sortOrder)
+    case UsersControlUserSortField.TENANT_NAME:
+      return (left, right): number =>
+        compareNullableStrings(left.tenantName, right.tenantName, sortOrder)
+    case UsersControlUserSortField.ROLE:
+      return (left, right): number => compareNullableStrings(left.role, right.role, sortOrder)
+    case UsersControlUserSortField.STATUS:
+      return (left, right): number => compareNullableStrings(left.status, right.status, sortOrder)
+    case UsersControlUserSortField.SESSION_PLATFORMS:
+      return (left, right): number =>
+        comparePlatformLists(left.sessionPlatforms, right.sessionPlatforms, sortOrder)
+    case UsersControlUserSortField.LAST_SEEN_AT:
+      return (left, right): number =>
+        compareNullableDates(toNullableDate(left.lastSeenAt), toNullableDate(right.lastSeenAt), sortOrder)
+    case UsersControlUserSortField.LAST_LOGIN_AT:
+      return (left, right): number =>
+        compareNullableDates(toNullableDate(left.lastLoginAt), toNullableDate(right.lastLoginAt), sortOrder)
+    case UsersControlUserSortField.ACTIVE_SESSION_COUNT:
+      return (left, right): number =>
+        compareNumbers(left.activeSessionCount, right.activeSessionCount, sortOrder)
+    case UsersControlUserSortField.CREATED_AT:
+      return (left, right): number =>
+        compareNullableDates(toNullableDate(left.createdAt), toNullableDate(right.createdAt), sortOrder)
+    case UsersControlUserSortField.NAME:
+    default:
+      return (left, right): number => compareNullableStrings(left.name, right.name, sortOrder)
   }
 }
 
@@ -251,44 +291,8 @@ export function sortUsersControlUsers(
   sortOrder: SortOrder
 ): UsersControlUserListItem[] {
   const sortedUsers = [...users]
-
-  sortedUsers.sort((left, right) => {
-    switch (sortBy) {
-      case UsersControlUserSortField.EMAIL:
-        return compareNullableStrings(left.email, right.email, sortOrder)
-      case UsersControlUserSortField.TENANT_NAME:
-        return compareNullableStrings(left.tenantName, right.tenantName, sortOrder)
-      case UsersControlUserSortField.ROLE:
-        return compareNullableStrings(left.role, right.role, sortOrder)
-      case UsersControlUserSortField.STATUS:
-        return compareNullableStrings(left.status, right.status, sortOrder)
-      case UsersControlUserSortField.SESSION_PLATFORMS:
-        return comparePlatformLists(left.sessionPlatforms, right.sessionPlatforms, sortOrder)
-      case UsersControlUserSortField.LAST_SEEN_AT:
-        return compareNullableDates(
-          left.lastSeenAt ? new Date(left.lastSeenAt) : null,
-          right.lastSeenAt ? new Date(right.lastSeenAt) : null,
-          sortOrder
-        )
-      case UsersControlUserSortField.LAST_LOGIN_AT:
-        return compareNullableDates(
-          left.lastLoginAt ? new Date(left.lastLoginAt) : null,
-          right.lastLoginAt ? new Date(right.lastLoginAt) : null,
-          sortOrder
-        )
-      case UsersControlUserSortField.ACTIVE_SESSION_COUNT:
-        return compareNumbers(left.activeSessionCount, right.activeSessionCount, sortOrder)
-      case UsersControlUserSortField.CREATED_AT:
-        return compareNullableDates(
-          left.createdAt ? new Date(left.createdAt) : null,
-          right.createdAt ? new Date(right.createdAt) : null,
-          sortOrder
-        )
-      case UsersControlUserSortField.NAME:
-      default:
-        return compareNullableStrings(left.name, right.name, sortOrder)
-    }
-  })
+  const comparator = getUserSortComparator(sortBy, sortOrder)
+  sortedUsers.sort(comparator)
 
   return sortedUsers
 }

@@ -146,35 +146,19 @@ export class AlertsService {
    * Ingest alerts from Wazuh Indexer via Elasticsearch DSL.
    */
   async ingestFromWazuh(tenantId: string): Promise<{ ingested: number }> {
-    const config = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
-    if (!config) {
-      this.logWarn('ingestFromWazuh', tenantId)
-      throw new BusinessException(
-        400,
-        'Wazuh connector not configured or disabled',
-        'errors.alerts.connectorNotConfigured'
-      )
-    }
+    const config = await this.getWazuhConfigOrThrow(tenantId)
 
     const result = await this.wazuhService.searchAlerts(config, buildWazuhIngestionQuery())
     const upsertOps = buildWazuhUpsertOps(result.hits)
 
     const allResults = await processInBatches(upsertOps, 50, op => {
       const { create, update } = buildWazuhAlertCreateInput(tenantId, op)
-      return this.alertsRepository.upsertByTenantAndExternalId(
-        tenantId,
-        op.externalId,
-        create,
-        update
-      )
+      return this.alertsRepository.upsertByTenantAndExternalId(tenantId, op.externalId, create, update)
     })
 
     const { ingested, failures } = countIngestedResults(allResults)
-    for (const message of failures) {
-      this.logger.warn(`Failed to ingest alert: ${message}`)
-    }
+    this.logIngestionFailures(failures)
 
-    // Best-effort entity extraction from ingested alerts
     const fulfilledAlerts = allResults
       .filter((r): r is PromiseFulfilledResult<AlertRecord> => r.status === 'fulfilled')
       .map(r => r.value)
@@ -252,6 +236,25 @@ export class AlertsService {
   /* ---------------------------------------------------------------- */
   /* PRIVATE HELPERS                                                   */
   /* ---------------------------------------------------------------- */
+
+  private async getWazuhConfigOrThrow(tenantId: string): Promise<Record<string, unknown>> {
+    const config = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
+    if (!config) {
+      this.logWarn('ingestFromWazuh', tenantId)
+      throw new BusinessException(
+        400,
+        'Wazuh connector not configured or disabled',
+        'errors.alerts.connectorNotConfigured'
+      )
+    }
+    return config
+  }
+
+  private logIngestionFailures(failures: string[]): void {
+    for (const message of failures) {
+      this.logger.warn(`Failed to ingest alert: ${message}`)
+    }
+  }
 
   private async extractEntitiesFromAlerts(tenantId: string, alerts: AlertRecord[]): Promise<void> {
     const results = await Promise.allSettled(

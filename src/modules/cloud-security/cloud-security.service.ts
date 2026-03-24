@@ -8,6 +8,7 @@ import {
   buildAccountUpdateData,
   buildAccountRecord,
   buildFindingRecord,
+  buildCloudSecurityStats,
 } from './cloud-security.utilities'
 import {
   AppLogFeature,
@@ -38,6 +39,24 @@ export class CloudSecurityService {
     private readonly repository: CloudSecurityRepository,
     private readonly appLogger: AppLoggerService
   ) {}
+
+  /* ---------------------------------------------------------------- */
+  /* LOGGING HELPERS                                                    */
+  /* ---------------------------------------------------------------- */
+
+  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
+    this.appLogger.info(`CloudSecurity: ${action}`, {
+      feature: AppLogFeature.CLOUD_SECURITY,
+      action,
+      outcome: AppLogOutcome.SUCCESS,
+      tenantId,
+      targetResource: 'CloudAccount',
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'CloudSecurityService',
+      functionName: action,
+      metadata,
+    })
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST ACCOUNTS (paginated, tenant-scoped)                          */
@@ -113,21 +132,7 @@ export class CloudSecurityService {
       status: CloudAccountStatus.DISCONNECTED,
     })
 
-    this.appLogger.info('Cloud account created', {
-      feature: AppLogFeature.CLOUD_SECURITY,
-      action: 'createAccount',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'CloudAccount',
-      targetResourceId: account.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CloudSecurityService',
-      functionName: 'createAccount',
-      metadata: { provider: account.provider, accountId: account.accountId },
-    })
-
+    this.logSuccess('createAccount', user.tenantId, { provider: account.provider, accountId: account.accountId })
     return buildAccountRecord(account)
   }
 
@@ -155,20 +160,7 @@ export class CloudSecurityService {
       )
     }
 
-    this.appLogger.info('Cloud account updated', {
-      feature: AppLogFeature.CLOUD_SECURITY,
-      action: 'updateAccount',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'CloudAccount',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CloudSecurityService',
-      functionName: 'updateAccount',
-    })
-
+    this.logSuccess('updateAccount', user.tenantId, { accountId: id })
     return this.getAccountById(id, user.tenantId)
   }
 
@@ -181,20 +173,7 @@ export class CloudSecurityService {
 
     await this.repository.deleteManyAccounts({ id, tenantId })
 
-    this.appLogger.info(`Cloud account ${existing.accountId} deleted`, {
-      feature: AppLogFeature.CLOUD_SECURITY,
-      action: 'deleteAccount',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'CloudAccount',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CloudSecurityService',
-      functionName: 'deleteAccount',
-      metadata: { provider: existing.provider, accountId: existing.accountId },
-    })
-
+    this.logSuccess('deleteAccount', tenantId, { provider: existing.provider, accountId: existing.accountId, actorEmail: actor })
     return { deleted: true }
   }
 
@@ -239,16 +218,9 @@ export class CloudSecurityService {
 
   async getCloudSecurityStats(tenantId: string): Promise<CloudSecurityStats> {
     const [
-      totalAccounts,
-      connectedAccounts,
-      disconnectedAccounts,
-      errorAccounts,
-      totalFindings,
-      openFindings,
-      resolvedFindings,
-      suppressedFindings,
-      criticalFindings,
-      highFindings,
+      totalAccounts, connectedAccounts, disconnectedAccounts, errorAccounts,
+      totalFindings, openFindings, resolvedFindings, suppressedFindings,
+      criticalFindings, highFindings,
     ] = await Promise.all([
       this.repository.countAccounts({ tenantId }),
       this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.CONNECTED),
@@ -262,17 +234,10 @@ export class CloudSecurityService {
       this.repository.countFindingsBySeverity(tenantId, CloudFindingSeverity.HIGH),
     ])
 
-    return {
-      totalAccounts,
-      connectedAccounts,
-      disconnectedAccounts,
-      errorAccounts,
-      totalFindings,
-      openFindings,
-      resolvedFindings,
-      suppressedFindings,
-      criticalFindings,
-      highFindings,
-    }
+    return buildCloudSecurityStats(
+      totalAccounts, connectedAccounts, disconnectedAccounts, errorAccounts,
+      totalFindings, openFindings, resolvedFindings, suppressedFindings,
+      criticalFindings, highFindings
+    )
   }
 }

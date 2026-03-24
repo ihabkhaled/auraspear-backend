@@ -1,8 +1,14 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../enums'
+import { AppLogOutcome } from '../enums'
 import { AppLoggerService } from './app-logger.service'
+import {
+  buildChecksMetadata,
+  buildStartupSummaryLogContext,
+  buildServiceCheckLogContext,
+  buildServiceCheckMessage,
+} from './startup-health.utilities'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { ServiceCheck } from './startup-health.types'
 
@@ -17,7 +23,6 @@ export class StartupHealthService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // Delay slightly to ensure all modules are initialized
     setTimeout(() => {
       void this.runStartupChecks()
     }, 2000)
@@ -27,70 +32,47 @@ export class StartupHealthService implements OnModuleInit {
     this.logger.log('Running startup health checks...')
 
     const checks = await Promise.all([this.checkPostgres(), this.checkRedis()])
+    const metadata = buildChecksMetadata(checks)
 
+    this.logStartupSummary(checks, metadata)
+    this.logIndividualChecks(checks)
+  }
+
+  private logStartupSummary(
+    checks: ServiceCheck[],
+    metadata: Record<string, unknown>
+  ): void {
     const allHealthy = checks.every(c => c.status === 'up')
-    const downServices = checks.filter(c => c.status === 'down')
-
-    const metadata: Record<string, unknown> = {}
-    for (const check of checks) {
-      metadata[check.name] = {
-        status: check.status,
-        latencyMs: check.latencyMs,
-        error: check.error ?? null,
-      }
-    }
 
     if (allHealthy) {
-      this.appLogger.info('All services healthy on startup', {
-        feature: AppLogFeature.SYSTEM_HEALTH,
-        action: 'startupCheck',
-        outcome: AppLogOutcome.SUCCESS,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'StartupHealthService',
-        functionName: 'runStartupChecks',
-        metadata,
-      })
+      this.appLogger.info(
+        'All services healthy on startup',
+        buildStartupSummaryLogContext(AppLogOutcome.SUCCESS, metadata)
+      )
       this.logger.log('Startup health checks passed: all services are UP')
     } else {
-      const downNames = downServices.map(s => s.name).join(', ')
-      this.appLogger.error(`Services DOWN on startup: ${downNames}`, {
-        feature: AppLogFeature.SYSTEM_HEALTH,
-        action: 'startupCheck',
-        outcome: AppLogOutcome.FAILURE,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'StartupHealthService',
-        functionName: 'runStartupChecks',
-        metadata,
-      })
+      const downNames = checks
+        .filter(c => c.status === 'down')
+        .map(s => s.name)
+        .join(', ')
+      this.appLogger.error(
+        `Services DOWN on startup: ${downNames}`,
+        buildStartupSummaryLogContext(AppLogOutcome.FAILURE, metadata)
+      )
       this.logger.error(`Startup health checks FAILED: ${downNames} are DOWN`)
     }
+  }
 
-    // Log individual results
+  private logIndividualChecks(checks: ServiceCheck[]): void {
     for (const check of checks) {
+      const message = buildServiceCheckMessage(check)
+      const outcome = check.status === 'up' ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE
+      const context = buildServiceCheckLogContext(check, outcome)
+
       if (check.status === 'up') {
-        this.appLogger.info(`${check.name}: UP (${String(check.latencyMs)}ms)`, {
-          feature: AppLogFeature.SYSTEM_HEALTH,
-          action: 'serviceCheck',
-          outcome: AppLogOutcome.SUCCESS,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'StartupHealthService',
-          functionName: 'runStartupChecks',
-          metadata: { service: check.name, latencyMs: check.latencyMs },
-        })
+        this.appLogger.info(message, context)
       } else {
-        this.appLogger.error(`${check.name}: DOWN — ${check.error ?? 'Unknown error'}`, {
-          feature: AppLogFeature.SYSTEM_HEALTH,
-          action: 'serviceCheck',
-          outcome: AppLogOutcome.FAILURE,
-          sourceType: AppLogSourceType.SERVICE,
-          className: 'StartupHealthService',
-          functionName: 'runStartupChecks',
-          metadata: {
-            service: check.name,
-            latencyMs: check.latencyMs,
-            error: check.error,
-          },
-        })
+        this.appLogger.error(message, context)
       }
     }
   }
@@ -113,6 +95,22 @@ export class StartupHealthService implements OnModuleInit {
 
   private async checkRedis(): Promise<ServiceCheck> {
     const start = Date.now()
+    const redis = this.createRedisCheckClient()
+
+    try {
+      await redis.connect()
+      await redis.ping()
+      const latencyMs = Date.now() - start
+      redis.disconnect()
+      return { name: 'Redis', status: 'up', latencyMs }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      redis.disconnect()
+      return { name: 'Redis', status: 'down', latencyMs: Date.now() - start, error: errorMessage }
+    }
+  }
+
+  private createRedisCheckClient(): Redis {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost')
     const port = this.configService.get<number>('REDIS_PORT', 6379)
     const password = this.configService.get<string>('REDIS_PASSWORD', '')
@@ -130,21 +128,6 @@ export class StartupHealthService implements OnModuleInit {
     // Suppress connection errors during check
     redis.on('error', () => {})
 
-    try {
-      await redis.connect()
-      await redis.ping()
-      const latencyMs = Date.now() - start
-      redis.disconnect()
-      return { name: 'Redis', status: 'up', latencyMs }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      redis.disconnect()
-      return {
-        name: 'Redis',
-        status: 'down',
-        latencyMs: Date.now() - start,
-        error: errorMessage,
-      }
-    }
+    return redis
   }
 }

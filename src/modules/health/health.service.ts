@@ -2,7 +2,22 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
 import { HealthRepository } from './health.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
+import {
+  buildComponentCheckResult,
+  buildFailedServiceHealthResult,
+  buildOverallHealthResponse,
+  buildServiceHealthResult,
+  countUnhealthy,
+  determineConnectorHealthStatus,
+  determineOverallStatus,
+  extractErrorMessage,
+} from './health.utilities'
+import {
+  AppLogFeature,
+  AppLogOutcome,
+  AppLogSourceType,
+  HealthStatus,
+} from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ConnectorsService } from '../connectors/connectors.service'
@@ -37,11 +52,6 @@ export class HealthService {
     })
   }
 
-  /**
-   * GET /health
-   * Overall system health -- checks database and Redis connectivity.
-   * Throws 503 if all services are down.
-   */
   async getOverallHealthOrThrow(): Promise<OverallHealth> {
     const health = await this.getOverallHealth()
 
@@ -52,20 +62,74 @@ export class HealthService {
     return health
   }
 
-  /**
-   * Overall system health -- checks database and Redis connectivity.
-   * This endpoint is public (no auth required).
-   */
   async getOverallHealth(): Promise<OverallHealth> {
     const [database, redis] = await Promise.all([this.checkDatabase(), this.checkRedis()])
+    const status = determineOverallStatus(database, redis)
 
-    let status: HealthStatus = HealthStatus.HEALTHY
-    if (database.status === HealthStatus.DOWN && redis.status === HealthStatus.DOWN) {
-      status = HealthStatus.DOWN
-    } else if (database.status === HealthStatus.DOWN || redis.status === HealthStatus.DOWN) {
-      status = HealthStatus.DEGRADED
+    this.logOverallHealth(status, database, redis)
+
+    return buildOverallHealthResponse(status, database, redis)
+  }
+
+  async getAllServiceHealth(tenantId: string): Promise<ServiceHealthResult[]> {
+    const connectors = await this.connectorsService.getEnabledConnectors(tenantId)
+
+    const results = await Promise.all(
+      connectors.map(async connector => this.checkConnectorHealth(tenantId, connector))
+    )
+
+    this.logServiceHealthResults(tenantId, connectors.length, results)
+
+    return results
+  }
+
+  private async checkConnectorHealth(
+    tenantId: string,
+    connector: { name: string; type: string }
+  ): Promise<ServiceHealthResult> {
+    try {
+      const test = await this.connectorsService.testConnection(tenantId, connector.type)
+      const status = determineConnectorHealthStatus(test.ok, test.latencyMs)
+      return buildServiceHealthResult(connector.name, connector.type, status, test.latencyMs)
+    } catch (error) {
+      const message = extractErrorMessage(error)
+      this.logger.error(`Health check failed for connector ${connector.type}: ${message}`)
+      this.logConnectorHealthFailure(tenantId, connector, message)
+      return buildFailedServiceHealthResult(connector.name, connector.type)
     }
+  }
 
+  private async checkDatabase(): Promise<ComponentCheck> {
+    const start = Date.now()
+    try {
+      await this.repository.pingDatabase()
+      return buildComponentCheckResult(HealthStatus.HEALTHY, Date.now() - start)
+    } catch (error) {
+      const message = extractErrorMessage(error)
+      this.logger.error(`Database health check failed: ${message}`)
+      this.logComponentCheckFailure('checkDatabase', message)
+      return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
+    }
+  }
+
+  private async checkRedis(): Promise<ComponentCheck> {
+    const start = Date.now()
+    try {
+      await this.redis.ping()
+      return buildComponentCheckResult(HealthStatus.HEALTHY, Date.now() - start)
+    } catch (error) {
+      const message = extractErrorMessage(error)
+      this.logger.error(`Redis health check failed: ${message}`)
+      this.logComponentCheckFailure('checkRedis', message)
+      return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
+    }
+  }
+
+  private logOverallHealth(
+    status: HealthStatus,
+    database: ComponentCheck,
+    redis: ComponentCheck
+  ): void {
     this.appLogger.debug('Overall health check completed', {
       feature: AppLogFeature.SYSTEM,
       action: 'getOverallHealth',
@@ -81,67 +145,45 @@ export class HealthService {
         redisLatencyMs: redis.latencyMs,
       },
     })
-
-    return {
-      status,
-      timestamp: new Date().toISOString(),
-      checks: { database, redis },
-    }
   }
 
-  /**
-   * GET /health/services
-   * Iterates tenant's enabled connectors and pings each one via ConnectorsService.
-   */
-  async getAllServiceHealth(tenantId: string): Promise<ServiceHealthResult[]> {
-    const connectors = await this.connectorsService.getEnabledConnectors(tenantId)
+  private logConnectorHealthFailure(
+    tenantId: string,
+    connector: { name: string; type: string },
+    errorMessage: string
+  ): void {
+    this.appLogger.error(`Health check failed for connector ${connector.type}`, {
+      feature: AppLogFeature.SYSTEM,
+      action: 'getAllServiceHealth',
+      className: 'HealthService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      tenantId,
+      metadata: {
+        connectorType: connector.type,
+        connectorName: connector.name,
+        error: errorMessage,
+      },
+    })
+  }
 
-    const results = await Promise.all(
-      connectors.map(async (connector): Promise<ServiceHealthResult> => {
-        try {
-          const test = await this.connectorsService.testConnection(tenantId, connector.type)
+  private logComponentCheckFailure(action: string, errorMessage: string): void {
+    this.appLogger.error(`${action} health check failed`, {
+      feature: AppLogFeature.SYSTEM,
+      action,
+      className: 'HealthService',
+      sourceType: AppLogSourceType.SERVICE,
+      outcome: AppLogOutcome.FAILURE,
+      metadata: { error: errorMessage },
+    })
+  }
 
-          let status: HealthStatus = HealthStatus.DOWN
-          if (test.ok) {
-            status = test.latencyMs > 3000 ? HealthStatus.DEGRADED : HealthStatus.HEALTHY
-          }
-
-          return {
-            name: connector.name,
-            type: connector.type,
-            status,
-            latencyMs: test.latencyMs,
-          }
-        } catch (error) {
-          this.logger.error(
-            `Health check failed for connector ${connector.type}: ${
-              error instanceof Error ? error.message : 'Unknown error'
-            }`
-          )
-          this.appLogger.error(`Health check failed for connector ${connector.type}`, {
-            feature: AppLogFeature.SYSTEM,
-            action: 'getAllServiceHealth',
-            className: 'HealthService',
-            sourceType: AppLogSourceType.SERVICE,
-            outcome: AppLogOutcome.FAILURE,
-            tenantId,
-            metadata: {
-              connectorType: connector.type,
-              connectorName: connector.name,
-              error: error instanceof Error ? error.message : 'Unknown error',
-            },
-          })
-          return {
-            name: connector.name,
-            type: connector.type,
-            status: HealthStatus.DOWN,
-            latencyMs: -1,
-          }
-        }
-      })
-    )
-
-    const unhealthyCount = results.filter(r => r.status !== HealthStatus.HEALTHY).length
+  private logServiceHealthResults(
+    tenantId: string,
+    totalConnectors: number,
+    results: ServiceHealthResult[]
+  ): void {
+    const unhealthyCount = countUnhealthy(results)
 
     this.appLogger.debug('Service health check completed for all connectors', {
       feature: AppLogFeature.SYSTEM,
@@ -152,59 +194,9 @@ export class HealthService {
       className: 'HealthService',
       functionName: 'getAllServiceHealth',
       metadata: {
-        totalConnectors: connectors.length,
+        totalConnectors,
         unhealthyCount,
       },
     })
-
-    return results
-  }
-
-  /**
-   * Ping the database with a simple SELECT 1 query.
-   */
-  private async checkDatabase(): Promise<ComponentCheck> {
-    const start = Date.now()
-    try {
-      await this.repository.pingDatabase()
-      return { status: HealthStatus.HEALTHY, latencyMs: Date.now() - start }
-    } catch (error) {
-      this.logger.error(
-        `Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      )
-      this.appLogger.error('Database health check failed', {
-        feature: AppLogFeature.SYSTEM,
-        action: 'checkDatabase',
-        className: 'HealthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
-      })
-      return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
-    }
-  }
-
-  /**
-   * Ping Redis to verify connectivity using the shared connection.
-   */
-  private async checkRedis(): Promise<ComponentCheck> {
-    const start = Date.now()
-    try {
-      await this.redis.ping()
-      return { status: HealthStatus.HEALTHY, latencyMs: Date.now() - start }
-    } catch (error) {
-      this.logger.error(
-        `Redis health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      )
-      this.appLogger.error('Redis health check failed', {
-        feature: AppLogFeature.SYSTEM,
-        action: 'checkRedis',
-        className: 'HealthService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { error: error instanceof Error ? error.message : 'Unknown error' },
-      })
-      return { status: HealthStatus.DOWN, latencyMs: Date.now() - start }
-    }
   }
 }
