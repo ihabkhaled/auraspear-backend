@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx prisma generate && (npx prisma migrate resolve --rolled-back 20260324_seed_agent_catalog || true) && npx prisma migrate deploy && npm run build && npm run prisma:seed",
+  "buildCommand": "npx prisma generate && npx prisma migrate deploy && npm run build && npm run prisma:seed",
   "installCommand": "npm install",
   "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/main.js" }]
