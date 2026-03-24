@@ -1,3 +1,6 @@
+export { AgentActionType } from './agent-action-type.enum'
+export { AgentAutomationMode } from './agent-automation-mode.enum'
+export { AgentRiskLevel } from './agent-risk-level.enum'
 export { AiActionCategory, AiApprovalLevel, AiFeatureKey } from './ai-feature.enum'
 export {
   AiAgentId,

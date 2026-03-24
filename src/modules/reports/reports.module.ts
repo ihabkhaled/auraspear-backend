@@ -11,7 +11,7 @@ import { DashboardsRepository } from '../dashboards/dashboards.repository'
 import { JobsModule } from '../jobs/jobs.module'
 
 @Module({
-  imports: [AppLogsModule, forwardRef(() => JobsModule), AiModule],
+  imports: [AppLogsModule, forwardRef(() => JobsModule), forwardRef(() => AiModule)],
   controllers: [ReportsController, AiReportController],
   providers: [
     ReportsRepository,

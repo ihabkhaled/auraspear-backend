@@ -1,5 +1,6 @@
 import { forwardRef, Module, type OnModuleInit } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
+import { OrchestratorModule } from '../ai/orchestrator/orchestrator.module'
 import { AiAgentTaskHandler } from '../ai-agents/ai-agent-task.handler'
 import { AiAgentsModule } from '../ai-agents/ai-agents.module'
 import { AlertsModule } from '../alerts/alerts.module'
@@ -29,7 +30,8 @@ import { JobService } from './jobs.service'
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    AlertsModule,
+    forwardRef(() => AlertsModule),
+    forwardRef(() => OrchestratorModule),
     AppLogsModule,
     ConnectorsModule,
     CorrelationModule,

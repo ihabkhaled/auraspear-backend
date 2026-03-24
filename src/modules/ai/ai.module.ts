@@ -3,6 +3,7 @@ import { AiController } from './ai.controller'
 import { AiRepository } from './ai.repository'
 import { AiService } from './ai.service'
 import { FeatureCatalogModule } from './feature-catalog/feature-catalog.module'
+import { OrchestratorModule } from './orchestrator/orchestrator.module'
 import { PromptRegistryModule } from './prompt-registry/prompt-registry.module'
 import { UsageBudgetModule } from './usage-budget/usage-budget.module'
 import { AgentConfigModule } from '../agent-config/agent-config.module'
@@ -18,12 +19,19 @@ import { OsintExecutorModule } from '../osint-executor/osint-executor.module'
     ConnectorsModule,
     LlmConnectorsModule,
     OsintExecutorModule,
+    OrchestratorModule,
     PromptRegistryModule,
     FeatureCatalogModule,
     UsageBudgetModule,
   ],
   controllers: [AiController],
   providers: [AiRepository, AiService],
-  exports: [AiService, PromptRegistryModule, FeatureCatalogModule, UsageBudgetModule],
+  exports: [
+    AiService,
+    OrchestratorModule,
+    PromptRegistryModule,
+    FeatureCatalogModule,
+    UsageBudgetModule,
+  ],
 })
 export class AiModule {}

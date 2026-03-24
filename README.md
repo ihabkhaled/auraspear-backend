@@ -457,6 +457,9 @@ npm run test:e2e           # End-to-end tests
 - Permissions and roles: [`docs/permissions-and-roles.md`](./docs/permissions-and-roles.md)
 - Adding connectors: [`docs/adding-connectors.md`](./docs/adding-connectors.md)
 - AI agent safety: [`docs/ai-agent-safety.md`](./docs/ai-agent-safety.md)
+- AI automation system: [`docs/AI-AUTOMATION.md`](./docs/AI-AUTOMATION.md) -- 28-agent catalog, execution flows, configuration, safety
+- AI provider routing: [`docs/AI-ROUTING.md`](./docs/AI-ROUTING.md) -- Bedrock/LLM APIs/OpenClaw selection, fallbacks, capability matrix
+- Permissions reference: [`docs/PERMISSIONS.md`](./docs/PERMISSIONS.md) -- Complete 136-permission matrix across 12 roles
 - Contribution workflow: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - Install and local environment: [`INSTALL.md`](./INSTALL.md)
 

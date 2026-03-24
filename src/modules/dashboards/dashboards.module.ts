@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiDashboardController } from './ai-dashboard.controller'
 import { AiDashboardService } from './ai-dashboard.service'
 import { DashboardsController } from './dashboards.controller'
@@ -12,7 +12,7 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
 import { ConnectorsModule } from '../connectors/connectors.module'
 
 @Module({
-  imports: [ConnectorsModule, AppLogsModule, AiModule],
+  imports: [ConnectorsModule, AppLogsModule, forwardRef(() => AiModule)],
   controllers: [DashboardsController, AiDashboardController, MsspDashboardController],
   providers: [
     DashboardsService,

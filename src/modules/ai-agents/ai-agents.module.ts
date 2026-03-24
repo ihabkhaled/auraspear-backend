@@ -8,7 +8,7 @@ import { AppLogsModule } from '../app-logs/app-logs.module'
 import { JobsModule } from '../jobs/jobs.module'
 
 @Module({
-  imports: [AppLogsModule, AiModule, forwardRef(() => JobsModule)],
+  imports: [AppLogsModule, forwardRef(() => AiModule), forwardRef(() => JobsModule)],
   controllers: [AiAgentsController],
   providers: [AiAgentsRepository, AiAgentsService, AiAgentTaskHandler],
   exports: [AiAgentsService, AiAgentsRepository, AiAgentTaskHandler],

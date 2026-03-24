@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiNormalizationController } from './ai-normalization.controller'
 import { AiNormalizationService } from './ai-normalization.service'
 import { NormalizationController } from './normalization.controller'
@@ -9,7 +9,7 @@ import { AiModule } from '../ai/ai.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 
 @Module({
-  imports: [AppLogsModule, AiModule],
+  imports: [AppLogsModule, forwardRef(() => AiModule)],
   controllers: [NormalizationController, AiNormalizationController],
   providers: [
     NormalizationRepository,

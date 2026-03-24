@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiAlertTriageController } from './ai-alert-triage.controller'
 import { AiAlertTriageService } from './ai-alert-triage.service'
 import { AlertsController } from './alerts.controller'
@@ -10,7 +10,7 @@ import { ConnectorsModule } from '../connectors/connectors.module'
 import { EntitiesModule } from '../entities/entities.module'
 
 @Module({
-  imports: [ConnectorsModule, AppLogsModule, AiModule, EntitiesModule],
+  imports: [ConnectorsModule, AppLogsModule, forwardRef(() => AiModule), EntitiesModule],
   controllers: [AlertsController, AiAlertTriageController],
   providers: [AlertsRepository, AlertsService, AiAlertTriageService],
   exports: [AlertsService, AlertsRepository],

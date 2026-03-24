@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiEntityController } from './ai-entity.controller'
 import { AiEntityService } from './ai-entity.service'
 import { EntitiesController } from './entities.controller'
@@ -10,7 +10,7 @@ import { AiModule } from '../ai/ai.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 
 @Module({
-  imports: [AppLogsModule, AiModule],
+  imports: [AppLogsModule, forwardRef(() => AiModule)],
   controllers: [EntitiesController, AiEntityController],
   providers: [
     EntitiesRepository,

@@ -24,6 +24,10 @@ export enum AiFeatureKey {
   KNOWLEDGE_SUMMARIZE_INCIDENT = 'knowledge.summarize_incident',
   ENTITY_RISK_EXPLAIN = 'entity.risk_explain',
   NORMALIZATION_VERIFY = 'normalization.verify',
+  VULNERABILITY_PRIORITIZE = 'vulnerability.prioritize',
+  CLOUD_FINDING_TRIAGE = 'cloud.finding_triage',
+  UEBA_ANOMALY_EXPLAIN = 'ueba.anomaly_explain',
+  ATTACK_PATH_SUMMARIZE = 'attack_path.summarize',
 }
 
 export enum AiApprovalLevel {

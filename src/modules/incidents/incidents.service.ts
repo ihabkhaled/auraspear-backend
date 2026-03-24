@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common'
 import { IncidentsRepository } from './incidents.repository'
 import {
   buildIncidentWhereClause,
@@ -19,6 +19,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import type { AddTimelineEntryDto } from './dto/add-timeline-entry.dto'
 import type { CreateIncidentDto } from './dto/create-incident.dto'
 import type { UpdateIncidentDto } from './dto/update-incident.dto'
@@ -38,7 +39,10 @@ export class IncidentsService {
 
   constructor(
     private readonly repository: IncidentsRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    @Optional()
+    @Inject(forwardRef(() => AgentEventListenerService))
+    private readonly agentEventListener: AgentEventListenerService | null
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -99,7 +103,9 @@ export class IncidentsService {
 
     const [incidents, total] = await Promise.all([
       this.repository.findManyWithTenant({
-        where, skip: (page - 1) * limit, take: limit,
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
         orderBy: buildIncidentOrderBy(sortBy, sortOrder),
       }),
       this.repository.count(where),
@@ -198,8 +204,19 @@ export class IncidentsService {
     const timelineEvent = describeIncidentChanges(dto, existing, actorLabel)
     const updateData = buildIncidentUpdateData(dto, existing.status, existing.resolvedAt)
 
-    const result = await this.executeUpdateIncident(id, user.tenantId, updateData, timelineEvent, user.email)
+    const result = await this.executeUpdateIncident(
+      id,
+      user.tenantId,
+      updateData,
+      timelineEvent,
+      user.email
+    )
     this.logIncidentAction('updateIncident', user, id)
+
+    // Fire-and-forget — notify AI when incident status changes
+    if (dto.status && dto.status !== existing.status) {
+      this.dispatchIncidentStatusChanged(user.tenantId, id, dto.status)
+    }
 
     return this.enrichIncidentRecord(result)
   }
@@ -500,5 +517,19 @@ export class IncidentsService {
       functionName: action,
       metadata,
     })
+  }
+
+  /**
+   * Fire-and-forget: notify AI agent when incident status changes.
+   * Never blocks the update flow and never throws.
+   */
+  private dispatchIncidentStatusChanged(
+    tenantId: string,
+    incidentId: string,
+    newStatus: string
+  ): void {
+    if (!this.agentEventListener) return
+    // Fire-and-forget — don't block incident update on AI
+    void this.agentEventListener.onIncidentStatusChanged(tenantId, incidentId, newStatus)
   }
 }

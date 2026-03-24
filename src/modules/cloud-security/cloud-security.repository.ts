@@ -78,6 +78,10 @@ export class CloudSecurityRepository {
     })
   }
 
+  async findFirstFinding(where: { id: string; tenantId: string }): Promise<CloudFinding | null> {
+    return this.prisma.cloudFinding.findFirst({ where })
+  }
+
   async countFindingsBySeverity(
     tenantId: string,
     severity: PrismaCloudFindingSeverity

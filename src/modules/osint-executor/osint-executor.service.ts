@@ -17,6 +17,7 @@ import {
   buildOsintRequest,
   buildSuccessQueryResult,
   extractResponseData,
+  extractSourceErrorDetail,
   extractVtAnalysisUrl,
   extractVtPollStatus,
   redactSensitiveHeaders,
@@ -72,7 +73,14 @@ export class OsintExecutorService {
     this.logOsintRequest(requestConfig, finalUrl, source, iocType, iocValue, executionConfig)
 
     return this.executeQueryWithErrorHandling(
-      finalUrl, requestConfig, executionConfig, source, sourceId, tenantId, iocType, startTime
+      finalUrl,
+      requestConfig,
+      executionConfig,
+      source,
+      sourceId,
+      tenantId,
+      iocType,
+      startTime
     )
   }
 
@@ -80,7 +88,10 @@ export class OsintExecutorService {
     sourceId: string,
     tenantId: string,
     startTime: number
-  ): Promise<OsintQueryResult | NonNullable<Awaited<ReturnType<typeof this.agentConfigRepository.findOsintSource>>>> {
+  ): Promise<
+    | OsintQueryResult
+    | NonNullable<Awaited<ReturnType<typeof this.agentConfigRepository.findOsintSource>>>
+  > {
     const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
 
     if (!source?.isEnabled) {
@@ -95,7 +106,11 @@ export class OsintExecutorService {
 
     if (!this.checkRateLimit(sourceId)) {
       return buildFailedQueryResult(
-        sourceId, source.name, source.sourceType, 'Rate limit exceeded', Date.now() - startTime
+        sourceId,
+        source.name,
+        source.sourceType,
+        'Rate limit exceeded',
+        Date.now() - startTime
       )
     }
 
@@ -114,7 +129,14 @@ export class OsintExecutorService {
   ): Promise<OsintQueryResult> {
     try {
       return await this.executeQueryAndBuildResult(
-        finalUrl, requestConfig, executionConfig, source, sourceId, tenantId, iocType, startTime
+        finalUrl,
+        requestConfig,
+        executionConfig,
+        source,
+        sourceId,
+        tenantId,
+        iocType,
+        startTime
       )
     } catch (error: unknown) {
       return this.handleQueryError(error, source, sourceId, tenantId, iocType, finalUrl, startTime)
@@ -153,7 +175,9 @@ export class OsintExecutorService {
     const source = await this.agentConfigRepository.findOsintSource(sourceId, tenantId)
     if (!source) {
       throw new BusinessException(
-        404, 'OSINT source not found', 'errors.agentConfig.osintSourceNotFound'
+        404,
+        'OSINT source not found',
+        'errors.agentConfig.osintSourceNotFound'
       )
     }
 
@@ -228,11 +252,23 @@ export class OsintExecutorService {
 
     try {
       return await this.executeFileUpload(
-        baseUrl, headers, form, source, sourceId, tenantId, file.originalname, startTime
+        baseUrl,
+        headers,
+        form,
+        source,
+        sourceId,
+        tenantId,
+        file.originalname,
+        startTime
       )
     } catch (error: unknown) {
       return this.handleFileUploadError(
-        error, source, sourceId, tenantId, file.originalname, startTime
+        error,
+        source,
+        sourceId,
+        tenantId,
+        file.originalname,
+        startTime
       )
     }
   }
@@ -289,7 +325,10 @@ export class OsintExecutorService {
   ): Promise<OsintQueryResult> {
     const response = await this.executeWithRetry(() =>
       this.executeSourceRequest(
-        finalUrl, requestConfig.method, requestConfig.headers, requestConfig.body,
+        finalUrl,
+        requestConfig.method,
+        requestConfig.headers,
+        requestConfig.body,
         executionConfig.timeout
       )
     )
@@ -309,7 +348,13 @@ export class OsintExecutorService {
     this.logQuerySuccess(tenantId, sourceId, source.name, iocType, responseTimeMs)
 
     return buildSuccessQueryResult(
-      sourceId, source.name, source.sourceType, data, finalData, response.status, responseTimeMs
+      sourceId,
+      source.name,
+      source.sourceType,
+      data,
+      finalData,
+      response.status,
+      responseTimeMs
     )
   }
 
@@ -330,7 +375,12 @@ export class OsintExecutorService {
       `OSINT error: source=${source.name} (${source.sourceType}) | url=${finalUrl} | status=${String(statusCode)} | ${String(responseTimeMs)}ms | error=${errorMessage}`
     )
 
-    await this.agentConfigRepository.updateOsintSourceHealth(sourceId, tenantId, false, errorMessage)
+    await this.agentConfigRepository.updateOsintSourceHealth(
+      sourceId,
+      tenantId,
+      false,
+      errorMessage
+    )
     this.logQueryFailure(tenantId, sourceId, source.name, iocType, errorMessage)
 
     return buildErrorQueryResult(sourceId, source.name, source.sourceType, error, responseTimeMs)
@@ -349,28 +399,57 @@ export class OsintExecutorService {
     startTime: number
   ): Promise<OsintQueryResult> {
     const response = await this.axiosService.fetch(`${baseUrl}/files`, {
-      method: HttpMethod.POST, headers, body: form, timeoutMs: source.timeout,
+      method: HttpMethod.POST,
+      headers,
+      body: form,
+      timeoutMs: source.timeout,
     })
     const responseTimeMs = Date.now() - startTime
 
     if (response.status >= 400) {
-      return buildFailedQueryResult(sourceId, source.name, source.sourceType, `HTTP ${String(response.status)} from file upload`, responseTimeMs)
+      return buildFailedQueryResult(
+        sourceId,
+        source.name,
+        source.sourceType,
+        `HTTP ${String(response.status)} from file upload`,
+        responseTimeMs
+      )
     }
 
-    return this.buildFileUploadSuccess(response.data, source, sourceId, tenantId, fileName, responseTimeMs, response.status)
+    return this.buildFileUploadSuccess(
+      response.data,
+      source,
+      sourceId,
+      tenantId,
+      fileName,
+      responseTimeMs,
+      response.status
+    )
   }
 
   private buildFileUploadSuccess(
     rawData: unknown,
     source: { name: string; sourceType: string; responsePath: string | null },
-    sourceId: string, tenantId: string, fileName: string, responseTimeMs: number, status: number
+    sourceId: string,
+    tenantId: string,
+    fileName: string,
+    responseTimeMs: number,
+    status: number
   ): OsintQueryResult {
     const finalData = rawData
     attachVtAnalysisUrl(finalData, source.sourceType, extractVtAnalysisUrl(rawData))
     const data = extractResponseData(finalData, source.responsePath)
     this.logFileUpload(true, source.name, tenantId, sourceId, fileName, responseTimeMs)
 
-    return buildSuccessQueryResult(sourceId, source.name, source.sourceType, data, finalData, status, responseTimeMs)
+    return buildSuccessQueryResult(
+      sourceId,
+      source.name,
+      source.sourceType,
+      data,
+      finalData,
+      status,
+      responseTimeMs
+    )
   }
 
   private handleFileUploadError(
@@ -384,10 +463,22 @@ export class OsintExecutorService {
     const responseTimeMs = Date.now() - startTime
     const errorMessage = error instanceof Error ? error.message : 'File upload failed'
 
-    this.logFileUpload(false, source.name, tenantId, sourceId, fileName, responseTimeMs, errorMessage)
+    this.logFileUpload(
+      false,
+      source.name,
+      tenantId,
+      sourceId,
+      fileName,
+      responseTimeMs,
+      errorMessage
+    )
 
     return buildFailedQueryResult(
-      sourceId, source.name, source.sourceType, errorMessage, responseTimeMs
+      sourceId,
+      source.name,
+      source.sourceType,
+      errorMessage,
+      responseTimeMs
     )
   }
 
@@ -422,7 +513,10 @@ export class OsintExecutorService {
     if (remaining.length === 0) return results
 
     const remainingResults = await this.executeBatchedQueries(
-      tenantId, iocType, iocValue, remaining
+      tenantId,
+      iocType,
+      iocValue,
+      remaining
     )
     return [...results, ...remainingResults]
   }
@@ -465,8 +559,12 @@ export class OsintExecutorService {
 
     if (response.status >= 400) {
       this.logHttpError(method, url, response)
-      const messageKey = resolveHttpErrorMessageKey(response.status)
-      const error = new Error(`HTTP ${String(response.status)} response from OSINT source`)
+      const sourceError = extractSourceErrorDetail(response.data)
+      const messageKey = sourceError.messageKey ?? resolveHttpErrorMessageKey(response.status)
+      const errorText = sourceError.detail
+        ? `${sourceError.detail} (HTTP ${String(response.status)})`
+        : `HTTP ${String(response.status)} response from OSINT source`
+      const error = new Error(errorText)
       Object.assign(error, { statusCode: response.status, messageKey })
       throw error
     }
@@ -509,7 +607,11 @@ export class OsintExecutorService {
 
   private validateAnalysisUrl(analysisUrl: string): void {
     if (!analysisUrl || typeof analysisUrl !== 'string') {
-      throw new BusinessException(400, 'analysisUrl is required', 'errors.osint.analysisUrlRequired')
+      throw new BusinessException(
+        400,
+        'analysisUrl is required',
+        'errors.osint.analysisUrlRequired'
+      )
     }
     if (!analysisUrl.startsWith('https://www.virustotal.com/api/v3/analyses/')) {
       throw new BusinessException(400, 'Invalid analysis URL', 'errors.osint.badRequest')
@@ -532,7 +634,11 @@ export class OsintExecutorService {
     const vtSource = sources.find(s => s.sourceType === 'virustotal' && s.isEnabled)
 
     if (!vtSource) {
-      throw new BusinessException(404, 'No enabled VirusTotal source', 'errors.osint.sourceNotFound')
+      throw new BusinessException(
+        404,
+        'No enabled VirusTotal source',
+        'errors.osint.sourceNotFound'
+      )
     }
 
     return vtSource
@@ -735,24 +841,21 @@ export class OsintExecutorService {
     responseTimeMs: number,
     errorMessage?: string
   ): void {
-    this.appLogger.info(
-      `OSINT file upload ${success ? 'succeeded' : 'failed'}: ${sourceName}`,
-      {
-        feature: AppLogFeature.AI_CONFIG,
-        action: 'osintFileUpload',
-        outcome: success ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
-        tenantId,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'OsintExecutorService',
-        functionName: 'uploadFileForScan',
-        metadata: {
-          sourceId,
-          sourceName,
-          fileName,
-          responseTimeMs,
-          ...(errorMessage ? { error: errorMessage } : {}),
-        },
-      }
-    )
+    this.appLogger.info(`OSINT file upload ${success ? 'succeeded' : 'failed'}: ${sourceName}`, {
+      feature: AppLogFeature.AI_CONFIG,
+      action: 'osintFileUpload',
+      outcome: success ? AppLogOutcome.SUCCESS : AppLogOutcome.FAILURE,
+      tenantId,
+      sourceType: AppLogSourceType.SERVICE,
+      className: 'OsintExecutorService',
+      functionName: 'uploadFileForScan',
+      metadata: {
+        sourceId,
+        sourceName,
+        fileName,
+        responseTimeMs,
+        ...(errorMessage ? { error: errorMessage } : {}),
+      },
+    })
   }
 }

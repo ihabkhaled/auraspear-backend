@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiDetectionCopilotController } from './ai-detection-copilot.controller'
 import { AiDetectionCopilotService } from './ai-detection-copilot.service'
 import { DetectionRulesController } from './detection-rules.controller'
@@ -10,7 +10,7 @@ import { AiModule } from '../ai/ai.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 
 @Module({
-  imports: [AppLogsModule, AiModule],
+  imports: [AppLogsModule, forwardRef(() => AiModule)],
   controllers: [DetectionRulesController, RulesEngineController, AiDetectionCopilotController],
   providers: [
     DetectionRulesRepository,

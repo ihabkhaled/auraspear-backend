@@ -474,6 +474,84 @@ export function resolveErrorMessageKey(errorMessage: string): string {
   return 'errors.osint.queryFailed'
 }
 
+/**
+ * Extract a human-readable error detail and specific messageKey from an OSINT API error response body.
+ *
+ * Supports:
+ * - VirusTotal: { error: { code: "NotFoundError", message: "Domain ... not found" } }
+ * - VirusTotal: { error: { code: "InvalidArgumentError", message: "Domain ... is not valid" } }
+ * - Generic: { error: "some string" }
+ * - Generic: { message: "some string" }
+ * - Generic: { detail: "some string" }
+ */
+export function extractSourceErrorDetail(responseData: unknown): {
+  detail: string | null
+  messageKey: string | null
+} {
+  if (typeof responseData !== 'object' || responseData === null) {
+    return { detail: null, messageKey: null }
+  }
+
+  const record = responseData as Record<string, unknown>
+
+  // VT format: { error: { code, message } }
+  const errorObject = Reflect.get(record, 'error') as Record<string, unknown> | string | undefined
+  if (typeof errorObject === 'object' && errorObject !== null) {
+    const code = Reflect.get(errorObject, 'code') as string | undefined
+    const message = Reflect.get(errorObject, 'message') as string | undefined
+
+    if (typeof message === 'string') {
+      const messageKey = resolveSourceErrorCodeKey(code ?? '')
+      return { detail: message, messageKey }
+    }
+  }
+
+  // Generic: { error: "string" }
+  if (typeof errorObject === 'string') {
+    return { detail: errorObject, messageKey: null }
+  }
+
+  // Generic: { message: "string" }
+  const message = Reflect.get(record, 'message') as string | undefined
+  if (typeof message === 'string') {
+    return { detail: message, messageKey: null }
+  }
+
+  // Generic: { detail: "string" }
+  const dtl = Reflect.get(record, 'detail') as string | undefined
+  if (typeof dtl === 'string') {
+    return { detail: dtl, messageKey: null }
+  }
+
+  return { detail: null, messageKey: null }
+}
+
+/**
+ * Map known OSINT source error codes to specific messageKeys.
+ */
+function resolveSourceErrorCodeKey(code: string): string | null {
+  switch (code) {
+    case 'NotFoundError':
+      return 'errors.osint.resourceNotFound'
+    case 'InvalidArgumentError':
+      return 'errors.osint.invalidArgument'
+    case 'AuthenticationRequiredError':
+      return 'errors.osint.authRequired'
+    case 'ForbiddenError':
+      return 'errors.osint.forbidden'
+    case 'QuotaExceededError':
+      return 'errors.osint.quotaExceeded'
+    case 'TooManyRequestsError':
+      return 'errors.osint.rateLimitExceeded'
+    case 'WrongCredentialsError':
+      return 'errors.osint.wrongCredentials'
+    case 'BadRequestError':
+      return 'errors.osint.badRequest'
+    default:
+      return null
+  }
+}
+
 /* ---------------------------------------------------------------- */
 /* HEADER REDACTION                                                   */
 /* ---------------------------------------------------------------- */
@@ -627,7 +705,5 @@ export function extractVtPollStatus(responseData: unknown): string | undefined {
     ? (Reflect.get(data, 'attributes') as Record<string, unknown> | undefined)
     : undefined
 
-  return attributes
-    ? (Reflect.get(attributes, 'status') as string | undefined)
-    : undefined
+  return attributes ? (Reflect.get(attributes, 'status') as string | undefined) : undefined
 }

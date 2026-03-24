@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common'
+import { AgentEventListenerService } from '../../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsRepository } from '../../connectors/connectors.repository'
 import type { Job } from '@prisma/client'
 
@@ -6,7 +7,12 @@ import type { Job } from '@prisma/client'
 export class ConnectorSyncHandler {
   private readonly logger = new Logger(ConnectorSyncHandler.name)
 
-  constructor(private readonly connectorsRepository: ConnectorsRepository) {}
+  constructor(
+    private readonly connectorsRepository: ConnectorsRepository,
+    @Optional()
+    @Inject(forwardRef(() => AgentEventListenerService))
+    private readonly agentEventListener: AgentEventListenerService | null
+  ) {}
 
   async handle(job: Job): Promise<Record<string, unknown>> {
     const payload = job.payload as Record<string, unknown> | null
@@ -32,10 +38,21 @@ export class ConnectorSyncHandler {
       lastSyncAt: new Date(),
     })
 
-    return {
+    const result = {
       connectorId,
       connectorType: connector.type,
       syncedAt: new Date().toISOString(),
     }
+
+    // Fire-and-forget — notify AI after successful connector sync
+    if (this.agentEventListener) {
+      void this.agentEventListener.onConnectorSyncCompleted(
+        job.tenantId,
+        connectorId,
+        connector.type
+      )
+    }
+
+    return result
   }
 }

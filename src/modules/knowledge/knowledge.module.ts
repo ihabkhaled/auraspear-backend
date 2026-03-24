@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiKnowledgeController } from './ai-knowledge.controller'
 import { AiKnowledgeService } from './ai-knowledge.service'
 import { KnowledgeController } from './knowledge.controller'
@@ -8,7 +8,7 @@ import { AiModule } from '../ai/ai.module'
 import { AppLogsModule } from '../app-logs/app-logs.module'
 
 @Module({
-  imports: [AppLogsModule, AiModule],
+  imports: [AppLogsModule, forwardRef(() => AiModule)],
   controllers: [KnowledgeController, AiKnowledgeController],
   providers: [KnowledgeService, KnowledgeRepository, AiKnowledgeService],
   exports: [KnowledgeService],

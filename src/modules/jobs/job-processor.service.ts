@@ -1,4 +1,12 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Interval } from '@nestjs/schedule'
 import Redis from 'ioredis'
@@ -15,6 +23,7 @@ import { JobService } from './jobs.service'
 import { placeholderJobHandler } from './jobs.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import type { JobHandler } from './jobs.types'
 import type { AppLogContext } from '../../common/services/app-logger.types'
 import type { Job } from '@prisma/client'
@@ -33,7 +42,10 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly jobService: JobService,
     private readonly jobRepository: JobRepository,
-    private readonly appLogger: AppLoggerService
+    private readonly appLogger: AppLoggerService,
+    @Optional()
+    @Inject(forwardRef(() => AgentEventListenerService))
+    private readonly agentEventListener: AgentEventListenerService | null
   ) {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost')
     const port = this.configService.get<number>('REDIS_PORT', 6379)
@@ -200,11 +212,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     )
   }
 
-  private async executeJobHandler(
-    job: Job,
-    handler: JobHandler,
-    startTime: number
-  ): Promise<void> {
+  private async executeJobHandler(job: Job, handler: JobHandler, startTime: number): Promise<void> {
     await this.jobService.markRunning(job.id, job.tenantId)
     this.logJobStarted(job)
 
@@ -229,6 +237,11 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
 
     const willRetry = job.attempts + 1 < job.maxAttempts
     this.logJobFailure(job, errorMessage, durationMs, willRetry, error)
+
+    // Fire-and-forget — notify AI when a job fails permanently
+    if (!willRetry && this.agentEventListener) {
+      void this.agentEventListener.onJobFailed(job.tenantId, job.id, job.type)
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -311,9 +324,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     return true
   }
 
-  private dispatchLockedJobs(
-    lockResults: Array<{ job: Job; acquired: boolean }>
-  ): void {
+  private dispatchLockedJobs(lockResults: Array<{ job: Job; acquired: boolean }>): void {
     const { lockedCount, skippedCount } = this.processLockResults(lockResults)
 
     if (lockedCount > 0 || skippedCount > 0) {
@@ -321,9 +332,10 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private processLockResults(
-    lockResults: Array<{ job: Job; acquired: boolean }>
-  ): { lockedCount: number; skippedCount: number } {
+  private processLockResults(lockResults: Array<{ job: Job; acquired: boolean }>): {
+    lockedCount: number
+    skippedCount: number
+  } {
     let lockedCount = 0
     let skippedCount = 0
 
@@ -504,11 +516,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     })
   }
 
-  private logJobCompleted(
-    job: Job,
-    durationMs: number,
-    result: Record<string, unknown>
-  ): void {
+  private logJobCompleted(job: Job, durationMs: number, result: Record<string, unknown>): void {
     this.appLogger.info(`Job completed: ${job.type}`, {
       feature: AppLogFeature.JOBS,
       action: 'execute',
@@ -574,22 +582,19 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
   }
 
   private logStaleRecovery(count: number, staleThreshold: Date): void {
-    this.appLogger.warn(
-      `Recovered ${String(count)} stale job(s) from RUNNING to PENDING`,
-      {
-        feature: AppLogFeature.JOBS,
-        action: 'recoverStaleJobs',
-        outcome: AppLogOutcome.WARNING,
-        sourceType: AppLogSourceType.CRON,
-        className: 'JobProcessorService',
-        functionName: 'recoverStaleJobs',
-        metadata: {
-          recoveredCount: count,
-          staleThresholdMs: STALE_RUNNING_WINDOW_MS,
-          staleThresholdDate: staleThreshold.toISOString(),
-        },
-      }
-    )
+    this.appLogger.warn(`Recovered ${String(count)} stale job(s) from RUNNING to PENDING`, {
+      feature: AppLogFeature.JOBS,
+      action: 'recoverStaleJobs',
+      outcome: AppLogOutcome.WARNING,
+      sourceType: AppLogSourceType.CRON,
+      className: 'JobProcessorService',
+      functionName: 'recoverStaleJobs',
+      metadata: {
+        recoveredCount: count,
+        staleThresholdMs: STALE_RUNNING_WINDOW_MS,
+        staleThresholdDate: staleThreshold.toISOString(),
+      },
+    })
   }
 
   private logStaleRecoveryError(error: unknown): void {

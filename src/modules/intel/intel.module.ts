@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { forwardRef, Module } from '@nestjs/common'
 import { AiIntelController } from './ai-intel.controller'
 import { AiIntelService } from './ai-intel.service'
 import { IntelController } from './intel.controller'
@@ -10,7 +10,7 @@ import { ConnectorsModule } from '../connectors/connectors.module'
 import { EntitiesModule } from '../entities/entities.module'
 
 @Module({
-  imports: [ConnectorsModule, AppLogsModule, AiModule, EntitiesModule],
+  imports: [ConnectorsModule, AppLogsModule, forwardRef(() => AiModule), EntitiesModule],
   controllers: [IntelController, AiIntelController],
   providers: [IntelRepository, IntelService, AiIntelService],
   exports: [IntelService],

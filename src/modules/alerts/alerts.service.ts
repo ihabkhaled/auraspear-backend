@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common'
 import { AlertsRepository } from './alerts.repository'
 import {
   buildAlertSearchWhere,
@@ -13,6 +13,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { processInBatches } from '../../common/utils/batch.utility'
+import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
@@ -28,7 +29,10 @@ export class AlertsService {
     private readonly connectorsService: ConnectorsService,
     private readonly wazuhService: WazuhService,
     private readonly appLogger: AppLoggerService,
-    private readonly entityExtractionService: EntityExtractionService
+    private readonly entityExtractionService: EntityExtractionService,
+    @Optional()
+    @Inject(forwardRef(() => AgentEventListenerService))
+    private readonly agentEventListener: AgentEventListenerService | null
   ) {}
 
   async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedAlerts> {
@@ -153,7 +157,12 @@ export class AlertsService {
 
     const allResults = await processInBatches(upsertOps, 50, op => {
       const { create, update } = buildWazuhAlertCreateInput(tenantId, op)
-      return this.alertsRepository.upsertByTenantAndExternalId(tenantId, op.externalId, create, update)
+      return this.alertsRepository.upsertByTenantAndExternalId(
+        tenantId,
+        op.externalId,
+        create,
+        update
+      )
     })
 
     const { ingested, failures } = countIngestedResults(allResults)
@@ -163,6 +172,9 @@ export class AlertsService {
       .filter((r): r is PromiseFulfilledResult<AlertRecord> => r.status === 'fulfilled')
       .map(r => r.value)
     await this.extractEntitiesFromAlerts(tenantId, fulfilledAlerts)
+
+    // Fire-and-forget — trigger AI triage for each ingested alert
+    this.dispatchAlertTriageForBatch(tenantId, fulfilledAlerts)
 
     this.logSuccess('ingestFromWazuh', tenantId, { ingested, totalHits: upsertOps.length })
     return { ingested }
@@ -336,5 +348,18 @@ export class AlertsService {
       className: 'AlertsService',
       functionName: action,
     })
+  }
+
+  /**
+   * Fire-and-forget: dispatch AI triage for a batch of ingested alerts.
+   * Never blocks the ingestion flow and never throws.
+   */
+  private dispatchAlertTriageForBatch(tenantId: string, alerts: AlertRecord[]): void {
+    if (!this.agentEventListener) return
+
+    for (const alert of alerts) {
+      // Fire-and-forget — don't block alert creation on AI
+      void this.agentEventListener.onAlertCreated(tenantId, alert.id)
+    }
   }
 }
