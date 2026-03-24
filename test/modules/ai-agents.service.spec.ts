@@ -278,9 +278,9 @@ describe('AiAgentsService', () => {
       }
 
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
-        'AI Agent not found',
+        'AiAgentsService => AI Agent not found',
         expect.objectContaining({
-          metadata: expect.objectContaining({ agentId: 'nonexistent', tenantId: TENANT_ID }),
+          metadata: expect.objectContaining({ agentId: 'nonexistent' }),
         })
       )
     })
@@ -339,10 +339,12 @@ describe('AiAgentsService', () => {
       await service.createAgent(createDto, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'AI Agent created',
+        'AiAgentsService => createAgent completed',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'createAgent',
+          outcome: 'success',
           tenantId: TENANT_ID,
+          metadata: expect.objectContaining({ actorEmail: USER_EMAIL }),
         })
       )
     })
@@ -468,11 +470,12 @@ describe('AiAgentsService', () => {
       await service.deleteAgent(AGENT_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('deleted'),
+        'AiAgentsService => deleteAgent completed',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'deleteAgent',
+          outcome: 'success',
           tenantId: TENANT_ID,
-          targetResourceId: AGENT_ID,
+          metadata: expect.objectContaining({ actorEmail: USER_EMAIL, agentId: AGENT_ID }),
         })
       )
     })
@@ -521,9 +524,11 @@ describe('AiAgentsService', () => {
       await service.updateSoul(AGENT_ID, { soulMd: 'test' }, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'AI Agent SOUL.md updated',
+        'AiAgentsService => updateSoul completed',
         expect.objectContaining({
-          targetResourceId: AGENT_ID,
+          action: 'updateSoul',
+          outcome: 'success',
+          metadata: expect.objectContaining({ agentId: AGENT_ID }),
         })
       )
     })
@@ -755,11 +760,12 @@ describe('AiAgentsService', () => {
       await service.stopAgent(AGENT_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('stopped'),
+        'AiAgentsService => stopAgent completed',
         expect.objectContaining({
-          actorEmail: USER_EMAIL,
+          action: 'stopAgent',
+          outcome: 'success',
           tenantId: TENANT_ID,
-          metadata: expect.objectContaining({ previousStatus: 'online' }),
+          metadata: expect.objectContaining({ actorEmail: USER_EMAIL, previousStatus: 'online' }),
         })
       )
     })

@@ -45,11 +45,22 @@ function createMockAiService() {
   }
 }
 
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
 function createService(
   aiService: ReturnType<typeof createMockAiService>,
   alertsRepository: ReturnType<typeof createMockAlertsRepository>
 ) {
-  return new AiAlertTriageService(aiService as never, alertsRepository as never)
+  return new AiAlertTriageService(
+    aiService as never,
+    alertsRepository as never,
+    mockAppLogger as never
+  )
 }
 
 describe('AiAlertTriageService', () => {

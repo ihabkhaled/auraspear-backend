@@ -5,23 +5,23 @@ import {
   REFRESH_FAMILY_REVOKED_PREFIX,
   TOKEN_BLACKLIST_PREFIX,
 } from './auth.constants'
-import {
-  buildBlacklistLogContext,
-  extractErrorMessage,
-  extractErrorStack,
-} from './token-blacklist.utilities'
-import { AppLogOutcome, RedisResponse } from '../../common/enums'
+import { extractErrorMessage, extractErrorStack } from './token-blacklist.utilities'
+import { AppLogFeature, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { REDIS_CLIENT } from '../../redis'
 
 @Injectable()
 export class TokenBlacklistService {
   private readonly logger = new Logger(TokenBlacklistService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.AUTH, 'TokenBlacklistService')
+  }
 
   async blacklist(jti: string, expSeconds: number): Promise<void> {
     try {
@@ -29,21 +29,10 @@ export class TokenBlacklistService {
       const ttl = Math.max(expSeconds, 1)
       await this.redis.set(key, '1', 'EX', ttl)
 
-      this.appLogger.info(
-        'Token blacklisted successfully',
-        buildBlacklistLogContext('blacklist', AppLogOutcome.SUCCESS, { ttlSeconds: ttl })
-      )
+      this.log.success('blacklist', 'system', { ttlSeconds: ttl })
     } catch (error) {
       this.logger.warn(`Failed to blacklist token ${jti}: ${extractErrorMessage(error)}`)
-      this.appLogger.error(
-        'Failed to blacklist token',
-        buildBlacklistLogContext(
-          'blacklist',
-          AppLogOutcome.FAILURE,
-          undefined,
-          extractErrorStack(error)
-        )
-      )
+      this.log.error('blacklist', 'system', error, { stackTrace: extractErrorStack(error) })
     }
   }
 
@@ -61,21 +50,13 @@ export class TokenBlacklistService {
       const blacklisted = result === 1
 
       if (blacklisted) {
-        this.appLogger.warn(
-          'Blacklisted token usage attempt detected',
-          buildBlacklistLogContext('isBlacklisted', AppLogOutcome.DENIED)
-        )
+        this.log.warn('isBlacklisted', 'system', 'Blacklisted token usage attempt detected')
       }
 
       return blacklisted
     } catch (error) {
       this.logger.warn(`Failed to check blacklist for ${jti}: ${extractErrorMessage(error)}`)
-      this.appLogger.error(
-        'Failed to check token blacklist (fail-open)',
-        buildBlacklistLogContext('isBlacklisted', AppLogOutcome.FAILURE, {
-          error: extractErrorMessage(error),
-        })
-      )
+      this.log.error('isBlacklisted', 'system', error, { failOpen: true })
 
       return false
     }
@@ -86,10 +67,7 @@ export class TokenBlacklistService {
       const result = await this.redis.ping()
       return result === RedisResponse.PONG
     } catch {
-      this.appLogger.warn(
-        'Token blacklist Redis connection is unhealthy',
-        buildBlacklistLogContext('isRedisHealthy', AppLogOutcome.FAILURE)
-      )
+      this.log.warn('isRedisHealthy', 'system', 'Token blacklist Redis connection is unhealthy')
       return false
     }
   }
@@ -104,27 +82,14 @@ export class TokenBlacklistService {
       const ttl = Math.max(ttlSeconds, 1)
       await this.redis.set(key, String(generation), 'EX', ttl)
 
-      this.appLogger.info(
-        'Refresh token family generation set',
-        buildBlacklistLogContext('setFamilyGeneration', AppLogOutcome.SUCCESS, {
-          family,
-          generation,
-          ttlSeconds: ttl,
-        })
-      )
+      this.log.success('setFamilyGeneration', 'system', { family, generation, ttlSeconds: ttl })
     } catch (error) {
       this.logger.warn(
         `Failed to set family generation for ${family}: ${extractErrorMessage(error)}`
       )
-      this.appLogger.error(
-        'Failed to set refresh token family generation',
-        buildBlacklistLogContext(
-          'setFamilyGeneration',
-          AppLogOutcome.FAILURE,
-          undefined,
-          extractErrorStack(error)
-        )
-      )
+      this.log.error('setFamilyGeneration', 'system', error, {
+        stackTrace: extractErrorStack(error),
+      })
     }
   }
 
@@ -140,12 +105,7 @@ export class TokenBlacklistService {
       this.logger.warn(
         `Failed to get family generation for ${family}: ${extractErrorMessage(error)}`
       )
-      this.appLogger.error(
-        'Failed to get refresh token family generation (fail-open)',
-        buildBlacklistLogContext('getFamilyGeneration', AppLogOutcome.FAILURE, {
-          error: extractErrorMessage(error),
-        })
-      )
+      this.log.error('getFamilyGeneration', 'system', error, { failOpen: true })
 
       return null
     }
@@ -154,21 +114,15 @@ export class TokenBlacklistService {
   async invalidateFamily(family: string): Promise<void> {
     try {
       await this.performFamilyInvalidation(family)
-      this.appLogger.warn(
+      this.log.warn(
+        'invalidateFamily',
+        'system',
         'Refresh token family invalidated (possible replay attack)',
-        buildBlacklistLogContext('invalidateFamily', AppLogOutcome.DENIED, { family })
+        { family }
       )
     } catch (error) {
       this.logger.warn(`Failed to invalidate family ${family}: ${extractErrorMessage(error)}`)
-      this.appLogger.error(
-        'Failed to invalidate refresh token family',
-        buildBlacklistLogContext(
-          'invalidateFamily',
-          AppLogOutcome.FAILURE,
-          undefined,
-          extractErrorStack(error)
-        )
-      )
+      this.log.error('invalidateFamily', 'system', error, { stackTrace: extractErrorStack(error) })
     }
   }
 
@@ -176,11 +130,20 @@ export class TokenBlacklistService {
     try {
       const key = `${REFRESH_FAMILY_REVOKED_PREFIX}${family}`
       const result = await this.redis.exists(key)
-      return result === 1
+      const revoked = result === 1
+
+      if (revoked) {
+        this.log.warn('isFamilyRevoked', 'system', 'Revoked refresh token family usage detected', {
+          family,
+        })
+      }
+
+      return revoked
     } catch (error) {
       this.logger.warn(
         `Failed to check family revocation for ${family}: ${extractErrorMessage(error)}`
       )
+      this.log.error('isFamilyRevoked', 'system', error, { family, failOpen: true })
 
       return false
     }
@@ -190,8 +153,11 @@ export class TokenBlacklistService {
     try {
       const key = `${REFRESH_FAMILY_PREFIX}${family}`
       await this.redis.del(key)
+
+      this.log.success('deleteFamilyKey', 'system', { family })
     } catch (error) {
       this.logger.warn(`Failed to delete family key for ${family}: ${extractErrorMessage(error)}`)
+      this.log.error('deleteFamilyKey', 'system', error, { stackTrace: extractErrorStack(error) })
     }
   }
 

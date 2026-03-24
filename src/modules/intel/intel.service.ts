@@ -13,10 +13,11 @@ import {
   countRejected,
   matchAlertsToIOCs,
 } from './intel.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { MispService } from '../connectors/services/misp.service'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
@@ -30,6 +31,7 @@ import type {
 @Injectable()
 export class IntelService {
   private readonly logger = new Logger(IntelService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly intelRepository: IntelRepository,
@@ -37,21 +39,30 @@ export class IntelService {
     private readonly mispService: MispService,
     private readonly entityExtractionService: EntityExtractionService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.INTEL, 'IntelService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* GET STATS                                                         */
   /* ---------------------------------------------------------------- */
 
   async getStats(tenantId: string): Promise<IntelStatsResponse> {
-    const [iocCounts, threatActorOrgs] = await Promise.all([
-      this.intelRepository.groupActiveIOCsByType(tenantId),
-      this.intelRepository.findDistinctOrganizations(tenantId),
-    ])
+    this.log.entry('getStats', tenantId)
 
-    const stats = computeIOCStats(iocCounts, threatActorOrgs)
-    this.logSuccess('getStats', tenantId, 'IntelStats', stats)
-    return stats
+    try {
+      const [iocCounts, threatActorOrgs] = await Promise.all([
+        this.intelRepository.groupActiveIOCsByType(tenantId),
+        this.intelRepository.findDistinctOrganizations(tenantId),
+      ])
+
+      const stats = computeIOCStats(iocCounts, threatActorOrgs)
+      this.log.success('getStats', tenantId, stats)
+      return stats
+    } catch (error: unknown) {
+      this.log.error('getStats', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -65,23 +76,30 @@ export class IntelService {
     sortBy?: string,
     sortOrder?: string
   ): Promise<PaginatedMispEvents> {
-    const where = { tenantId }
-    const [data, total] = await Promise.all([
-      this.intelRepository.findManyMispEvents({
-        where,
-        orderBy: buildMispOrderBy(sortBy, sortOrder),
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.intelRepository.countMispEvents(where),
-    ])
+    this.log.entry('getRecentEvents', tenantId, { page, limit })
 
-    this.logSuccess('getRecentEvents', tenantId, 'IntelMispEvent', {
-      page,
-      limit,
-      totalEvents: total,
-    })
-    return { data, pagination: buildPaginationMeta(page, limit, total) }
+    try {
+      const where = { tenantId }
+      const [data, total] = await Promise.all([
+        this.intelRepository.findManyMispEvents({
+          where,
+          orderBy: buildMispOrderBy(sortBy, sortOrder),
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.intelRepository.countMispEvents(where),
+      ])
+
+      this.log.success('getRecentEvents', tenantId, {
+        page,
+        limit,
+        totalEvents: total,
+      })
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('getRecentEvents', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -98,26 +116,33 @@ export class IntelService {
     sortOrder?: string,
     source?: string
   ): Promise<PaginatedIOCs> {
-    const where = buildIOCSearchWhere(tenantId, query, type, source)
-    const [data, total] = await Promise.all([
-      this.intelRepository.findManyIOCs({
-        where,
-        orderBy: buildIOCOrderBy(sortBy, sortOrder),
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.intelRepository.countIOCs(where),
-    ])
+    this.log.entry('searchIOCs', tenantId, { query, type, source, page, limit })
 
-    this.logSuccess('searchIOCs', tenantId, 'IntelIOC', {
-      query,
-      type,
-      source,
-      page,
-      limit,
-      totalResults: total,
-    })
-    return { data, pagination: buildPaginationMeta(page, limit, total) }
+    try {
+      const where = buildIOCSearchWhere(tenantId, query, type, source)
+      const [data, total] = await Promise.all([
+        this.intelRepository.findManyIOCs({
+          where,
+          orderBy: buildIOCOrderBy(sortBy, sortOrder),
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.intelRepository.countIOCs(where),
+      ])
+
+      this.log.success('searchIOCs', tenantId, {
+        query,
+        type,
+        source,
+        page,
+        limit,
+        totalResults: total,
+      })
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('searchIOCs', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -125,20 +150,27 @@ export class IntelService {
   /* ---------------------------------------------------------------- */
 
   async matchIOCsAgainstAlerts(tenantId: string, alertIds: string[]): Promise<IOCMatchResult[]> {
-    this.logSuccess('matchIOCsAgainstAlerts', tenantId, 'Alert', { alertCount: alertIds.length })
-    const alerts = await this.intelRepository.findAlertsByIds(tenantId, alertIds)
+    this.log.entry('matchIOCsAgainstAlerts', tenantId, { alertCount: alertIds.length })
 
-    const ips = collectAlertIPs(alerts)
-    const matchingIOCs =
-      ips.length > 0 ? await this.intelRepository.findActiveIOCsByValues(tenantId, ips) : []
+    try {
+      const alerts = await this.intelRepository.findAlertsByIds(tenantId, alertIds)
 
-    const iocByValue = buildIOCLookupMap(matchingIOCs)
-    this.logSuccess('matchIOCsAgainstAlerts', tenantId, 'IntelIOC', {
-      matchingIOCsFound: matchingIOCs.length,
-      uniqueIPs: ips.length,
-    })
+      const ips = collectAlertIPs(alerts)
+      const matchingIOCs =
+        ips.length > 0 ? await this.intelRepository.findActiveIOCsByValues(tenantId, ips) : []
 
-    return matchAlertsToIOCs(alertIds, alerts, iocByValue)
+      const iocByValue = buildIOCLookupMap(matchingIOCs)
+      this.log.success('matchIOCsAgainstAlerts', tenantId, {
+        matchingIOCsFound: matchingIOCs.length,
+        uniqueIPs: ips.length,
+        alertCount: alertIds.length,
+      })
+
+      return matchAlertsToIOCs(alertIds, alerts, iocByValue)
+    } catch (error: unknown) {
+      this.log.error('matchIOCsAgainstAlerts', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -146,7 +178,8 @@ export class IntelService {
   /* ---------------------------------------------------------------- */
 
   async syncFromMisp(tenantId: string): Promise<{ eventsUpserted: number; iocsUpserted: number }> {
-    this.logSuccess('syncFromMisp', tenantId, 'IntelMispEvent')
+    this.log.entry('syncFromMisp', tenantId)
+
     const config = await this.getConfigOrThrow(tenantId)
 
     try {
@@ -156,7 +189,7 @@ export class IntelService {
       this.logger.log(
         `MISP sync complete for tenant ${tenantId}: ${eventsUpserted} events, ${iocsUpserted} IOCs`
       )
-      this.logSuccess('syncFromMisp', tenantId, 'IntelMispEvent', { eventsUpserted, iocsUpserted })
+      this.log.success('syncFromMisp', tenantId, { eventsUpserted, iocsUpserted })
       return { eventsUpserted, iocsUpserted }
     } catch (error) {
       this.handleSyncError(error, tenantId)
@@ -170,7 +203,9 @@ export class IntelService {
   private async getConfigOrThrow(tenantId: string): Promise<Record<string, unknown>> {
     const config = await this.connectorsService.getDecryptedConfig(tenantId, 'misp')
     if (!config) {
-      this.logWarn('syncFromMisp', tenantId, { reason: 'misp_connector_not_configured' })
+      this.log.warn('syncFromMisp', tenantId, 'MISP connector not configured', {
+        reason: 'misp_connector_not_configured',
+      })
       throw new BusinessException(
         400,
         'MISP connector not configured or disabled',
@@ -219,9 +254,7 @@ export class IntelService {
     rawAttributes: unknown[]
   ): Promise<void> {
     const results = await Promise.allSettled(
-      rawAttributes.map(rawAttribute =>
-        this.extractSingleMispIocEntity(tenantId, rawAttribute)
-      )
+      rawAttributes.map(rawAttribute => this.extractSingleMispIocEntity(tenantId, rawAttribute))
     )
 
     const failed = countRejected(results)
@@ -232,10 +265,7 @@ export class IntelService {
     }
   }
 
-  private async extractSingleMispIocEntity(
-    tenantId: string,
-    rawAttribute: unknown
-  ): Promise<void> {
+  private async extractSingleMispIocEntity(tenantId: string, rawAttribute: unknown): Promise<void> {
     const attribute = rawAttribute as Record<string, unknown>
     const iocType = String(attribute['type'] ?? 'unknown')
     const iocValue = String(attribute['value'] ?? '')
@@ -255,58 +285,8 @@ export class IntelService {
   private handleSyncError(error: unknown, tenantId: string): never {
     const message = error instanceof Error ? error.message : 'Unknown error'
     this.logger.error(`MISP sync failed for tenant ${tenantId}: ${message}`)
-    this.logError('syncFromMisp', tenantId, error)
+    this.log.error('syncFromMisp', tenantId, error)
     if (error instanceof BusinessException) throw error
     throw new BusinessException(502, `MISP sync failed: ${message}`, 'errors.intel.syncFailed')
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(
-    action: string,
-    tenantId: string,
-    resource?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`Intel ${action}`, {
-      feature: AppLogFeature.INTEL,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: resource,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IntelService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.warn(`Intel ${action} failed`, {
-      feature: AppLogFeature.INTEL,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IntelService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logError(action: string, tenantId: string, error: unknown): void {
-    this.appLogger.error(`Intel ${action} error`, {
-      feature: AppLogFeature.INTEL,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IntelService',
-      functionName: action,
-      stackTrace: error instanceof Error ? error.stack : undefined,
-      metadata: { errorMessage: error instanceof Error ? error.message : 'Unknown error' },
-    })
   }
 }

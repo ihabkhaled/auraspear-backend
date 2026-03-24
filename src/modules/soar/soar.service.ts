@@ -11,8 +11,6 @@ import {
 } from './soar.utilities'
 import {
   AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
   SoarPlaybookStatus,
   SoarExecutionStatus,
   SortOrder,
@@ -20,6 +18,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { CreatePlaybookDto } from './dto/create-playbook.dto'
 import type { UpdatePlaybookDto } from './dto/update-playbook.dto'
 import type {
@@ -34,28 +33,13 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class SoarService {
   private readonly logger = new Logger(SoarService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: SoarRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
-
-  /* ---------------------------------------------------------------- */
-  /* LOGGING HELPERS                                                    */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`SOAR: ${action}`, {
-      feature: AppLogFeature.SOAR,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'SoarPlaybook',
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SoarService',
-      functionName: action,
-      metadata,
-    })
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.SOAR, 'SoarService')
   }
 
   /* ---------------------------------------------------------------- */
@@ -93,27 +77,41 @@ export class SoarService {
     triggerType?: string,
     query?: string
   ): Promise<PaginatedPlaybooks> {
-    const where = buildPlaybookListWhere(tenantId, status, triggerType, query)
+    this.log.entry('listPlaybooks', tenantId, { page, limit, status, triggerType, query })
 
-    const [playbooks, total] = await Promise.all([
-      this.repository.findManyPlaybooksWithTenant({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: buildPlaybookOrderBy(sortBy, sortOrder),
-      }),
-      this.repository.countPlaybooks(where),
-    ])
+    try {
+      const where = buildPlaybookListWhere(tenantId, status, triggerType, query)
 
-    const creatorsMap = await this.resolveCreatorNamesBatch(playbooks.map(p => p.createdBy))
+      const [playbooks, total] = await Promise.all([
+        this.repository.findManyPlaybooksWithTenant({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy: buildPlaybookOrderBy(sortBy, sortOrder),
+        }),
+        this.repository.countPlaybooks(where),
+      ])
 
-    const data: SoarPlaybookRecord[] = playbooks.map(p =>
-      buildPlaybookRecord(p, p.createdBy ? (creatorsMap.get(p.createdBy) ?? null) : null)
-    )
+      const creatorsMap = await this.resolveCreatorNamesBatch(playbooks.map(p => p.createdBy))
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data: SoarPlaybookRecord[] = playbooks.map(p =>
+        buildPlaybookRecord(p, p.createdBy ? (creatorsMap.get(p.createdBy) ?? null) : null)
+      )
+
+      this.log.success('listPlaybooks', tenantId, {
+        page,
+        limit,
+        total,
+        returnedCount: data.length,
+      })
+
+      return {
+        data,
+        pagination: buildPaginationMeta(page, limit, total),
+      }
+    } catch (error: unknown) {
+      this.log.error('listPlaybooks', tenantId, error)
+      throw error
     }
   }
 
@@ -122,23 +120,26 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async getPlaybookById(id: string, tenantId: string): Promise<SoarPlaybookRecord> {
-    const playbook = await this.repository.findFirstPlaybookWithTenant({ id, tenantId })
+    this.log.entry('getPlaybookById', tenantId, { playbookId: id })
 
-    if (!playbook) {
-      this.appLogger.warn('Playbook not found', {
-        feature: AppLogFeature.SOAR,
-        action: 'getPlaybookById',
-        className: 'SoarService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { playbookId: id, tenantId },
-      })
-      throw new BusinessException(404, `Playbook ${id} not found`, 'errors.soar.playbookNotFound')
+    try {
+      const playbook = await this.repository.findFirstPlaybookWithTenant({ id, tenantId })
+
+      if (!playbook) {
+        this.log.warn('getPlaybookById', tenantId, 'Playbook not found', { playbookId: id })
+        throw new BusinessException(404, `Playbook ${id} not found`, 'errors.soar.playbookNotFound')
+      }
+
+      const createdByName = await this.resolveCreatorName(playbook.createdBy)
+
+      this.log.success('getPlaybookById', tenantId, { playbookId: id })
+      return buildPlaybookRecord(playbook, createdByName)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('getPlaybookById', tenantId, error)
+      }
+      throw error
     }
-
-    const createdByName = await this.resolveCreatorName(playbook.createdBy)
-
-    return buildPlaybookRecord(playbook, createdByName)
   }
 
   /* ---------------------------------------------------------------- */
@@ -146,36 +147,51 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async createPlaybook(dto: CreatePlaybookDto, user: JwtPayload): Promise<SoarPlaybookRecord> {
-    const existing = await this.repository.findFirstPlaybookWithTenant({
-      tenantId: user.tenantId,
+    this.log.entry('createPlaybook', user.tenantId, {
       name: dto.name,
-    })
-
-    if (existing) {
-      throw new BusinessException(
-        409,
-        `Playbook with name "${dto.name}" already exists`,
-        'errors.soar.playbookAlreadyExists'
-      )
-    }
-
-    const playbook = await this.repository.createPlaybookWithTenant({
-      tenantId: user.tenantId,
-      name: dto.name,
-      description: dto.description ?? null,
       triggerType: dto.triggerType,
-      triggerConditions: dto.triggerConditions
-        ? (dto.triggerConditions as Prisma.InputJsonValue)
-        : Prisma.DbNull,
-      steps: dto.steps as Prisma.InputJsonValue,
-      status: SoarPlaybookStatus.DRAFT,
-      executionCount: 0,
-      createdBy: user.email,
     })
 
-    this.logSuccess('createPlaybook', user.tenantId, { name: playbook.name, triggerType: playbook.triggerType })
-    const createdByName = await this.resolveCreatorName(playbook.createdBy)
-    return buildPlaybookRecord(playbook, createdByName)
+    try {
+      const existing = await this.repository.findFirstPlaybookWithTenant({
+        tenantId: user.tenantId,
+        name: dto.name,
+      })
+
+      if (existing) {
+        throw new BusinessException(
+          409,
+          `Playbook with name "${dto.name}" already exists`,
+          'errors.soar.playbookAlreadyExists'
+        )
+      }
+
+      const playbook = await this.repository.createPlaybookWithTenant({
+        tenantId: user.tenantId,
+        name: dto.name,
+        description: dto.description ?? null,
+        triggerType: dto.triggerType,
+        triggerConditions: dto.triggerConditions
+          ? (dto.triggerConditions as Prisma.InputJsonValue)
+          : Prisma.DbNull,
+        steps: dto.steps as Prisma.InputJsonValue,
+        status: SoarPlaybookStatus.DRAFT,
+        executionCount: 0,
+        createdBy: user.email,
+      })
+
+      this.log.success('createPlaybook', user.tenantId, {
+        name: playbook.name,
+        triggerType: playbook.triggerType,
+      })
+      const createdByName = await this.resolveCreatorName(playbook.createdBy)
+      return buildPlaybookRecord(playbook, createdByName)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('createPlaybook', user.tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -187,19 +203,31 @@ export class SoarService {
     dto: UpdatePlaybookDto,
     user: JwtPayload
   ): Promise<SoarPlaybookRecord> {
-    await this.getPlaybookById(id, user.tenantId)
-
-    const updated = await this.repository.updateManyPlaybooks({
-      where: { id, tenantId: user.tenantId },
-      data: buildPlaybookUpdateData(dto),
+    this.log.entry('updatePlaybook', user.tenantId, {
+      playbookId: id,
+      updatedFields: Object.keys(dto),
     })
 
-    if (updated.count === 0) {
-      throw new BusinessException(404, `Playbook ${id} not found`, 'errors.soar.playbookNotFound')
-    }
+    try {
+      await this.getPlaybookById(id, user.tenantId)
 
-    this.logSuccess('updatePlaybook', user.tenantId, { playbookId: id })
-    return this.getPlaybookById(id, user.tenantId)
+      const updated = await this.repository.updateManyPlaybooks({
+        where: { id, tenantId: user.tenantId },
+        data: buildPlaybookUpdateData(dto),
+      })
+
+      if (updated.count === 0) {
+        throw new BusinessException(404, `Playbook ${id} not found`, 'errors.soar.playbookNotFound')
+      }
+
+      this.log.success('updatePlaybook', user.tenantId, { playbookId: id })
+      return this.getPlaybookById(id, user.tenantId)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('updatePlaybook', user.tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -207,12 +235,25 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async deletePlaybook(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getPlaybookById(id, tenantId)
+    this.log.entry('deletePlaybook', tenantId, { playbookId: id, actorEmail: actor })
 
-    await this.repository.deleteManyPlaybooks({ id, tenantId })
+    try {
+      const existing = await this.getPlaybookById(id, tenantId)
 
-    this.logSuccess('deletePlaybook', tenantId, { playbookId: id, name: existing.name, actorEmail: actor })
-    return { deleted: true }
+      await this.repository.deleteManyPlaybooks({ id, tenantId })
+
+      this.log.success('deletePlaybook', tenantId, {
+        playbookId: id,
+        name: existing.name,
+        actorEmail: actor,
+      })
+      return { deleted: true }
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('deletePlaybook', tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -225,31 +266,46 @@ export class SoarService {
     page = 1,
     limit = 20
   ): Promise<PaginatedExecutions> {
-    const where: Prisma.SoarExecutionWhereInput = { tenantId }
+    this.log.entry('listExecutions', tenantId, { playbookId, page, limit })
 
-    if (playbookId) {
-      where.playbookId = playbookId
-    }
+    try {
+      const where: Prisma.SoarExecutionWhereInput = { tenantId }
 
-    const [executions, total] = await Promise.all([
-      this.repository.findManyExecutionsWithPlaybook({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: { startedAt: SortOrder.DESC },
-      }),
-      this.repository.countExecutions(where),
-    ])
+      if (playbookId) {
+        where.playbookId = playbookId
+      }
 
-    const creatorsMap = await this.resolveCreatorNamesBatch(executions.map(e => e.triggeredBy))
+      const [executions, total] = await Promise.all([
+        this.repository.findManyExecutionsWithPlaybook({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy: { startedAt: SortOrder.DESC },
+        }),
+        this.repository.countExecutions(where),
+      ])
 
-    const data: SoarExecutionRecord[] = executions.map(e =>
-      buildExecutionRecord(e, e.triggeredBy ? (creatorsMap.get(e.triggeredBy) ?? null) : null)
-    )
+      const creatorsMap = await this.resolveCreatorNamesBatch(executions.map(e => e.triggeredBy))
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data: SoarExecutionRecord[] = executions.map(e =>
+        buildExecutionRecord(e, e.triggeredBy ? (creatorsMap.get(e.triggeredBy) ?? null) : null)
+      )
+
+      this.log.success('listExecutions', tenantId, {
+        playbookId,
+        page,
+        limit,
+        total,
+        returnedCount: data.length,
+      })
+
+      return {
+        data,
+        pagination: buildPaginationMeta(page, limit, total),
+      }
+    } catch (error: unknown) {
+      this.log.error('listExecutions', tenantId, error)
+      throw error
     }
   }
 
@@ -258,25 +314,37 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async executePlaybook(id: string, user: JwtPayload): Promise<SoarExecutionRecord> {
-    const playbook = await this.getPlaybookById(id, user.tenantId)
+    this.log.entry('executePlaybook', user.tenantId, { playbookId: id })
 
-    if (playbook.status !== SoarPlaybookStatus.ACTIVE) {
-      throw new BusinessException(
-        400,
-        'Only active playbooks can be executed',
-        'errors.soar.playbookNotActive'
-      )
+    try {
+      const playbook = await this.getPlaybookById(id, user.tenantId)
+
+      if (playbook.status !== SoarPlaybookStatus.ACTIVE) {
+        throw new BusinessException(
+          400,
+          'Only active playbooks can be executed',
+          'errors.soar.playbookNotActive'
+        )
+      }
+
+      const execution = await this.repository.executePlaybookTransaction({
+        playbookId: id,
+        tenantId: user.tenantId,
+        triggeredBy: user.email,
+      })
+
+      this.log.success('executePlaybook', user.tenantId, {
+        playbookId: id,
+        playbookName: playbook.name,
+      })
+      const triggeredByName = await this.resolveCreatorName(execution.triggeredBy)
+      return buildExecutionRecord(execution, triggeredByName)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('executePlaybook', user.tenantId, error)
+      }
+      throw error
     }
-
-    const execution = await this.repository.executePlaybookTransaction({
-      playbookId: id,
-      tenantId: user.tenantId,
-      triggeredBy: user.email,
-    })
-
-    this.logSuccess('executePlaybook', user.tenantId, { playbookId: id, playbookName: playbook.name })
-    const triggeredByName = await this.resolveCreatorName(execution.triggeredBy)
-    return buildExecutionRecord(execution, triggeredByName)
   }
 
   /* ---------------------------------------------------------------- */
@@ -284,15 +352,29 @@ export class SoarService {
   /* ---------------------------------------------------------------- */
 
   async getSoarStats(tenantId: string): Promise<SoarStats> {
-    const counts = await this.fetchSoarStatCounts(tenantId)
-    return buildSoarStats(
-      counts.totalPlaybooks,
-      counts.activePlaybooks,
-      counts.totalExecutions,
-      counts.successfulExecutions,
-      counts.failedExecutions,
-      counts.avgExecutionTimeMs
-    )
+    this.log.entry('getSoarStats', tenantId, {})
+
+    try {
+      const counts = await this.fetchSoarStatCounts(tenantId)
+
+      this.log.success('getSoarStats', tenantId, {
+        totalPlaybooks: counts.totalPlaybooks,
+        activePlaybooks: counts.activePlaybooks,
+        totalExecutions: counts.totalExecutions,
+      })
+
+      return buildSoarStats(
+        counts.totalPlaybooks,
+        counts.activePlaybooks,
+        counts.totalExecutions,
+        counts.successfulExecutions,
+        counts.failedExecutions,
+        counts.avgExecutionTimeMs
+      )
+    } catch (error: unknown) {
+      this.log.error('getSoarStats', tenantId, error)
+      throw error
+    }
   }
 
   private async fetchSoarStatCounts(tenantId: string): Promise<{
@@ -320,8 +402,12 @@ export class SoarService {
     ])
 
     return {
-      totalPlaybooks, activePlaybooks, totalExecutions,
-      successfulExecutions, failedExecutions, avgExecutionTimeMs,
+      totalPlaybooks,
+      activePlaybooks,
+      totalExecutions,
+      successfulExecutions,
+      failedExecutions,
+      avgExecutionTimeMs,
     }
   }
 }

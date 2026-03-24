@@ -12,8 +12,6 @@ import {
 } from './cloud-security.utilities'
 import {
   AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
   CloudAccountStatus,
   CloudFindingSeverity,
   CloudFindingStatus,
@@ -21,6 +19,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type {
   CloudAccountRecord,
   CloudSecurityStats,
@@ -34,28 +33,17 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class CloudSecurityService {
   private readonly logger = new Logger(CloudSecurityService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: CloudSecurityRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
-
-  /* ---------------------------------------------------------------- */
-  /* LOGGING HELPERS                                                    */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`CloudSecurity: ${action}`, {
-      feature: AppLogFeature.CLOUD_SECURITY,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'CloudAccount',
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CloudSecurityService',
-      functionName: action,
-      metadata,
-    })
+  ) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.CLOUD_SECURITY,
+      'CloudSecurityService'
+    )
   }
 
   /* ---------------------------------------------------------------- */
@@ -71,24 +59,33 @@ export class CloudSecurityService {
     provider?: string,
     status?: string
   ): Promise<PaginatedAccounts> {
-    const where = buildAccountListWhere(tenantId, provider, status)
-    const orderBy = buildAccountOrderBy(sortBy, sortOrder)
+    this.log.entry('listAccounts', tenantId, { page, limit, provider, status })
 
-    const [accounts, total] = await Promise.all([
-      this.repository.findManyAccounts({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy,
-      }),
-      this.repository.countAccounts(where),
-    ])
+    try {
+      const where = buildAccountListWhere(tenantId, provider, status)
+      const orderBy = buildAccountOrderBy(sortBy, sortOrder)
 
-    const data = accounts.map(buildAccountRecord)
+      const [accounts, total] = await Promise.all([
+        this.repository.findManyAccounts({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy,
+        }),
+        this.repository.countAccounts(where),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data = accounts.map(buildAccountRecord)
+
+      this.log.success('listAccounts', tenantId, { page, limit, total, returnedCount: data.length })
+
+      return {
+        data,
+        pagination: buildPaginationMeta(page, limit, total),
+      }
+    } catch (error: unknown) {
+      this.log.error('listAccounts', tenantId, error)
+      throw error
     }
   }
 
@@ -97,25 +94,28 @@ export class CloudSecurityService {
   /* ---------------------------------------------------------------- */
 
   async getAccountById(id: string, tenantId: string): Promise<CloudAccountRecord> {
-    const account = await this.repository.findFirstAccount({ id, tenantId })
+    this.log.entry('getAccountById', tenantId, { accountId: id })
 
-    if (!account) {
-      this.appLogger.warn('Cloud account not found', {
-        feature: AppLogFeature.CLOUD_SECURITY,
-        action: 'getAccountById',
-        className: 'CloudSecurityService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { accountId: id, tenantId },
-      })
-      throw new BusinessException(
-        404,
-        `Cloud account ${id} not found`,
-        'errors.cloudSecurity.accountNotFound'
-      )
+    try {
+      const account = await this.repository.findFirstAccount({ id, tenantId })
+
+      if (!account) {
+        this.log.warn('getAccountById', tenantId, 'Cloud account not found', { accountId: id })
+        throw new BusinessException(
+          404,
+          `Cloud account ${id} not found`,
+          'errors.cloudSecurity.accountNotFound'
+        )
+      }
+
+      this.log.success('getAccountById', tenantId, { accountId: id })
+      return buildAccountRecord(account)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('getAccountById', tenantId, error)
+      }
+      throw error
     }
-
-    return buildAccountRecord(account)
   }
 
   /* ---------------------------------------------------------------- */
@@ -123,17 +123,30 @@ export class CloudSecurityService {
   /* ---------------------------------------------------------------- */
 
   async createAccount(dto: CreateAccountDto, user: JwtPayload): Promise<CloudAccountRecord> {
-    const account = await this.repository.createAccount({
-      tenantId: user.tenantId,
+    this.log.entry('createAccount', user.tenantId, {
       provider: dto.provider,
       accountId: dto.accountId,
-      alias: dto.alias ?? null,
-      region: dto.region ?? null,
-      status: CloudAccountStatus.DISCONNECTED,
     })
 
-    this.logSuccess('createAccount', user.tenantId, { provider: account.provider, accountId: account.accountId })
-    return buildAccountRecord(account)
+    try {
+      const account = await this.repository.createAccount({
+        tenantId: user.tenantId,
+        provider: dto.provider,
+        accountId: dto.accountId,
+        alias: dto.alias ?? null,
+        region: dto.region ?? null,
+        status: CloudAccountStatus.DISCONNECTED,
+      })
+
+      this.log.success('createAccount', user.tenantId, {
+        provider: account.provider,
+        accountId: account.accountId,
+      })
+      return buildAccountRecord(account)
+    } catch (error: unknown) {
+      this.log.error('createAccount', user.tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -145,23 +158,35 @@ export class CloudSecurityService {
     dto: UpdateAccountDto,
     user: JwtPayload
   ): Promise<CloudAccountRecord> {
-    await this.getAccountById(id, user.tenantId)
-
-    const updated = await this.repository.updateManyAccounts({
-      where: { id, tenantId: user.tenantId },
-      data: buildAccountUpdateData(dto),
+    this.log.entry('updateAccount', user.tenantId, {
+      accountId: id,
+      updatedFields: Object.keys(dto),
     })
 
-    if (updated.count === 0) {
-      throw new BusinessException(
-        404,
-        `Cloud account ${id} not found`,
-        'errors.cloudSecurity.accountNotFound'
-      )
-    }
+    try {
+      await this.getAccountById(id, user.tenantId)
 
-    this.logSuccess('updateAccount', user.tenantId, { accountId: id })
-    return this.getAccountById(id, user.tenantId)
+      const updated = await this.repository.updateManyAccounts({
+        where: { id, tenantId: user.tenantId },
+        data: buildAccountUpdateData(dto),
+      })
+
+      if (updated.count === 0) {
+        throw new BusinessException(
+          404,
+          `Cloud account ${id} not found`,
+          'errors.cloudSecurity.accountNotFound'
+        )
+      }
+
+      this.log.success('updateAccount', user.tenantId, { accountId: id })
+      return this.getAccountById(id, user.tenantId)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('updateAccount', user.tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -169,12 +194,25 @@ export class CloudSecurityService {
   /* ---------------------------------------------------------------- */
 
   async deleteAccount(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getAccountById(id, tenantId)
+    this.log.entry('deleteAccount', tenantId, { accountId: id, actorEmail: actor })
 
-    await this.repository.deleteManyAccounts({ id, tenantId })
+    try {
+      const existing = await this.getAccountById(id, tenantId)
 
-    this.logSuccess('deleteAccount', tenantId, { provider: existing.provider, accountId: existing.accountId, actorEmail: actor })
-    return { deleted: true }
+      await this.repository.deleteManyAccounts({ id, tenantId })
+
+      this.log.success('deleteAccount', tenantId, {
+        provider: existing.provider,
+        accountId: existing.accountId,
+        actorEmail: actor,
+      })
+      return { deleted: true }
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('deleteAccount', tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -191,24 +229,33 @@ export class CloudSecurityService {
     status?: string,
     cloudAccountId?: string
   ): Promise<PaginatedFindings> {
-    const where = buildFindingListWhere(tenantId, severity, status, cloudAccountId)
-    const orderBy = buildFindingOrderBy(sortBy, sortOrder)
+    this.log.entry('listFindings', tenantId, { page, limit, severity, status, cloudAccountId })
 
-    const [findings, total] = await Promise.all([
-      this.repository.findManyFindings({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy,
-      }),
-      this.repository.countFindings(where),
-    ])
+    try {
+      const where = buildFindingListWhere(tenantId, severity, status, cloudAccountId)
+      const orderBy = buildFindingOrderBy(sortBy, sortOrder)
 
-    const data = findings.map(buildFindingRecord)
+      const [findings, total] = await Promise.all([
+        this.repository.findManyFindings({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy,
+        }),
+        this.repository.countFindings(where),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data = findings.map(buildFindingRecord)
+
+      this.log.success('listFindings', tenantId, { page, limit, total, returnedCount: data.length })
+
+      return {
+        data,
+        pagination: buildPaginationMeta(page, limit, total),
+      }
+    } catch (error: unknown) {
+      this.log.error('listFindings', tenantId, error)
+      throw error
     }
   }
 
@@ -217,27 +264,54 @@ export class CloudSecurityService {
   /* ---------------------------------------------------------------- */
 
   async getCloudSecurityStats(tenantId: string): Promise<CloudSecurityStats> {
-    const [
-      totalAccounts, connectedAccounts, disconnectedAccounts, errorAccounts,
-      totalFindings, openFindings, resolvedFindings, suppressedFindings,
-      criticalFindings, highFindings,
-    ] = await Promise.all([
-      this.repository.countAccounts({ tenantId }),
-      this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.CONNECTED),
-      this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.DISCONNECTED),
-      this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.ERROR),
-      this.repository.countFindings({ tenantId }),
-      this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.OPEN),
-      this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.RESOLVED),
-      this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.SUPPRESSED),
-      this.repository.countFindingsBySeverity(tenantId, CloudFindingSeverity.CRITICAL),
-      this.repository.countFindingsBySeverity(tenantId, CloudFindingSeverity.HIGH),
-    ])
+    this.log.entry('getCloudSecurityStats', tenantId, {})
 
-    return buildCloudSecurityStats(
-      totalAccounts, connectedAccounts, disconnectedAccounts, errorAccounts,
-      totalFindings, openFindings, resolvedFindings, suppressedFindings,
-      criticalFindings, highFindings
-    )
+    try {
+      const [
+        totalAccounts,
+        connectedAccounts,
+        disconnectedAccounts,
+        errorAccounts,
+        totalFindings,
+        openFindings,
+        resolvedFindings,
+        suppressedFindings,
+        criticalFindings,
+        highFindings,
+      ] = await Promise.all([
+        this.repository.countAccounts({ tenantId }),
+        this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.CONNECTED),
+        this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.DISCONNECTED),
+        this.repository.countAccountsByStatus(tenantId, CloudAccountStatus.ERROR),
+        this.repository.countFindings({ tenantId }),
+        this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.OPEN),
+        this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.RESOLVED),
+        this.repository.countFindingsByStatus(tenantId, CloudFindingStatus.SUPPRESSED),
+        this.repository.countFindingsBySeverity(tenantId, CloudFindingSeverity.CRITICAL),
+        this.repository.countFindingsBySeverity(tenantId, CloudFindingSeverity.HIGH),
+      ])
+
+      this.log.success('getCloudSecurityStats', tenantId, {
+        totalAccounts,
+        totalFindings,
+        criticalFindings,
+      })
+
+      return buildCloudSecurityStats(
+        totalAccounts,
+        connectedAccounts,
+        disconnectedAccounts,
+        errorAccounts,
+        totalFindings,
+        openFindings,
+        resolvedFindings,
+        suppressedFindings,
+        criticalFindings,
+        highFindings
+      )
+    } catch (error: unknown) {
+      this.log.error('getCloudSecurityStats', tenantId, error)
+      throw error
+    }
   }
 }

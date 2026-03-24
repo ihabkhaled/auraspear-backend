@@ -4,12 +4,14 @@ import { JobType } from './enums/job.enums'
 import { SCHEDULE_INTERVAL_MS } from './jobs.constants'
 import { JobService } from './jobs.service'
 import { countScheduleResults, getCurrentScheduleWindow } from './jobs.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { PrismaService } from '../../prisma/prisma.service'
 
 @Injectable()
 export class JobSchedulerService {
+  private readonly log: ServiceLogger
   private readonly enabled: boolean
 
   constructor(
@@ -17,6 +19,7 @@ export class JobSchedulerService {
     private readonly prisma: PrismaService,
     private readonly appLogger: AppLoggerService
   ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.JOBS, 'JobSchedulerService')
     // Only enable automatic scheduling when ENABLE_JOB_SCHEDULER=true
     // Without real event ingestion, auto-scheduling creates noise
     this.enabled = process.env['ENABLE_JOB_SCHEDULER'] === 'true'
@@ -29,17 +32,32 @@ export class JobSchedulerService {
    */
   @Interval(SCHEDULE_INTERVAL_MS)
   async scheduleRuleExecution(): Promise<void> {
-    if (!this.enabled) return
+    if (!this.enabled) {
+      this.log.skipped('scheduleRuleExecution', '', 'Scheduler disabled')
+      return
+    }
+
+    this.log.entry('scheduleRuleExecution', '', { intervalMs: SCHEDULE_INTERVAL_MS })
+
     try {
       const detectionCount = await this.scheduleDetectionRules()
       const correlationCount = await this.scheduleCorrelationRules()
-      this.logScheduleSuccess(detectionCount, correlationCount)
+
+      if (detectionCount > 0 || correlationCount > 0) {
+        this.log.success('scheduleRuleExecution', '', {
+          detectionRulesEnqueued: detectionCount,
+          correlationRulesEnqueued: correlationCount,
+          intervalMs: SCHEDULE_INTERVAL_MS,
+        })
+      }
     } catch (error) {
-      this.logScheduleError(error)
+      this.log.error('scheduleRuleExecution', '', error)
     }
   }
 
   private async scheduleDetectionRules(): Promise<number> {
+    this.log.debug('scheduleDetectionRules', '', 'Starting detection rule scheduling')
+
     const activeRules = await this.prisma.detectionRule.findMany({
       where: { status: 'active' },
       select: { id: true, tenantId: true, name: true },
@@ -64,6 +82,8 @@ export class JobSchedulerService {
   }
 
   private async scheduleCorrelationRules(): Promise<number> {
+    this.log.debug('scheduleCorrelationRules', '', 'Starting correlation rule scheduling')
+
     const activeRules = await this.prisma.correlationRule.findMany({
       where: { status: 'active' },
       select: { id: true, tenantId: true, title: true },
@@ -105,54 +125,12 @@ export class JobSchedulerService {
     for (const index of rejectedIndices) {
       const rule = rules.at(index)
       if (rule) {
-        this.appLogger.warn(`Failed to enqueue ${resourceName} ${rule.id}`, {
-          feature: AppLogFeature.JOBS,
-          action: functionName,
-          outcome: AppLogOutcome.WARNING,
-          sourceType: AppLogSourceType.CRON,
-          className: 'JobSchedulerService',
-          functionName,
-          tenantId: rule.tenantId,
-          targetResource: resourceName,
-          targetResourceId: rule.id,
-          metadata: { ruleName: rule.name ?? rule.title },
+        this.log.warn(functionName, rule.tenantId, `Failed to enqueue ${resourceName} ${rule.id}`, {
+          resourceName,
+          resourceId: rule.id,
+          ruleName: rule.name ?? rule.title,
         })
       }
     }
-  }
-
-  private logScheduleSuccess(detectionCount: number, correlationCount: number): void {
-    if (detectionCount > 0 || correlationCount > 0) {
-      this.appLogger.info(
-        `Scheduled rule execution: ${String(detectionCount)} detection, ${String(correlationCount)} correlation`,
-        {
-          feature: AppLogFeature.JOBS,
-          action: 'scheduleRuleExecution',
-          outcome: AppLogOutcome.SUCCESS,
-          sourceType: AppLogSourceType.CRON,
-          className: 'JobSchedulerService',
-          functionName: 'scheduleRuleExecution',
-          metadata: {
-            detectionRulesEnqueued: detectionCount,
-            correlationRulesEnqueued: correlationCount,
-            intervalMs: SCHEDULE_INTERVAL_MS,
-          },
-        }
-      )
-    }
-  }
-
-  private logScheduleError(error: unknown): void {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    this.appLogger.error(`Scheduled rule execution failed: ${errorMessage}`, {
-      feature: AppLogFeature.JOBS,
-      action: 'scheduleRuleExecution',
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.CRON,
-      className: 'JobSchedulerService',
-      functionName: 'scheduleRuleExecution',
-      stackTrace: error instanceof Error ? error.stack : undefined,
-      metadata: { error: errorMessage },
-    })
   }
 }

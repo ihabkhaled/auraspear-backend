@@ -8,13 +8,9 @@ import {
 } from './connector-sync.constants'
 import { ConnectorSyncRepository } from './connector-sync.repository'
 import { buildGraylogAlertData, countFulfilledResults } from './connector-sync.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  ConnectorType,
-} from '../../common/enums'
+import { AppLogFeature, ConnectorType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
 import { AlertsService } from '../alerts/alerts.service'
 import { ConnectorsService } from '../connectors/connectors.service'
@@ -26,6 +22,7 @@ import type { ConnectorType as PrismaConnectorType, Alert } from '@prisma/client
 @Injectable()
 export class ConnectorSyncService {
   private readonly logger = new Logger(ConnectorSyncService.name)
+  private readonly log: ServiceLogger
   private running = false
 
   constructor(
@@ -36,7 +33,9 @@ export class ConnectorSyncService {
     private readonly graylogService: GraylogService,
     private readonly entityExtractionService: EntityExtractionService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.CONNECTORS, 'ConnectorSyncService')
+  }
 
   /**
    * Periodic sync entry-point — runs every SYNC_INTERVAL_MS.
@@ -46,15 +45,17 @@ export class ConnectorSyncService {
   @Interval(SYNC_INTERVAL_MS)
   async handleSync(): Promise<void> {
     if (this.running) {
-      this.logger.debug('Sync already in progress — skipping this tick')
+      this.log.skipped('handleSync', '', 'Already running')
       return
     }
 
     this.running = true
+    this.log.entry('handleSync', '')
     try {
       await this.syncAllTenants()
+      this.log.success('handleSync', '')
     } catch (error) {
-      this.logger.error(`Global sync error: ${error instanceof Error ? error.message : 'unknown'}`)
+      this.log.error('handleSync', '', error)
     } finally {
       this.running = false
     }
@@ -68,12 +69,19 @@ export class ConnectorSyncService {
     tenantId: string,
     type: string
   ): Promise<{ success: boolean; message: string; ingested?: number }> {
+    this.log.entry('syncConnector', tenantId, { connectorType: type })
+
     if (!SYNCABLE_TYPES_SET.has(type)) {
+      this.log.warn('syncConnector', tenantId, `Unsupported type: ${type}`, { connectorType: type })
       return { success: false, message: `Connector type '${type}' does not support data sync` }
     }
 
     try {
       const result = await this.syncSingleConnector(tenantId, type)
+      this.log.success('syncConnector', tenantId, {
+        connectorType: type,
+        ingested: result.ingested,
+      })
       return {
         success: true,
         message: `Synced ${result.ingested} records from ${type}`,
@@ -81,6 +89,7 @@ export class ConnectorSyncService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync failed'
+      this.log.error('syncConnector', tenantId, error, { connectorType: type })
       return { success: false, message }
     }
   }
@@ -92,9 +101,13 @@ export class ConnectorSyncService {
       types: SYNCABLE_TYPES,
     })
 
-    if (connectors.length === 0) return
+    if (connectors.length === 0) {
+      this.log.skipped('syncAllTenants', '', 'No eligible connectors')
+      return
+    }
 
     this.logger.log(`Sync tick: ${connectors.length} connector(s) eligible`)
+    this.log.entry('syncAllTenants', '', { eligibleCount: connectors.length })
 
     const results = await Promise.allSettled(
       connectors.map(async connector => {
@@ -106,19 +119,16 @@ export class ConnectorSyncService {
     this.logSyncResults(results)
   }
 
-  private async syncSingleConnector(
-    tenantId: string,
-    type: string
-  ): Promise<{ ingested: number }> {
-    this.logSyncStart(tenantId, type)
+  private async syncSingleConnector(tenantId: string, type: string): Promise<{ ingested: number }> {
+    this.log.entry('sync', tenantId, { connectorType: type })
 
     try {
       const ingested = await this.dispatchSync(tenantId, type)
       await this.repository.updateConnectorSyncTimestamp(tenantId, type as PrismaConnectorType)
-      this.logSyncComplete(tenantId, type, ingested)
+      this.log.success('sync', tenantId, { connectorType: type, ingested })
       return { ingested }
     } catch (error) {
-      this.logSyncFailure(tenantId, type, error)
+      this.log.error('sync', tenantId, error, { connectorType: type })
       throw error
     }
   }
@@ -189,10 +199,7 @@ export class ConnectorSyncService {
   /**
    * Extract entities from Graylog alerts (best-effort).
    */
-  private async extractEntitiesFromGraylogAlerts(
-    tenantId: string,
-    alerts: Alert[]
-  ): Promise<void> {
+  private async extractEntitiesFromGraylogAlerts(tenantId: string, alerts: Alert[]): Promise<void> {
     const results = await Promise.allSettled(
       alerts.map(alert =>
         this.entityExtractionService.extractFromAlert({
@@ -246,45 +253,5 @@ export class ConnectorSyncService {
     }
 
     this.logger.log(`Sync tick complete: ${succeeded} succeeded, ${failed} failed`)
-  }
-
-  private logSyncStart(tenantId: string, type: string): void {
-    this.appLogger.info(`Starting sync for ${type}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'sync',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.CRON,
-      className: 'ConnectorSyncService',
-      functionName: 'syncSingleConnector',
-      metadata: { connectorType: type },
-    })
-  }
-
-  private logSyncComplete(tenantId: string, type: string, ingested: number): void {
-    this.appLogger.info(`Sync completed for ${type}: ${ingested} records`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'sync',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.CRON,
-      className: 'ConnectorSyncService',
-      functionName: 'syncSingleConnector',
-      metadata: { connectorType: type, ingested },
-    })
-  }
-
-  private logSyncFailure(tenantId: string, type: string, error: unknown): void {
-    this.appLogger.error(`Sync failed for ${type}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action: 'sync',
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      sourceType: AppLogSourceType.CRON,
-      className: 'ConnectorSyncService',
-      functionName: 'syncSingleConnector',
-      stackTrace: error instanceof Error ? error.stack : undefined,
-      metadata: { connectorType: type },
-    })
   }
 }

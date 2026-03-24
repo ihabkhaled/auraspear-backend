@@ -9,16 +9,11 @@ import {
   buildCreatorsMap,
   mapIncidentListItem,
 } from './incidents.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  IncidentStatus,
-  SortOrder,
-} from '../../common/enums'
+import { AppLogFeature, IncidentStatus, SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import type { AddTimelineEntryDto } from './dto/add-timeline-entry.dto'
 import type { CreateIncidentDto } from './dto/create-incident.dto'
@@ -36,6 +31,7 @@ import type { IncidentTimeline } from '@prisma/client'
 @Injectable()
 export class IncidentsService {
   private readonly logger = new Logger(IncidentsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: IncidentsRepository,
@@ -43,7 +39,9 @@ export class IncidentsService {
     @Optional()
     @Inject(forwardRef(() => AgentEventListenerService))
     private readonly agentEventListener: AgentEventListenerService | null
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.INCIDENTS, 'IncidentsService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* RESOLVE HELPERS                                                    */
@@ -99,6 +97,8 @@ export class IncidentsService {
     category?: string,
     query?: string
   ): Promise<PaginatedIncidents> {
+    this.log.entry('listIncidents', tenantId, { page, limit, status, severity, category, query })
+
     const where = buildIncidentWhereClause(tenantId, { status, severity, category, query })
 
     const [incidents, total] = await Promise.all([
@@ -112,6 +112,9 @@ export class IncidentsService {
     ])
 
     const data = await this.enrichIncidentListItems(incidents)
+
+    this.log.success('listIncidents', tenantId, { total, returnedCount: data.length })
+
     return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
@@ -133,14 +136,7 @@ export class IncidentsService {
     const incident = await this.repository.findFirstWithRelations({ id, tenantId })
 
     if (!incident) {
-      this.appLogger.warn('Incident not found', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'getIncidentById',
-        className: 'IncidentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { incidentId: id, tenantId },
-      })
+      this.log.warn('getIncidentById', tenantId, 'Incident not found', { incidentId: id })
       throw new BusinessException(404, `Incident ${id} not found`, 'errors.incidents.notFound')
     }
 
@@ -176,9 +172,12 @@ export class IncidentsService {
     }
 
     const result = await this.executeCreateIncident(dto, linkedAlertIds, user)
-    this.logIncidentAction('createIncident', user, result.id, {
+    this.log.success('createIncident', user.tenantId, {
+      incidentId: result.id,
       incidentNumber: result.incidentNumber,
       severity: result.severity,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
 
     return this.enrichIncidentRecord(result)
@@ -211,7 +210,11 @@ export class IncidentsService {
       timelineEvent,
       user.email
     )
-    this.logIncidentAction('updateIncident', user, id)
+    this.log.success('updateIncident', user.tenantId, {
+      incidentId: id,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
 
     // Fire-and-forget — notify AI when incident status changes
     if (dto.status && dto.status !== existing.status) {
@@ -230,6 +233,12 @@ export class IncidentsService {
     status: UpdateIncidentDto['status'],
     user: JwtPayload
   ): Promise<IncidentRecord> {
+    this.log.entry('changeStatus', user.tenantId, {
+      incidentId: id,
+      newStatus: status,
+      actorEmail: user.email,
+    })
+
     const dto: UpdateIncidentDto = { status }
     return this.updateIncident(id, dto, user)
   }
@@ -243,18 +252,10 @@ export class IncidentsService {
 
     await this.repository.deleteMany({ id, tenantId })
 
-    this.appLogger.info(`Incident ${existing.incidentNumber} deleted`, {
-      feature: AppLogFeature.INCIDENTS,
-      action: 'deleteIncident',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
+    this.log.success('deleteIncident', tenantId, {
+      incidentNumber: existing.incidentNumber,
       actorEmail: actor,
-      targetResource: 'Incident',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IncidentsService',
-      functionName: 'deleteIncident',
-      metadata: { incidentNumber: existing.incidentNumber },
+      incidentId: id,
     })
 
     return { deleted: true }
@@ -265,13 +266,22 @@ export class IncidentsService {
   /* ---------------------------------------------------------------- */
 
   async getIncidentTimeline(id: string, tenantId: string): Promise<IncidentTimeline[]> {
+    this.log.entry('getIncidentTimeline', tenantId, { incidentId: id })
+
     // Verify incident exists and belongs to tenant
     await this.getIncidentById(id, tenantId)
 
-    return this.repository.findManyTimeline({
+    const timeline = await this.repository.findManyTimeline({
       where: { incidentId: id },
       orderBy: { timestamp: SortOrder.DESC },
     })
+
+    this.log.success('getIncidentTimeline', tenantId, {
+      incidentId: id,
+      entryCount: timeline.length,
+    })
+
+    return timeline
   }
 
   async addTimelineEntry(
@@ -289,18 +299,10 @@ export class IncidentsService {
       actorName: user.email,
     })
 
-    this.appLogger.info('Timeline entry added', {
-      feature: AppLogFeature.INCIDENTS,
-      action: 'addTimelineEntry',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
+    this.log.success('addTimelineEntry', user.tenantId, {
+      incidentId: id,
+      timelineEntryId: entry.id,
       actorEmail: user.email,
-      targetResource: 'IncidentTimeline',
-      targetResourceId: entry.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IncidentsService',
-      functionName: 'addTimelineEntry',
-      metadata: { incidentId: id },
     })
 
     return entry
@@ -311,6 +313,8 @@ export class IncidentsService {
   /* ---------------------------------------------------------------- */
 
   async getIncidentStats(tenantId: string): Promise<IncidentStats> {
+    this.log.entry('getIncidentStats', tenantId)
+
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
@@ -325,6 +329,14 @@ export class IncidentsService {
       ),
       this.repository.getAvgResolveHours(tenantId),
     ])
+
+    this.log.success('getIncidentStats', tenantId, {
+      open,
+      inProgress,
+      contained,
+      resolved30d,
+      avgResolveHours,
+    })
 
     return {
       open,
@@ -343,14 +355,12 @@ export class IncidentsService {
     const membership = await this.repository.findActiveTenantMembership(assigneeId, tenantId)
 
     if (!membership) {
-      this.appLogger.warn('Invalid assignee: user is not an active member of the tenant', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'validateAssigneeInTenant',
-        className: 'IncidentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { assigneeId, tenantId },
-      })
+      this.log.warn(
+        'validateAssigneeInTenant',
+        tenantId,
+        'Invalid assignee: user is not an active member of the tenant',
+        { assigneeId }
+      )
       throw new BusinessException(
         400,
         'Assignee is not an active member of this tenant',
@@ -365,16 +375,16 @@ export class IncidentsService {
       user.tenantId
     )
     if (validAlerts !== linkedAlertIds.length) {
-      this.appLogger.warn('Invalid linked alerts: some do not belong to tenant', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'createIncident',
-        className: 'IncidentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        tenantId: user.tenantId,
-        actorEmail: user.email,
-        metadata: { linkedAlertIds, validCount: validAlerts },
-      })
+      this.log.warn(
+        'createIncident',
+        user.tenantId,
+        'Invalid linked alerts: some do not belong to tenant',
+        {
+          linkedAlertIds,
+          validCount: validAlerts,
+          actorEmail: user.email,
+        }
+      )
       throw new BusinessException(
         400,
         'One or more linked alerts do not belong to this tenant',
@@ -405,17 +415,9 @@ export class IncidentsService {
       dto.status !== IncidentStatus.OPEN &&
       dto.status !== IncidentStatus.IN_PROGRESS
     ) {
-      this.appLogger.warn('Update incident denied: incident is closed', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'updateIncident',
-        outcome: AppLogOutcome.DENIED,
-        tenantId: user.tenantId,
+      this.log.warn('updateIncident', user.tenantId, 'Update incident denied: incident is closed', {
+        incidentId: id,
         actorEmail: user.email,
-        targetResource: 'Incident',
-        targetResourceId: id,
-        sourceType: AppLogSourceType.SERVICE,
-        className: 'IncidentsService',
-        functionName: 'updateIncident',
       })
       throw new BusinessException(
         400,
@@ -472,14 +474,8 @@ export class IncidentsService {
     })
 
     if (!result) {
-      this.appLogger.warn('Incident not found during update transaction', {
-        feature: AppLogFeature.INCIDENTS,
-        action: 'updateIncident',
-        className: 'IncidentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        tenantId,
-        metadata: { incidentId: id },
+      this.log.warn('updateIncident', tenantId, 'Incident not found during update transaction', {
+        incidentId: id,
       })
       throw new BusinessException(404, `Incident ${id} not found`, 'errors.incidents.notFound')
     }
@@ -495,28 +491,6 @@ export class IncidentsService {
       this.resolveCreatorName(result.createdBy),
     ])
     return { ...result, assigneeName, assigneeEmail, createdByName, tenantName: result.tenant.name }
-  }
-
-  private logIncidentAction(
-    action: string,
-    user: JwtPayload,
-    resourceId: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`Incident ${action}`, {
-      feature: AppLogFeature.INCIDENTS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'Incident',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'IncidentsService',
-      functionName: action,
-      metadata,
-    })
   }
 
   /**

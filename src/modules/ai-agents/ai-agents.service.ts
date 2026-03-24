@@ -7,17 +7,11 @@ import {
   buildAgentUpdateData,
   buildToolUpdateData,
 } from './ai-agents.utilities'
-import {
-  AiAgentSessionStatus,
-  AiAgentStatus,
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  SortOrder,
-} from '../../common/enums'
+import { AiAgentSessionStatus, AiAgentStatus, AppLogFeature, SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { JobType } from '../jobs/enums/job.enums'
 import { JobService } from '../jobs/jobs.service'
 import type {
@@ -38,12 +32,15 @@ import type { AiAgent, AiAgentSession, AiAgentTool } from '@prisma/client'
 @Injectable()
 export class AiAgentsService {
   private readonly logger = new Logger(AiAgentsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: AiAgentsRepository,
     private readonly appLogger: AppLoggerService,
     private readonly jobService: JobService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI_AGENTS, 'AiAgentsService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
@@ -59,6 +56,9 @@ export class AiAgentsService {
     tier?: string,
     query?: string
   ): Promise<PaginatedAgents> {
+    this.logger.log(
+      `listAgents called for tenant ${tenantId}: page=${String(page)}, limit=${String(limit)}`
+    )
     const where = buildAgentListWhere(tenantId, status, tier, query)
 
     const [agents, total] = await Promise.all([
@@ -73,6 +73,7 @@ export class AiAgentsService {
 
     const data = this.mapAgentListItems(agents)
 
+    this.logger.log(`listAgents completed for tenant ${tenantId}: ${String(total)} agents found`)
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
@@ -98,17 +99,11 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async getAgentById(id: string, tenantId: string): Promise<AiAgentRecord> {
+    this.logger.log(`getAgentById called for agent ${id} in tenant ${tenantId}`)
     const agent = await this.repository.findFirstWithDetails({ id, tenantId })
 
     if (!agent) {
-      this.appLogger.warn('AI Agent not found', {
-        feature: AppLogFeature.AI_AGENTS,
-        action: 'getAgentById',
-        className: 'AiAgentsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { agentId: id, tenantId },
-      })
+      this.log.warn('getAgentById', tenantId, 'AI Agent not found', { agentId: id })
       throw new BusinessException(404, `AI Agent ${id} not found`, 'errors.aiAgents.notFound')
     }
 
@@ -120,6 +115,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async createAgent(dto: CreateAgentDto, user: JwtPayload): Promise<AiAgentRecord> {
+    this.logger.log(`createAgent called by ${user.email} in tenant ${user.tenantId}`)
     await this.validateAgentNameUnique(user.tenantId, dto.name)
 
     const newAgent = await this.repository.createWithDetails({
@@ -132,19 +128,11 @@ export class AiAgentsService {
       soulMd: dto.soulMd ?? null,
     })
 
-    this.appLogger.info('AI Agent created', {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'createAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
+    this.log.success('createAgent', user.tenantId, {
+      name: newAgent.name,
+      tier: newAgent.tier,
+      model: newAgent.model,
       actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgent',
-      targetResourceId: newAgent.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'createAgent',
-      metadata: { name: newAgent.name, tier: newAgent.tier, model: newAgent.model },
     })
 
     return buildAgentRecord(newAgent as unknown as AgentWithRelations)
@@ -174,6 +162,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async updateAgent(id: string, dto: UpdateAgentDto, user: JwtPayload): Promise<AiAgentRecord> {
+    this.logger.log(`updateAgent called for agent ${id} by ${user.email}`)
     await this.getAgentById(id, user.tenantId)
 
     if (dto.name !== undefined) {
@@ -185,19 +174,7 @@ export class AiAgentsService {
       data: buildAgentUpdateData(dto),
     })
 
-    this.appLogger.info('AI Agent updated', {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'updateAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgent',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'updateAgent',
-    })
+    this.log.success('updateAgent', user.tenantId, { agentId: id, actorEmail: user.email })
 
     return buildAgentRecord(updated as unknown as AgentWithRelations)
   }
@@ -207,22 +184,15 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async deleteAgent(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
+    this.logger.log(`deleteAgent called for agent ${id} in tenant ${tenantId}`)
     const existing = await this.getAgentById(id, tenantId)
 
     await this.repository.deleteMany({ id, tenantId })
 
-    this.appLogger.info(`AI Agent "${existing.name}" deleted`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'deleteAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
+    this.log.success('deleteAgent', tenantId, {
+      agentId: id,
+      name: existing.name,
       actorEmail: actor,
-      targetResource: 'AiAgent',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'deleteAgent',
-      metadata: { name: existing.name },
     })
 
     return { deleted: true }
@@ -233,6 +203,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async updateSoul(id: string, dto: UpdateSoulDto, user: JwtPayload): Promise<AiAgentRecord> {
+    this.logger.log(`updateSoul called for agent ${id} by ${user.email}`)
     await this.getAgentById(id, user.tenantId)
 
     const updated = await this.repository.updateWithDetails({
@@ -240,19 +211,7 @@ export class AiAgentsService {
       data: { soulMd: dto.soulMd },
     })
 
-    this.appLogger.info('AI Agent SOUL.md updated', {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'updateSoul',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgent',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'updateSoul',
-    })
+    this.log.success('updateSoul', user.tenantId, { agentId: id, actorEmail: user.email })
 
     return buildAgentRecord(updated as unknown as AgentWithRelations)
   }
@@ -267,6 +226,7 @@ export class AiAgentsService {
     page = 1,
     limit = 20
   ): Promise<PaginatedResponse<AiAgentSession>> {
+    this.logger.log(`getAgentSessions called for agent ${agentId} in tenant ${tenantId}`)
     // Verify agent exists and belongs to tenant
     await this.getAgentById(agentId, tenantId)
 
@@ -282,6 +242,7 @@ export class AiAgentsService {
       this.repository.countSessions(where),
     ])
 
+    this.logger.log(`getAgentSessions completed for agent ${agentId}: ${String(total)} sessions`)
     return {
       data: sessions,
       pagination: buildPaginationMeta(page, limit, total),
@@ -293,6 +254,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async getAgentStats(tenantId: string): Promise<AiAgentStats> {
+    this.logger.log(`getAgentStats called for tenant ${tenantId}`)
     const [totalAgents, onlineAgents, sessionAgg, costAgg] = await Promise.all([
       this.repository.count({ tenantId }),
       this.repository.count({ tenantId, status: AiAgentStatus.ONLINE }),
@@ -306,6 +268,9 @@ export class AiAgentsService {
       }),
     ])
 
+    this.logger.log(
+      `getAgentStats completed for tenant ${tenantId}: ${String(totalAgents)} total, ${String(onlineAgents)} online`
+    )
     return {
       totalAgents,
       onlineAgents,
@@ -320,6 +285,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async startAgent(id: string, tenantId: string, actor: string): Promise<AiAgentRecord> {
+    this.logger.log(`startAgent called for agent ${id} in tenant ${tenantId}`)
     const existing = await this.getAgentById(id, tenantId)
 
     if (existing.status === AiAgentStatus.ONLINE) {
@@ -331,18 +297,10 @@ export class AiAgentsService {
       data: { status: AiAgentStatus.ONLINE },
     })
 
-    this.appLogger.info(`AI Agent "${existing.name}" started`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'startAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
+    this.log.success('startAgent', tenantId, {
+      agentId: id,
+      previousStatus: existing.status,
       actorEmail: actor,
-      targetResource: 'AiAgent',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'startAgent',
-      metadata: { previousStatus: existing.status },
     })
 
     return buildAgentRecord(updated as unknown as AgentWithRelations)
@@ -353,6 +311,7 @@ export class AiAgentsService {
   /* ---------------------------------------------------------------- */
 
   async stopAgent(id: string, tenantId: string, actor: string): Promise<AiAgentRecord> {
+    this.logger.log(`stopAgent called for agent ${id} in tenant ${tenantId}`)
     const existing = await this.getAgentById(id, tenantId)
 
     if (existing.status === AiAgentStatus.OFFLINE) {
@@ -364,18 +323,10 @@ export class AiAgentsService {
       data: { status: AiAgentStatus.OFFLINE },
     })
 
-    this.appLogger.info(`AI Agent "${existing.name}" stopped`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'stopAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
+    this.log.success('stopAgent', tenantId, {
+      agentId: id,
+      previousStatus: existing.status,
       actorEmail: actor,
-      targetResource: 'AiAgent',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'stopAgent',
-      metadata: { previousStatus: existing.status },
     })
 
     return buildAgentRecord(updated as unknown as AgentWithRelations)
@@ -386,6 +337,7 @@ export class AiAgentsService {
     dto: ExecuteAgentDto,
     user: JwtPayload
   ): Promise<{ queued: boolean; jobId: string; sessionId: string }> {
+    this.logger.log(`runAgent called for agent ${id} by ${user.email}`)
     const agent = await this.getAgentById(id, user.tenantId)
 
     if (agent.status === AiAgentStatus.OFFLINE) {
@@ -410,19 +362,11 @@ export class AiAgentsService {
     jobId: string,
     user: JwtPayload
   ): void {
-    this.appLogger.info('AI Agent execution queued', {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'runAgent',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
+    this.log.success('runAgent', user.tenantId, {
+      agentId,
+      sessionId,
+      jobId,
       actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgent',
-      targetResourceId: agentId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'runAgent',
-      metadata: { sessionId, jobId },
     })
   }
 
@@ -458,7 +402,8 @@ export class AiAgentsService {
     dto: CreateAgentToolDto,
     user: JwtPayload
   ): Promise<AiAgentTool> {
-    const agent = await this.getAgentById(agentId, user.tenantId)
+    this.logger.log(`createTool called for agent ${agentId} by ${user.email}`)
+    await this.getAgentById(agentId, user.tenantId)
     await this.validateToolNameUnique(agentId, dto.name)
 
     const tool = await this.repository.createTool({
@@ -468,19 +413,10 @@ export class AiAgentsService {
       schema: JSON.parse(JSON.stringify(dto.schema ?? {})),
     })
 
-    this.appLogger.info(`Tool "${tool.name}" created for agent "${agent.name}"`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'createTool',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
+    this.log.success('createTool', user.tenantId, {
+      agentId,
+      toolName: tool.name,
       actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgentTool',
-      targetResourceId: tool.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'createTool',
-      metadata: { agentId, toolName: tool.name },
     })
 
     return tool
@@ -496,25 +432,18 @@ export class AiAgentsService {
     dto: UpdateAgentToolDto,
     user: JwtPayload
   ): Promise<AiAgentTool> {
+    this.logger.log(`updateTool called for tool ${toolId} on agent ${agentId} by ${user.email}`)
     await this.getAgentById(agentId, user.tenantId)
     await this.validateToolExists(toolId, agentId)
     await this.validateToolNameUnique(agentId, dto.name, toolId)
 
     const updated = await this.repository.updateTool({ id: toolId }, buildToolUpdateData(dto))
 
-    this.appLogger.info(`Tool "${updated.name}" updated on agent ${agentId}`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'updateTool',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
+    this.log.success('updateTool', user.tenantId, {
+      agentId,
+      toolId,
+      toolName: updated.name,
       actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'AiAgentTool',
-      targetResourceId: toolId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'updateTool',
-      metadata: { agentId },
     })
 
     return updated
@@ -563,24 +492,13 @@ export class AiAgentsService {
     tenantId: string,
     actorEmail: string
   ): Promise<{ deleted: boolean }> {
+    this.logger.log(`deleteTool called for tool ${toolId} on agent ${agentId}`)
     await this.getAgentById(agentId, tenantId)
     await this.validateToolExists(toolId, agentId)
 
     await this.repository.deleteTool({ id: toolId })
 
-    this.appLogger.info(`Tool deleted from agent ${agentId}`, {
-      feature: AppLogFeature.AI_AGENTS,
-      action: 'deleteTool',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail,
-      targetResource: 'AiAgentTool',
-      targetResourceId: toolId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AiAgentsService',
-      functionName: 'deleteTool',
-      metadata: { agentId },
-    })
+    this.log.success('deleteTool', tenantId, { agentId, toolId, actorEmail })
 
     return { deleted: true }
   }

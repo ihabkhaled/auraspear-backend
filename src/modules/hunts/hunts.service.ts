@@ -12,10 +12,11 @@ import {
   generateHuntAnalysis,
   sanitizeEsQuery,
 } from './hunts.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, ConnectorType } from '../../common/enums'
+import { AppLogFeature, ConnectorType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { processChunked } from '../../common/utils/batch.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
@@ -25,6 +26,7 @@ import type { Prisma } from '@prisma/client'
 @Injectable()
 export class HuntsService {
   private readonly logger = new Logger(HuntsService.name)
+  private readonly log: ServiceLogger
 
   private readonly VALID_TRANSITIONS = new Map<HuntSessionStatus, Set<HuntSessionStatus>>([
     [HuntSessionStatus.running, new Set([HuntSessionStatus.completed, HuntSessionStatus.error])],
@@ -35,12 +37,15 @@ export class HuntsService {
     private readonly connectorsService: ConnectorsService,
     private readonly wazuhService: WazuhService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.HUNTS, 'HuntsService')
+  }
 
   async runHunt(tenantId: string, dto: RunHuntDto, email: string): Promise<HuntSessionRecord> {
-    this.logAction('runHunt', tenantId, email, undefined, {
+    this.log.entry('runHunt', tenantId, {
       query: dto.query,
       timeRange: dto.timeRange,
+      actorEmail: email,
     })
 
     const session = await this.huntsRepository.createSession({
@@ -71,20 +76,35 @@ export class HuntsService {
   }
 
   async listRuns(tenantId: string, page: number, limit: number): Promise<PaginatedHuntSessions> {
-    const skip = (page - 1) * limit
-    const [data, total] = await Promise.all([
-      this.huntsRepository.findSessionsPaginated(tenantId, skip, limit),
-      this.huntsRepository.countSessions(tenantId),
-    ])
-    return { data, pagination: buildPaginationMeta(page, limit, total) }
+    this.log.entry('listRuns', tenantId, { page, limit })
+
+    try {
+      const skip = (page - 1) * limit
+      const [data, total] = await Promise.all([
+        this.huntsRepository.findSessionsPaginated(tenantId, skip, limit),
+        this.huntsRepository.countSessions(tenantId),
+      ])
+
+      this.log.success('listRuns', tenantId, { page, limit, total, returnedCount: data.length })
+
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('listRuns', tenantId, error)
+      throw error
+    }
   }
 
   async getRun(tenantId: string, id: string): Promise<HuntSessionRecord> {
+    this.log.debug('getRun', tenantId, 'starting', { sessionId: id })
+
     const session = await this.huntsRepository.findSessionByIdAndTenant(id, tenantId)
     if (!session) {
-      this.logWarn('getRun', tenantId, id)
+      this.log.warn('getRun', tenantId, 'session not found', { sessionId: id })
       throw new BusinessException(404, `Hunt session ${id} not found`, 'errors.hunts.notFound')
     }
+
+    this.log.debug('getRun', tenantId, 'completed', { sessionId: id })
+
     return session
   }
 
@@ -94,9 +114,11 @@ export class HuntsService {
     page: number,
     limit: number
   ): Promise<PaginatedHuntEvents> {
+    this.log.debug('getEvents', tenantId, 'starting', { sessionId, page, limit })
+
     const session = await this.huntsRepository.findSessionExistsByIdAndTenant(sessionId, tenantId)
     if (!session) {
-      this.logWarn('getEvents', tenantId, sessionId)
+      this.log.warn('getEvents', tenantId, 'session not found', { sessionId })
       throw new BusinessException(
         404,
         `Hunt session ${sessionId} not found`,
@@ -110,6 +132,14 @@ export class HuntsService {
       this.huntsRepository.countEvents(sessionId),
     ])
 
+    this.log.debug('getEvents', tenantId, 'completed', {
+      sessionId,
+      page,
+      limit,
+      total,
+      returnedCount: data.length,
+    })
+
     return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
@@ -118,19 +148,29 @@ export class HuntsService {
   /* ---------------------------------------------------------------- */
 
   async deleteRun(tenantId: string, id: string, email: string): Promise<{ deleted: boolean }> {
-    const session = await this.huntsRepository.findSessionByIdAndTenant(id, tenantId)
-    if (!session) {
-      this.logWarn('deleteRun', tenantId, id)
-      throw new BusinessException(404, `Hunt session ${id} not found`, 'errors.hunts.notFound')
+    this.log.entry('deleteRun', tenantId, { sessionId: id, actorEmail: email })
+
+    try {
+      const session = await this.huntsRepository.findSessionByIdAndTenant(id, tenantId)
+      if (!session) {
+        this.log.warn('deleteRun', tenantId, 'session not found', { sessionId: id })
+        throw new BusinessException(404, `Hunt session ${id} not found`, 'errors.hunts.notFound')
+      }
+
+      await this.huntsRepository.deleteSessionAndEvents(id, tenantId)
+
+      this.log.success('deleteRun', tenantId, {
+        sessionId: id,
+        actorEmail: email,
+        query: session.query,
+      })
+
+      return { deleted: true }
+    } catch (error: unknown) {
+      if (error instanceof BusinessException) throw error
+      this.log.error('deleteRun', tenantId, error, { sessionId: id })
+      throw error
     }
-
-    await this.huntsRepository.deleteSessionAndEvents(id, tenantId)
-
-    this.logAction('deleteRun', tenantId, email, id, {
-      query: session.query,
-    })
-
-    return { deleted: true }
   }
 
   /* ---------------------------------------------------------------- */
@@ -149,11 +189,20 @@ export class HuntsService {
     const eventData = await this.processHuntEvents(result.hits, session.id)
 
     const updated = await this.completeHuntSession(
-      session, eventData, result, dto, tenantId, esQuery
+      session,
+      eventData,
+      result,
+      dto,
+      tenantId,
+      esQuery
     )
 
-    this.logAction('runHunt', tenantId, email, session.id, {
-      eventsFound: result.total, query: dto.query, timeRange: dto.timeRange,
+    this.log.success('runHunt', tenantId, {
+      sessionId: session.id,
+      actorEmail: email,
+      eventsFound: result.total,
+      query: dto.query,
+      timeRange: dto.timeRange,
     })
     return updated
   }
@@ -214,10 +263,18 @@ export class HuntsService {
     const threatScoreValue = computeThreatScore(eventData, uniqueIpCount, mitreTechniques.length)
 
     const reasoning = buildHuntReasoning(
-      dto.timeRange, result.total, uniqueIpCount, mitreTechniques, threatScoreValue
+      dto.timeRange,
+      result.total,
+      uniqueIpCount,
+      mitreTechniques,
+      threatScoreValue
     )
     const aiAnalysis = generateHuntAnalysis(
-      dto.query, result.total, uniqueIpCount, mitreTechniques, eventData
+      dto.query,
+      result.total,
+      uniqueIpCount,
+      mitreTechniques,
+      eventData
     )
 
     return { uniqueIpCount, threatScoreValue, mitreTactics, mitreTechniques, reasoning, aiAnalysis }
@@ -244,7 +301,7 @@ export class HuntsService {
       ],
     })
 
-    this.logWarn('runHunt', tenantId, session.id, { email })
+    this.log.warn('runHunt', tenantId, 'missing connector', { sessionId: session.id, email })
     throw new BusinessException(
       422,
       'Wazuh/OpenSearch connector is not configured for this tenant',
@@ -292,13 +349,8 @@ export class HuntsService {
     const sanitized = sanitizeEsQuery(query)
 
     if (sanitized.length === 0) {
-      this.appLogger.warn('Hunt query is invalid or empty after sanitization', {
-        feature: AppLogFeature.HUNTS,
-        action: 'sanitizeEsQuery',
-        className: 'HuntsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { originalQueryLength: query.length },
+      this.log.warn('sanitizeEsQuery', '', 'Hunt query is invalid or empty after sanitization', {
+        originalQueryLength: query.length,
       })
       throw new BusinessException(400, 'Invalid or empty hunt query', 'errors.hunts.invalidQuery')
     }
@@ -315,51 +367,5 @@ export class HuntsService {
         'errors.hunts.invalidTransition'
       )
     }
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
-
-  private logAction(
-    action: string,
-    tenantId: string,
-    email: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`Hunt action: ${action}`, {
-      feature: AppLogFeature.HUNTS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: email,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'HuntsService',
-      functionName: action,
-      targetResource: 'HuntSession',
-      targetResourceId: resourceId,
-      metadata,
-    })
-  }
-
-  private logWarn(
-    action: string,
-    tenantId: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.warn(`Hunt action failed: ${action}`, {
-      feature: AppLogFeature.HUNTS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'HuntsService',
-      functionName: action,
-      targetResource: 'HuntSession',
-      targetResourceId: resourceId,
-      ...metadata,
-    })
   }
 }

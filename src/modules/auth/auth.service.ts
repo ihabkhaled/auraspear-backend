@@ -19,16 +19,11 @@ import {
   preserveImpersonationClaims,
 } from './auth.utilities'
 import { TokenBlacklistService } from './token-blacklist.service'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  TokenType,
-  UserSessionStatus,
-} from '../../common/enums'
+import { AppLogFeature, TokenType, UserSessionStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { RoleSettingsService } from '../role-settings/role-settings.service'
 import type {
   AuthSessionContext,
@@ -47,6 +42,7 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name)
+  private readonly log: ServiceLogger
   private readonly jwtSecret: string
   private readonly accessExpiry: jwt.SignOptions['expiresIn']
   private readonly refreshExpiry: jwt.SignOptions['expiresIn']
@@ -58,6 +54,7 @@ export class AuthService {
     private readonly appLogger: AppLoggerService,
     private readonly roleSettingsService: RoleSettingsService
   ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.AUTH, 'AuthService')
     const secret = this.configService.get<string>('JWT_SECRET')
     if (!secret || secret.length < 64 || !/^[\da-f]+$/i.test(secret)) {
       throw new Error('JWT_SECRET must be at least 64 hex characters (32 bytes)')
@@ -91,7 +88,10 @@ export class AuthService {
 
     const payload = buildPayloadFromMembership(user, firstMembership)
     const session = await this.issueSession(
-      user.id, firstMembership.tenantId, payload, sessionContext
+      user.id,
+      firstMembership.tenantId,
+      payload,
+      sessionContext
     )
 
     return this.buildLoginResponse(user, firstMembership, payload, session)
@@ -108,7 +108,7 @@ export class AuthService {
     const valid = await this.validatePasswordOrDummy(password, user?.passwordHash)
 
     if (!user?.passwordHash || !valid) {
-      this.logWarn('login', { actorEmail: email })
+      this.log.warn('login', 'system', 'Invalid credentials', { actorEmail: email })
       throw new BusinessException(
         401,
         'Invalid email or password',
@@ -136,10 +136,9 @@ export class AuthService {
       firstMembership.role
     )
 
-    this.logSuccess('login', {
+    this.log.success('login', firstMembership.tenantId, {
       actorEmail: user.email,
       actorUserId: user.id,
-      tenantId: firstMembership.tenantId,
     })
 
     return {
@@ -152,6 +151,7 @@ export class AuthService {
   }
 
   async getPermissions(tenantId: string, role: string): Promise<string[]> {
+    this.log.success('getPermissions', tenantId, { role })
     return this.roleSettingsService.getUserPermissions(tenantId, role)
   }
 
@@ -161,6 +161,8 @@ export class AuthService {
     payload: JwtPayload,
     sessionContext?: AuthSessionContext
   ): Promise<IssuedSessionTokens> {
+    this.log.entry('issueSession', tenantId, { actorUserId: userId })
+
     const issuedRefresh = this.issueRefreshToken(payload)
     const issuedAccess = this.issueAccessTokenBundle({
       ...payload,
@@ -173,6 +175,11 @@ export class AuthService {
       issuedAccess,
       sessionContext ?? createDefaultAuthSessionContext()
     )
+
+    this.log.success('issueSession', tenantId, {
+      actorUserId: userId,
+      family: issuedRefresh.family,
+    })
 
     return {
       accessToken: issuedAccess.accessToken,
@@ -224,7 +231,10 @@ export class AuthService {
     preserveImpersonationClaims(nextPayload, payload)
 
     const tokens = await this.rotateAndIssueTokens(
-      nextPayload, rotation, membership.tenantId, sessionContext
+      nextPayload,
+      rotation,
+      membership.tenantId,
+      sessionContext
     )
     await this.finalizeRefreshRotation(payload, rotation, tokens)
 
@@ -240,15 +250,12 @@ export class AuthService {
     tokens: IssuedRefreshToken,
     requestedTenantId?: string
   ): void {
-    this.logSuccess('refreshTokens', {
+    this.log.success('refreshTokens', membership.tenantId, {
       actorEmail: user.email,
       actorUserId: user.id,
-      tenantId: membership.tenantId,
-      metadata: {
-        requestedTenantId: requestedTenantId ?? membership.tenantId,
-        family: rotation.family.id,
-        generation: tokens.generation,
-      },
+      requestedTenantId: requestedTenantId ?? membership.tenantId,
+      family: rotation.family.id,
+      generation: tokens.generation,
     })
   }
 
@@ -278,10 +285,12 @@ export class AuthService {
     }
 
     await Promise.all(blacklistTasks)
-    this.logSuccess('logout', { metadata: { family } })
+    this.log.success('logout', 'system', { family })
   }
 
   async performLogout(accessUser: JwtPayload | undefined, refreshToken: string): Promise<void> {
+    this.log.entry('performLogout', 'system', { actorUserId: accessUser?.sub })
+
     if (!accessUser?.jti || !accessUser?.exp) {
       throw new BusinessException(
         401,
@@ -309,6 +318,8 @@ export class AuthService {
       typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined,
       accessUser.sub
     )
+
+    this.log.success('performLogout', 'system', { actorUserId: accessUser.sub })
   }
 
   resolveRefreshToken(cookieToken: string | undefined, bodyToken: string | undefined): string {
@@ -326,26 +337,40 @@ export class AuthService {
   }
 
   async validateUserActive(userId: string): Promise<void> {
+    this.log.entry('validateUserActive', 'system', { actorUserId: userId })
+
     const user = await this.authRepository.findUserByIdWithActiveMembershipCheck(
       userId,
       MembershipStatus.ACTIVE
     )
     if (!user) {
-      this.logWarn('validateUserActive', { actorUserId: userId })
+      this.log.warn('validateUserActive', 'system', 'User no longer exists', {
+        actorUserId: userId,
+      })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
     if (user.memberships.length === 0) {
-      this.logWarn('validateUserActive', { actorUserId: userId })
+      this.log.warn('validateUserActive', 'system', 'User account is not active', {
+        actorUserId: userId,
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
+
+    this.log.success('validateUserActive', 'system', { actorUserId: userId })
   }
 
   async validateMembershipActive(userId: string, tenantId: string): Promise<void> {
+    this.log.entry('validateMembershipActive', tenantId, { actorUserId: userId })
+
     const membership = await this.authRepository.findMembershipByUserAndTenant(userId, tenantId)
     if (membership?.status !== MembershipStatus.ACTIVE) {
-      this.logDenied('validateMembershipActive', { actorUserId: userId, tenantId })
+      this.log.warn('validateMembershipActive', tenantId, 'Membership not active — denied', {
+        actorUserId: userId,
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
+
+    this.log.success('validateMembershipActive', tenantId, { actorUserId: userId })
   }
 
   async resolveAuthorizedTenantContext(
@@ -358,10 +383,15 @@ export class AuthService {
     )
 
     if (memberships.length === 0) {
-      this.logDenied('resolveAuthorizedTenantContext', {
-        actorUserId: payload.sub,
-        requestedTenantId,
-      })
+      this.log.warn(
+        'resolveAuthorizedTenantContext',
+        payload.tenantId,
+        'No active memberships — denied',
+        {
+          actorUserId: payload.sub,
+          requestedTenantId,
+        }
+      )
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
@@ -384,9 +414,9 @@ export class AuthService {
       userId,
       MembershipStatus.ACTIVE
     )
-    this.logSuccess('getUserTenants', {
+    this.log.success('getUserTenants', 'system', {
       actorUserId: userId,
-      metadata: { tenantCount: memberships.length },
+      tenantCount: memberships.length,
     })
     return mapMembershipsToTenantInfos(memberships)
   }
@@ -411,10 +441,11 @@ export class AuthService {
       sessionContext
     )
 
-    this.logSuccess('endImpersonation', {
+    this.log.success('endImpersonation', firstMembership.tenantId, {
       actorEmail: admin.email,
       actorUserId: admin.id,
-      metadata: { impersonatedUserId: caller.sub, impersonatedEmail: caller.email },
+      impersonatedUserId: caller.sub,
+      impersonatedEmail: caller.email,
     })
 
     return {
@@ -438,17 +469,16 @@ export class AuthService {
         UserRole.SOC_ANALYST_L1
       )
 
-      this.logSuccess('findOrCreateUser', {
+      this.log.success('findOrCreateUser', tenantId, {
         actorUserId: user.id,
         actorEmail: email,
-        tenantId,
-        metadata: { role: membership.role },
+        role: membership.role,
       })
 
       return { id: user.id, role: membership.role as UserRole }
     } catch (error) {
       this.logger.error('Failed to upsert user', error)
-      this.logError('findOrCreateUser', { actorEmail: email, tenantId, error })
+      this.log.error('findOrCreateUser', tenantId, error, { actorEmail: email })
       throw new BusinessException(401, 'Unable to provision user', 'errors.auth.provisionFailed')
     }
   }
@@ -587,6 +617,8 @@ export class AuthService {
       return
     }
 
+    this.log.entry('touchSessionActivity', tenantId, { actorUserId: payload.sub })
+
     const updatedCount = await this.authRepository.touchUserSession({
       familyId: payload.family,
       tenantId,
@@ -615,12 +647,24 @@ export class AuthService {
     reason: RefreshTokenFamilyRevocationReason,
     revokedByUserId?: string
   ): Promise<number> {
+    this.log.entry('revokeSessionTargets', 'system', {
+      targetCount: targets.length,
+      reason,
+      revokedByUserId,
+    })
+
     if (targets.length === 0) {
       return 0
     }
 
     const tasks = this.buildRevocationTasks(targets, reason, revokedByUserId)
     await Promise.all(tasks)
+
+    this.log.success('revokeSessionTargets', 'system', {
+      revokedCount: targets.length,
+      reason,
+      revokedByUserId,
+    })
 
     return targets.length
   }
@@ -644,7 +688,11 @@ export class AuthService {
 
       tasks.push(
         this.authRepository.revokeRefreshTokenFamily(
-          target.familyId, reason, new Date(), undefined, revokedByUserId
+          target.familyId,
+          reason,
+          new Date(),
+          undefined,
+          revokedByUserId
         )
       )
     }
@@ -669,10 +717,15 @@ export class AuthService {
       hashTokenIdentifier(payload.jti)
     )
     if (rotation?.family.id !== payload.family) {
-      this.logWarn('getRefreshRotationOrThrow', {
-        actorUserId: payload.sub,
-        metadata: { family: payload.family },
-      })
+      this.log.warn(
+        'getRefreshRotationOrThrow',
+        payload.tenantId,
+        'Refresh token rotation record not found',
+        {
+          actorUserId: payload.sub,
+          family: payload.family,
+        }
+      )
       throw new BusinessException(
         401,
         'Refresh token rotation record not found',
@@ -742,9 +795,8 @@ export class AuthService {
     const membership = user.memberships.find(item => item.tenantId === targetTenantId)
 
     if (!membership) {
-      this.logDenied('resolveRefreshMembership', {
+      this.log.warn('resolveRefreshMembership', targetTenantId, 'No access to tenant — denied', {
         actorUserId: user.id,
-        requestedTenantId: targetTenantId,
       })
       throw new BusinessException(403, 'No access to this tenant', 'errors.auth.noTenantAccess')
     }
@@ -760,11 +812,16 @@ export class AuthService {
       rotation.id
     )
 
-    this.logDenied('refreshTokens', {
-      actorUserId: rotation.family.userId,
-      tenantId: rotation.family.tenantId,
-      metadata: { family: rotation.family.id, generation: rotation.generation },
-    })
+    this.log.warn(
+      'refreshTokens',
+      rotation.family.tenantId,
+      'Refresh token replay detected — denied',
+      {
+        actorUserId: rotation.family.userId,
+        family: rotation.family.id,
+        generation: rotation.generation,
+      }
+    )
 
     throw new BusinessException(
       401,
@@ -786,13 +843,19 @@ export class AuthService {
     action: string
   ): { tenantId: string; role: string; tenant: { id: string; name: string; slug: string } } {
     if (user.memberships.length === 0) {
-      this.logWarn(action, { actorEmail: user.email, actorUserId: user.id })
+      this.log.warn(action, 'system', 'No memberships found', {
+        actorEmail: user.email,
+        actorUserId: user.id,
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
     const first = user.memberships[0]
     if (!first) {
-      this.logWarn(action, { actorEmail: user.email, actorUserId: user.id })
+      this.log.warn(action, 'system', 'First membership is undefined', {
+        actorEmail: user.email,
+        actorUserId: user.id,
+      })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
 
@@ -829,7 +892,9 @@ export class AuthService {
         throw error
       }
 
-      this.logWarn(action, { error: error instanceof Error ? error.message : 'Unknown error' })
+      this.log.warn(action, 'system', 'Token verification failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
       throw new BusinessException(401, `Invalid or expired ${expectedType} token`, errorKey)
     }
   }
@@ -849,11 +914,11 @@ export class AuthService {
       MembershipStatus.ACTIVE
     )
     if (!user) {
-      this.logWarn(action, { actorUserId: userId })
+      this.log.warn(action, 'system', 'User no longer exists', { actorUserId: userId })
       throw new BusinessException(401, 'User no longer exists', 'errors.auth.userNotFound')
     }
     if (user.memberships.length === 0) {
-      this.logWarn(action, { actorUserId: userId })
+      this.log.warn(action, 'system', 'User has no active memberships', { actorUserId: userId })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
     return user
@@ -861,7 +926,10 @@ export class AuthService {
 
   private assertCallerIsImpersonated(caller: JwtPayload): void {
     if (caller.isImpersonated !== true || !caller.impersonatorSub) {
-      this.logDenied('endImpersonation', { actorUserId: caller.sub, actorEmail: caller.email })
+      this.log.warn('endImpersonation', caller.tenantId, 'Not currently impersonating — denied', {
+        actorUserId: caller.sub,
+        actorEmail: caller.email,
+      })
       throw new BusinessException(
         400,
         'Not currently impersonating',
@@ -884,10 +952,7 @@ export class AuthService {
     }
   }
 
-  private assertRefreshPayloadValid(
-    refreshPayload: JwtPayload,
-    accessUser: JwtPayload
-  ): void {
+  private assertRefreshPayloadValid(refreshPayload: JwtPayload, accessUser: JwtPayload): void {
     if (!refreshPayload.jti || !refreshPayload.exp) {
       throw new BusinessException(
         401,
@@ -910,12 +975,17 @@ export class AuthService {
     rotation: RefreshRotationWithFamily,
     tenantId: string,
     sessionContext?: AuthSessionContext
-  ): Promise<IssuedRefreshToken & { accessToken: string; accessJti: string; accessExpiresAt: Date }> {
+  ): Promise<
+    IssuedRefreshToken & { accessToken: string; accessJti: string; accessExpiresAt: Date }
+  > {
     const issuedRefresh = this.issueRefreshToken(
-      nextPayload, rotation.family.id, rotation.generation + 1
+      nextPayload,
+      rotation.family.id,
+      rotation.generation + 1
     )
     const issuedAccess = this.issueAccessTokenBundle({
-      ...nextPayload, family: rotation.family.id,
+      ...nextPayload,
+      family: rotation.family.id,
     })
 
     await this.persistRotation(rotation, issuedRefresh, issuedAccess, tenantId, sessionContext)
@@ -969,18 +1039,21 @@ export class AuthService {
   ): Promise<AuthorizedTenantContext> {
     const isGlobalAdmin = memberships.some(item => item.role === UserRole.GLOBAL_ADMIN)
     if (!isGlobalAdmin) {
-      this.logDenied('resolveAuthorizedTenantContext', {
-        actorUserId: userId,
-        requestedTenantId: targetTenantId,
-      })
+      this.log.warn(
+        'resolveAuthorizedTenantContext',
+        targetTenantId,
+        'Not a global admin — denied',
+        {
+          actorUserId: userId,
+        }
+      )
       throw new BusinessException(403, 'No access to this tenant', 'errors.auth.noTenantAccess')
     }
 
     const tenant = await this.authRepository.findTenantById(targetTenantId)
     if (!tenant) {
-      this.logDenied('resolveAuthorizedTenantContext', {
+      this.log.warn('resolveAuthorizedTenantContext', targetTenantId, 'Tenant not found — denied', {
         actorUserId: userId,
-        requestedTenantId: targetTenantId,
       })
       throw new BusinessException(400, 'Invalid tenant ID', 'errors.tenants.notFound')
     }
@@ -990,54 +1063,5 @@ export class AuthService {
       tenantSlug: tenant.slug,
       role: UserRole.GLOBAL_ADMIN,
     }
-  }
-
-  private logSuccess(action: string, extra?: Record<string, unknown>): void {
-    this.appLogger.info(`Auth ${action}`, {
-      feature: AppLogFeature.AUTH,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: action,
-      ...extra,
-    })
-  }
-
-  private logWarn(action: string, extra?: Record<string, unknown>): void {
-    this.appLogger.warn(`Auth ${action} failed`, {
-      feature: AppLogFeature.AUTH,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: action,
-      ...extra,
-    })
-  }
-
-  private logDenied(action: string, extra?: Record<string, unknown>): void {
-    this.appLogger.warn(`Auth ${action} denied`, {
-      feature: AppLogFeature.AUTH,
-      action,
-      outcome: AppLogOutcome.DENIED,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: action,
-      ...extra,
-    })
-  }
-
-  private logError(action: string, extra?: Record<string, unknown>): void {
-    this.appLogger.error(`Auth ${action} error`, {
-      feature: AppLogFeature.AUTH,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AuthService',
-      functionName: action,
-      stackTrace: extra?.['error'] instanceof Error ? (extra['error'] as Error).stack : undefined,
-      ...extra,
-    })
   }
 }

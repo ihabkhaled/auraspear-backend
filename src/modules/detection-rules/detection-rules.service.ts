@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { DetectionRulesExecutor } from './detection-rules.executor'
 import { DetectionRulesRepository } from './detection-rules.repository'
 import {
@@ -8,15 +8,11 @@ import {
   buildRuleUpdateData,
   buildDetectionRuleStats,
 } from './detection-rules.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  DetectionRuleStatus,
-} from '../../common/enums'
+import { AppLogFeature, DetectionRuleStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type {
   DetectionExecutionResult,
   DetectionRuleRecord,
@@ -30,13 +26,19 @@ import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class DetectionRulesService {
-  private readonly logger = new Logger(DetectionRulesService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: DetectionRulesRepository,
     private readonly appLogger: AppLoggerService,
     private readonly executor: DetectionRulesExecutor
-  ) {}
+  ) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.DETECTION_RULES,
+      'DetectionRulesService'
+    )
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
@@ -53,24 +55,24 @@ export class DetectionRulesService {
     status?: string,
     query?: string
   ): Promise<PaginatedDetectionRules> {
-    const where = buildRuleListWhere(tenantId, ruleType, severity, status, query)
-    const orderBy = buildRuleOrderBy(sortBy, sortOrder)
+    this.log.entry('listRules', tenantId, { page, limit, ruleType, severity, status, query })
 
-    const [rules, total] = await Promise.all([
-      this.repository.findMany({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy,
-      }),
-      this.repository.count(where),
-    ])
+    try {
+      const where = buildRuleListWhere(tenantId, ruleType, severity, status, query)
+      const orderBy = buildRuleOrderBy(sortBy, sortOrder)
 
-    const data: DetectionRuleRecord[] = rules.map(buildDetectionRuleRecord)
+      const [rules, total] = await Promise.all([
+        this.repository.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy }),
+        this.repository.count(where),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data: DetectionRuleRecord[] = rules.map(buildDetectionRuleRecord)
+      this.log.success('listRules', tenantId, { page, limit, total, returnedCount: data.length })
+
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('listRules', tenantId, error)
+      throw error
     }
   }
 
@@ -79,25 +81,22 @@ export class DetectionRulesService {
   /* ---------------------------------------------------------------- */
 
   async getRuleById(id: string, tenantId: string): Promise<DetectionRuleRecord> {
+    this.log.debug('getRuleById', tenantId, 'starting', { ruleId: id })
+
     const rule = await this.repository.findFirst({
       where: { id, tenantId },
     })
 
     if (!rule) {
-      this.appLogger.warn('Detection rule not found', {
-        feature: AppLogFeature.DETECTION_RULES,
-        action: 'getRuleById',
-        className: 'DetectionRulesService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { ruleId: id, tenantId },
-      })
+      this.log.warn('getRuleById', tenantId, 'not found', { ruleId: id })
       throw new BusinessException(
         404,
         `Detection rule ${id} not found`,
         'errors.detectionRules.notFound'
       )
     }
+
+    this.log.success('getRuleById', tenantId, { ruleId: id, ruleNumber: rule.ruleNumber })
 
     return buildDetectionRuleRecord(rule)
   }
@@ -107,34 +106,34 @@ export class DetectionRulesService {
   /* ---------------------------------------------------------------- */
 
   async createRule(dto: CreateDetectionRuleDto, user: JwtPayload): Promise<DetectionRuleRecord> {
-    const result = await this.repository.createInTransaction({
-      tenantId: user.tenantId,
+    this.log.entry('createRule', user.tenantId, {
       name: dto.name,
-      description: dto.description ?? null,
       ruleType: dto.ruleType,
       severity: dto.severity,
-      status: DetectionRuleStatus.TESTING,
-      conditions: dto.conditions as Prisma.InputJsonValue,
-      actions: dto.actions as Prisma.InputJsonValue,
-      createdBy: user.email,
     })
 
-    this.appLogger.info('Detection rule created', {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'createRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'DetectionRule',
-      targetResourceId: result.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'createRule',
-      metadata: { ruleNumber: result.ruleNumber, severity: result.severity },
-    })
+    try {
+      const result = await this.repository.createInTransaction({
+        tenantId: user.tenantId,
+        name: dto.name,
+        description: dto.description ?? null,
+        ruleType: dto.ruleType,
+        severity: dto.severity,
+        status: DetectionRuleStatus.TESTING,
+        conditions: dto.conditions as Prisma.InputJsonValue,
+        actions: dto.actions as Prisma.InputJsonValue,
+        createdBy: user.email,
+      })
 
-    return buildDetectionRuleRecord(result)
+      this.log.success('createRule', user.tenantId, {
+        ruleNumber: result.ruleNumber,
+        severity: result.severity,
+      })
+      return buildDetectionRuleRecord(result)
+    } catch (error: unknown) {
+      this.log.error('createRule', user.tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -146,11 +145,18 @@ export class DetectionRulesService {
     dto: UpdateDetectionRuleDto,
     user: JwtPayload
   ): Promise<DetectionRuleRecord> {
-    await this.getRuleById(id, user.tenantId)
-    await this.applyRuleUpdate(id, user.tenantId, buildRuleUpdateData(dto))
+    this.log.entry('updateRule', user.tenantId, { updatedFields: Object.keys(dto) })
 
-    this.logRuleAction('updateRule', 'Detection rule updated', id, user)
-    return this.getRuleById(id, user.tenantId)
+    try {
+      await this.getRuleById(id, user.tenantId)
+      await this.applyRuleUpdate(id, user.tenantId, buildRuleUpdateData(dto))
+
+      this.log.success('updateRule', user.tenantId, { ruleId: id })
+      return this.getRuleById(id, user.tenantId)
+    } catch (error: unknown) {
+      this.log.error('updateRule', user.tenantId, error, { ruleId: id })
+      throw error
+    }
   }
 
   private async applyRuleUpdate(
@@ -177,27 +183,20 @@ export class DetectionRulesService {
   /* ---------------------------------------------------------------- */
 
   async toggleRule(id: string, enabled: boolean, user: JwtPayload): Promise<DetectionRuleRecord> {
-    await this.getRuleById(id, user.tenantId)
+    this.log.entry('toggleRule', user.tenantId, { enabled })
 
-    const newStatus = enabled ? DetectionRuleStatus.ACTIVE : DetectionRuleStatus.DISABLED
-    await this.applyRuleStatusUpdate(id, user.tenantId, newStatus)
+    try {
+      await this.getRuleById(id, user.tenantId)
 
-    this.appLogger.info('Detection rule toggled', {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'toggleRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'DetectionRule',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'toggleRule',
-      metadata: { enabled, newStatus },
-    })
+      const newStatus = enabled ? DetectionRuleStatus.ACTIVE : DetectionRuleStatus.DISABLED
+      await this.applyRuleStatusUpdate(id, user.tenantId, newStatus)
 
-    return this.getRuleById(id, user.tenantId)
+      this.log.success('toggleRule', user.tenantId, { enabled, newStatus })
+      return this.getRuleById(id, user.tenantId)
+    } catch (error: unknown) {
+      this.log.error('toggleRule', user.tenantId, error)
+      throw error
+    }
   }
 
   private async applyRuleStatusUpdate(
@@ -213,25 +212,20 @@ export class DetectionRulesService {
   /* ---------------------------------------------------------------- */
 
   async deleteRule(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getRuleById(id, tenantId)
+    this.log.entry('deleteRule', tenantId, { ruleId: id, actorEmail: actor })
 
-    await this.repository.deleteMany({ id, tenantId })
+    try {
+      const existing = await this.getRuleById(id, tenantId)
 
-    this.appLogger.info(`Detection rule ${existing.ruleNumber} deleted`, {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'deleteRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'DetectionRule',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'deleteRule',
-      metadata: { ruleNumber: existing.ruleNumber },
-    })
+      await this.repository.deleteMany({ id, tenantId })
 
-    return { deleted: true }
+      this.log.success('deleteRule', tenantId, { ruleId: id, ruleNumber: existing.ruleNumber })
+
+      return { deleted: true }
+    } catch (error: unknown) {
+      this.log.error('deleteRule', tenantId, error, { ruleId: id })
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -244,15 +238,28 @@ export class DetectionRulesService {
     events: Record<string, unknown>[],
     actorEmail: string
   ): Promise<DetectionExecutionResult> {
-    const rule = await this.getRuleById(id, tenantId)
+    this.log.entry('simulateRule', tenantId, { ruleId: id, eventCount: events.length, actorEmail })
 
-    const result = await this.executor.evaluateRule(
-      { id: rule.id, name: rule.name, severity: rule.severity, conditions: rule.conditions },
-      events
-    )
+    try {
+      const rule = await this.getRuleById(id, tenantId)
 
-    this.logSimulationResult(id, tenantId, actorEmail, events.length, result)
-    return result
+      const result = await this.executor.evaluateRule(
+        { id: rule.id, name: rule.name, severity: rule.severity, conditions: rule.conditions },
+        events
+      )
+
+      this.log.success('simulateRule', tenantId, {
+        ruleId: id,
+        inputCount: events.length,
+        matchCount: result.matchCount,
+        status: result.status,
+        durationMs: result.durationMs,
+      })
+      return result
+    } catch (error: unknown) {
+      this.log.error('simulateRule', tenantId, error, { ruleId: id, eventCount: events.length })
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -260,66 +267,25 @@ export class DetectionRulesService {
   /* ---------------------------------------------------------------- */
 
   async getDetectionRuleStats(tenantId: string): Promise<DetectionRuleStats> {
-    const [total, active, testing, disabled, aggregates] = await Promise.all([
-      this.repository.count({ tenantId }),
-      this.repository.countByStatus(tenantId, DetectionRuleStatus.ACTIVE),
-      this.repository.countByStatus(tenantId, DetectionRuleStatus.TESTING),
-      this.repository.countByStatus(tenantId, DetectionRuleStatus.DISABLED),
-      this.repository.aggregateHitCount(tenantId),
-    ])
+    this.log.entry('getDetectionRuleStats', tenantId)
 
-    return buildDetectionRuleStats(total, active, testing, disabled, aggregates)
-  }
+    try {
+      const [total, active, testing, disabled, aggregates] = await Promise.all([
+        this.repository.count({ tenantId }),
+        this.repository.countByStatus(tenantId, DetectionRuleStatus.ACTIVE),
+        this.repository.countByStatus(tenantId, DetectionRuleStatus.TESTING),
+        this.repository.countByStatus(tenantId, DetectionRuleStatus.DISABLED),
+        this.repository.aggregateHitCount(tenantId),
+      ])
 
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
+      const stats = buildDetectionRuleStats(total, active, testing, disabled, aggregates)
 
-  private logRuleAction(
-    action: string,
-    message: string,
-    ruleId: string,
-    user: JwtPayload
-  ): void {
-    this.appLogger.info(message, {
-      feature: AppLogFeature.DETECTION_RULES,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'DetectionRule',
-      targetResourceId: ruleId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: action,
-    })
-  }
+      this.log.success('getDetectionRuleStats', tenantId, { total, active, testing, disabled })
 
-  private logSimulationResult(
-    ruleId: string,
-    tenantId: string,
-    actorEmail: string,
-    inputCount: number,
-    result: DetectionExecutionResult
-  ): void {
-    this.appLogger.info('Detection rule simulation executed', {
-      feature: AppLogFeature.DETECTION_RULES,
-      action: 'simulateRule',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail,
-      targetResource: 'DetectionRule',
-      targetResourceId: ruleId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'DetectionRulesService',
-      functionName: 'simulateRule',
-      metadata: {
-        inputCount,
-        matchCount: result.matchCount,
-        status: result.status,
-        durationMs: result.durationMs,
-      },
-    })
+      return stats
+    } catch (error: unknown) {
+      this.log.error('getDetectionRuleStats', tenantId, error)
+      throw error
+    }
   }
 }

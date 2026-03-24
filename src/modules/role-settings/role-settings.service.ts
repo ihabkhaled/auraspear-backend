@@ -15,15 +15,10 @@ import {
   buildSeedPermissionEntries,
   getImpactedRoles,
 } from './role-settings.utilities'
-import {
-  ALL_PERMISSIONS,
-  Permission,
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-} from '../../common/enums'
+import { ALL_PERMISSIONS, Permission, AppLogFeature } from '../../common/enums'
 import { UserRole as UserRoleEnum } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { PermissionUpdateReason } from '../notifications/notifications.enums'
 import { NotificationsService } from '../notifications/notifications.service'
 import { USERS_CONTROL_PERMISSION_KEYS } from '../users-control/users-control.constants'
@@ -32,6 +27,7 @@ import type { UserRole } from '@prisma/client'
 @Injectable()
 export class RoleSettingsService {
   private readonly logger = new Logger(RoleSettingsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: RoleSettingsRepository,
@@ -39,7 +35,9 @@ export class RoleSettingsService {
     private readonly appLogger: AppLoggerService,
     @Inject(forwardRef(() => NotificationsService))
     private readonly notificationsService: NotificationsService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.ROLE_SETTINGS, 'RoleSettingsService')
+  }
 
   private async emitRoleMatrixPermissionChanges(
     tenantId: string,
@@ -86,10 +84,7 @@ export class RoleSettingsService {
       return
     }
 
-    await this.repository.bulkCreatePermissions(
-      tenantId,
-      buildDefaultAllowedPermissionEntries()
-    )
+    await this.repository.bulkCreatePermissions(tenantId, buildDefaultAllowedPermissionEntries())
     this.cache.invalidate(tenantId)
   }
 
@@ -98,6 +93,7 @@ export class RoleSettingsService {
   /* ---------------------------------------------------------------- */
 
   getConfigurableRoles(): string[] {
+    this.log.success('getConfigurableRoles', 'system')
     return [...CONFIGURABLE_ROLES]
   }
 
@@ -106,8 +102,12 @@ export class RoleSettingsService {
   /* ---------------------------------------------------------------- */
 
   async getPermissionMatrix(tenantId: string): Promise<Record<string, string[]>> {
+    this.log.entry('getPermissionMatrix', tenantId)
+
     await this.ensureTenantDefaultPermissionsInitialized(tenantId)
     const records = await this.repository.findPermissionsByTenant(tenantId)
+
+    this.log.success('getPermissionMatrix', tenantId, { recordCount: records.length })
 
     return buildPermissionMatrixFromRecords(records)
   }
@@ -131,12 +131,9 @@ export class RoleSettingsService {
     const entries = buildPermissionMatrixEntries(matrix)
     await this.repository.bulkUpsertPermissions(tenantId, entries)
     this.cache.invalidate(tenantId)
-    await this.emitRoleMatrixPermissionChanges(
-      tenantId,
-      getImpactedRoles(currentMatrix, matrix)
-    )
+    await this.emitRoleMatrixPermissionChanges(tenantId, getImpactedRoles(currentMatrix, matrix))
 
-    this.logPermissionMatrixAction('updatePermissionMatrix', tenantId, actorEmail, actorUserId)
+    this.log.success('updatePermissionMatrix', tenantId, { actorEmail, actorUserId })
 
     return this.getPermissionMatrix(tenantId)
   }
@@ -170,7 +167,7 @@ export class RoleSettingsService {
     this.cache.invalidate(tenantId)
     await this.emitRoleMatrixPermissionChanges(tenantId, CONFIGURABLE_ROLES as UserRole[])
 
-    this.logPermissionMatrixAction('resetToDefaults', tenantId, actorEmail, actorUserId)
+    this.log.success('resetToDefaults', tenantId, { actorEmail, actorUserId })
 
     return this.getPermissionMatrix(tenantId)
   }
@@ -186,12 +183,23 @@ export class RoleSettingsService {
 
     const cached = this.cache.get(tenantId, role)
     if (cached) {
+      this.log.success('getUserPermissions', tenantId, {
+        role,
+        source: 'cache',
+        permissionCount: cached.size,
+      })
       return [...cached]
     }
 
     const records = await this.repository.findPermissionsByTenantAndRole(tenantId, role as UserRole)
     const permissions = records.map(r => r.permissionKey)
     this.cache.set(tenantId, role, new Set(permissions))
+
+    this.log.success('getUserPermissions', tenantId, {
+      role,
+      source: 'database',
+      permissionCount: permissions.length,
+    })
 
     return permissions
   }
@@ -206,7 +214,11 @@ export class RoleSettingsService {
     }
 
     const userPermissions = await this.getUserPermissions(tenantId, role)
-    return userPermissions.includes(permission)
+    const hasIt = userPermissions.includes(permission)
+
+    this.log.success('hasPermission', tenantId, { role, permission, result: hasIt })
+
+    return hasIt
   }
 
   /* ---------------------------------------------------------------- */
@@ -214,12 +226,17 @@ export class RoleSettingsService {
   /* ---------------------------------------------------------------- */
 
   async seedDefaultsForTenant(tenantId: string): Promise<void> {
+    this.log.entry('seedDefaultsForTenant', tenantId)
+
     const entries = buildSeedPermissionEntries()
     await this.repository.bulkUpsertPermissions(tenantId, entries)
-    this.logger.log(`Seeded default permissions for tenant ${tenantId}`)
+
+    this.log.success('seedDefaultsForTenant', tenantId, { entryCount: entries.length })
   }
 
   async seedAllTenants(): Promise<void> {
+    this.log.entry('seedAllTenants', 'system')
+
     const tenantIds = await this.repository.findAllTenantIds()
 
     const seedPromises = tenantIds.map(async tenantId => {
@@ -227,7 +244,7 @@ export class RoleSettingsService {
     })
     await Promise.all(seedPromises)
 
-    this.logger.log(`Seeded default permissions for ${tenantIds.length} tenants`)
+    this.log.success('seedAllTenants', 'system', { tenantCount: tenantIds.length })
   }
 
   /* ---------------------------------------------------------------- */
@@ -238,17 +255,31 @@ export class RoleSettingsService {
     tenantId: string,
     actorRole?: string
   ): Promise<Array<{ key: string; module: string; labelKey: string; sortOrder: number }>> {
+    this.log.entry('getPermissionDefinitions', tenantId, { actorRole })
+
     await this.ensurePermissionDefinitionsInitialized()
     const definitions = await this.repository.findPermissionDefinitions(tenantId)
 
     if (actorRole === UserRoleEnum.TENANT_ADMIN) {
-      return definitions.filter(definition => definition.module !== ROLE_SETTINGS_MODULE)
+      const filtered = definitions.filter(definition => definition.module !== ROLE_SETTINGS_MODULE)
+      this.log.success('getPermissionDefinitions', tenantId, {
+        definitionCount: filtered.length,
+        actorRole,
+      })
+      return filtered
     }
+
+    this.log.success('getPermissionDefinitions', tenantId, {
+      definitionCount: definitions.length,
+      actorRole,
+    })
 
     return definitions
   }
 
   async seedPermissionDefinitions(): Promise<void> {
+    this.log.entry('seedPermissionDefinitions', 'system')
+
     const upsertPromises = PERMISSION_DEFINITIONS.map(definition =>
       this.repository.upsertPermissionDefinition(
         null,
@@ -260,29 +291,8 @@ export class RoleSettingsService {
     )
     await Promise.all(upsertPromises)
 
-    this.logger.log(`Seeded ${PERMISSION_DEFINITIONS.length} permission definitions`)
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
-
-  private logPermissionMatrixAction(
-    action: string,
-    tenantId: string,
-    actorEmail: string,
-    actorUserId: string
-  ): void {
-    this.appLogger.info(`Permission matrix ${action}`, {
-      feature: AppLogFeature.AUTH,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail,
-      actorUserId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'RoleSettingsService',
-      functionName: action,
+    this.log.success('seedPermissionDefinitions', 'system', {
+      definitionCount: PERMISSION_DEFINITIONS.length,
     })
   }
 }

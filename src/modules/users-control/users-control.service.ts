@@ -11,10 +11,11 @@ import {
   paginateUsersControlUsers,
   sortUsersControlUsers,
 } from './users-control.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { AUTH_SESSION_ONLINE_WINDOW_MS } from '../auth/auth-session.constants'
 import { RefreshTokenFamilyRevocationReason } from '../auth/auth.enums'
 import { AuthService } from '../auth/auth.service'
@@ -32,14 +33,18 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class UsersControlService {
   private readonly logger = new Logger(UsersControlService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: UsersControlRepository,
     private readonly authService: AuthService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.USERS_CONTROL, 'UsersControlService')
+  }
 
   async getSummary(actor: JwtPayload, tenantId: string): Promise<UsersControlSummary> {
+    this.logger.log(`getSummary called by ${actor.email} for tenant ${tenantId}`)
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     const where = buildUsersControlUserWhere(undefined, scopedTenantId)
@@ -50,7 +55,11 @@ export class UsersControlService {
       this.repository.countScopedActiveSessions(scopedTenantId),
     ])
 
-    return mapUsersControlSummary(totalUsers, onlineUsers, activeSessions)
+    const summary = mapUsersControlSummary(totalUsers, onlineUsers, activeSessions)
+    this.logger.log(
+      `getSummary completed: ${String(totalUsers)} total users, ${String(onlineUsers)} online`
+    )
+    return summary
   }
 
   async listUsers(
@@ -58,6 +67,7 @@ export class UsersControlService {
     tenantId: string,
     query: ListControlledUsersQueryDto
   ): Promise<{ data: UsersControlUserListItem[]; pagination: UsersControlPagination }> {
+    this.logger.log(`listUsers called by ${actor.email} for tenant ${tenantId}`)
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     const where = buildUsersControlUserWhere(query.search, scopedTenantId)
@@ -79,6 +89,7 @@ export class UsersControlService {
     )
     const total = sortedUsers.length
 
+    this.logger.log(`listUsers completed: ${String(total)} total users found`)
     return {
       data: paginateUsersControlUsers(sortedUsers, query.page, query.limit),
       pagination: buildPagination(query.page, query.limit, total),
@@ -91,6 +102,7 @@ export class UsersControlService {
     tenantId: string,
     query: ListUserSessionsQueryDto
   ): Promise<{ data: UsersControlSessionItem[]; pagination: UsersControlPagination }> {
+    this.logger.log(`listUserSessions called for user ${userId} by ${actor.email}`)
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     await this.findScopedUserOrThrow(userId, scopedTenantId)
@@ -108,6 +120,7 @@ export class UsersControlService {
       buildUsersControlSessionOrderBy(query.sortBy, query.sortOrder)
     )
 
+    this.logger.log(`listUserSessions completed for user ${userId}: ${String(total)} sessions`)
     return {
       data: sessions.map(mapUsersControlSession),
       pagination: buildPagination(query.page, query.limit, total),
@@ -119,6 +132,7 @@ export class UsersControlService {
     actor: JwtPayload,
     tenantId: string
   ): Promise<{ revokedSessions: number }> {
+    this.logger.log(`forceLogoutUser called for user ${userId} by ${actor.email}`)
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     const user = await this.findScopedUserOrThrow(userId, scopedTenantId)
@@ -130,10 +144,15 @@ export class UsersControlService {
       actor.sub
     )
 
-    this.logSuccess('forceLogoutUser', actor, {
+    this.logger.log(
+      `forceLogoutUser completed for user ${userId}: ${String(revokedSessions)} sessions revoked`
+    )
+    this.log.success('forceLogoutUser', actor.tenantId, {
       targetUserId: userId,
       revokedSessions,
       scopedTenantId,
+      actorUserId: actor.sub,
+      actorEmail: actor.email,
     })
 
     return { revokedSessions }
@@ -145,6 +164,9 @@ export class UsersControlService {
     actor: JwtPayload,
     tenantId: string
   ): Promise<{ revokedSessions: number }> {
+    this.logger.log(
+      `terminateSession called for session ${sessionId} of user ${userId} by ${actor.email}`
+    )
     const scopedTenantId = this.validateAndScopeUser(actor, tenantId)
     const user = await this.findScopedUserOrThrow(userId, scopedTenantId)
     this.assertCanManageTargetUser(actor, user)
@@ -156,14 +178,23 @@ export class UsersControlService {
       actor.sub
     )
 
-    this.logSuccess('terminateSession', actor, {
-      targetUserId: userId, targetSessionId: sessionId, revokedSessions, scopedTenantId,
+    this.logger.log(
+      `terminateSession completed for session ${sessionId}: ${String(revokedSessions)} sessions revoked`
+    )
+    this.log.success('terminateSession', actor.tenantId, {
+      targetUserId: userId,
+      targetSessionId: sessionId,
+      revokedSessions,
+      scopedTenantId,
+      actorUserId: actor.sub,
+      actorEmail: actor.email,
     })
 
     return { revokedSessions }
   }
 
   async forceLogoutAll(actor: JwtPayload, tenantId: string): Promise<{ revokedSessions: number }> {
+    this.logger.log(`forceLogoutAll called by ${actor.email} for tenant ${tenantId}`)
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     const isGlobalAdmin = actor.role === UserRole.GLOBAL_ADMIN
@@ -177,9 +208,12 @@ export class UsersControlService {
       actor.sub
     )
 
-    this.logSuccess('forceLogoutAll', actor, {
+    this.logger.log(`forceLogoutAll completed: ${String(revokedSessions)} sessions revoked`)
+    this.log.success('forceLogoutAll', actor.tenantId, {
       revokedSessions,
       scopedTenantId,
+      actorUserId: actor.sub,
+      actorEmail: actor.email,
     })
 
     return { revokedSessions }
@@ -243,7 +277,9 @@ export class UsersControlService {
     scopedTenantId: string | undefined
   ): Promise<Awaited<ReturnType<typeof this.repository.findSessionRevocationTargetsBySession>>> {
     const targets = await this.repository.findSessionRevocationTargetsBySession(
-      userId, sessionId, scopedTenantId
+      userId,
+      sessionId,
+      scopedTenantId
     )
 
     if (targets.length === 0) {
@@ -251,20 +287,5 @@ export class UsersControlService {
     }
 
     return targets
-  }
-
-  private logSuccess(action: string, actor: JwtPayload, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`Users control ${action}`, {
-      feature: AppLogFeature.USERS_CONTROL,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      actorUserId: actor.sub,
-      actorEmail: actor.email,
-      tenantId: actor.tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersControlService',
-      functionName: action,
-      metadata,
-    })
   }
 }

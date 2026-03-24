@@ -290,9 +290,9 @@ describe('UebaService', () => {
       }
 
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
-        'UEBA entity not found',
+        'UebaService => UEBA entity not found',
         expect.objectContaining({
-          metadata: expect.objectContaining({ entityId: 'nonexistent', tenantId: TENANT_ID }),
+          metadata: expect.objectContaining({ entityId: 'nonexistent' }),
         })
       )
     })

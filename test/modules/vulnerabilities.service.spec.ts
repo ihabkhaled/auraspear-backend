@@ -724,10 +724,11 @@ describe('VulnerabilitiesService', () => {
       await service.deleteVulnerability(VULN_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Vulnerability: deleteVulnerability',
+        'VulnerabilitiesService => deleteVulnerability completed',
         expect.objectContaining({
           action: 'deleteVulnerability',
           tenantId: TENANT_ID,
+          outcome: 'success',
           metadata: expect.objectContaining({ cveId: 'CVE-2025-1234' }),
         })
       )

@@ -1,16 +1,27 @@
 import { Injectable } from '@nestjs/common'
 import { NormalizationService } from './normalization.service'
 import { extractPipelineSteps } from './normalization.utilities'
-import { AiFeatureKey } from '../../common/enums'
+import { AiFeatureKey, AppLogFeature } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { AiService } from '../ai/ai.service'
 import type { AiResponse } from '../ai/ai.types'
 
 @Injectable()
 export class AiNormalizationService {
+  private readonly log: ServiceLogger
+
   constructor(
     private readonly aiService: AiService,
-    private readonly normalizationService: NormalizationService
-  ) {}
+    private readonly normalizationService: NormalizationService,
+    private readonly appLogger: AppLoggerService
+  ) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.NORMALIZATION,
+      'AiNormalizationService'
+    )
+  }
 
   async verifyPipeline(
     tenantId: string,
@@ -20,18 +31,47 @@ export class AiNormalizationService {
     sampleEvents: Record<string, unknown>[],
     connector?: string
   ): Promise<AiResponse> {
-    const pipeline = await this.normalizationService.getPipelineById(pipelineId, tenantId)
-    const { normalizedEvents } = await this.normalizationService.dryRunPipeline(
-      pipelineId, tenantId, sampleEvents, userEmail
-    )
-
-    const context = this.buildVerifyContext(pipeline, sampleEvents, normalizedEvents)
-
-    return this.aiService.executeAiTask({
-      tenantId, userId, userEmail,
-      featureKey: AiFeatureKey.NORMALIZATION_VERIFY,
-      context, connector,
+    this.log.entry('ai-verify-pipeline', tenantId, {
+      pipelineId,
+      sampleEventCount: sampleEvents.length,
+      actorUserId: userId,
+      actorEmail: userEmail,
     })
+
+    try {
+      const pipeline = await this.normalizationService.getPipelineById(pipelineId, tenantId)
+      const { normalizedEvents } = await this.normalizationService.dryRunPipeline(
+        pipelineId,
+        tenantId,
+        sampleEvents,
+        userEmail
+      )
+
+      const result = await this.aiService.executeAiTask({
+        tenantId,
+        userId,
+        userEmail,
+        featureKey: AiFeatureKey.NORMALIZATION_VERIFY,
+        context: this.buildVerifyContext(pipeline, sampleEvents, normalizedEvents),
+        connector,
+      })
+
+      this.log.success('ai-verify-pipeline', tenantId, {
+        pipelineId,
+        normalizedCount: normalizedEvents.length,
+        model: result.model,
+        actorUserId: userId,
+        actorEmail: userEmail,
+      })
+      return result
+    } catch (error: unknown) {
+      this.log.error('ai-verify-pipeline', tenantId, error, {
+        pipelineId,
+        actorUserId: userId,
+        actorEmail: userEmail,
+      })
+      throw error
+    }
   }
 
   private buildVerifyContext(

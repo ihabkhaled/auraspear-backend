@@ -1,10 +1,18 @@
 import { DetectionRulesExecutor } from '../../src/modules/detection-rules/detection-rules.executor'
 
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
 describe('DetectionRulesExecutor', () => {
   let executor: DetectionRulesExecutor
 
   beforeEach(() => {
-    executor = new DetectionRulesExecutor()
+    jest.clearAllMocks()
+    executor = new DetectionRulesExecutor(mockAppLogger as never)
   })
 
   it('matches events against field conditions', async () => {
@@ -212,8 +220,11 @@ detection:
       conditions: { fields: { event_type: 'test' } },
     }
 
-    // Pass null to force an error in iteration
-    const result = await executor.evaluateRule(rule, null as unknown as Record<string, unknown>[])
+    // Pass an object with length property but not iterable to force an error in for-of loop
+    const result = await executor.evaluateRule(rule, { length: 1 } as unknown as Record<
+      string,
+      unknown
+    >[])
     expect(result.status).toBe('error')
     expect(result.error).toBeDefined()
   })

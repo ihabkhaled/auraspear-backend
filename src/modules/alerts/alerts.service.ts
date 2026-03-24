@@ -12,6 +12,7 @@ import { AlertStatus, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsService } from '../connectors/connectors.service'
@@ -23,6 +24,7 @@ import type { SearchAlertsDto } from './dto/search-alerts.dto'
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly alertsRepository: AlertsRepository,
@@ -33,7 +35,9 @@ export class AlertsService {
     @Optional()
     @Inject(forwardRef(() => AgentEventListenerService))
     private readonly agentEventListener: AgentEventListenerService | null
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.ALERTS, 'AlertsService')
+  }
 
   async search(tenantId: string, query: SearchAlertsDto): Promise<PaginatedAlerts> {
     const where = buildAlertSearchWhere(tenantId, query)
@@ -45,7 +49,7 @@ export class AlertsService {
       take: query.limit,
     })
 
-    this.logSuccess('search', tenantId, {
+    this.log.success('search', tenantId, {
       page: query.page,
       limit: query.limit,
       total,
@@ -60,7 +64,7 @@ export class AlertsService {
     const alert = await this.alertsRepository.findFirstByIdAndTenant(id, tenantId)
 
     if (!alert) {
-      this.logWarn('findById', tenantId, id)
+      this.log.warn('findById', tenantId, 'Alert not found', { targetResourceId: id })
       throw new BusinessException(404, 'Alert not found', 'errors.alerts.notFound')
     }
 
@@ -81,7 +85,7 @@ export class AlertsService {
       throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
     }
 
-    this.logSuccess('acknowledge', tenantId, { alertId: id })
+    this.log.success('acknowledge', tenantId, { alertId: id })
     return updated
   }
 
@@ -97,7 +101,7 @@ export class AlertsService {
       throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
     }
 
-    this.logSuccess('investigate', tenantId, { alertId: id })
+    this.log.success('investigate', tenantId, { alertId: id })
     return updated
   }
 
@@ -118,7 +122,7 @@ export class AlertsService {
       throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
     }
 
-    this.logSuccess('escalate', tenantId, { alertId: id, reason })
+    this.log.success('escalate', tenantId, { alertId: id, reason })
     return updated
   }
 
@@ -142,7 +146,7 @@ export class AlertsService {
       throw new BusinessException(404, 'Alert not found after update', 'errors.alerts.notFound')
     }
 
-    this.logSuccess('close', tenantId, { alertId: id, resolution })
+    this.log.success('close', tenantId, { alertId: id, resolution })
     return updated
   }
 
@@ -176,7 +180,7 @@ export class AlertsService {
     // Fire-and-forget — trigger AI triage for each ingested alert
     this.dispatchAlertTriageForBatch(tenantId, fulfilledAlerts)
 
-    this.logSuccess('ingestFromWazuh', tenantId, { ingested, totalHits: upsertOps.length })
+    this.log.success('ingestFromWazuh', tenantId, { ingested, totalHits: upsertOps.length })
     return { ingested }
   }
 
@@ -225,7 +229,7 @@ export class AlertsService {
     const succeeded = results.filter(result => result.status === 'fulfilled').length
     const failed = results.length - succeeded
 
-    this.logSuccess('bulkAcknowledge', tenantId, { succeeded, failed, total: ids.length })
+    this.log.success('bulkAcknowledge', tenantId, { succeeded, failed, total: ids.length })
     return { succeeded, failed }
   }
 
@@ -241,7 +245,7 @@ export class AlertsService {
     const succeeded = results.filter(result => result.status === 'fulfilled').length
     const failed = results.length - succeeded
 
-    this.logSuccess('bulkClose', tenantId, { succeeded, failed, total: ids.length })
+    this.log.success('bulkClose', tenantId, { succeeded, failed, total: ids.length })
     return { succeeded, failed }
   }
 
@@ -252,7 +256,7 @@ export class AlertsService {
   private async getWazuhConfigOrThrow(tenantId: string): Promise<Record<string, unknown>> {
     const config = await this.connectorsService.getDecryptedConfig(tenantId, 'wazuh')
     if (!config) {
-      this.logWarn('ingestFromWazuh', tenantId)
+      this.log.warn('ingestFromWazuh', tenantId, 'Alert action failed')
       throw new BusinessException(
         400,
         'Wazuh connector not configured or disabled',
@@ -321,33 +325,6 @@ export class AlertsService {
       `Cannot ${action} a closed alert`,
       'errors.alerts.alreadyClosed'
     )
-  }
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`Alert action: ${action}`, {
-      feature: AppLogFeature.ALERTS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AlertsService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, tenantId: string, resourceId?: string): void {
-    this.appLogger.warn(`Alert action failed: ${action}`, {
-      feature: AppLogFeature.ALERTS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      targetResource: 'Alert',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AlertsService',
-      functionName: action,
-    })
   }
 
   /**

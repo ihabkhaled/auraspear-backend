@@ -11,9 +11,10 @@ import {
   determineOverallStatus,
   extractErrorMessage,
 } from './health.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
+import { AppLogFeature, HealthStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { REDIS_CLIENT } from '../../redis'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
@@ -21,18 +22,25 @@ import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './healt
 @Injectable()
 export class HealthService {
   private readonly logger = new Logger(HealthService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: HealthRepository,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly connectorsService: ConnectorsService,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.SYSTEM, 'HealthService')
+  }
 
   async getOverallHealthOrThrow(): Promise<OverallHealth> {
+    this.log.entry('getOverallHealthOrThrow', '')
     const health = await this.getOverallHealth()
 
     if (health.status === HealthStatus.DOWN) {
+      this.log.error('getOverallHealthOrThrow', '', new Error('System is down'), {
+        status: health.status,
+      })
       throw new BusinessException(503, 'System is down', 'errors.health.serviceUnavailable')
     }
 
@@ -40,22 +48,34 @@ export class HealthService {
   }
 
   async getOverallHealth(): Promise<OverallHealth> {
+    this.log.entry('getOverallHealth', '')
     const [database, redis] = await Promise.all([this.checkDatabase(), this.checkRedis()])
     const status = determineOverallStatus(database, redis)
 
-    this.logOverallHealth(status, database, redis)
+    this.log.debug('getOverallHealth', '', 'Overall health check completed', {
+      status,
+      databaseStatus: database.status,
+      databaseLatencyMs: database.latencyMs,
+      redisStatus: redis.status,
+      redisLatencyMs: redis.latencyMs,
+    })
 
     return buildOverallHealthResponse(status, database, redis)
   }
 
   async getAllServiceHealth(tenantId: string): Promise<ServiceHealthResult[]> {
+    this.log.entry('getAllServiceHealth', tenantId)
     const connectors = await this.connectorsService.getEnabledConnectors(tenantId)
 
     const results = await Promise.all(
       connectors.map(async connector => this.checkConnectorHealth(tenantId, connector))
     )
 
-    this.logServiceHealthResults(tenantId, connectors.length, results)
+    const unhealthyCount = countUnhealthy(results)
+    this.log.debug('getAllServiceHealth', tenantId, 'Service health check completed', {
+      totalConnectors: connectors.length,
+      unhealthyCount,
+    })
 
     return results
   }
@@ -71,7 +91,10 @@ export class HealthService {
     } catch (error) {
       const message = extractErrorMessage(error)
       this.logger.error(`Health check failed for connector ${connector.type}: ${message}`)
-      this.logConnectorHealthFailure(tenantId, connector, message)
+      this.log.error('getAllServiceHealth', tenantId, error, {
+        connectorType: connector.type,
+        connectorName: connector.name,
+      })
       return buildFailedServiceHealthResult(connector.name, connector.type)
     }
   }
@@ -84,7 +107,7 @@ export class HealthService {
     } catch (error) {
       const message = extractErrorMessage(error)
       this.logger.error(`Database health check failed: ${message}`)
-      this.logComponentCheckFailure('checkDatabase', message)
+      this.log.error('checkDatabase', '', error, { error: message })
       return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
     }
   }
@@ -97,83 +120,8 @@ export class HealthService {
     } catch (error) {
       const message = extractErrorMessage(error)
       this.logger.error(`Redis health check failed: ${message}`)
-      this.logComponentCheckFailure('checkRedis', message)
+      this.log.error('checkRedis', '', error, { error: message })
       return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
     }
-  }
-
-  private logOverallHealth(
-    status: HealthStatus,
-    database: ComponentCheck,
-    redis: ComponentCheck
-  ): void {
-    this.appLogger.debug('Overall health check completed', {
-      feature: AppLogFeature.SYSTEM,
-      action: 'getOverallHealth',
-      outcome: status === HealthStatus.HEALTHY ? AppLogOutcome.SUCCESS : AppLogOutcome.WARNING,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'HealthService',
-      functionName: 'getOverallHealth',
-      metadata: {
-        status,
-        databaseStatus: database.status,
-        databaseLatencyMs: database.latencyMs,
-        redisStatus: redis.status,
-        redisLatencyMs: redis.latencyMs,
-      },
-    })
-  }
-
-  private logConnectorHealthFailure(
-    tenantId: string,
-    connector: { name: string; type: string },
-    errorMessage: string
-  ): void {
-    this.appLogger.error(`Health check failed for connector ${connector.type}`, {
-      feature: AppLogFeature.SYSTEM,
-      action: 'getAllServiceHealth',
-      className: 'HealthService',
-      sourceType: AppLogSourceType.SERVICE,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      metadata: {
-        connectorType: connector.type,
-        connectorName: connector.name,
-        error: errorMessage,
-      },
-    })
-  }
-
-  private logComponentCheckFailure(action: string, errorMessage: string): void {
-    this.appLogger.error(`${action} health check failed`, {
-      feature: AppLogFeature.SYSTEM,
-      action,
-      className: 'HealthService',
-      sourceType: AppLogSourceType.SERVICE,
-      outcome: AppLogOutcome.FAILURE,
-      metadata: { error: errorMessage },
-    })
-  }
-
-  private logServiceHealthResults(
-    tenantId: string,
-    totalConnectors: number,
-    results: ServiceHealthResult[]
-  ): void {
-    const unhealthyCount = countUnhealthy(results)
-
-    this.appLogger.debug('Service health check completed for all connectors', {
-      feature: AppLogFeature.SYSTEM,
-      action: 'getAllServiceHealth',
-      outcome: unhealthyCount === 0 ? AppLogOutcome.SUCCESS : AppLogOutcome.WARNING,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'HealthService',
-      functionName: 'getAllServiceHealth',
-      metadata: {
-        totalConnectors,
-        unhealthyCount,
-      },
-    })
   }
 }

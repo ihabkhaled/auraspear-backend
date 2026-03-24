@@ -22,6 +22,7 @@ import {
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { JobType } from '../jobs/enums/job.enums'
 import { JobService } from '../jobs/jobs.service'
 import type { CreateReportFromTemplateDto } from './dto/create-report-from-template.dto'
@@ -42,12 +43,15 @@ import type { JwtPayload } from '../../common/interfaces/authenticated-request.i
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: ReportsRepository,
     private readonly appLogger: AppLoggerService,
     private readonly jobService: JobService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.REPORTS, 'ReportsService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* RESOLVE HELPERS                                                    */
@@ -93,16 +97,29 @@ export class ReportsService {
     query?: string,
     format?: string
   ): Promise<PaginatedReports> {
-    const where = buildReportListWhere(tenantId, type, module, status, query, format)
+    this.log.entry('listReports', tenantId, { page, limit, type, module, status, query, format })
 
-    const [reports, total] = await this.fetchReportsPage(where, page, limit, sortBy, sortOrder)
-    const generatorsMap = await this.resolveGeneratorNamesBatch(reports.map(r => r.generatedBy))
+    try {
+      const where = buildReportListWhere(tenantId, type, module, status, query, format)
 
-    const data: ReportRecord[] = reports.map(r =>
-      buildReportRecord(r, generatorsMap.get(r.generatedBy) ?? null)
-    )
+      const [reports, total] = await this.fetchReportsPage(where, page, limit, sortBy, sortOrder)
+      const generatorsMap = await this.resolveGeneratorNamesBatch(reports.map(r => r.generatedBy))
 
-    return { data, pagination: buildPaginationMeta(page, limit, total) }
+      const data: ReportRecord[] = reports.map(r =>
+        buildReportRecord(r, generatorsMap.get(r.generatedBy) ?? null)
+      )
+
+      this.log.success('listReports', tenantId, {
+        page,
+        limit,
+        total,
+        returnedCount: data.length,
+      })
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('listReports', tenantId, error)
+      throw error
+    }
   }
 
   private async fetchReportsPage(
@@ -132,29 +149,32 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async getReportById(id: string, tenantId: string): Promise<ReportRecord> {
-    const report = await this.repository.findFirstReport({
-      where: { id, tenantId },
-      include: {
-        tenant: { select: { name: true } },
-        template: { select: { id: true, key: true, module: true, name: true } },
-      },
-    })
+    this.log.entry('getReportById', tenantId, { reportId: id })
 
-    if (!report) {
-      this.appLogger.warn('Report not found', {
-        feature: AppLogFeature.REPORTS,
-        action: 'getReportById',
-        className: 'ReportsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { reportId: id, tenantId },
+    try {
+      const report = await this.repository.findFirstReport({
+        where: { id, tenantId },
+        include: {
+          tenant: { select: { name: true } },
+          template: { select: { id: true, key: true, module: true, name: true } },
+        },
       })
-      throw new BusinessException(404, `Report ${id} not found`, 'errors.reports.notFound')
+
+      if (!report) {
+        this.log.warn('getReportById', tenantId, 'Report not found', { reportId: id })
+        throw new BusinessException(404, `Report ${id} not found`, 'errors.reports.notFound')
+      }
+
+      const generatedByName = await this.resolveGeneratorName(report.generatedBy)
+
+      this.log.success('getReportById', tenantId, { reportId: id })
+      return buildReportRecord(report, generatedByName)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('getReportById', tenantId, error)
+      }
+      throw error
     }
-
-    const generatedByName = await this.resolveGeneratorName(report.generatedBy)
-
-    return buildReportRecord(report, generatedByName)
   }
 
   /* ---------------------------------------------------------------- */
@@ -162,13 +182,24 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async createReport(dto: CreateReportDto, user: JwtPayload): Promise<ReportRecord> {
-    const report = await this.persistNewReport(dto, user)
+    this.log.entry('createReport', user.tenantId, {
+      name: dto.name,
+      type: dto.type,
+      format: dto.format,
+    })
 
-    this.logReportCreated('createReport', user, report)
-    await this.enqueueReportGeneration(user, report.id)
+    try {
+      const report = await this.persistNewReport(dto, user)
 
-    const generatedByName = await this.resolveGeneratorName(report.generatedBy)
-    return buildReportRecord(report, generatedByName)
+      this.logReportCreated('createReport', user, report)
+      await this.enqueueReportGeneration(user, report.id)
+
+      const generatedByName = await this.resolveGeneratorName(report.generatedBy)
+      return buildReportRecord(report, generatedByName)
+    } catch (error: unknown) {
+      this.log.error('createReport', user.tenantId, error)
+      throw error
+    }
   }
 
   private async persistNewReport(
@@ -198,11 +229,7 @@ export class ReportsService {
     })
   }
 
-  private logReportCreated(
-    action: string,
-    user: JwtPayload,
-    report: ReportWithRelations
-  ): void {
+  private logReportCreated(action: string, user: JwtPayload, report: ReportWithRelations): void {
     this.appLogger.info('Report created', {
       feature: AppLogFeature.REPORTS,
       action,
@@ -235,18 +262,26 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async listReportTemplates(tenantId: string, module?: string): Promise<ReportTemplateRecord[]> {
-    const templates = await this.repository.findManyReportTemplates({
-      where: {
-        ...(module ? { module: module as Prisma.ReportTemplateWhereInput['module'] } : {}),
-        OR: [{ tenantId }, { tenantId: null, isSystem: true }],
-      },
-      orderBy: [{ tenantId: 'desc' }, { createdAt: 'asc' }],
-      include: {
-        tenant: { select: { name: true } },
-      },
-    })
+    this.log.entry('listReportTemplates', tenantId, { module })
 
-    return templates.map(template => buildReportTemplateRecord(template))
+    try {
+      const templates = await this.repository.findManyReportTemplates({
+        where: {
+          ...(module ? { module: module as Prisma.ReportTemplateWhereInput['module'] } : {}),
+          OR: [{ tenantId }, { tenantId: null, isSystem: true }],
+        },
+        orderBy: [{ tenantId: 'desc' }, { createdAt: 'asc' }],
+        include: {
+          tenant: { select: { name: true } },
+        },
+      })
+
+      this.log.success('listReportTemplates', tenantId, { returnedCount: templates.length })
+      return templates.map(template => buildReportTemplateRecord(template))
+    } catch (error: unknown) {
+      this.log.error('listReportTemplates', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -257,14 +292,26 @@ export class ReportsService {
     dto: CreateReportFromTemplateDto,
     user: JwtPayload
   ): Promise<ReportRecord> {
-    const template = await this.resolveTemplate(user.tenantId, dto.templateKey, dto.module)
-    const report = await this.createReportFromResolvedTemplate(template, dto, user)
+    this.log.entry('createReportFromTemplate', user.tenantId, {
+      templateKey: dto.templateKey,
+      module: dto.module,
+    })
 
-    this.logTemplateReportCreated(user, report, template)
-    await this.enqueueReportGeneration(user, report.id)
+    try {
+      const template = await this.resolveTemplate(user.tenantId, dto.templateKey, dto.module)
+      const report = await this.createReportFromResolvedTemplate(template, dto, user)
 
-    const generatedByName = await this.resolveGeneratorName(report.generatedBy)
-    return buildReportRecord(report, generatedByName)
+      this.logTemplateReportCreated(user, report, template)
+      await this.enqueueReportGeneration(user, report.id)
+
+      const generatedByName = await this.resolveGeneratorName(report.generatedBy)
+      return buildReportRecord(report, generatedByName)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('createReportFromTemplate', user.tenantId, error)
+      }
+      throw error
+    }
   }
 
   private logTemplateReportCreated(
@@ -300,7 +347,12 @@ export class ReportsService {
         include: { tenant: { select: { name: true } } },
       }),
       this.repository.findManyReportTemplates({
-        where: { tenantId: null, isSystem: true, key: templateKey as ReportTemplateKey, module: module as ReportModule },
+        where: {
+          tenantId: null,
+          isSystem: true,
+          key: templateKey as ReportTemplateKey,
+          module: module as ReportModule,
+        },
         take: 1,
         include: { tenant: { select: { name: true } } },
       }),
@@ -367,66 +419,65 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async updateReport(id: string, dto: UpdateReportDto, user: JwtPayload): Promise<ReportRecord> {
-    await this.getReportById(id, user.tenantId)
+    this.log.entry('updateReport', user.tenantId, { reportId: id, updatedFields: Object.keys(dto) })
 
-    const updated = await this.repository.updateManyReports({
-      where: { id, tenantId: user.tenantId },
-      data: buildReportUpdateData(dto),
-    })
+    try {
+      await this.getReportById(id, user.tenantId)
 
-    if (updated.count === 0) {
-      throw new BusinessException(404, `Report ${id} not found`, 'errors.reports.notFound')
+      const updated = await this.repository.updateManyReports({
+        where: { id, tenantId: user.tenantId },
+        data: buildReportUpdateData(dto),
+      })
+
+      if (updated.count === 0) {
+        throw new BusinessException(404, `Report ${id} not found`, 'errors.reports.notFound')
+      }
+
+      this.log.success('updateReport', user.tenantId, {
+        reportId: id,
+        updatedFields: Object.keys(dto),
+      })
+
+      return this.getReportById(id, user.tenantId)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('updateReport', user.tenantId, error)
+      }
+      throw error
     }
-
-    this.appLogger.info('Report updated', {
-      feature: AppLogFeature.REPORTS,
-      action: 'updateReport',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'Report',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ReportsService',
-      functionName: 'updateReport',
-      metadata: { updatedFields: Object.keys(dto) },
-    })
-
-    return this.getReportById(id, user.tenantId)
   }
 
   /* ---------------------------------------------------------------- */
   /* EXPORT REPORT                                                     */
   /* ---------------------------------------------------------------- */
 
-  async exportReport(id: string, tenantId: string, user: JwtPayload): Promise<ReportRecord> {
-    const report = await this.getReportById(id, tenantId)
+  async exportReport(id: string, tenantId: string, _user: JwtPayload): Promise<ReportRecord> {
+    this.log.entry('exportReport', tenantId, { reportId: id })
 
-    if (report.status !== ReportStatus.COMPLETED) {
-      throw new BusinessException(
-        400,
-        'Only completed reports can be exported',
-        'errors.reports.notCompleted'
-      )
+    try {
+      const report = await this.getReportById(id, tenantId)
+
+      if (report.status !== ReportStatus.COMPLETED) {
+        throw new BusinessException(
+          400,
+          'Only completed reports can be exported',
+          'errors.reports.notCompleted'
+        )
+      }
+
+      this.log.success('exportReport', tenantId, {
+        reportId: id,
+        name: report.name,
+        format: report.format,
+      })
+
+      return report
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('exportReport', tenantId, error)
+      }
+      throw error
     }
-
-    this.appLogger.info('Report exported', {
-      feature: AppLogFeature.REPORTS,
-      action: 'exportReport',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'Report',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ReportsService',
-      functionName: 'exportReport',
-      metadata: { name: report.name, format: report.format },
-    })
-
-    return report
   }
 
   /* ---------------------------------------------------------------- */
@@ -434,27 +485,24 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async deleteReport(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getReportById(id, tenantId)
+    this.log.entry('deleteReport', tenantId, { reportId: id, actorEmail: actor })
 
-    await this.repository.deleteManyReports({
-      where: { id, tenantId },
-    })
+    try {
+      const existing = await this.getReportById(id, tenantId)
 
-    this.appLogger.info(`Report ${existing.name} deleted`, {
-      feature: AppLogFeature.REPORTS,
-      action: 'deleteReport',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'Report',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'ReportsService',
-      functionName: 'deleteReport',
-      metadata: { name: existing.name },
-    })
+      await this.repository.deleteManyReports({
+        where: { id, tenantId },
+      })
 
-    return { deleted: true }
+      this.log.success('deleteReport', tenantId, { reportId: id, name: existing.name })
+
+      return { deleted: true }
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('deleteReport', tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -462,10 +510,20 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async downloadReport(id: string, tenantId: string): Promise<ReportDownloadResponse> {
-    const report = await this.fetchAndValidateReportForDownload(id, tenantId)
-    const content = JSON.parse(report.generatedContent) as GeneratedReportContent
+    this.log.entry('downloadReport', tenantId, { reportId: id })
 
-    return buildReportDownloadResponse(report.name, report.format, content)
+    try {
+      const report = await this.fetchAndValidateReportForDownload(id, tenantId)
+      const content = JSON.parse(report.generatedContent) as GeneratedReportContent
+
+      this.log.success('downloadReport', tenantId, { reportId: id })
+      return buildReportDownloadResponse(report.name, report.format, content)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('downloadReport', tenantId, error)
+      }
+      throw error
+    }
   }
 
   private async fetchAndValidateReportForDownload(
@@ -508,32 +566,45 @@ export class ReportsService {
   /* ---------------------------------------------------------------- */
 
   async getReportStats(tenantId: string): Promise<ReportStats> {
-    const [totalReports, completedReports, failedReports, generatingReports, availableTemplates] =
-      await Promise.all([
-        this.repository.countReports({ tenantId }),
-        this.repository.countReports({
-          tenantId,
-          status: ReportStatus.COMPLETED,
-        }),
-        this.repository.countReports({
-          tenantId,
-          status: ReportStatus.FAILED,
-        }),
-        this.repository.countReports({
-          tenantId,
-          status: ReportStatus.GENERATING,
-        }),
-        this.repository.countReportTemplates({
-          OR: [{ tenantId }, { tenantId: null, isSystem: true }],
-        }),
-      ])
+    this.log.entry('getReportStats', tenantId, {})
 
-    return buildReportStats(
-      totalReports,
-      completedReports,
-      failedReports,
-      generatingReports,
-      availableTemplates
-    )
+    try {
+      const [totalReports, completedReports, failedReports, generatingReports, availableTemplates] =
+        await Promise.all([
+          this.repository.countReports({ tenantId }),
+          this.repository.countReports({
+            tenantId,
+            status: ReportStatus.COMPLETED,
+          }),
+          this.repository.countReports({
+            tenantId,
+            status: ReportStatus.FAILED,
+          }),
+          this.repository.countReports({
+            tenantId,
+            status: ReportStatus.GENERATING,
+          }),
+          this.repository.countReportTemplates({
+            OR: [{ tenantId }, { tenantId: null, isSystem: true }],
+          }),
+        ])
+
+      this.log.success('getReportStats', tenantId, {
+        totalReports,
+        completedReports,
+        failedReports,
+      })
+
+      return buildReportStats(
+        totalReports,
+        completedReports,
+        failedReports,
+        generatingReports,
+        availableTemplates
+      )
+    } catch (error: unknown) {
+      this.log.error('getReportStats', tenantId, error)
+      throw error
+    }
   }
 }

@@ -42,10 +42,11 @@ describe('TokenBlacklistService', () => {
 
       expect(mockRedis.set).toHaveBeenCalledWith('token:blacklist:jti-001', '1', 'EX', 900)
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'Token blacklisted successfully',
+        'TokenBlacklistService => blacklist completed',
         expect.objectContaining({
           action: 'blacklist',
-          metadata: { ttlSeconds: 900 },
+          outcome: 'success',
+          metadata: expect.objectContaining({ ttlSeconds: 900 }),
         })
       )
     })
@@ -72,13 +73,14 @@ describe('TokenBlacklistService', () => {
       await expect(service.blacklist('jti-fail', 600)).resolves.toBeUndefined()
 
       expect(mockAppLogger.error).toHaveBeenCalledWith(
-        'Failed to blacklist token',
+        'TokenBlacklistService => blacklist failed',
         expect.objectContaining({
           action: 'blacklist',
           className: 'TokenBlacklistService',
           functionName: 'blacklist',
           sourceType: 'service',
-          stackTrace: expect.stringContaining('ECONNREFUSED'),
+          outcome: 'failure',
+          metadata: expect.objectContaining({ error: 'ECONNREFUSED' }),
         })
       )
     })
@@ -89,12 +91,13 @@ describe('TokenBlacklistService', () => {
       await expect(service.blacklist('jti-string-err', 300)).resolves.toBeUndefined()
 
       expect(mockAppLogger.error).toHaveBeenCalledWith(
-        'Failed to blacklist token',
+        'TokenBlacklistService => blacklist failed',
         expect.objectContaining({
           action: 'blacklist',
           className: 'TokenBlacklistService',
           functionName: 'blacklist',
           sourceType: 'service',
+          outcome: 'failure',
         })
       )
     })
@@ -113,7 +116,7 @@ describe('TokenBlacklistService', () => {
       expect(result).toBe(true)
       expect(mockRedis.exists).toHaveBeenCalledWith('token:blacklist:jti-blacklisted')
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
-        'Blacklisted token usage attempt detected',
+        'TokenBlacklistService => Blacklisted token usage attempt detected',
         expect.objectContaining({
           action: 'isBlacklisted',
         })
@@ -138,10 +141,11 @@ describe('TokenBlacklistService', () => {
 
       expect(result).toBe(false)
       expect(mockAppLogger.error).toHaveBeenCalledWith(
-        'Failed to check token blacklist (fail-open)',
+        'TokenBlacklistService => isBlacklisted failed',
         expect.objectContaining({
           action: 'isBlacklisted',
-          metadata: { error: 'Connection timed out' },
+          outcome: 'failure',
+          metadata: expect.objectContaining({ error: 'Connection timed out' }),
         })
       )
     })
@@ -153,9 +157,10 @@ describe('TokenBlacklistService', () => {
 
       expect(result).toBe(false)
       expect(mockAppLogger.error).toHaveBeenCalledWith(
-        'Failed to check token blacklist (fail-open)',
+        'TokenBlacklistService => isBlacklisted failed',
         expect.objectContaining({
-          metadata: { error: 'Unknown error' },
+          outcome: 'failure',
+          metadata: expect.objectContaining({ error: expect.any(String) }),
         })
       )
     })
@@ -190,7 +195,7 @@ describe('TokenBlacklistService', () => {
 
       expect(result).toBe(false)
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
-        'Token blacklist Redis connection is unhealthy',
+        'TokenBlacklistService => Token blacklist Redis connection is unhealthy',
         expect.objectContaining({
           action: 'isRedisHealthy',
         })

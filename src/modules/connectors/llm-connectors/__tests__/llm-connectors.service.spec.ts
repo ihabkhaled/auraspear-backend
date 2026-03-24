@@ -169,8 +169,10 @@ describe('LlmConnectorsService', () => {
       await service.list(TENANT_ID)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'LlmConnector list',
+        'LlmConnectorsService => list completed',
         expect.objectContaining({
+          action: 'list',
+          outcome: 'success',
           metadata: expect.objectContaining({ count: 1 }),
         })
       )

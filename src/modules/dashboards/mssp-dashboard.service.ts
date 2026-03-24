@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { MsspDashboardRepository } from './mssp-dashboard.repository'
 import { buildPortfolioOverview } from './mssp-dashboard.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type {
   MsspPortfolioOverview,
   MsspTenantComparison,
@@ -11,36 +12,44 @@ import type {
 
 @Injectable()
 export class MsspDashboardService {
+  private readonly logger = new Logger(MsspDashboardService.name)
+  private readonly log: ServiceLogger
+
   constructor(
     private readonly msspRepository: MsspDashboardRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.MSSP_DASHBOARD,
+      'MsspDashboardService'
+    )
+  }
 
   async getPortfolioOverview(): Promise<MsspPortfolioOverview> {
+    this.logger.log('getPortfolioOverview called')
     const tenants = await this.msspRepository.getAllTenants()
     const summaries = await this.buildTenantSummaries(tenants)
     const overview = buildPortfolioOverview(summaries)
 
-    this.appLogger.info('MSSP portfolio overview fetched', {
-      feature: AppLogFeature.MSSP_DASHBOARD,
-      action: 'getPortfolioOverview',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: 'global',
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'MsspDashboardService',
-      functionName: 'getPortfolioOverview',
-      metadata: {
-        tenantCount: tenants.length,
-        totalAlerts: overview.totalAlerts,
-        totalCriticalAlerts: overview.totalCriticalAlerts,
-      },
+    this.logger.log(
+      `getPortfolioOverview completed, ${String(tenants.length)} tenants, ${String(overview.totalAlerts)} total alerts`
+    )
+    this.log.success('getPortfolioOverview', 'global', {
+      tenantCount: tenants.length,
+      totalAlerts: overview.totalAlerts,
+      totalCriticalAlerts: overview.totalCriticalAlerts,
     })
 
     return overview
   }
 
   async getTenantComparison(): Promise<MsspTenantComparison> {
+    this.logger.log('getTenantComparison called')
     const overview = await this.getPortfolioOverview()
+    this.logger.log(
+      `getTenantComparison completed, ${String(overview.tenants.length)} tenants compared`
+    )
     return { tenants: overview.tenants }
   }
 

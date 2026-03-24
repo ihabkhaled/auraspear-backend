@@ -10,6 +10,13 @@ const bcrypt = jest.requireMock('bcryptjs') as {
   hash: jest.Mock
 }
 
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
 function createMockRepository() {
   return {
     findPlatformAdminByEmail: jest.fn(),
@@ -28,12 +35,14 @@ describe('PlatformAdminBootstrapService', () => {
     repository = createMockRepository()
     bcrypt.compare.mockReset()
     bcrypt.hash.mockReset()
+    jest.clearAllMocks()
 
     service = new PlatformAdminBootstrapService(
       repository as never,
       {
         get: jest.fn().mockReturnValue('Admin@123!Secure'),
-      } as never
+      } as never,
+      mockAppLogger as never
     )
   })
 

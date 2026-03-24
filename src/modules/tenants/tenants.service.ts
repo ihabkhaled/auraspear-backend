@@ -27,6 +27,7 @@ import {
   UserRole,
 } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { AUTH_BCRYPT_SALT_ROUNDS } from '../auth/auth.constants'
 import { AuthService } from '../auth/auth.service'
 import { PermissionUpdateReason } from '../notifications/notifications.enums'
@@ -53,6 +54,7 @@ import type { TenantMembership, User } from '@prisma/client'
 @Injectable()
 export class TenantsService {
   private readonly logger = new Logger(TenantsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly tenantsRepository: TenantsRepository,
@@ -61,7 +63,9 @@ export class TenantsService {
     private readonly appLogger: AppLoggerService,
     @Inject(forwardRef(() => NotificationsService))
     private readonly notificationsService: NotificationsService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.TENANT_MEMBERS, 'TenantsService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* FIND ALL TENANTS                                                  */
@@ -74,6 +78,7 @@ export class TenantsService {
     sortBy = 'name',
     sortOrder = 'asc'
   ): Promise<PaginatedResult<TenantWithCounts>> {
+    this.logger.log(`findAll called: page=${String(page)}, limit=${String(limit)}`)
     const where = buildTenantSearchWhere(search)
     const orderBy = buildTenantOrderBy(sortBy, sortOrder)
 
@@ -84,7 +89,7 @@ export class TenantsService {
       take: limit,
     })
 
-    this.logSuccess('findAll', undefined, undefined, {
+    this.log.success('findAll', '', {
       page,
       limit,
       total,
@@ -98,12 +103,13 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async findById(id: string): Promise<TenantWithCounts> {
+    this.logger.log(`findById called for tenant ${id}`)
     const tenant = await this.tenantsRepository.findByIdWithCounts(id)
     if (!tenant) {
-      this.logWarn('findById', id)
+      this.log.warn('findById', id ?? '', 'Tenant findById failed')
       throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
     }
-    this.logDebug('findById', id)
+    this.log.debug('findById', id ?? '', 'Tenant findById')
     return mapTenantToCounts(tenant)
   }
 
@@ -112,23 +118,24 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async create(dto: CreateTenantDto): Promise<TenantRecord> {
+    this.logger.log(`create called for tenant slug=${dto.slug}`)
     try {
       const tenant = await this.tenantsRepository.create({ name: dto.name, slug: dto.slug })
-      this.logSuccess('create', tenant.id, undefined, {
+      this.log.success('create', tenant.id ?? '', {
         tenantName: dto.name,
         tenantSlug: dto.slug,
       })
       return tenant
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        this.logWarn('create', undefined, { slug: dto.slug })
+        this.log.warn('create', '', 'Tenant create failed', { slug: dto.slug })
         throw new BusinessException(
           409,
           'Tenant slug already exists',
           'errors.tenants.slugConflict'
         )
       }
-      this.logError('create', error, { slug: dto.slug })
+      this.log.error('create', '', error, { slug: dto.slug })
       throw error
     }
   }
@@ -138,8 +145,9 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async update(id: string, dto: UpdateTenantDto): Promise<TenantRecord> {
+    this.logger.log(`update called for tenant ${id}`)
     const tenant = await this.tenantsRepository.update(id, dto)
-    this.logSuccess('update', id, undefined, { updatedFields: Object.keys(dto) })
+    this.log.success('update', id ?? '', { updatedFields: Object.keys(dto) })
     return tenant
   }
 
@@ -148,9 +156,10 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async remove(id: string): Promise<{ deleted: boolean }> {
+    this.logger.log(`remove called for tenant ${id}`)
     await this.tenantsRepository.deactivateAllMemberships(id, MembershipStatus.INACTIVE)
     this.logger.log(`Tenant ${id} soft-deleted: all memberships deactivated`)
-    this.logSuccess('remove', id)
+    this.log.success('remove', id ?? '')
     return { deleted: true }
   }
 
@@ -168,11 +177,23 @@ export class TenantsService {
     role?: string,
     status?: string
   ): Promise<PaginatedResult<UserRecord>> {
+    this.logger.log(
+      `findUsers called for tenant ${tenantId}: page=${String(page)}, limit=${String(limit)}`
+    )
     try {
-      return await this.executeFindUsers(tenantId, page, limit, search, sortBy, sortOrder, role, status)
+      return await this.executeFindUsers(
+        tenantId,
+        page,
+        limit,
+        search,
+        sortBy,
+        sortOrder,
+        role,
+        status
+      )
     } catch (error) {
       this.logger.error(`Failed to fetch users for tenant ${tenantId}`, error)
-      this.logError('findUsers', error, { tenantId })
+      this.log.error('findUsers', '', error, { tenantId })
       throw error
     }
   }
@@ -195,8 +216,11 @@ export class TenantsService {
       take: limit,
     })
 
-    this.logSuccess('findUsers', tenantId, undefined, {
-      page, limit, total, hasSearch: Boolean(search),
+    this.log.success('findUsers', tenantId ?? '', {
+      page,
+      limit,
+      total,
+      hasSearch: Boolean(search),
     })
     return {
       data: memberships.map(mapMembershipToUserRecord),
@@ -209,16 +233,19 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async findMembers(tenantId: string): Promise<Array<{ id: string; name: string; email: string }>> {
+    this.logger.log(`findMembers called for tenant ${tenantId}`)
     try {
       const memberships = await this.tenantsRepository.findActiveMembersWithUsers(
         tenantId,
         MembershipStatus.ACTIVE
       )
-      this.logDebug('findMembers', tenantId, { count: memberships.length })
+      this.log.debug('findMembers', tenantId ?? '', 'Tenant findMembers', {
+        count: memberships.length,
+      })
       return memberships.map(m => ({ id: m.user.id, name: m.user.name, email: m.user.email }))
     } catch (error) {
       this.logger.error(`Failed to fetch members for tenant ${tenantId}`, error)
-      this.logError('findMembers', error, { tenantId })
+      this.log.error('findMembers', '', error, { tenantId })
       throw error
     }
   }
@@ -228,11 +255,15 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async checkEmail(tenantId: string, email: string): Promise<CheckEmailResult> {
+    this.logger.log(`checkEmail called for tenant ${tenantId}`)
     const user = await this.tenantsRepository.findUserByEmail(email.toLowerCase().trim())
     if (!user) return { exists: false, user: null, alreadyInTenant: false }
 
     const membership = await this.tenantsRepository.findMembershipByUserAndTenant(user.id, tenantId)
-    this.logDebug('checkEmail', tenantId, { exists: true, alreadyInTenant: membership !== null })
+    this.log.debug('checkEmail', tenantId ?? '', 'Tenant checkEmail', {
+      exists: true,
+      alreadyInTenant: membership !== null,
+    })
     return { exists: true, user, alreadyInTenant: membership !== null }
   }
 
@@ -247,13 +278,23 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
+    this.logger.log(`assignUser called for tenant ${tenantId}`)
     this.guardGlobalAdminAssignment('assignUser', tenantId, dto.role, callerRole, dto.email)
     const normalizedEmail = dto.email.toLowerCase().trim()
 
     try {
       const result = await this.performAssignment(tenantId, normalizedEmail, dto)
-      this.logSuccess('assignUser', tenantId, result.user.id, { role: result.membership.role })
-      await this.notifyTenantAssigned(tenantId, result.user.id, result.membership.role, callerId, callerEmail)
+      this.log.success('assignUser', tenantId ?? '', {
+        targetResourceId: result.user.id,
+        role: result.membership.role,
+      })
+      await this.notifyTenantAssigned(
+        tenantId,
+        result.user.id,
+        result.membership.role,
+        callerId,
+        callerEmail
+      )
       return mapFindOrCreateResultToUserRecord(result)
     } catch (error) {
       return this.handleUserMutationError(error, 'assignUser', tenantId, normalizedEmail)
@@ -265,6 +306,7 @@ export class TenantsService {
   /* ---------------------------------------------------------------- */
 
   async addUser(tenantId: string, dto: AddUserDto, callerRole: UserRole): Promise<UserRecord> {
+    this.logger.log(`addUser called for tenant ${tenantId}`)
     this.guardGlobalAdminAssignment('addUser', tenantId, dto.role, callerRole, dto.email)
     const passwordHash = await bcrypt.hash(dto.password, AUTH_BCRYPT_SALT_ROUNDS)
 
@@ -289,7 +331,10 @@ export class TenantsService {
         existingUser ? undefined : { name: dto.name, passwordHash }
       )
 
-      this.logSuccess('addUser', tenantId, result.user.id, { role: result.membership.role })
+      this.log.success('addUser', tenantId ?? '', {
+        targetResourceId: result.user.id,
+        role: result.membership.role,
+      })
       return mapFindOrCreateResultToUserRecord(result)
     } catch (error) {
       return this.handleUserMutationError(error, 'addUser', tenantId, dto.email)
@@ -308,6 +353,7 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
+    this.logger.log(`updateUser called for user ${userId} in tenant ${tenantId}`)
     this.guardSelfRoleChange('updateUser', tenantId, callerId, userId, dto.role)
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
 
@@ -320,9 +366,20 @@ export class TenantsService {
     await this.applyUserUpdates(userId, tenantId, dto)
 
     const updated = await this.findMembershipOrThrow(userId, tenantId, 'updateUser')
-    this.logSuccess('updateUser', tenantId, userId, { updatedFields: Object.keys(dto) }, callerId)
+    this.log.success('updateUser', tenantId ?? '', {
+      targetResourceId: userId,
+      updatedFields: Object.keys(dto),
+      actorUserId: callerId,
+    })
 
-    await this.notifyRoleChangeIfNeeded(tenantId, userId, previousRole, dto.role, callerId, callerEmail)
+    await this.notifyRoleChangeIfNeeded(
+      tenantId,
+      userId,
+      previousRole,
+      dto.role,
+      callerId,
+      callerEmail
+    )
     return mapMembershipToUserRecord(updated)
   }
 
@@ -336,10 +393,17 @@ export class TenantsService {
   ): Promise<void> {
     if (newRole === undefined || newRole === previousRole) return
     await this.notificationsService.notifyRoleChanged(
-      tenantId, userId, previousRole, newRole, callerId, callerEmail
+      tenantId,
+      userId,
+      previousRole,
+      newRole,
+      callerId,
+      callerEmail
     )
     this.notificationsService.emitPermissionsUpdated(
-      tenantId, userId, PermissionUpdateReason.ROLE_UPDATED
+      tenantId,
+      userId,
+      PermissionUpdateReason.ROLE_UPDATED
     )
   }
 
@@ -354,6 +418,7 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<{ deleted: boolean }> {
+    this.logger.log(`removeUser called for user ${userId} in tenant ${tenantId}`)
     this.guardSelfAction(
       'removeUser',
       'Cannot delete your own account',
@@ -367,7 +432,10 @@ export class TenantsService {
     this.guardGlobalAdminModification('removeUser', tenantId, userId, membership.role, callerRole)
 
     await this.tenantsRepository.updateMembershipStatus(userId, tenantId, MembershipStatus.INACTIVE)
-    this.logSuccess('removeUser', tenantId, userId, undefined, callerId)
+    this.log.success('removeUser', tenantId ?? '', {
+      targetResourceId: userId,
+      actorUserId: callerId,
+    })
     await this.notificationsService.notifyUserRemoved(tenantId, userId, callerId, callerEmail)
     this.notificationsService.emitPermissionsUpdated(
       tenantId,
@@ -388,10 +456,14 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
+    this.logger.log(`restoreUser called for user ${userId} in tenant ${tenantId}`)
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'restoreUser')
 
     if (isNotInactive(membership.status)) {
-      this.logWarn('restoreUser', tenantId, { userId, currentStatus: membership.status })
+      this.log.warn('restoreUser', tenantId ?? '', 'Tenant restoreUser failed', {
+        userId,
+        currentStatus: membership.status,
+      })
       throw new BusinessException(400, 'User is not deleted', 'errors.tenants.userNotDeleted')
     }
     this.guardGlobalAdminModification('restoreUser', tenantId, userId, membership.role, callerRole)
@@ -401,7 +473,10 @@ export class TenantsService {
       tenantId,
       MembershipStatus.ACTIVE
     )
-    this.logSuccess('restoreUser', tenantId, userId, undefined, callerId)
+    this.log.success('restoreUser', tenantId ?? '', {
+      targetResourceId: userId,
+      actorUserId: callerId,
+    })
     await this.notificationsService.notifyUserRestored(tenantId, userId, callerId, callerEmail)
     this.notificationsService.emitPermissionsUpdated(
       tenantId,
@@ -422,9 +497,14 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
+    this.logger.log(`blockUser called for user ${userId} in tenant ${tenantId}`)
     this.guardSelfAction(
-      'blockUser', 'Cannot block your own account',
-      'errors.tenants.cannotBlockSelf', tenantId, callerId, userId
+      'blockUser',
+      'Cannot block your own account',
+      'errors.tenants.cannotBlockSelf',
+      tenantId,
+      callerId,
+      userId
     )
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'blockUser')
     this.guardProtectedUserAction('blockUser', tenantId, userId, membership.user)
@@ -432,22 +512,27 @@ export class TenantsService {
     this.guardNotAlreadySuspended(membership.status, tenantId, userId)
 
     const updated = await this.tenantsRepository.updateMembershipStatusWithUser(
-      userId, tenantId, MembershipStatus.SUSPENDED
+      userId,
+      tenantId,
+      MembershipStatus.SUSPENDED
     )
-    this.logSuccess('blockUser', tenantId, userId, undefined, callerId)
+    this.log.success('blockUser', tenantId ?? '', {
+      targetResourceId: userId,
+      actorUserId: callerId,
+    })
     await this.notificationsService.notifyUserBlocked(tenantId, userId, callerId, callerEmail)
     this.notificationsService.emitPermissionsUpdated(
-      tenantId, userId, PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
+      tenantId,
+      userId,
+      PermissionUpdateReason.MEMBERSHIP_STATUS_UPDATED
     )
     return mapMembershipToUserRecord(updated)
   }
 
   private guardNotAlreadySuspended(status: string, tenantId: string, userId: string): void {
     if (!isAlreadySuspended(status)) return
-    this.logWarn('blockUser', tenantId, { userId })
-    throw new BusinessException(
-      400, 'User is already blocked', 'errors.tenants.userAlreadyBlocked'
-    )
+    this.log.warn('blockUser', tenantId ?? '', 'Tenant blockUser failed', { userId })
+    throw new BusinessException(400, 'User is already blocked', 'errors.tenants.userAlreadyBlocked')
   }
 
   /* ---------------------------------------------------------------- */
@@ -461,10 +546,14 @@ export class TenantsService {
     callerId: string,
     callerEmail: string
   ): Promise<UserRecord> {
+    this.logger.log(`unblockUser called for user ${userId} in tenant ${tenantId}`)
     const membership = await this.findMembershipOrThrow(userId, tenantId, 'unblockUser')
 
     if (isNotSuspended(membership.status)) {
-      this.logWarn('unblockUser', tenantId, { userId, currentStatus: membership.status })
+      this.log.warn('unblockUser', tenantId ?? '', 'Tenant unblockUser failed', {
+        userId,
+        currentStatus: membership.status,
+      })
       throw new BusinessException(400, 'User is not blocked', 'errors.tenants.userNotBlocked')
     }
     this.guardGlobalAdminModification('unblockUser', tenantId, userId, membership.role, callerRole)
@@ -474,7 +563,10 @@ export class TenantsService {
       tenantId,
       MembershipStatus.ACTIVE
     )
-    this.logSuccess('unblockUser', tenantId, userId, undefined, callerId)
+    this.log.success('unblockUser', tenantId ?? '', {
+      targetResourceId: userId,
+      actorUserId: callerId,
+    })
     await this.notificationsService.notifyUserUnblocked(tenantId, userId, callerId, callerEmail)
     this.notificationsService.emitPermissionsUpdated(
       tenantId,
@@ -493,6 +585,7 @@ export class TenantsService {
     userId: string,
     caller: JwtPayload
   ): Promise<ImpersonationSessionResult> {
+    this.logger.log(`impersonateUser called for user ${userId} in tenant ${tenantId}`)
     this.guardNestedImpersonation(caller)
     this.guardSelfImpersonation(caller, userId, tenantId)
 
@@ -502,7 +595,12 @@ export class TenantsService {
       caller
     )
 
-    const targetPayload = this.buildImpersonationPayload(targetUser, tenant, targetMembership, caller)
+    const targetPayload = this.buildImpersonationPayload(
+      targetUser,
+      tenant,
+      targetMembership,
+      caller
+    )
     const session = await this.authService.issueSession(targetUser.id, tenantId, targetPayload)
 
     this.logImpersonation(tenantId, caller, targetUser, targetMembership.role)
@@ -520,7 +618,7 @@ export class TenantsService {
   ): Promise<TenantMembership & { user: User }> {
     const membership = await this.tenantsRepository.findMembershipWithUser(userId, tenantId)
     if (!membership) {
-      this.logWarn(action, tenantId, { userId })
+      this.log.warn(action, tenantId ?? '', `Tenant ${action} failed`, { userId })
       throw new BusinessException(
         404,
         'User not found in this tenant',
@@ -535,7 +633,7 @@ export class TenantsService {
   ): Promise<{ id: string; slug: string; name: string }> {
     const tenant = await this.tenantsRepository.findTenantById(tenantId)
     if (!tenant) {
-      this.logWarn('impersonateUser', tenantId)
+      this.log.warn('impersonateUser', tenantId ?? '', 'Tenant impersonateUser failed')
       throw new BusinessException(404, 'Tenant not found', 'errors.tenants.notFound')
     }
     return tenant
@@ -547,7 +645,7 @@ export class TenantsService {
   ): Promise<{ id: string; email: string; name: string; isProtected: boolean }> {
     const user = await this.tenantsRepository.findUserById(userId)
     if (!user) {
-      this.logWarn('impersonateUser', tenantId, { userId })
+      this.log.warn('impersonateUser', tenantId ?? '', 'Tenant impersonateUser failed', { userId })
       throw new BusinessException(404, 'Target user not found', 'errors.impersonation.userNotFound')
     }
     return user
@@ -716,7 +814,7 @@ export class TenantsService {
     email: string
   ): void {
     if (membership) {
-      this.logWarn(action, tenantId, { email })
+      this.log.warn(action, tenantId ?? '', `Tenant ${action} failed`, { email })
       throw new BusinessException(
         409,
         'User is already a member of this tenant',
@@ -916,14 +1014,14 @@ export class TenantsService {
   ): never {
     if (error instanceof BusinessException) throw error
     if (isUniqueConstraintError(error)) {
-      this.logWarn(action, tenantId, { email })
+      this.log.warn(action, tenantId ?? '', `Tenant ${action} failed`, { email })
       throw new BusinessException(
         409,
         'Email already exists in this tenant',
         'errors.tenants.emailExists'
       )
     }
-    this.logError(action, error, { tenantId, email })
+    this.log.error(action, '', error, { tenantId, email })
     throw error
   }
 
@@ -949,56 +1047,8 @@ export class TenantsService {
   /* PRIVATE: Logging                                                  */
   /* ---------------------------------------------------------------- */
 
-  private logSuccess(
-    action: string,
-    tenantId?: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>,
-    actorUserId?: string
-  ): void {
-    this.appLogger.info(`Tenant ${action}`, {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'Tenant',
-      targetResourceId: resourceId,
-      actorUserId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logDebug(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.debug(`Tenant ${action}`, {
-      feature: AppLogFeature.TENANT_MEMBERS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.warn(`Tenant ${action} failed`, {
-      feature: AppLogFeature.TENANTS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: action,
-      metadata,
-    })
-  }
-
   private logDenied(action: string, tenantId?: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.warn(`Tenant ${action} denied`, {
+    this.appLogger.warn(`TenantsService => ${action} denied`, {
       feature: AppLogFeature.TENANT_MEMBERS,
       action,
       outcome: AppLogOutcome.DENIED,
@@ -1007,18 +1057,6 @@ export class TenantsService {
       className: 'TenantsService',
       functionName: action,
       metadata,
-    })
-  }
-
-  private logError(action: string, error: unknown, metadata?: Record<string, unknown>): void {
-    this.appLogger.error(`Tenant ${action} error`, {
-      feature: AppLogFeature.TENANTS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'TenantsService',
-      functionName: action,
-      metadata: { ...metadata, error: error instanceof Error ? error.message : 'Unknown error' },
     })
   }
 

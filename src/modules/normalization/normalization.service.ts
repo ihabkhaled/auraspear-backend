@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { NormalizationExecutor } from './normalization.executor'
 import { NormalizationRepository } from './normalization.repository'
 import {
@@ -9,16 +9,11 @@ import {
   buildNormalizationStats,
   extractPipelineSteps,
 } from './normalization.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  NormalizationPipelineStatus,
-  SortOrder,
-} from '../../common/enums'
+import { AppLogFeature, NormalizationPipelineStatus, SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { CreatePipelineDto } from './dto/create-pipeline.dto'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
 import type {
@@ -32,13 +27,19 @@ import type { Prisma } from '@prisma/client'
 
 @Injectable()
 export class NormalizationService {
-  private readonly logger = new Logger(NormalizationService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: NormalizationRepository,
     private readonly appLogger: AppLoggerService,
     private readonly executor: NormalizationExecutor
-  ) {}
+  ) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.NORMALIZATION,
+      'NormalizationService'
+    )
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
@@ -54,24 +55,34 @@ export class NormalizationService {
     status?: string,
     query?: string
   ): Promise<PaginatedPipelines> {
-    const where = buildPipelineListWhere(tenantId, sourceType, status, query)
-    const orderBy = buildPipelineOrderBy(sortBy, sortOrder)
+    this.log.entry('listPipelines', tenantId, { page, limit, sourceType, status, query })
 
-    const [pipelines, total] = await Promise.all([
-      this.repository.findManyPipelines({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy,
-      }),
-      this.repository.countPipelines(where),
-    ])
+    try {
+      const where = buildPipelineListWhere(tenantId, sourceType, status, query)
+      const orderBy = buildPipelineOrderBy(sortBy, sortOrder)
 
-    const data: NormalizationPipelineRecord[] = pipelines.map(buildPipelineRecord)
+      const [pipelines, total] = await Promise.all([
+        this.repository.findManyPipelines({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy,
+        }),
+        this.repository.countPipelines(where),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data: NormalizationPipelineRecord[] = pipelines.map(buildPipelineRecord)
+      this.log.success('listPipelines', tenantId, {
+        page,
+        limit,
+        total,
+        returnedCount: data.length,
+      })
+
+      return { data, pagination: buildPaginationMeta(page, limit, total) }
+    } catch (error: unknown) {
+      this.log.error('listPipelines', tenantId, error)
+      throw error
     }
   }
 
@@ -80,23 +91,20 @@ export class NormalizationService {
   /* ---------------------------------------------------------------- */
 
   async getPipelineById(id: string, tenantId: string): Promise<NormalizationPipelineRecord> {
+    this.log.debug('getPipelineById', tenantId, 'starting', { pipelineId: id })
+
     const pipeline = await this.repository.findFirstPipelineByIdAndTenant(id, tenantId)
 
     if (!pipeline) {
-      this.appLogger.warn('Normalization pipeline not found', {
-        feature: AppLogFeature.NORMALIZATION,
-        action: 'getPipelineById',
-        className: 'NormalizationService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { pipelineId: id, tenantId },
-      })
+      this.log.warn('getPipelineById', tenantId, 'not found', { pipelineId: id })
       throw new BusinessException(
         404,
         `Normalization pipeline ${id} not found`,
         'errors.normalization.notFound'
       )
     }
+
+    this.log.success('getPipelineById', tenantId, { pipelineId: id, name: pipeline.name })
 
     return buildPipelineRecord(pipeline)
   }
@@ -109,40 +117,36 @@ export class NormalizationService {
     dto: CreatePipelineDto,
     user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
-    await this.ensureNoDuplicatePipelineName(user.tenantId, dto.name)
-
-    const pipeline = await this.repository.createPipeline({
-      tenantId: user.tenantId,
+    this.log.entry('createPipeline', user.tenantId, {
       name: dto.name,
-      description: dto.description ?? null,
       sourceType: dto.sourceType,
-      status: NormalizationPipelineStatus.INACTIVE,
-      parserConfig: dto.parserConfig as Prisma.InputJsonValue,
-      fieldMappings: dto.fieldMappings as Prisma.InputJsonValue,
     })
 
-    this.appLogger.info('Normalization pipeline created', {
-      feature: AppLogFeature.NORMALIZATION,
-      action: 'createPipeline',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'NormalizationPipeline',
-      targetResourceId: pipeline.id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NormalizationService',
-      functionName: 'createPipeline',
-      metadata: { name: pipeline.name, sourceType: pipeline.sourceType },
-    })
+    try {
+      await this.ensureNoDuplicatePipelineName(user.tenantId, dto.name)
 
-    return buildPipelineRecord(pipeline)
+      const pipeline = await this.repository.createPipeline({
+        tenantId: user.tenantId,
+        name: dto.name,
+        description: dto.description ?? null,
+        sourceType: dto.sourceType,
+        status: NormalizationPipelineStatus.INACTIVE,
+        parserConfig: dto.parserConfig as Prisma.InputJsonValue,
+        fieldMappings: dto.fieldMappings as Prisma.InputJsonValue,
+      })
+
+      this.log.success('createPipeline', user.tenantId, {
+        name: pipeline.name,
+        sourceType: pipeline.sourceType,
+      })
+      return buildPipelineRecord(pipeline)
+    } catch (error: unknown) {
+      this.log.error('createPipeline', user.tenantId, error)
+      throw error
+    }
   }
 
-  private async ensureNoDuplicatePipelineName(
-    tenantId: string,
-    name: string
-  ): Promise<void> {
+  private async ensureNoDuplicatePipelineName(tenantId: string, name: string): Promise<void> {
     const duplicates = await this.repository.findManyPipelines({
       where: { tenantId, name },
       skip: 0,
@@ -168,11 +172,21 @@ export class NormalizationService {
     dto: UpdatePipelineDto,
     user: JwtPayload
   ): Promise<NormalizationPipelineRecord> {
-    await this.getPipelineById(id, user.tenantId)
-    await this.applyPipelineUpdate(id, user.tenantId, buildPipelineUpdateData(dto))
+    this.log.entry('updatePipeline', user.tenantId, {
+      updatedFields: Object.keys(dto),
+      pipelineId: id,
+    })
 
-    this.logPipelineAction('updatePipeline', 'Normalization pipeline updated', id, user)
-    return this.getPipelineById(id, user.tenantId)
+    try {
+      await this.getPipelineById(id, user.tenantId)
+      await this.applyPipelineUpdate(id, user.tenantId, buildPipelineUpdateData(dto))
+
+      this.log.success('updatePipeline', user.tenantId, { pipelineId: id })
+      return this.getPipelineById(id, user.tenantId)
+    } catch (error: unknown) {
+      this.log.error('updatePipeline', user.tenantId, error, { pipelineId: id })
+      throw error
+    }
   }
 
   private async applyPipelineUpdate(
@@ -196,25 +210,20 @@ export class NormalizationService {
   /* ---------------------------------------------------------------- */
 
   async deletePipeline(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getPipelineById(id, tenantId)
+    this.log.entry('deletePipeline', tenantId, { pipelineId: id, actorEmail: actor })
 
-    await this.repository.deleteManyPipelinesByIdAndTenant(id, tenantId)
+    try {
+      const existing = await this.getPipelineById(id, tenantId)
 
-    this.appLogger.info(`Normalization pipeline ${existing.name} deleted`, {
-      feature: AppLogFeature.NORMALIZATION,
-      action: 'deletePipeline',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: actor,
-      targetResource: 'NormalizationPipeline',
-      targetResourceId: id,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NormalizationService',
-      functionName: 'deletePipeline',
-      metadata: { name: existing.name },
-    })
+      await this.repository.deleteManyPipelinesByIdAndTenant(id, tenantId)
 
-    return { deleted: true }
+      this.log.success('deletePipeline', tenantId, { pipelineId: id, name: existing.name })
+
+      return { deleted: true }
+    } catch (error: unknown) {
+      this.log.error('deletePipeline', tenantId, error, { pipelineId: id })
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -222,15 +231,31 @@ export class NormalizationService {
   /* ---------------------------------------------------------------- */
 
   async getNormalizationStats(tenantId: string): Promise<NormalizationStats> {
-    const [total, active, inactive, errorPipelines, aggregates] = await Promise.all([
-      this.repository.countPipelines({ tenantId }),
-      this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.ACTIVE),
-      this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.INACTIVE),
-      this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.ERROR),
-      this.repository.aggregatePipelinesSums(tenantId),
-    ])
+    this.log.entry('getNormalizationStats', tenantId)
 
-    return buildNormalizationStats(total, active, inactive, errorPipelines, aggregates)
+    try {
+      const [total, active, inactive, errorPipelines, aggregates] = await Promise.all([
+        this.repository.countPipelines({ tenantId }),
+        this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.ACTIVE),
+        this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.INACTIVE),
+        this.repository.countPipelinesByStatus(tenantId, NormalizationPipelineStatus.ERROR),
+        this.repository.aggregatePipelinesSums(tenantId),
+      ])
+
+      const stats = buildNormalizationStats(total, active, inactive, errorPipelines, aggregates)
+
+      this.log.success('getNormalizationStats', tenantId, {
+        total,
+        active,
+        inactive,
+        errorPipelines,
+      })
+
+      return stats
+    } catch (error: unknown) {
+      this.log.error('getNormalizationStats', tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -243,67 +268,35 @@ export class NormalizationService {
     events: Record<string, unknown>[],
     actorEmail: string
   ): Promise<NormalizationOutput> {
-    const pipeline = await this.getPipelineById(id, tenantId)
-    const steps = extractPipelineSteps(pipeline.parserConfig, pipeline.fieldMappings)
-
-    const output = await this.executor.executePipeline(
-      { id: pipeline.id, name: pipeline.name, steps },
-      events
-    )
-
-    this.logDryRunResult(id, tenantId, actorEmail, events.length, output)
-    return output
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                  */
-  /* ---------------------------------------------------------------- */
-
-  private logPipelineAction(
-    action: string,
-    message: string,
-    pipelineId: string,
-    user: JwtPayload
-  ): void {
-    this.appLogger.info(message, {
-      feature: AppLogFeature.NORMALIZATION,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: 'NormalizationPipeline',
-      targetResourceId: pipelineId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NormalizationService',
-      functionName: action,
-    })
-  }
-
-  private logDryRunResult(
-    pipelineId: string,
-    tenantId: string,
-    actorEmail: string,
-    inputCount: number,
-    output: NormalizationOutput
-  ): void {
-    this.appLogger.info('Normalization pipeline dry-run executed', {
-      feature: AppLogFeature.NORMALIZATION,
-      action: 'dryRunPipeline',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
+    this.log.entry('dryRunPipeline', tenantId, {
+      pipelineId: id,
+      eventCount: events.length,
       actorEmail,
-      targetResource: 'NormalizationPipeline',
-      targetResourceId: pipelineId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'NormalizationService',
-      functionName: 'dryRunPipeline',
-      metadata: {
-        inputCount,
+    })
+
+    try {
+      const pipeline = await this.getPipelineById(id, tenantId)
+      const steps = extractPipelineSteps(pipeline.parserConfig, pipeline.fieldMappings)
+
+      const output = await this.executor.executePipeline(
+        { id: pipeline.id, name: pipeline.name, steps },
+        events
+      )
+
+      this.log.success('dryRunPipeline', tenantId, {
+        pipelineId: id,
+        inputCount: events.length,
         outputCount: output.result.outputCount,
         droppedCount: output.result.droppedCount,
         durationMs: output.result.durationMs,
-      },
-    })
+      })
+      return output
+    } catch (error: unknown) {
+      this.log.error('dryRunPipeline', tenantId, error, {
+        pipelineId: id,
+        eventCount: events.length,
+      })
+      throw error
+    }
   }
 }

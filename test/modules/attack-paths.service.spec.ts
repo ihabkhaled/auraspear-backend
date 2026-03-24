@@ -288,13 +288,12 @@ describe('AttackPathsService', () => {
       }
 
       expect(mockAppLogger.warn).toHaveBeenCalledWith(
-        'Attack path not found',
+        'AttackPathsService => Attack path not found',
         expect.objectContaining({
           action: 'getPathById',
           className: 'AttackPathsService',
           metadata: expect.objectContaining({
             attackPathId: 'nonexistent',
-            tenantId: TENANT_ID,
           }),
         })
       )
@@ -411,10 +410,11 @@ describe('AttackPathsService', () => {
       await service.createPath(createDto, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'AttackPath: createPath',
+        'AttackPathsService => createPath completed',
         expect.objectContaining({
           action: 'createPath',
           tenantId: TENANT_ID,
+          outcome: 'success',
           metadata: expect.objectContaining({ pathNumber: 'AP-0003' }),
         })
       )
@@ -522,10 +522,11 @@ describe('AttackPathsService', () => {
       await service.updatePath(PATH_ID, { title: 'Updated' }, buildMockUser() as never)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'AttackPath: updatePath',
+        'AttackPathsService => updatePath completed',
         expect.objectContaining({
           action: 'updatePath',
           tenantId: TENANT_ID,
+          outcome: 'success',
           metadata: expect.objectContaining({ attackPathId: PATH_ID }),
         })
       )
@@ -567,10 +568,11 @@ describe('AttackPathsService', () => {
       await service.deletePath(PATH_ID, TENANT_ID, USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        'AttackPath: deletePath',
+        'AttackPathsService => deletePath completed',
         expect.objectContaining({
           action: 'deletePath',
           tenantId: TENANT_ID,
+          outcome: 'success',
           metadata: expect.objectContaining({
             pathNumber: 'AP-0001',
             attackPathId: PATH_ID,

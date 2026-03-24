@@ -22,8 +22,6 @@ import {
 } from './cases.utilities'
 import {
   AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
   CaseStatus,
   CaseTaskStatus,
   CaseTimelineType,
@@ -33,6 +31,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { hasRoleAtLeast } from '../../common/utils/role.utility'
 import { AlertsRepository } from '../alerts/alerts.repository'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
@@ -70,6 +69,7 @@ import type {
 @Injectable()
 export class CasesService {
   private readonly logger = new Logger(CasesService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly casesRepository: CasesRepository,
@@ -77,7 +77,9 @@ export class CasesService {
     private readonly notificationsService: NotificationsService,
     private readonly entityExtractionService: EntityExtractionService,
     private readonly alertsRepository: AlertsRepository
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.CASES, 'CasesService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
@@ -95,6 +97,16 @@ export class CasesService {
     cycleId?: string,
     ownerUserId?: string
   ): Promise<PaginatedCases> {
+    this.log.entry('listCases', tenantId, {
+      page,
+      limit,
+      status,
+      severity,
+      query,
+      cycleId,
+      ownerUserId,
+    })
+
     const where = buildCaseWhereClause(tenantId, { status, severity, query, cycleId, ownerUserId })
 
     const [cases, total] = await this.casesRepository.findCasesAndCount({
@@ -110,6 +122,9 @@ export class CasesService {
     ])
 
     const data = cases.map(c => this.enrichCaseListItem(c, ownersMap, creatorsMap))
+
+    this.log.success('listCases', tenantId, { total, returnedCount: data.length })
+
     return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
@@ -118,6 +133,8 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   async getCaseStats(tenantId: string): Promise<CaseStats> {
+    this.log.entry('getCaseStats', tenantId)
+
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
@@ -127,6 +144,8 @@ export class CasesService {
       this.casesRepository.countClosedSince(tenantId, thirtyDaysAgo),
       this.casesRepository.getAvgResolutionHours(tenantId),
     ])
+
+    this.log.success('getCaseStats', tenantId)
 
     return {
       ...statusCounts,
@@ -175,9 +194,12 @@ export class CasesService {
     }
 
     const result = await this.executeCreateCase(dto, linkedAlerts, user)
-    this.logSuccess('createCase', user, 'Case', result.id, {
+    this.log.success('createCase', user.tenantId, {
+      caseId: result.id,
       caseNumber: result.caseNumber,
       severity: result.severity,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
 
     // Best-effort entity extraction from linked alerts
@@ -200,7 +222,7 @@ export class CasesService {
   async getCaseById(id: string, tenantId: string): Promise<CaseRecord> {
     const caseRecord = await this.casesRepository.findCaseByIdAndTenant(id, tenantId)
     if (!caseRecord) {
-      this.logWarn('getCaseById', { caseId: id, tenantId })
+      this.log.warn('getCaseById', tenantId, 'Case not found', { caseId: id })
       throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
     return this.enrichCaseRecord(caseRecord)
@@ -222,9 +244,12 @@ export class CasesService {
 
     const result = await this.performCaseUpdate(id, dto, existing, isReopening, user)
 
-    this.logSuccess('updateCase', user, 'Case', id, {
+    this.log.success('updateCase', user.tenantId, {
+      caseId: id,
       caseNumber: existing.caseNumber,
       changedFields: Object.keys(dto).join(', '),
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
 
     await this.sendUpdateNotifications(dto, existing, user, id)
@@ -240,7 +265,10 @@ export class CasesService {
   ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>>> {
     const actorLabel = await this.resolveActorLabel(user)
     const timelineDescription = await this.buildUpdateTimelineDescription(
-      dto, existing, isReopening, actorLabel
+      dto,
+      existing,
+      isReopening,
+      actorLabel
     )
     const timelineType = resolveTimelineType(
       dto.status !== undefined && dto.status !== existing.status
@@ -267,10 +295,13 @@ export class CasesService {
 
     const result = await this.executeAssignCase(id, ownerUserId, existing, user)
 
-    this.logSuccess('assignCase', user, 'Case', id, {
+    this.log.success('assignCase', user.tenantId, {
+      caseId: id,
       caseNumber: existing.caseNumber,
       previousOwner: existing.ownerUserId,
       newOwner: ownerUserId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
 
     await this.notifyAssignmentChange(ownerUserId, existing, user, id)
@@ -282,13 +313,21 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   async deleteCase(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
+    this.log.entry('deleteCase', tenantId, { caseId: id, actorEmail: actor })
+
     const existing = await this.getCaseById(id, tenantId)
     await this.casesRepository.softDeleteCaseTransaction(id, tenantId, CaseStatus.CLOSED, {
       type: CaseTimelineType.DELETED,
       actor,
       description: JSON.stringify({ key: 'caseDeleted', params: { caseRef: existing.caseNumber } }),
     })
-    this.logger.log(`Case ${existing.caseNumber} soft-deleted by ${actor}`)
+
+    this.log.success('deleteCase', tenantId, {
+      caseId: id,
+      caseNumber: existing.caseNumber,
+      actorEmail: actor,
+    })
+
     return { deleted: true }
   }
 
@@ -297,6 +336,12 @@ export class CasesService {
   /* ---------------------------------------------------------------- */
 
   async linkAlert(caseId: string, dto: LinkAlertDto, user: JwtPayload): Promise<CaseRecord> {
+    this.log.entry('linkAlert', user.tenantId, {
+      caseId,
+      alertId: dto.alertId,
+      actorEmail: user.email,
+    })
+
     const existing = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
       existing.status,
@@ -309,7 +354,15 @@ export class CasesService {
     this.ensureAlertNotDuplicate(existing.linkedAlerts, dto.alertId, user, caseId)
 
     const result = await this.executeLinkAlert(caseId, user, existing.linkedAlerts, dto)
-    this.logger.log(`Alert ${dto.alertId} linked to case ${existing.caseNumber}`)
+
+    this.log.success('linkAlert', user.tenantId, {
+      caseId,
+      caseNumber: existing.caseNumber,
+      alertId: dto.alertId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
+
     return this.enrichCaseRecord(result)
   }
 
@@ -323,16 +376,23 @@ export class CasesService {
     page = 1,
     limit = 50
   ): Promise<PaginatedCaseNotes> {
+    this.log.entry('getCaseNotes', tenantId, { caseId, page, limit })
+
     await this.getCaseById(caseId, tenantId)
     const [notes, total] = await this.casesRepository.findCaseNotesAndCount(
       caseId,
       (page - 1) * limit,
       limit
     )
+
+    this.log.success('getCaseNotes', tenantId, { caseId, total, returnedCount: notes.length })
+
     return { data: notes, pagination: buildPaginationMeta(page, limit, total) }
   }
 
   async addCaseNote(caseId: string, dto: CreateNoteDto, user: JwtPayload): Promise<CaseNote> {
+    this.log.entry('addCaseNote', user.tenantId, { caseId, actorEmail: user.email })
+
     const existing = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
       existing.status,
@@ -350,7 +410,15 @@ export class CasesService {
         params: { content: truncateBody(dto.body) },
       }),
     })
-    this.logger.log(`Note added to case ${existing.caseNumber} by ${user.email}`)
+
+    this.log.success('addCaseNote', user.tenantId, {
+      noteId: note.id,
+      caseId,
+      caseNumber: existing.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
+
     return note
   }
 
@@ -364,6 +432,8 @@ export class CasesService {
     page = 1,
     limit = 20
   ): Promise<PaginatedCaseComments> {
+    this.log.entry('listCaseComments', tenantId, { caseId, page, limit })
+
     await this.getCaseById(caseId, tenantId)
     const [comments, total] = await this.casesRepository.findCommentsAndCount(
       caseId,
@@ -372,6 +442,9 @@ export class CasesService {
     )
     const userMap = await this.buildCommentUserMap(comments)
     const data = comments.map(c => mapCommentToResponseShape(c, userMap))
+
+    this.log.success('listCaseComments', tenantId, { caseId, total, returnedCount: data.length })
+
     return { data, pagination: buildPaginationMeta(page, limit, total) }
   }
 
@@ -382,7 +455,11 @@ export class CasesService {
   ): Promise<CaseCommentResponse> {
     const existing = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      existing.status, 'addCaseComment', user, caseId, 'Cannot add comments to a closed case'
+      existing.status,
+      'addCaseComment',
+      user,
+      caseId,
+      'Cannot add comments to a closed case'
     )
 
     const uniqueMentionIds = [...new Set(dto.mentionedUserIds)]
@@ -391,10 +468,22 @@ export class CasesService {
 
     const comment = await this.executeAddComment(caseId, user, dto.body, uniqueMentionIds)
 
-    this.logSuccess('addCaseComment', user, 'CaseComment', comment.id, {
-      caseId, caseNumber: existing.caseNumber, mentionCount: uniqueMentionIds.length,
+    this.log.success('addCaseComment', user.tenantId, {
+      commentId: comment.id,
+      caseId,
+      caseNumber: existing.caseNumber,
+      mentionCount: uniqueMentionIds.length,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
-    await this.sendCommentNotifications(user, caseId, existing, comment.id, uniqueMentionIds, dto.body)
+    await this.sendCommentNotifications(
+      user,
+      caseId,
+      existing,
+      comment.id,
+      uniqueMentionIds,
+      dto.body
+    )
     return this.mapCommentToResponse(comment, user.sub)
   }
 
@@ -422,7 +511,12 @@ export class CasesService {
         description: JSON.stringify({ key: 'commentEdited', params: {} }),
       }
     )
-    this.logSuccess('updateCaseComment', user, 'CaseComment', commentId, { caseId })
+    this.log.success('updateCaseComment', user.tenantId, {
+      commentId,
+      caseId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return this.mapCommentToResponse(comment, user.sub)
   }
 
@@ -440,9 +534,12 @@ export class CasesService {
       actor: user.email,
       description: JSON.stringify({ key: 'commentDeleted', params: {} }),
     })
-    this.logSuccess('deleteCaseComment', user, 'CaseComment', commentId, {
+    this.log.success('deleteCaseComment', user.tenantId, {
+      commentId,
       caseId,
       caseNumber: caseRecord.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
     return { deleted: true }
   }
@@ -452,13 +549,23 @@ export class CasesService {
     query: string,
     limit = 10
   ): Promise<MentionableUser[]> {
+    this.log.entry('searchMentionableUsers', tenantId, { query, limit })
+
     const memberships = await this.casesRepository.searchMentionableMembers(
       tenantId,
       query,
       MembershipStatus.ACTIVE,
       limit
     )
-    return memberships.map(m => ({ id: m.user.id, name: m.user.name, email: m.user.email }))
+    const results = memberships.map(m => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+    }))
+
+    this.log.success('searchMentionableUsers', tenantId, { resultCount: results.length })
+
+    return results
   }
 
   /* ---------------------------------------------------------------- */
@@ -468,13 +575,21 @@ export class CasesService {
   async createTask(caseId: string, dto: CreateTaskDto, user: JwtPayload): Promise<CaseTask> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      caseRecord.status, 'createTask', user, caseId, 'Cannot add tasks to a closed case'
+      caseRecord.status,
+      'createTask',
+      user,
+      caseId,
+      'Cannot add tasks to a closed case'
     )
 
     const task = await this.executeCreateTask(caseId, dto, user)
 
-    this.logSuccess('createTask', user, 'CaseTask', task.id, {
-      caseId, caseNumber: caseRecord.caseNumber,
+    this.log.success('createTask', user.tenantId, {
+      taskId: task.id,
+      caseId,
+      caseNumber: caseRecord.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
     await this.notifyTaskAdded(user, caseId, caseRecord, dto.title)
     return task
@@ -486,6 +601,8 @@ export class CasesService {
     dto: UpdateTaskDto,
     user: JwtPayload
   ): Promise<CaseTask> {
+    this.log.entry('updateTask', user.tenantId, { caseId, taskId, actorEmail: user.email })
+
     await this.getCaseById(caseId, user.tenantId)
     const existing = await this.findTaskOrThrow(taskId, caseId)
     await this.casesRepository.updateTask(taskId, caseId, buildTaskUpdateData(dto))
@@ -500,6 +617,14 @@ export class CasesService {
         description: buildTaskStatusTimelineDescription(existing.title, dto.status, actorLabel),
       })
     }
+
+    this.log.success('updateTask', user.tenantId, {
+      taskId,
+      caseId,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
+
     return task
   }
 
@@ -522,9 +647,12 @@ export class CasesService {
         params: { taskTitle: existing.title, actorLabel },
       }),
     })
-    this.logSuccess('deleteTask', user, 'CaseTask', taskId, {
+    this.log.success('deleteTask', user.tenantId, {
+      taskId,
       caseId,
       caseNumber: caseRecord.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
     return { deleted: true }
   }
@@ -540,15 +668,23 @@ export class CasesService {
   ): Promise<CaseArtifact> {
     const caseRecord = await this.getCaseById(caseId, user.tenantId)
     this.ensureNotClosed(
-      caseRecord.status, 'createArtifact', user, caseId, 'Cannot add artifacts to a closed case'
+      caseRecord.status,
+      'createArtifact',
+      user,
+      caseId,
+      'Cannot add artifacts to a closed case'
     )
     await this.ensureNoDuplicateArtifact(caseId, dto)
 
     const artifact = await this.executeCreateArtifact(caseId, dto, user)
     this.triggerArtifactEntityExtraction(user.tenantId, dto)
 
-    this.logSuccess('createArtifact', user, 'CaseArtifact', artifact.id, {
-      caseId, caseNumber: caseRecord.caseNumber,
+    this.log.success('createArtifact', user.tenantId, {
+      artifactId: artifact.id,
+      caseId,
+      caseNumber: caseRecord.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
     await this.notifyArtifactAdded(user, caseId, caseRecord, dto)
     return artifact
@@ -573,9 +709,12 @@ export class CasesService {
         params: { artifactValue: `${existing.type}:${existing.value}`, actorLabel },
       }),
     })
-    this.logSuccess('deleteArtifact', user, 'CaseArtifact', artifactId, {
+    this.log.success('deleteArtifact', user.tenantId, {
+      artifactId,
       caseId,
       caseNumber: caseRecord.caseNumber,
+      actorEmail: user.email,
+      actorUserId: user.sub,
     })
     return { deleted: true }
   }
@@ -670,9 +809,8 @@ export class CasesService {
       tenantId
     )
     if (membership?.status !== MembershipStatus.ACTIVE) {
-      this.logWarn('validateOwnerInTenant', {
+      this.log.warn('validateOwnerInTenant', tenantId, 'Owner is not an active member', {
         ownerUserId,
-        tenantId,
         membershipStatus: membership?.status ?? null,
       })
       throw new BusinessException(
@@ -689,7 +827,11 @@ export class CasesService {
       linkedAlerts
     )
     if (validAlerts !== linkedAlerts.length) {
-      this.logWarn('createCase', { linkedAlertIds: linkedAlerts, validCount: validAlerts }, user)
+      this.log.warn('createCase', user.tenantId, 'Invalid linked alerts', {
+        linkedAlertIds: linkedAlerts,
+        validCount: validAlerts,
+        actorEmail: user.email,
+      })
       throw new BusinessException(
         400,
         'One or more linked alerts do not belong to this tenant',
@@ -735,7 +877,11 @@ export class CasesService {
   ): Promise<void> {
     const alertExists = await this.casesRepository.countAlertByTenantAndId(user.tenantId, alertId)
     if (alertExists === 0) {
-      this.logWarn('linkAlert', { caseId, alertId }, user)
+      this.log.warn('linkAlert', user.tenantId, 'Alert does not belong to tenant', {
+        caseId,
+        alertId,
+        actorEmail: user.email,
+      })
       throw new BusinessException(
         400,
         'The linked alert does not belong to this tenant',
@@ -782,7 +928,11 @@ export class CasesService {
     message: string
   ): void {
     if (status !== CaseStatus.CLOSED) return
-    this.logWarn(action, { caseId, status }, user)
+    this.log.warn(action, user.tenantId, 'Case is closed', {
+      caseId,
+      status,
+      actorEmail: user.email,
+    })
     throw new BusinessException(400, message, 'errors.cases.alreadyClosed')
   }
 
@@ -795,7 +945,10 @@ export class CasesService {
   ): void {
     const isAssigneeChange = dto.ownerUserId !== undefined
     if (!shouldBlockClosedCaseUpdate(existing.status, isReopening, isAssigneeChange)) return
-    this.logDenied('updateCase', user, id)
+    this.log.warn('updateCase', user.tenantId, 'Update denied: case is closed', {
+      caseId: id,
+      actorEmail: user.email,
+    })
     throw new BusinessException(400, 'Cannot update a closed case', 'errors.cases.alreadyClosed')
   }
 
@@ -809,7 +962,10 @@ export class CasesService {
     if (!isStatusChange) return
     const isAdmin = hasRoleAtLeast(user.role, UserRole.TENANT_ADMIN)
     if (isAdmin || user.sub === existing.ownerUserId) return
-    this.logDenied('updateCase', user, id)
+    this.log.warn('updateCase', user.tenantId, 'Status change denied: not owner or admin', {
+      caseId: id,
+      actorEmail: user.email,
+    })
     throw new BusinessException(
       403,
       'Only case owner or admin can change case status',
@@ -824,7 +980,11 @@ export class CasesService {
     caseId: string
   ): void {
     if (!linkedAlerts.includes(alertId)) return
-    this.logWarn('linkAlert', { caseId, alertId }, user)
+    this.log.warn('linkAlert', user.tenantId, 'Duplicate alert link attempt', {
+      caseId,
+      alertId,
+      actorEmail: user.email,
+    })
     throw new BusinessException(
       409,
       `Alert ${alertId} is already linked to this case`,
@@ -963,7 +1123,7 @@ export class CasesService {
     )
 
     if (!result) {
-      this.logWarn('updateCase', { caseId: id })
+      this.log.warn('updateCase', tenantId, 'Case not found during update', { caseId: id })
       throw new BusinessException(404, `Case ${id} not found`, 'errors.cases.notFound')
     }
 
@@ -991,7 +1151,7 @@ export class CasesService {
     )
 
     if (!result) {
-      this.logWarn('linkAlert', { caseId })
+      this.log.warn('linkAlert', user.tenantId, 'Case not found during link alert', { caseId })
       throw new BusinessException(404, `Case ${caseId} not found`, 'errors.cases.notFound')
     }
 
@@ -1082,14 +1242,21 @@ export class CasesService {
   ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['updateCaseTransaction']>>>> {
     const actorLabel = await this.resolveActorLabel(user)
     const timelineDescription = await this.buildAssignTimelineDescription(
-      ownerUserId, existing.ownerUserId, actorLabel
+      ownerUserId,
+      existing.ownerUserId,
+      actorLabel
     )
 
-    return this.executeUpdateCase(id, user.tenantId, { ownerUserId }, {
-      type: CaseTimelineType.UPDATED,
-      actor: user.email,
-      description: timelineDescription,
-    })
+    return this.executeUpdateCase(
+      id,
+      user.tenantId,
+      { ownerUserId },
+      {
+        type: CaseTimelineType.UPDATED,
+        actor: user.email,
+        description: timelineDescription,
+      }
+    )
   }
 
   private async notifyAssignmentChange(
@@ -1100,17 +1267,25 @@ export class CasesService {
   ): Promise<void> {
     if (ownerUserId && ownerUserId !== existing.ownerUserId) {
       await this.notificationsService.notifyCaseActivity(
-        user.tenantId, caseId, existing.caseNumber, ownerUserId,
+        user.tenantId,
+        caseId,
+        existing.caseNumber,
+        ownerUserId,
         NotificationType.CASE_ASSIGNED,
         JSON.stringify({ key: 'caseAssignedMessage', params: { caseRef: existing.caseNumber } }),
-        user.sub, user.email
+        user.sub,
+        user.email
       )
     }
 
     if (!ownerUserId && existing.ownerUserId) {
       await this.notificationsService.notifyCaseUnassigned(
-        user.tenantId, caseId, existing.caseNumber,
-        existing.ownerUserId, user.sub, user.email
+        user.tenantId,
+        caseId,
+        existing.caseNumber,
+        existing.ownerUserId,
+        user.sub,
+        user.email
       )
     }
   }
@@ -1244,7 +1419,11 @@ export class CasesService {
   ): Promise<void> {
     if (mentionIds.length === 0) return
     await this.notificationsService.createMentionNotifications(
-      user.tenantId, caseId, commentId, mentionIds, user
+      user.tenantId,
+      caseId,
+      commentId,
+      mentionIds,
+      user
     )
   }
 
@@ -1255,13 +1434,17 @@ export class CasesService {
     body: string
   ): Promise<void> {
     await this.notificationsService.notifyCaseActivity(
-      user.tenantId, caseId, existing.caseNumber, existing.ownerUserId,
+      user.tenantId,
+      caseId,
+      existing.caseNumber,
+      existing.ownerUserId,
       NotificationType.CASE_COMMENT_ADDED,
       JSON.stringify({
         key: 'caseCommentMessage',
         params: { caseRef: existing.caseNumber, content: truncateBody(body) },
       }),
-      user.sub, user.email
+      user.sub,
+      user.email
     )
   }
 
@@ -1324,17 +1507,14 @@ export class CasesService {
     body: string,
     mentionIds: string[]
   ): Promise<AddCommentResult> {
-    return this.casesRepository.addCommentTransaction(
-      caseId, user.sub, body, mentionIds,
-      {
-        type: CaseTimelineType.COMMENT_ADDED,
-        actor: user.email,
-        description: JSON.stringify({
-          key: 'commentAdded',
-          params: { content: truncateBody(body) },
-        }),
-      }
-    )
+    return this.casesRepository.addCommentTransaction(caseId, user.sub, body, mentionIds, {
+      type: CaseTimelineType.COMMENT_ADDED,
+      actor: user.email,
+      description: JSON.stringify({
+        key: 'commentAdded',
+        params: { content: truncateBody(body) },
+      }),
+    })
   }
 
   /* ---------------------------------------------------------------- */
@@ -1425,60 +1605,5 @@ export class CasesService {
     if (allUserIds.length === 0) return new Map()
     const users = await this.casesRepository.findUsersByIds(allUserIds)
     return new Map(users.map(u => [u.id, u]))
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging Helpers                                          */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(
-    action: string,
-    user: JwtPayload,
-    resource: string,
-    resourceId: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`${resource} ${action}`, {
-      feature: AppLogFeature.CASES,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      actorUserId: user.sub,
-      targetResource: resource,
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CasesService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, metadata?: Record<string, unknown>, user?: JwtPayload): void {
-    this.appLogger.warn(`Case action failed: ${action}`, {
-      feature: AppLogFeature.CASES,
-      action,
-      className: 'CasesService',
-      sourceType: AppLogSourceType.SERVICE,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId: user?.tenantId,
-      actorEmail: user?.email,
-      metadata,
-    })
-  }
-
-  private logDenied(action: string, user: JwtPayload, resourceId: string): void {
-    this.appLogger.warn(`Case action denied: ${action}`, {
-      feature: AppLogFeature.CASES,
-      action,
-      outcome: AppLogOutcome.DENIED,
-      tenantId: user.tenantId,
-      actorEmail: user.email,
-      targetResource: 'Case',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CasesService',
-      functionName: action,
-    })
   }
 }

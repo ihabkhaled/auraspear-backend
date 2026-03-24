@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AppLogFeature } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type {
   NormalizationOutput,
   NormalizationPipelineInput,
@@ -8,6 +11,15 @@ import type {
 @Injectable()
 export class NormalizationExecutor {
   private readonly logger = new Logger(NormalizationExecutor.name)
+  private readonly log: ServiceLogger
+
+  constructor(private readonly appLogger: AppLoggerService) {
+    this.log = new ServiceLogger(
+      this.appLogger,
+      AppLogFeature.NORMALIZATION,
+      'NormalizationExecutor'
+    )
+  }
 
   /**
    * Applies a normalization pipeline to a batch of events.
@@ -21,8 +33,17 @@ export class NormalizationExecutor {
     const errors: string[] = []
     let droppedCount = 0
 
+    this.log.entry('executePipeline', '', {
+      pipelineId: pipeline.id,
+      pipelineName: pipeline.name,
+      eventCount: events.length,
+      stepCount: pipeline.steps.length,
+    })
+
     for (const event of events) {
       try {
+        this.log.debug('executePipeline', '', 'processing event', { pipelineId: pipeline.id })
+
         const normalized = this.applySteps(event, pipeline.steps)
         if (normalized === null) {
           droppedCount++
@@ -39,6 +60,15 @@ export class NormalizationExecutor {
     this.logger.log(
       `Pipeline ${pipeline.id} processed ${String(events.length)} events: ${String(normalizedEvents.length)} normalized, ${String(droppedCount)} dropped in ${String(durationMs)}ms`
     )
+
+    this.log.success('executePipeline', '', {
+      pipelineId: pipeline.id,
+      inputCount: events.length,
+      outputCount: normalizedEvents.length,
+      droppedCount,
+      errorCount: errors.length,
+      durationMs,
+    })
 
     return {
       result: {

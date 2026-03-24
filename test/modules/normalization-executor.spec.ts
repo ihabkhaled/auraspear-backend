@@ -1,11 +1,19 @@
 import { NormalizationExecutor } from '../../src/modules/normalization/normalization.executor'
 import type { NormalizationStep } from '../../src/modules/normalization/normalization.executor'
 
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
 describe('NormalizationExecutor', () => {
   let executor: NormalizationExecutor
 
   beforeEach(() => {
-    executor = new NormalizationExecutor()
+    jest.clearAllMocks()
+    executor = new NormalizationExecutor(mockAppLogger as never)
   })
 
   it('renames fields', async () => {

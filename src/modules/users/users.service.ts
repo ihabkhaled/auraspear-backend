@@ -11,6 +11,7 @@ import {
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { ChangePasswordDto } from './dto/change-password.dto'
 import type { UpdatePreferencesDto } from './dto/update-preferences.dto'
 import type { UpdateProfileDto } from './dto/update-profile.dto'
@@ -20,23 +21,27 @@ import type { User, UserPreference } from '@prisma/client'
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.USERS, 'UsersService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* GET PROFILE                                                       */
   /* ---------------------------------------------------------------- */
 
   async getProfile(userId: string, tenantId?: string): Promise<UserProfile> {
+    this.logger.log(`getProfile called for user ${userId}`)
     const user = await this.usersRepository.findByIdWithPreferencesAndMemberships(userId, tenantId)
     if (!user) {
-      this.logWarn('getProfile', userId, tenantId)
+      this.log.warn('getProfile', tenantId ?? '', 'User not found', { actorUserId: userId })
       throw new BusinessException(404, 'User not found', 'errors.users.notFound')
     }
-    this.logSuccess('getProfile', userId, user.email, tenantId)
+    this.log.success('getProfile', tenantId ?? '', { actorUserId: userId, actorEmail: user.email })
     return mapUserToProfile(user)
   }
 
@@ -45,12 +50,13 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<UserProfile> {
+    this.logger.log(`updateProfile called for user ${userId}`)
     const user = await this.findUserOrThrow(userId, 'updateProfile')
     await this.verifyPasswordOrThrow(user, dto.currentPassword, 'updateProfile')
 
     const updated = await this.usersRepository.updateName(userId, dto.name)
     this.logger.log(`Profile updated for user ${userId}`)
-    this.logSuccess('updateProfile', userId, user.email)
+    this.log.success('updateProfile', '', { actorUserId: userId, actorEmail: user.email })
     return mapUserToProfile(updated)
   }
 
@@ -59,6 +65,7 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<{ changed: boolean }> {
+    this.logger.log(`changePassword called for user ${userId}`)
     const user = await this.findUserOrThrow(userId, 'changePassword')
     await this.verifyPasswordOrThrow(user, dto.currentPassword, 'changePassword')
 
@@ -66,7 +73,7 @@ export class UsersService {
     await this.usersRepository.updatePasswordHash(userId, hashedPassword)
 
     this.logger.log(`Password changed for user ${userId}`)
-    this.logSuccess('changePassword', userId, user.email)
+    this.log.success('changePassword', '', { actorUserId: userId, actorEmail: user.email })
     return { changed: true }
   }
 
@@ -77,9 +84,10 @@ export class UsersService {
   async getPreferences(
     userId: string
   ): Promise<UserPreference | (typeof DEFAULT_PREFERENCES & { userId: string })> {
+    this.logger.log(`getPreferences called for user ${userId}`)
     const user = await this.findUserOrThrow(userId, 'getPreferences')
     const preference = await this.usersRepository.findPreference(userId)
-    this.logSuccess('getPreferences', userId, user.email)
+    this.log.success('getPreferences', '', { actorUserId: userId, actorEmail: user.email })
     return preference ?? { userId, ...DEFAULT_PREFERENCES }
   }
 
@@ -88,6 +96,7 @@ export class UsersService {
   /* ---------------------------------------------------------------- */
 
   async updatePreferences(userId: string, dto: UpdatePreferencesDto): Promise<UserPreference> {
+    this.logger.log(`updatePreferences called for user ${userId}`)
     const user = await this.findUserOrThrow(userId, 'updatePreferences')
 
     const preference = await this.usersRepository.upsertPreference(
@@ -97,7 +106,9 @@ export class UsersService {
     )
 
     this.logger.log(`Preferences updated for user ${userId}`)
-    this.logSuccess('updatePreferences', userId, user.email, undefined, {
+    this.log.success('updatePreferences', '', {
+      actorUserId: userId,
+      actorEmail: user.email,
       theme: dto.theme ?? null,
       language: dto.language ?? null,
     })
@@ -111,7 +122,7 @@ export class UsersService {
   private async findUserOrThrow(userId: string, action: string): Promise<User> {
     const user = await this.usersRepository.findById(userId)
     if (!user) {
-      this.logWarn(action, userId)
+      this.log.warn(action, '', 'User not found', { actorUserId: userId })
       throw new BusinessException(404, 'User not found', 'errors.users.notFound')
     }
     return user
@@ -141,46 +152,8 @@ export class UsersService {
   /* PRIVATE: Logging                                                  */
   /* ---------------------------------------------------------------- */
 
-  private logSuccess(
-    action: string,
-    userId: string,
-    email?: string,
-    tenantId?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`Users ${action}`, {
-      feature: AppLogFeature.USERS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      actorUserId: userId,
-      actorEmail: email,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, userId: string, tenantId?: string): void {
-    this.appLogger.warn(`Users ${action} failed`, {
-      feature: AppLogFeature.USERS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      actorUserId: userId,
-      tenantId,
-      targetResource: 'User',
-      targetResourceId: userId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'UsersService',
-      functionName: action,
-    })
-  }
-
   private logDenied(action: string, userId: string, email: string): void {
-    this.appLogger.warn(`Users ${action} denied`, {
+    this.appLogger.warn(`UsersService => ${action} denied`, {
       feature: AppLogFeature.USERS,
       action,
       outcome: AppLogOutcome.DENIED,

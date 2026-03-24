@@ -10,16 +10,10 @@ import {
   redactOsintSource,
 } from './agent-config.utilities'
 import { BUILTIN_OSINT_SOURCES } from './constants/osint-sources.constants'
-import {
-  AiAgentId,
-  ApprovalStatus,
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  TokenResetPeriod,
-} from '../../common/enums'
+import { AiAgentId, ApprovalStatus, AppLogFeature, TokenResetPeriod } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import { encrypt } from '../../common/utils/encryption.utility'
 import { validateUrl } from '../../common/utils/ssrf.utility'
 import { OsintExecutorService } from '../osint-executor/osint-executor.service'
@@ -39,6 +33,7 @@ import type { InputJsonValue } from '@prisma/client/runtime/library'
 @Injectable()
 export class AgentConfigService {
   private readonly logger = new Logger(AgentConfigService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: AgentConfigRepository,
@@ -46,11 +41,14 @@ export class AgentConfigService {
     private readonly configService: ConfigService,
     @Inject(forwardRef(() => OsintExecutorService))
     private readonly osintExecutorService: OsintExecutorService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI_CONFIG, 'AgentConfigService')
+  }
 
   // ─── Agent Configs ──────────────────────────────────────────
 
   async getAgentConfigs(tenantId: string): Promise<AgentConfigWithDefaults[]> {
+    this.logger.log(`getAgentConfigs called for tenant ${tenantId}`)
     const records = await this.repository.findAllAgentConfigs(tenantId)
 
     const agentIds = Object.values(AiAgentId)
@@ -62,12 +60,16 @@ export class AgentConfigService {
       result.push(buildAgentConfigWithDefaults(agentId, record))
     }
 
-    this.logSuccess('listAgentConfigs', tenantId)
+    this.logger.log(
+      `getAgentConfigs completed for tenant ${tenantId}: ${String(result.length)} configs`
+    )
+    this.log.success('listAgentConfigs', tenantId)
 
     return result
   }
 
   async getAgentConfig(tenantId: string, agentId: string): Promise<AgentConfigWithDefaults> {
+    this.logger.log(`getAgentConfig called for agent ${agentId} in tenant ${tenantId}`)
     this.validateAgentId(agentId)
 
     const record = await this.repository.findAgentConfig(tenantId, agentId)
@@ -81,6 +83,7 @@ export class AgentConfigService {
     dto: UpdateAgentConfigDto,
     actor: string
   ): Promise<AgentConfigWithDefaults> {
+    this.logger.log(`updateAgentConfig called for agent ${agentId} in tenant ${tenantId}`)
     this.validateAgentId(agentId)
 
     const updateData: Record<string, unknown> = { ...dto }
@@ -90,7 +93,7 @@ export class AgentConfigService {
 
     await this.repository.upsertAgentConfig(tenantId, agentId, updateData)
 
-    this.logSuccess('updateAgentConfig', tenantId, { agentId, actor })
+    this.log.success('updateAgentConfig', tenantId, { agentId, actor })
 
     return this.getAgentConfig(tenantId, agentId)
   }
@@ -101,11 +104,14 @@ export class AgentConfigService {
     enabled: boolean,
     actor: string
   ): Promise<AgentConfigWithDefaults> {
+    this.logger.log(
+      `toggleAgent called for agent ${agentId} in tenant ${tenantId}: enabled=${String(enabled)}`
+    )
     this.validateAgentId(agentId)
 
     await this.repository.upsertAgentConfig(tenantId, agentId, { isEnabled: enabled })
 
-    this.logSuccess('toggleAgent', tenantId, { agentId, enabled, actor })
+    this.log.success('toggleAgent', tenantId, { agentId, enabled, actor })
 
     return this.getAgentConfig(tenantId, agentId)
   }
@@ -116,6 +122,9 @@ export class AgentConfigService {
     period: TokenResetPeriod,
     actor: string
   ): Promise<AgentConfigWithDefaults> {
+    this.logger.log(
+      `resetUsage called for agent ${agentId} in tenant ${tenantId}, period=${period}`
+    )
     this.validateAgentId(agentId)
 
     const existing = await this.repository.findAgentConfig(tenantId, agentId)
@@ -126,7 +135,7 @@ export class AgentConfigService {
     const resetData = buildTokenResetData(period)
     await this.repository.resetTokenCounters(tenantId, agentId, resetData)
 
-    this.logSuccess('resetUsage', tenantId, { agentId, period, actor })
+    this.log.success('resetUsage', tenantId, { agentId, period, actor })
 
     return this.getAgentConfig(tenantId, agentId)
   }
@@ -152,6 +161,7 @@ export class AgentConfigService {
   // ─── OSINT Sources ─────────────────────────────────────────
 
   async listOsintSources(tenantId: string): Promise<OsintSourceRedacted[]> {
+    this.logger.log(`listOsintSources called for tenant ${tenantId}`)
     let sources = await this.repository.findAllOsintSources(tenantId)
 
     // Lazy seed: if no sources exist for this tenant, seed builtins
@@ -160,6 +170,9 @@ export class AgentConfigService {
       sources = await this.repository.findAllOsintSources(tenantId)
     }
 
+    this.logger.log(
+      `listOsintSources completed for tenant ${tenantId}: ${String(sources.length)} sources`
+    )
     return sources.map(redactOsintSource)
   }
 
@@ -194,7 +207,7 @@ export class AgentConfigService {
       )
     )
 
-    this.logSuccess('seedBuiltinSources', tenantId)
+    this.log.success('seedBuiltinSources', tenantId)
   }
 
   async createOsintSource(
@@ -202,6 +215,7 @@ export class AgentConfigService {
     dto: CreateOsintSourceDto,
     actor: string
   ): Promise<OsintSourceRedacted> {
+    this.logger.log(`createOsintSource called for tenant ${tenantId} by ${actor}`)
     if (dto.baseUrl) {
       validateUrl(dto.baseUrl)
     }
@@ -223,7 +237,7 @@ export class AgentConfigService {
       timeout: dto.timeout ?? 30_000,
     })
 
-    this.logSuccess('createOsintSource', tenantId, {
+    this.log.success('createOsintSource', tenantId, {
       sourceId: record.id,
       sourceType: dto.sourceType,
       actor,
@@ -238,9 +252,8 @@ export class AgentConfigService {
     dto: UpdateOsintSourceDto,
     actor: string
   ): Promise<OsintSourceRedacted> {
-    this.validateOsintSourceExists(
-      await this.repository.findOsintSource(id, tenantId)
-    )
+    this.logger.log(`updateOsintSource called for source ${id} in tenant ${tenantId}`)
+    this.validateOsintSourceExists(await this.repository.findOsintSource(id, tenantId))
 
     if (dto.baseUrl) {
       validateUrl(dto.baseUrl)
@@ -250,28 +263,29 @@ export class AgentConfigService {
     const updateData = buildOsintSourceUpdateData(dto as Record<string, unknown>, encryptedKey)
     const record = await this.repository.updateOsintSource(id, tenantId, updateData)
 
-    this.logSuccess('updateOsintSource', tenantId, { sourceId: id, actor })
+    this.log.success('updateOsintSource', tenantId, { sourceId: id, actor })
 
     return redactOsintSource(record)
   }
 
   async deleteOsintSource(id: string, tenantId: string, actor: string): Promise<void> {
-    this.validateOsintSourceExists(
-      await this.repository.findOsintSource(id, tenantId)
-    )
+    this.logger.log(`deleteOsintSource called for source ${id} in tenant ${tenantId}`)
+    this.validateOsintSourceExists(await this.repository.findOsintSource(id, tenantId))
 
     await this.repository.deleteOsintSource(id, tenantId)
 
-    this.logSuccess('deleteOsintSource', tenantId, { sourceId: id, actor })
+    this.log.success('deleteOsintSource', tenantId, { sourceId: id, actor })
   }
 
   async testOsintSource(id: string, tenantId: string, actor: string): Promise<OsintTestResult> {
+    this.logger.log(`testOsintSource called for source ${id} in tenant ${tenantId}`)
     return this.osintExecutorService.testSource(id, tenantId, actor)
   }
 
   // ─── Approvals ─────────────────────────────────────────────
 
   async listApprovals(tenantId: string, status?: string): Promise<AiApprovalRequestRecord[]> {
+    this.logger.log(`listApprovals called for tenant ${tenantId}`)
     return this.repository.findAllApprovals(tenantId, status)
   }
 
@@ -281,6 +295,7 @@ export class AgentConfigService {
     dto: ResolveApprovalDto,
     actor: string
   ): Promise<AiApprovalRequestRecord> {
+    this.logger.log(`resolveApproval called for approval ${id} in tenant ${tenantId}`)
     await this.findAndValidateApproval(id, tenantId)
 
     const record = await this.repository.updateApprovalStatus(id, tenantId, {
@@ -290,7 +305,7 @@ export class AgentConfigService {
       comment: dto.comment ?? null,
     })
 
-    this.logSuccess('resolveApproval', tenantId, { approvalId: id, status: dto.status, actor })
+    this.log.success('resolveApproval', tenantId, { approvalId: id, status: dto.status, actor })
 
     return record
   }
@@ -368,18 +383,5 @@ export class AgentConfigService {
     if (!isValidAgentId(agentId)) {
       throw new BusinessException(400, 'Invalid agent ID', 'errors.agentConfig.invalidAgentId')
     }
-  }
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`AgentConfig action: ${action}`, {
-      feature: AppLogFeature.AI_CONFIG,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AgentConfigService',
-      functionName: action,
-      metadata,
-    })
   }
 }

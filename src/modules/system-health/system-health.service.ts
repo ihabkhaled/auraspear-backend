@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { SystemHealthRepository } from './system-health.repository'
 import {
   buildHealthCheckListWhere,
@@ -9,9 +9,10 @@ import {
   buildMetricRecord,
   buildSystemHealthStats,
 } from './system-health.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type {
   HealthCheckRecord,
   PaginatedHealthChecks,
@@ -21,12 +22,14 @@ import type {
 
 @Injectable()
 export class SystemHealthService {
-  private readonly logger = new Logger(SystemHealthService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: SystemHealthRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.SYSTEM_HEALTH, 'SystemHealthService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST HEALTH CHECKS (paginated, tenant-scoped)                     */
@@ -41,6 +44,15 @@ export class SystemHealthService {
     serviceType?: string,
     status?: string
   ): Promise<PaginatedHealthChecks> {
+    this.log.entry('listHealthChecks', tenantId, {
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      serviceType,
+      status,
+    })
+
     const where = buildHealthCheckListWhere(tenantId, serviceType, status)
     const orderBy = buildHealthCheckOrderBy(sortBy, sortOrder)
 
@@ -56,6 +68,8 @@ export class SystemHealthService {
 
     const data: HealthCheckRecord[] = healthChecks.map(buildHealthCheckRecord)
 
+    this.log.success('listHealthChecks', tenantId, { total, returned: data.length, page, limit })
+
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
@@ -67,7 +81,11 @@ export class SystemHealthService {
   /* ---------------------------------------------------------------- */
 
   async getLatestHealthChecks(tenantId: string): Promise<HealthCheckRecord[]> {
+    this.log.entry('getLatestHealthChecks', tenantId)
+
     const healthChecks = await this.repository.findLatestHealthChecks(tenantId)
+
+    this.log.success('getLatestHealthChecks', tenantId, { count: healthChecks.length })
 
     return healthChecks.map(buildHealthCheckRecord)
   }
@@ -85,6 +103,15 @@ export class SystemHealthService {
     metricType?: string,
     metricName?: string
   ): Promise<PaginatedMetrics> {
+    this.log.entry('listMetrics', tenantId, {
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      metricType,
+      metricName,
+    })
+
     const where = buildMetricListWhere(tenantId, metricType, metricName)
     const orderBy = buildMetricOrderBy(sortBy, sortOrder)
 
@@ -100,6 +127,8 @@ export class SystemHealthService {
 
     const data = metrics.map(buildMetricRecord)
 
+    this.log.success('listMetrics', tenantId, { total, returned: data.length, page, limit })
+
     return {
       data,
       pagination: buildPaginationMeta(page, limit, total),
@@ -111,19 +140,12 @@ export class SystemHealthService {
   /* ---------------------------------------------------------------- */
 
   async getSystemHealthStats(tenantId: string): Promise<SystemHealthStats> {
+    this.log.entry('getSystemHealthStats', tenantId)
+
     const latestChecks = await this.getLatestHealthChecks(tenantId)
 
-    this.appLogger.info('System health stats retrieved', {
-      feature: AppLogFeature.SYSTEM_HEALTH,
-      action: 'getSystemHealthStats',
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'SystemHealthService',
-      functionName: 'getSystemHealthStats',
-      metadata: {
-        totalServices: latestChecks.length,
-      },
+    this.log.success('getSystemHealthStats', tenantId, {
+      totalServices: latestChecks.length,
     })
 
     return buildSystemHealthStats(latestChecks)

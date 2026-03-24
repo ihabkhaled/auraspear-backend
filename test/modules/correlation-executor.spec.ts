@@ -1,10 +1,18 @@
 import { CorrelationExecutor } from '../../src/modules/correlation/correlation.executor'
 
+const mockAppLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+}
+
 describe('CorrelationExecutor', () => {
   let executor: CorrelationExecutor
 
   beforeEach(() => {
-    executor = new CorrelationExecutor()
+    jest.clearAllMocks()
+    executor = new CorrelationExecutor(mockAppLogger as never)
   })
 
   it('triggers when threshold is exceeded', async () => {

@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { REDACTED } from './llm-connectors.constants'
 import { LlmConnectorsRepository } from './llm-connectors.repository'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
+import { AppLogFeature } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { ServiceLogger } from '../../../common/services/service-logger'
 import { decrypt, encrypt } from '../../../common/utils/encryption.utility'
 import { buildLlmConnectorUpdateData } from '../connectors.utilities'
 import { LlmApisService } from '../services/llm-apis.service'
@@ -15,7 +16,7 @@ import type { LlmConnector } from '@prisma/client'
 
 @Injectable()
 export class LlmConnectorsService {
-  private readonly logger = new Logger(LlmConnectorsService.name)
+  private readonly log: ServiceLogger
   private readonly encryptionKey: string
 
   constructor(
@@ -24,6 +25,7 @@ export class LlmConnectorsService {
     private readonly llmApisService: LlmApisService,
     private readonly appLogger: AppLoggerService
   ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.CONNECTORS, 'LlmConnectorsService')
     const key = this.configService.get<string>('CONFIG_ENCRYPTION_KEY')
     if (key?.length !== 64 || !/^[\da-f]+$/i.test(key)) {
       throw new Error('CONFIG_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
@@ -36,8 +38,9 @@ export class LlmConnectorsService {
   /* ---------------------------------------------------------------- */
 
   async list(tenantId: string): Promise<LlmConnectorResponse[]> {
+    this.log.entry('list', tenantId)
     const connectors = await this.repository.findAllByTenant(tenantId)
-    this.logSuccess('list', tenantId, undefined, { count: connectors.length })
+    this.log.success('list', tenantId, { count: connectors.length })
     return connectors.map(c => this.toResponse(c))
   }
 
@@ -46,8 +49,9 @@ export class LlmConnectorsService {
   /* ---------------------------------------------------------------- */
 
   async getById(id: string, tenantId: string): Promise<LlmConnectorResponse> {
+    this.log.entry('getById', tenantId, { resourceId: id })
     const connector = await this.findOrThrow(id, tenantId, 'getById')
-    this.logSuccess('getById', tenantId, id)
+    this.log.success('getById', tenantId, { resourceId: id })
     return this.toResponse(connector)
   }
 
@@ -60,6 +64,7 @@ export class LlmConnectorsService {
     dto: CreateLlmConnectorDto,
     actorEmail: string
   ): Promise<LlmConnectorResponse> {
+    this.log.entry('create', tenantId, { name: dto.name, actorEmail })
     await this.guardUniqueName(tenantId, dto.name)
 
     const encryptedApiKey = encrypt(dto.apiKey, this.encryptionKey)
@@ -76,7 +81,8 @@ export class LlmConnectorsService {
       timeout: dto.timeout ?? 60000,
     })
 
-    this.logSuccess('create', tenantId, connector.id, {
+    this.log.success('create', tenantId, {
+      resourceId: connector.id,
       name: dto.name,
       actorEmail,
     })
@@ -93,22 +99,26 @@ export class LlmConnectorsService {
     dto: UpdateLlmConnectorDto,
     actorEmail: string
   ): Promise<LlmConnectorResponse> {
+    this.log.entry('update', tenantId, {
+      resourceId: id,
+      updatedFields: Object.keys(dto),
+      actorEmail,
+    })
     const existing = await this.findOrThrow(id, tenantId, 'update')
 
     if (dto.name !== undefined && dto.name !== existing.name) {
       await this.guardUniqueName(tenantId, dto.name, id)
     }
 
-    const updateData = buildLlmConnectorUpdateData(dto, value =>
-      encrypt(value, this.encryptionKey)
-    )
+    const updateData = buildLlmConnectorUpdateData(dto, value => encrypt(value, this.encryptionKey))
 
     const updated = await this.repository.updateAndReturn(id, tenantId, updateData)
     if (!updated) {
       throw new BusinessException(404, 'LLM connector not found', 'errors.llmConnectors.notFound')
     }
 
-    this.logSuccess('update', tenantId, id, {
+    this.log.success('update', tenantId, {
+      resourceId: id,
       updatedFields: Object.keys(dto),
       actorEmail,
     })
@@ -120,10 +130,11 @@ export class LlmConnectorsService {
   /* ---------------------------------------------------------------- */
 
   async delete(id: string, tenantId: string, actorEmail: string): Promise<{ deleted: boolean }> {
+    this.log.entry('delete', tenantId, { resourceId: id, actorEmail })
     await this.findOrThrow(id, tenantId, 'delete')
     await this.repository.delete(id, tenantId)
 
-    this.logSuccess('delete', tenantId, id, { actorEmail })
+    this.log.success('delete', tenantId, { resourceId: id, actorEmail })
     return { deleted: true }
   }
 
@@ -136,12 +147,13 @@ export class LlmConnectorsService {
     tenantId: string,
     actorEmail: string
   ): Promise<{ id: string; enabled: boolean }> {
+    this.log.entry('toggle', tenantId, { resourceId: id, actorEmail })
     const existing = await this.findOrThrow(id, tenantId, 'toggle')
     const newEnabled = !existing.enabled
 
     await this.repository.updateAndReturn(id, tenantId, { enabled: newEnabled })
 
-    this.logSuccess('toggle', tenantId, id, { enabled: newEnabled, actorEmail })
+    this.log.success('toggle', tenantId, { resourceId: id, enabled: newEnabled, actorEmail })
     return { id, enabled: newEnabled }
   }
 
@@ -153,13 +165,24 @@ export class LlmConnectorsService {
     id: string,
     tenantId: string
   ): Promise<{ id: string; ok: boolean; details: string; testedAt: string }> {
+    this.log.entry('testConnection', tenantId, { resourceId: id })
     const connector = await this.findOrThrow(id, tenantId, 'testConnection')
     const config = this.buildDecryptedConfig(connector)
     const { ok, details, latencyMs } = await this.executeTest(connector.name, config)
 
     const testedAt = new Date()
     await this.persistTestResult(id, tenantId, ok, details, testedAt)
-    this.logTestOutcome(tenantId, id, ok, latencyMs, details)
+
+    if (ok) {
+      this.log.success('testConnection', tenantId, { resourceId: id, latencyMs, ok })
+    } else {
+      this.log.warn('testConnection', tenantId, 'Connection test failed', {
+        resourceId: id,
+        latencyMs,
+        ok,
+        details: details.slice(0, 300),
+      })
+    }
 
     return { id, ok, details, testedAt: testedAt.toISOString() }
   }
@@ -174,7 +197,10 @@ export class LlmConnectorsService {
       return { ok: result.ok, details: result.details, latencyMs: Date.now() - start }
     } catch (error) {
       const details = error instanceof Error ? error.message : 'Connection test failed'
-      this.logger.warn(`LLM connector test failed for ${connectorName}: ${details}`)
+      this.log.warn('executeTest', '', `LLM connector test failed for ${connectorName}`, {
+        connectorName,
+        error: details,
+      })
       return { ok: false, details, latencyMs: Date.now() - start }
     }
   }
@@ -193,29 +219,14 @@ export class LlmConnectorsService {
     })
   }
 
-  private logTestOutcome(
-    tenantId: string,
-    id: string,
-    ok: boolean,
-    latencyMs: number,
-    details: string
-  ): void {
-    if (ok) {
-      this.logSuccess('testConnection', tenantId, id, { latencyMs, ok })
-    } else {
-      this.logWarn('testConnection', tenantId, id, {
-        latencyMs,
-        ok,
-        details: details.slice(0, 300),
-      })
-    }
-  }
-
   /* ---------------------------------------------------------------- */
   /* PUBLIC: Decrypted Config (for AI service)                         */
   /* ---------------------------------------------------------------- */
 
   async getDecryptedConfig(id: string, tenantId: string): Promise<Record<string, unknown> | null> {
+    this.log.debug('getDecryptedConfig', tenantId, 'Decrypting LLM connector config', {
+      resourceId: id,
+    })
     const connector = await this.repository.findByIdAndTenant(id, tenantId)
     if (!connector?.enabled) return null
     return this.buildDecryptedConfig(connector)
@@ -226,6 +237,7 @@ export class LlmConnectorsService {
   /* ---------------------------------------------------------------- */
 
   async getEnabledConfigs(tenantId: string): Promise<LlmConnectorEnabledConfig[]> {
+    this.log.debug('getEnabledConfigs', tenantId, 'Fetching enabled LLM configs')
     const connectors = await this.repository.findEnabledByTenant(tenantId)
     return connectors.map(c => ({
       id: c.id,
@@ -239,6 +251,7 @@ export class LlmConnectorsService {
   /* ---------------------------------------------------------------- */
 
   async hasEnabledConnectors(tenantId: string): Promise<boolean> {
+    this.log.debug('hasEnabledConnectors', tenantId, 'Checking for enabled LLM connectors')
     const connectors = await this.repository.findEnabledByTenant(tenantId)
     return connectors.length > 0
   }
@@ -250,6 +263,7 @@ export class LlmConnectorsService {
   async getEnabledSummaries(
     tenantId: string
   ): Promise<Array<{ id: string; name: string; enabled: boolean }>> {
+    this.log.debug('getEnabledSummaries', tenantId, 'Fetching enabled LLM summaries')
     const connectors = await this.repository.findAllByTenant(tenantId)
     return connectors
       .filter(c => c.enabled)
@@ -277,7 +291,7 @@ export class LlmConnectorsService {
   private async findOrThrow(id: string, tenantId: string, action: string): Promise<LlmConnector> {
     const connector = await this.repository.findByIdAndTenant(id, tenantId)
     if (!connector) {
-      this.logWarn(action, tenantId, id)
+      this.log.warn(action, tenantId, 'LLM connector not found', { resourceId: id })
       throw new BusinessException(404, 'LLM connector not found', 'errors.llmConnectors.notFound')
     }
     return connector
@@ -299,7 +313,9 @@ export class LlmConnectorsService {
     try {
       apiKey = decrypt(connector.encryptedApiKey, this.encryptionKey)
     } catch {
-      this.logger.warn(`Failed to decrypt API key for LLM connector ${connector.id}`)
+      this.log.warn('buildDecryptedConfig', connector.tenantId, 'Failed to decrypt API key', {
+        resourceId: connector.id,
+      })
       apiKey = ''
     }
 
@@ -332,46 +348,5 @@ export class LlmConnectorsService {
       createdAt: connector.createdAt.toISOString(),
       updatedAt: connector.updatedAt.toISOString(),
     }
-  }
-
-  /* ---------------------------------------------------------------- */
-  /* PRIVATE: Logging                                                   */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(
-    action: string,
-    tenantId: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.info(`LlmConnector ${action}`, {
-      feature: AppLogFeature.CONNECTORS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'LlmConnector',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'LlmConnectorsService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(
-    action: string,
-    tenantId: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>
-  ): void {
-    this.appLogger.warn(`LlmConnector ${action} failed`, {
-      feature: AppLogFeature.CONNECTORS,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'LlmConnectorsService',
-      functionName: action,
-      metadata: { ...metadata, tenantId, resourceId },
-    })
   }
 }

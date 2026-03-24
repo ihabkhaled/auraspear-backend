@@ -8,10 +8,11 @@ import {
   deduplicateRelations,
   buildGraphResponse,
 } from './entities.utilities'
-import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
+import { AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { CreateEntityDto } from './dto/create-entity.dto'
 import type { ListEntitiesQueryDto } from './dto/list-entities-query.dto'
 import type { UpdateEntityDto } from './dto/update-entity.dto'
@@ -21,13 +22,19 @@ import type { InputJsonValue } from '@prisma/client/runtime/library'
 @Injectable()
 export class EntitiesService {
   private readonly logger = new Logger(EntitiesService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly entitiesRepository: EntitiesRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.ENTITIES, 'EntitiesService')
+  }
 
   async list(tenantId: string, query: ListEntitiesQueryDto): Promise<PaginatedEntities> {
+    this.logger.log(
+      `list called for tenant ${tenantId}: page=${String(query.page)}, limit=${String(query.limit)}`
+    )
     const where = buildEntitySearchWhere(tenantId, query)
 
     const [data, total] = await this.entitiesRepository.findManyAndCount({
@@ -37,16 +44,17 @@ export class EntitiesService {
       take: query.limit,
     })
 
-    this.logSuccess('list', tenantId, { page: query.page, limit: query.limit, total })
+    this.log.success('list', tenantId, { page: query.page, limit: query.limit, total })
 
     return { data, pagination: buildPaginationMeta(query.page, query.limit, total) }
   }
 
   async findById(tenantId: string, id: string): Promise<EntityRecord> {
+    this.logger.log(`findById called for entity ${id} in tenant ${tenantId}`)
     const entity = await this.entitiesRepository.findFirstByIdAndTenant(id, tenantId)
 
     if (!entity) {
-      this.logWarn('findById', tenantId, id)
+      this.log.warn('findById', tenantId, 'Entity not found', { targetResourceId: id })
       throw new BusinessException(404, 'Entity not found', 'errors.entities.notFound')
     }
 
@@ -54,6 +62,7 @@ export class EntitiesService {
   }
 
   async create(tenantId: string, dto: CreateEntityDto): Promise<EntityRecord> {
+    this.logger.log(`create called for tenant ${tenantId}, type=${dto.type}`)
     const existing = await this.entitiesRepository.findByTypeAndValue(tenantId, dto.type, dto.value)
 
     if (existing) {
@@ -68,12 +77,14 @@ export class EntitiesService {
       metadata: (dto.metadata ?? {}) as InputJsonValue,
     })
 
-    this.logSuccess('create', tenantId, { entityId: entity.id, type: dto.type })
+    this.logger.log(`create completed for entity ${entity.id} in tenant ${tenantId}`)
+    this.log.success('create', tenantId, { entityId: entity.id, type: dto.type })
 
     return entity
   }
 
   async update(tenantId: string, id: string, dto: UpdateEntityDto): Promise<EntityRecord> {
+    this.logger.log(`update called for entity ${id} in tenant ${tenantId}`)
     await this.findById(tenantId, id)
 
     const updated = await this.entitiesRepository.updateByIdAndTenant(id, tenantId, {
@@ -85,12 +96,14 @@ export class EntitiesService {
       throw new BusinessException(404, 'Entity not found after update', 'errors.entities.notFound')
     }
 
-    this.logSuccess('update', tenantId, { entityId: id })
+    this.logger.log(`update completed for entity ${id}`)
+    this.log.success('update', tenantId, { entityId: id })
 
     return updated
   }
 
   async getGraph(tenantId: string, entityId: string): Promise<EntityGraphResponse> {
+    this.logger.log(`getGraph called for entity ${entityId} in tenant ${tenantId}`)
     const rootEntity = await this.findById(tenantId, entityId)
 
     const directRelations = await this.entitiesRepository.findRelationsForEntity(entityId, tenantId)
@@ -112,37 +125,19 @@ export class EntitiesService {
       tenantId
     )
 
-    return buildGraphResponse(rootEntity, entities, uniqueRelations)
+    const graph = buildGraphResponse(rootEntity, entities, uniqueRelations)
+    this.logger.log(
+      `getGraph completed for entity ${entityId}: ${String(entities.length)} nodes, ${String(uniqueRelations.size)} relations`
+    )
+    return graph
   }
 
   async getTopRisky(tenantId: string, limit = 10): Promise<EntityRecord[]> {
-    return this.entitiesRepository.findTopRisky(tenantId, limit)
-  }
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`Entity action: ${action}`, {
-      feature: AppLogFeature.ENTITIES,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'EntitiesService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, tenantId: string, resourceId?: string): void {
-    this.appLogger.warn(`Entity action failed: ${action}`, {
-      feature: AppLogFeature.ENTITIES,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      targetResource: 'Entity',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'EntitiesService',
-      functionName: action,
-    })
+    this.logger.log(`getTopRisky called for tenant ${tenantId}, limit=${String(limit)}`)
+    const results = await this.entitiesRepository.findTopRisky(tenantId, limit)
+    this.logger.log(
+      `getTopRisky completed for tenant ${tenantId}: ${String(results.length)} entities`
+    )
+    return results
   }
 }

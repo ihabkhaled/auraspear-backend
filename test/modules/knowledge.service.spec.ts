@@ -142,8 +142,8 @@ describe('KnowledgeService', () => {
       )
       expect(result.id).toBe('rb-new')
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Knowledge action: create'),
-        expect.objectContaining({ tenantId: TENANT_ID })
+        'KnowledgeService => create completed',
+        expect.objectContaining({ tenantId: TENANT_ID, outcome: 'success' })
       )
     })
 
@@ -217,8 +217,8 @@ describe('KnowledgeService', () => {
       await service.delete(TENANT_ID, 'rb-1', USER_EMAIL)
 
       expect(mockAppLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Knowledge action: delete'),
-        expect.objectContaining({ tenantId: TENANT_ID })
+        'KnowledgeService => delete completed',
+        expect.objectContaining({ tenantId: TENANT_ID, outcome: 'success' })
       )
     })
   })

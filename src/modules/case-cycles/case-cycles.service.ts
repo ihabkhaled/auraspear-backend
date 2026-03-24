@@ -15,6 +15,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType, CaseCycleStatus } from 
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './case-cycles.types'
 import type { CloseCaseCycleDto } from './dto/close-case-cycle.dto'
 import type { CreateCaseCycleDto } from './dto/create-case-cycle.dto'
@@ -25,11 +26,14 @@ import type { Case, CaseCycle, Prisma } from '@prisma/client'
 @Injectable()
 export class CaseCyclesService {
   private readonly logger = new Logger(CaseCyclesService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly caseCyclesRepository: CaseCyclesRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.CASE_CYCLES, 'CaseCyclesService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST                                                              */
@@ -52,7 +56,7 @@ export class CaseCyclesService {
     })
 
     const data = cycles.map(mapCycleToRecord)
-    this.logSuccess('listCycles', tenantId, undefined, {
+    this.log.success('listCycles', tenantId, {
       page,
       limit,
       total,
@@ -80,10 +84,10 @@ export class CaseCyclesService {
   async getActiveCycle(tenantId: string): Promise<CaseCycleRecord | null> {
     const cycle = await this.caseCyclesRepository.findFirstActive(tenantId)
     if (!cycle) {
-      this.logSuccess('getActiveCycle', tenantId)
+      this.log.success('getActiveCycle', tenantId)
       return null
     }
-    this.logSuccess('getActiveCycle', tenantId, cycle.id)
+    this.log.success('getActiveCycle', tenantId, { targetResourceId: cycle.id })
     return mapCycleToRecord(cycle)
   }
 
@@ -98,7 +102,8 @@ export class CaseCyclesService {
     const { openCount, closedCount } = countOpenAndClosed(cycle.cases)
     const { cases: _cases, _count, ...rest } = cycle
 
-    this.logSuccess('getCycleById', tenantId, id, {
+    this.log.success('getCycleById', tenantId, {
+      targetResourceId: id,
       caseCount: _count.cases,
       openCount,
       closedCount,
@@ -124,7 +129,12 @@ export class CaseCyclesService {
       createdBy: user.email,
     })
 
-    this.logSuccess('createCycle', user.tenantId, cycle.id, { cycleName: cycle.name }, user)
+    this.log.success('createCycle', user.tenantId, {
+      targetResourceId: cycle.id,
+      cycleName: cycle.name,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return { ...cycle, caseCount: 0, openCount: 0, closedCount: 0 }
   }
 
@@ -152,16 +162,13 @@ export class CaseCyclesService {
     await this.caseCyclesRepository.update(id, user.tenantId, updateData)
 
     const refreshed = await this.findCycleWithCountsOrThrow(id, user.tenantId)
-    this.logSuccess(
-      'updateCycle',
-      user.tenantId,
-      id,
-      {
-        updatedFields: Object.keys(dto),
-        autoDeactivated: updateData['status'] === CaseCycleStatus.CLOSED,
-      },
-      user
-    )
+    this.log.success('updateCycle', user.tenantId, {
+      targetResourceId: id,
+      updatedFields: Object.keys(dto),
+      autoDeactivated: updateData['status'] === CaseCycleStatus.CLOSED,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return mapCycleToRecord(refreshed)
   }
 
@@ -190,7 +197,11 @@ export class CaseCyclesService {
 
     const { openCount, closedCount } = countOpenAndClosed(existing.cases)
 
-    this.logSuccess('activateCycle', user.tenantId, id, undefined, user)
+    this.log.success('activateCycle', user.tenantId, {
+      targetResourceId: id,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return { ...result, caseCount: existing._count.cases, openCount, closedCount }
   }
 
@@ -206,16 +217,13 @@ export class CaseCyclesService {
       ? this.caseCyclesRepository.deleteCycleWithCasesTransaction(id, user.tenantId)
       : this.caseCyclesRepository.deleteCycle(id, user.tenantId))
 
-    this.logSuccess(
-      'deleteCycle',
-      user.tenantId,
-      id,
-      {
-        cycleName: existing.name,
-        casesUnlinked: existing._count.cases,
-      },
-      user
-    )
+    this.log.success('deleteCycle', user.tenantId, {
+      targetResourceId: id,
+      cycleName: existing.name,
+      casesUnlinked: existing._count.cases,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return { deleted: true }
   }
 
@@ -236,16 +244,13 @@ export class CaseCyclesService {
     })
 
     const refreshed = await this.findCycleWithCountsOrThrow(id, user.tenantId)
-    this.logSuccess(
-      'closeCycle',
-      user.tenantId,
-      id,
-      {
-        cycleName: existing.name,
-        caseCount: refreshed._count.cases,
-      },
-      user
-    )
+    this.log.success('closeCycle', user.tenantId, {
+      targetResourceId: id,
+      cycleName: existing.name,
+      caseCount: refreshed._count.cases,
+      actorEmail: user.email,
+      actorUserId: user.sub,
+    })
     return mapCycleToRecord(refreshed)
   }
 
@@ -289,7 +294,7 @@ export class CaseCyclesService {
   > {
     const cycle = await this.caseCyclesRepository.findFirstByIdAndTenantWithCases(id, tenantId)
     if (!cycle) {
-      this.logWarn(action, tenantId, id)
+      this.log.warn(action, tenantId, 'CaseCycle not found', { targetResourceId: id })
       throw new BusinessException(404, `Case cycle ${id} not found`, 'errors.caseCycles.notFound')
     }
     return cycle
@@ -413,43 +418,6 @@ export class CaseCyclesService {
   /* ---------------------------------------------------------------- */
   /* PRIVATE: Logging                                                  */
   /* ---------------------------------------------------------------- */
-
-  private logSuccess(
-    action: string,
-    tenantId: string,
-    resourceId?: string,
-    metadata?: Record<string, unknown>,
-    user?: JwtPayload
-  ): void {
-    this.appLogger.info(`CaseCycle ${action}`, {
-      feature: AppLogFeature.CASE_CYCLES,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      actorEmail: user?.email,
-      actorUserId: user?.sub,
-      targetResource: 'CaseCycle',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CaseCyclesService',
-      functionName: action,
-      metadata,
-    })
-  }
-
-  private logWarn(action: string, tenantId: string, resourceId?: string): void {
-    this.appLogger.warn(`CaseCycle ${action} failed`, {
-      feature: AppLogFeature.CASE_CYCLES,
-      action,
-      outcome: AppLogOutcome.FAILURE,
-      tenantId,
-      targetResource: 'CaseCycle',
-      targetResourceId: resourceId,
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'CaseCyclesService',
-      functionName: action,
-    })
-  }
 
   private logDenied(
     action: string,

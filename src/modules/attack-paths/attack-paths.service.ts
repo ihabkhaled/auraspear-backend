@@ -5,15 +5,11 @@ import {
   buildAttackPathOrderBy,
   buildAttackPathUpdateData,
 } from './attack-paths.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  AttackPathStatus,
-} from '../../common/enums'
+import { AppLogFeature, AttackPathStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { ServiceLogger } from '../../common/services/service-logger'
 import type { AttackPathRecord, AttackPathStats, PaginatedAttackPaths } from './attack-paths.types'
 import type { CreateAttackPathDto } from './dto/create-attack-path.dto'
 import type { UpdateAttackPathDto } from './dto/update-attack-path.dto'
@@ -23,11 +19,14 @@ import type { Prisma } from '@prisma/client'
 @Injectable()
 export class AttackPathsService {
   private readonly logger = new Logger(AttackPathsService.name)
+  private readonly log: ServiceLogger
 
   constructor(
     private readonly repository: AttackPathsRepository,
     private readonly appLogger: AppLoggerService
-  ) {}
+  ) {
+    this.log = new ServiceLogger(this.appLogger, AppLogFeature.ATTACK_PATHS, 'AttackPathsService')
+  }
 
   /* ---------------------------------------------------------------- */
   /* LIST (paginated, tenant-scoped)                                   */
@@ -43,26 +42,35 @@ export class AttackPathsService {
     status?: string,
     query?: string
   ): Promise<PaginatedAttackPaths> {
-    const where = buildAttackPathListWhere(tenantId, severity, status, query)
+    this.log.entry('listPaths', tenantId, { page, limit, severity, status, query })
 
-    const [paths, total] = await Promise.all([
-      this.repository.findManyWithTenant({
-        where,
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: buildAttackPathOrderBy(sortBy, sortOrder),
-      }),
-      this.repository.count(where),
-    ])
+    try {
+      const where = buildAttackPathListWhere(tenantId, severity, status, query)
 
-    const data = paths.map(p => ({
-      ...p,
-      tenantName: p.tenant.name,
-    }))
+      const [paths, total] = await Promise.all([
+        this.repository.findManyWithTenant({
+          where,
+          skip: (page - 1) * limit,
+          take: limit,
+          orderBy: buildAttackPathOrderBy(sortBy, sortOrder),
+        }),
+        this.repository.count(where),
+      ])
 
-    return {
-      data,
-      pagination: buildPaginationMeta(page, limit, total),
+      const data = paths.map(p => ({
+        ...p,
+        tenantName: p.tenant.name,
+      }))
+
+      this.log.success('listPaths', tenantId, { page, limit, total, returnedCount: data.length })
+
+      return {
+        data,
+        pagination: buildPaginationMeta(page, limit, total),
+      }
+    } catch (error: unknown) {
+      this.log.error('listPaths', tenantId, error)
+      throw error
     }
   }
 
@@ -71,23 +79,31 @@ export class AttackPathsService {
   /* ---------------------------------------------------------------- */
 
   async getPathById(id: string, tenantId: string): Promise<AttackPathRecord> {
-    const path = await this.repository.findFirstWithTenant({ id, tenantId })
+    this.log.entry('getPathById', tenantId, { attackPathId: id })
 
-    if (!path) {
-      this.appLogger.warn('Attack path not found', {
-        feature: AppLogFeature.ATTACK_PATHS,
-        action: 'getPathById',
-        className: 'AttackPathsService',
-        sourceType: AppLogSourceType.SERVICE,
-        outcome: AppLogOutcome.FAILURE,
-        metadata: { attackPathId: id, tenantId },
-      })
-      throw new BusinessException(404, `Attack path ${id} not found`, 'errors.attackPaths.notFound')
-    }
+    try {
+      const path = await this.repository.findFirstWithTenant({ id, tenantId })
 
-    return {
-      ...path,
-      tenantName: path.tenant.name,
+      if (!path) {
+        this.log.warn('getPathById', tenantId, 'Attack path not found', { attackPathId: id })
+        throw new BusinessException(
+          404,
+          `Attack path ${id} not found`,
+          'errors.attackPaths.notFound'
+        )
+      }
+
+      this.log.success('getPathById', tenantId, { attackPathId: id })
+
+      return {
+        ...path,
+        tenantName: path.tenant.name,
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('getPathById', tenantId, error)
+      }
+      throw error
     }
   }
 
@@ -96,23 +112,33 @@ export class AttackPathsService {
   /* ---------------------------------------------------------------- */
 
   async createPath(dto: CreateAttackPathDto, user: JwtPayload): Promise<AttackPathRecord> {
-    const result = await this.repository.createWithNumber({
-      tenantId: user.tenantId,
-      data: {
-        title: dto.title,
-        description: dto.description ?? null,
-        severity: dto.severity,
-        status: AttackPathStatus.ACTIVE,
-        stages: dto.stages as Prisma.InputJsonValue,
-        affectedAssets: dto.affectedAssets,
-        killChainCoverage: dto.killChainCoverage,
-        mitreTactics: dto.mitreTactics ?? [],
-        mitreTechniques: dto.mitreTechniques ?? [],
-      },
-    })
+    this.log.entry('createPath', user.tenantId, { title: dto.title, severity: dto.severity })
 
-    this.logSuccess('createPath', user.tenantId, { pathNumber: result.pathNumber, severity: result.severity })
-    return { ...result, tenantName: result.tenant.name }
+    try {
+      const result = await this.repository.createWithNumber({
+        tenantId: user.tenantId,
+        data: {
+          title: dto.title,
+          description: dto.description ?? null,
+          severity: dto.severity,
+          status: AttackPathStatus.ACTIVE,
+          stages: dto.stages as Prisma.InputJsonValue,
+          affectedAssets: dto.affectedAssets,
+          killChainCoverage: dto.killChainCoverage,
+          mitreTactics: dto.mitreTactics ?? [],
+          mitreTechniques: dto.mitreTechniques ?? [],
+        },
+      })
+
+      this.log.success('createPath', user.tenantId, {
+        pathNumber: result.pathNumber,
+        severity: result.severity,
+      })
+      return { ...result, tenantName: result.tenant.name }
+    } catch (error: unknown) {
+      this.log.error('createPath', user.tenantId, error)
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -124,19 +150,35 @@ export class AttackPathsService {
     dto: UpdateAttackPathDto,
     user: JwtPayload
   ): Promise<AttackPathRecord> {
-    await this.getPathById(id, user.tenantId)
-
-    const updated = await this.repository.updateMany({
-      where: { id, tenantId: user.tenantId },
-      data: buildAttackPathUpdateData(dto),
+    this.log.entry('updatePath', user.tenantId, {
+      attackPathId: id,
+      updatedFields: Object.keys(dto),
     })
 
-    if (updated.count === 0) {
-      throw new BusinessException(404, `Attack path ${id} not found`, 'errors.attackPaths.notFound')
-    }
+    try {
+      await this.getPathById(id, user.tenantId)
 
-    this.logSuccess('updatePath', user.tenantId, { attackPathId: id })
-    return this.getPathById(id, user.tenantId)
+      const updated = await this.repository.updateMany({
+        where: { id, tenantId: user.tenantId },
+        data: buildAttackPathUpdateData(dto),
+      })
+
+      if (updated.count === 0) {
+        throw new BusinessException(
+          404,
+          `Attack path ${id} not found`,
+          'errors.attackPaths.notFound'
+        )
+      }
+
+      this.log.success('updatePath', user.tenantId, { attackPathId: id })
+      return this.getPathById(id, user.tenantId)
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('updatePath', user.tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -144,30 +186,25 @@ export class AttackPathsService {
   /* ---------------------------------------------------------------- */
 
   async deletePath(id: string, tenantId: string, actor: string): Promise<{ deleted: boolean }> {
-    const existing = await this.getPathById(id, tenantId)
+    this.log.entry('deletePath', tenantId, { attackPathId: id, actorEmail: actor })
 
-    await this.repository.deleteMany({ id, tenantId })
+    try {
+      const existing = await this.getPathById(id, tenantId)
 
-    this.logSuccess('deletePath', tenantId, { attackPathId: id, pathNumber: existing.pathNumber, actorEmail: actor })
-    return { deleted: true }
-  }
+      await this.repository.deleteMany({ id, tenantId })
 
-  /* ---------------------------------------------------------------- */
-  /* LOGGING HELPERS                                                    */
-  /* ---------------------------------------------------------------- */
-
-  private logSuccess(action: string, tenantId: string, metadata?: Record<string, unknown>): void {
-    this.appLogger.info(`AttackPath: ${action}`, {
-      feature: AppLogFeature.ATTACK_PATHS,
-      action,
-      outcome: AppLogOutcome.SUCCESS,
-      tenantId,
-      targetResource: 'AttackPath',
-      sourceType: AppLogSourceType.SERVICE,
-      className: 'AttackPathsService',
-      functionName: action,
-      metadata,
-    })
+      this.log.success('deletePath', tenantId, {
+        attackPathId: id,
+        pathNumber: existing.pathNumber,
+        actorEmail: actor,
+      })
+      return { deleted: true }
+    } catch (error: unknown) {
+      if (!(error instanceof BusinessException)) {
+        this.log.error('deletePath', tenantId, error)
+      }
+      throw error
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -175,19 +212,28 @@ export class AttackPathsService {
   /* ---------------------------------------------------------------- */
 
   async getAttackPathStats(tenantId: string): Promise<AttackPathStats> {
-    const [activePaths, assetsResult, coverageResult] = await Promise.all([
-      this.repository.count({ tenantId, status: AttackPathStatus.ACTIVE }),
-      this.repository.aggregateSum(
-        { tenantId, status: AttackPathStatus.ACTIVE },
-        { affectedAssets: true }
-      ),
-      this.repository.aggregateAvg({ tenantId }, { killChainCoverage: true }),
-    ])
+    this.log.entry('getAttackPathStats', tenantId, {})
 
-    return {
-      activePaths,
-      assetsAtRisk: assetsResult._sum?.affectedAssets ?? 0,
-      avgKillChainCoverage: Math.round((coverageResult._avg?.killChainCoverage ?? 0) * 100) / 100,
+    try {
+      const [activePaths, assetsResult, coverageResult] = await Promise.all([
+        this.repository.count({ tenantId, status: AttackPathStatus.ACTIVE }),
+        this.repository.aggregateSum(
+          { tenantId, status: AttackPathStatus.ACTIVE },
+          { affectedAssets: true }
+        ),
+        this.repository.aggregateAvg({ tenantId }, { killChainCoverage: true }),
+      ])
+
+      this.log.success('getAttackPathStats', tenantId, { activePaths })
+
+      return {
+        activePaths,
+        assetsAtRisk: assetsResult._sum?.affectedAssets ?? 0,
+        avgKillChainCoverage: Math.round((coverageResult._avg?.killChainCoverage ?? 0) * 100) / 100,
+      }
+    } catch (error: unknown) {
+      this.log.error('getAttackPathStats', tenantId, error)
+      throw error
     }
   }
 }
