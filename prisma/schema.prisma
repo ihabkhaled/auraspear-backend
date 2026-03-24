@@ -539,6 +539,7 @@ model Tenant {
   osintSourceConfigs      OsintSourceConfig[]
   aiApprovalRequests      AiApprovalRequest[]
   aiExecutionFindings     AiExecutionFinding[]
+  aiAgentSchedules        AiAgentSchedule[]
 
   @@map("tenants")
 }
@@ -2333,4 +2334,48 @@ model AiExecutionFinding {
   @@index([tenantId, agentId])
   @@index([tenantId, findingType])
   @@map("ai_execution_findings")
+}
+
+// ─── AI Agent Schedules ───────────────────────────────────
+
+model AiAgentSchedule {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String?   @map("tenant_id") @db.Uuid
+  agentId             String    @map("agent_id") @db.VarChar(50)
+  seedKey             String    @unique @map("seed_key") @db.VarChar(100)
+  module              String    @db.VarChar(50)
+  cronExpression      String    @map("cron_expression") @db.VarChar(100)
+  timezone            String    @default("UTC") @db.VarChar(50)
+  isEnabled           Boolean   @default(false) @map("is_enabled")
+  isPaused            Boolean   @default(false) @map("is_paused")
+  executionMode       String    @default("suggest_only") @map("execution_mode") @db.VarChar(30)
+  riskMode            String    @default("low") @map("risk_mode") @db.VarChar(20)
+  approvalMode        String    @default("not_required") @map("approval_mode") @db.VarChar(30)
+  maxConcurrency      Int       @default(1) @map("max_concurrency")
+  allowOverlap        Boolean   @default(false) @map("allow_overlap")
+  dedupeWindowSeconds Int       @default(300) @map("dedupe_window_seconds")
+  providerPreference  String?   @map("provider_preference") @db.VarChar(50)
+  modelPreference     String?   @map("model_preference") @db.VarChar(100)
+  scopeJson           Json?     @map("scope_json")
+  isSystemDefault     Boolean   @default(false) @map("is_system_default")
+  lastRunAt           DateTime? @map("last_run_at")
+  nextRunAt           DateTime? @map("next_run_at")
+  lastStatus          String?   @map("last_status") @db.VarChar(20)
+  lastDurationMs      Int?      @map("last_duration_ms")
+  failureStreak       Int       @default(0) @map("failure_streak")
+  successStreak       Int       @default(0) @map("success_streak")
+  disabledReason      String?   @map("disabled_reason") @db.Text
+  createdBy           String?   @map("created_by") @db.VarChar(320)
+  updatedBy           String?   @map("updated_by") @db.VarChar(320)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([isEnabled, isPaused])
+  @@index([module])
+  @@index([agentId])
+  @@index([nextRunAt])
+  @@map("ai_agent_schedules")
 }

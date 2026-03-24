@@ -4,6 +4,9 @@ import { AgentSchedulerService } from './agent-scheduler.service'
 import { OrchestratorController } from './orchestrator.controller'
 import { OrchestratorRepository } from './orchestrator.repository'
 import { OrchestratorService } from './orchestrator.service'
+import { ScheduleController } from './schedule/schedule.controller'
+import { ScheduleRepository } from './schedule/schedule.repository'
+import { ScheduleService } from './schedule/schedule.service'
 import { PrismaModule } from '../../../prisma/prisma.module'
 import { AgentConfigModule } from '../../agent-config/agent-config.module'
 import { AppLogsModule } from '../../app-logs/app-logs.module'
@@ -18,13 +21,21 @@ import { UsageBudgetModule } from '../usage-budget/usage-budget.module'
     AppLogsModule,
     PrismaModule,
   ],
-  controllers: [OrchestratorController],
+  controllers: [OrchestratorController, ScheduleController],
   providers: [
     OrchestratorRepository,
     OrchestratorService,
     AgentEventListenerService,
     AgentSchedulerService,
+    ScheduleRepository,
+    ScheduleService,
   ],
-  exports: [OrchestratorService, AgentEventListenerService, AgentSchedulerService],
+  exports: [
+    OrchestratorService,
+    AgentEventListenerService,
+    AgentSchedulerService,
+    ScheduleService,
+    ScheduleRepository,
+  ],
 })
 export class OrchestratorModule {}

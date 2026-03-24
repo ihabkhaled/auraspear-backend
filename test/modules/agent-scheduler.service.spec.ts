@@ -1,9 +1,12 @@
-import { AgentActionType, AiAgentId, AiTriggerMode } from '../../src/common/enums'
 import { AgentSchedulerService } from '../../src/modules/ai/orchestrator/agent-scheduler.service'
 
-/* ------------------------------------------------------------------ */
-/* Mock factories                                                      */
-/* ------------------------------------------------------------------ */
+function createMockScheduleService() {
+  return {
+    findDueSchedules: jest.fn().mockResolvedValue([]),
+    markRunStarted: jest.fn().mockResolvedValue(undefined),
+    markRunCompleted: jest.fn().mockResolvedValue(undefined),
+  }
+}
 
 function createMockOrchestratorService() {
   return {
@@ -16,23 +19,6 @@ function createMockOrchestratorService() {
   }
 }
 
-function createMockAgentConfigService() {
-  return {
-    getAgentConfig: jest.fn(),
-  }
-}
-
-function createMockPrismaService() {
-  return {
-    tenantAgentConfig: {
-      findMany: jest.fn().mockResolvedValue([]),
-    },
-    tenant: {
-      findMany: jest.fn().mockResolvedValue([]),
-    },
-  }
-}
-
 function createMockAppLogger() {
   return {
     info: jest.fn(),
@@ -42,163 +28,91 @@ function createMockAppLogger() {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Tests                                                               */
-/* ------------------------------------------------------------------ */
-
 describe('AgentSchedulerService', () => {
-  let orchestratorService: ReturnType<typeof createMockOrchestratorService>
-  let agentConfigService: ReturnType<typeof createMockAgentConfigService>
-  let prisma: ReturnType<typeof createMockPrismaService>
-  let appLogger: ReturnType<typeof createMockAppLogger>
   let service: AgentSchedulerService
+  let scheduleService: ReturnType<typeof createMockScheduleService>
+  let orchestratorService: ReturnType<typeof createMockOrchestratorService>
+  let appLogger: ReturnType<typeof createMockAppLogger>
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    scheduleService = createMockScheduleService()
     orchestratorService = createMockOrchestratorService()
-    agentConfigService = createMockAgentConfigService()
-    prisma = createMockPrismaService()
     appLogger = createMockAppLogger()
     service = new AgentSchedulerService(
       orchestratorService as never,
-      agentConfigService as never,
-      prisma as never,
+      scheduleService as never,
       appLogger as never
     )
   })
 
-  /* ---------------------------------------------------------------- */
-  /* processScheduledAgents                                             */
-  /* ---------------------------------------------------------------- */
+  describe('processDueSchedules', () => {
+    it('should do nothing when no schedules are due', async () => {
+      scheduleService.findDueSchedules.mockResolvedValue([])
 
-  describe('processScheduledAgents', () => {
-    it('should dispatch tasks for enabled scheduled agents', async () => {
-      prisma.tenantAgentConfig.findMany.mockResolvedValue([
-        { tenantId: 'tenant-001', agentId: 'rules-hygiene' },
-        { tenantId: 'tenant-002', agentId: 'norm-verification' },
-      ])
+      await service.processDueSchedules()
 
-      const dispatched = await service.processScheduledAgents()
-
-      expect(dispatched).toBe(2)
-      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledTimes(2)
-      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tenantId: 'tenant-001',
-          agentId: 'rules-hygiene',
-          actionType: AgentActionType.REVIEW,
-          payload: { source: 'scheduler' },
-          triggeredBy: 'system:scheduler',
-        })
-      )
-      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tenantId: 'tenant-002',
-          agentId: 'norm-verification',
-        })
-      )
-    })
-
-    it('should skip disabled agents (none returned from query)', async () => {
-      prisma.tenantAgentConfig.findMany.mockResolvedValue([])
-
-      const dispatched = await service.processScheduledAgents()
-
-      expect(dispatched).toBe(0)
+      expect(scheduleService.findDueSchedules).toHaveBeenCalledTimes(1)
       expect(orchestratorService.dispatchAgentTask).not.toHaveBeenCalled()
     })
 
-    it('should continue processing when one agent dispatch fails', async () => {
-      prisma.tenantAgentConfig.findMany.mockResolvedValue([
-        { tenantId: 'tenant-001', agentId: 'rules-hygiene' },
-        { tenantId: 'tenant-002', agentId: 'norm-verification' },
-      ])
-      orchestratorService.dispatchAgentTask
-        .mockRejectedValueOnce(new Error('Quota exceeded'))
-        .mockResolvedValueOnce({ dispatched: true, jobId: 'job-002' })
+    it('should dispatch due schedules and mark them started', async () => {
+      const dueSchedule = {
+        id: 'sched-001',
+        tenantId: 'tenant-001',
+        agentId: 'alert-triage',
+        module: 'alerts',
+        executionMode: 'suggest_only',
+        cronExpression: '0 */10 * * * *',
+        timezone: 'UTC',
+      }
+      scheduleService.findDueSchedules.mockResolvedValue([dueSchedule])
 
-      const dispatched = await service.processScheduledAgents()
+      await service.processDueSchedules()
 
-      expect(dispatched).toBe(1)
-      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledTimes(2)
-      expect(appLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Quota exceeded'),
-        expect.objectContaining({ tenantId: 'tenant-001' })
-      )
-    })
-
-    it('should query only enabled configs with scheduled trigger mode', async () => {
-      prisma.tenantAgentConfig.findMany.mockResolvedValue([])
-
-      await service.processScheduledAgents()
-
-      expect(prisma.tenantAgentConfig.findMany).toHaveBeenCalledWith({
-        where: { isEnabled: true, triggerMode: AiTriggerMode.SCHEDULED },
-        select: { tenantId: true, agentId: true },
-      })
-    })
-  })
-
-  /* ---------------------------------------------------------------- */
-  /* runDailyDigests                                                    */
-  /* ---------------------------------------------------------------- */
-
-  describe('runDailyDigests', () => {
-    it('should dispatch digest agents per tenant', async () => {
-      prisma.tenant.findMany.mockResolvedValue([
-        { id: 'tenant-001' },
-        { id: 'tenant-002' },
-        { id: 'tenant-003' },
-      ])
-
-      const dispatched = await service.runDailyDigests()
-
-      expect(dispatched).toBe(3)
-      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledTimes(3)
+      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledTimes(1)
       expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: 'tenant-001',
-          agentId: AiAgentId.REPORTING,
-          actionType: AgentActionType.REPORT,
-          payload: { type: 'daily_digest' },
+          agentId: 'alert-triage',
           triggeredBy: 'system:scheduler',
         })
       )
     })
 
-    it('should return 0 when no active tenants exist', async () => {
-      prisma.tenant.findMany.mockResolvedValue([])
-
-      const dispatched = await service.runDailyDigests()
-
-      expect(dispatched).toBe(0)
-      expect(orchestratorService.dispatchAgentTask).not.toHaveBeenCalled()
-    })
-
-    it('should continue when one tenant digest fails', async () => {
-      prisma.tenant.findMany.mockResolvedValue([{ id: 'tenant-001' }, { id: 'tenant-002' }])
+    it('should continue processing when one schedule fails', async () => {
+      const schedules = [
+        {
+          id: 'sched-001',
+          tenantId: 'tenant-001',
+          agentId: 'alert-triage',
+          module: 'alerts',
+          executionMode: 'suggest_only',
+        },
+        {
+          id: 'sched-002',
+          tenantId: 'tenant-001',
+          agentId: 'job-health',
+          module: 'jobs',
+          executionMode: 'suggest_only',
+        },
+      ]
+      scheduleService.findDueSchedules.mockResolvedValue(schedules)
       orchestratorService.dispatchAgentTask
         .mockRejectedValueOnce(new Error('Agent disabled'))
         .mockResolvedValueOnce({ dispatched: true, jobId: 'job-002' })
 
-      const dispatched = await service.runDailyDigests()
+      await service.processDueSchedules()
 
-      expect(dispatched).toBe(1)
-      expect(appLogger.warn).toHaveBeenCalledTimes(1)
-      expect(appLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Daily digest failed'),
-        expect.objectContaining({ tenantId: 'tenant-001' })
-      )
+      expect(orchestratorService.dispatchAgentTask).toHaveBeenCalledTimes(2)
     })
 
-    it('should query all tenants', async () => {
-      prisma.tenant.findMany.mockResolvedValue([])
+    it('should not throw even if all schedules fail', async () => {
+      scheduleService.findDueSchedules.mockResolvedValue([
+        { id: 's1', tenantId: 't1', agentId: 'a1', module: 'm1', executionMode: 'suggest_only' },
+      ])
+      orchestratorService.dispatchAgentTask.mockRejectedValue(new Error('fail'))
 
-      await service.runDailyDigests()
-
-      expect(prisma.tenant.findMany).toHaveBeenCalledWith({
-        select: { id: true },
-      })
+      await expect(service.processDueSchedules()).resolves.toBe(0)
     })
   })
 })

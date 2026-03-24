@@ -1,15 +1,18 @@
 import { Injectable } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { OrchestratorService } from './orchestrator.service'
-import { AgentActionType, AiAgentId, AiTriggerMode, AppLogFeature } from '../../../common/enums'
+import { ScheduleService } from './schedule/schedule.service'
+import { AgentActionType, AppLogFeature } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
-import { PrismaService } from '../../../prisma/prisma.service'
-import { AgentConfigService } from '../../agent-config/agent-config.service'
+import type { ScheduleRecord } from './schedule/schedule.types'
 
 /**
- * Processes scheduled agent tasks and daily digests.
- * Intended to be called from a cron job or scheduler module.
+ * Infrastructure heartbeat that polls due schedules from the database
+ * and dispatches them through the orchestrator.
+ *
+ * All business schedules are stored in the `ai_agent_schedules` table.
+ * This service is the ONLY place that uses @Cron — a single 30-second tick.
  */
 @Injectable()
 export class AgentSchedulerService {
@@ -17,121 +20,93 @@ export class AgentSchedulerService {
 
   constructor(
     private readonly orchestratorService: OrchestratorService,
-    private readonly agentConfigService: AgentConfigService,
-    private readonly prisma: PrismaService,
+    private readonly scheduleService: ScheduleService,
     private readonly appLogger: AppLoggerService
   ) {
     this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI, 'AgentSchedulerService')
   }
 
   /**
-   * Iterates all tenant agent configs with `triggerMode: 'scheduled'`
-   * and dispatches their tasks through the orchestrator.
+   * Infrastructure heartbeat — every 30 seconds.
+   * Queries all due schedules from the DB and dispatches them.
    */
-  @Cron('0 */15 * * * *')
-  async processScheduledAgents(): Promise<number> {
-    const scheduledConfigs = await this.prisma.tenantAgentConfig.findMany({
-      where: { isEnabled: true, triggerMode: AiTriggerMode.SCHEDULED },
-      select: { tenantId: true, agentId: true },
-    })
+  @Cron('*/30 * * * * *')
+  async processDueSchedules(): Promise<number> {
+    const dueSchedules = await this.scheduleService.findDueSchedules()
+
+    if (dueSchedules.length === 0) {
+      return 0
+    }
 
     const results = await Promise.allSettled(
-      scheduledConfigs.map(config =>
-        this.orchestratorService.dispatchAgentTask({
-          tenantId: config.tenantId,
-          agentId: config.agentId,
-          actionType: AgentActionType.REVIEW,
-          payload: { source: 'scheduler' },
-          triggeredBy: 'system:scheduler',
-        })
-      )
+      dueSchedules.map(schedule => this.dispatchSchedule(schedule))
     )
 
     const dispatched = this.countSuccessful(results)
 
     for (let index = 0; index < results.length; index += 1) {
       const result = results.at(index)
-      const config = scheduledConfigs.at(index)
-      if (result?.status === 'rejected' && config) {
+      const schedule = dueSchedules.at(index)
+      if (result?.status === 'rejected' && schedule) {
         const errorMessage =
           result.reason instanceof Error ? result.reason.message : 'Unknown error'
         this.log.warn(
-          'processScheduledAgents',
-          config.tenantId,
-          `Failed to dispatch agent ${config.agentId}: ${errorMessage}`,
-          { agentId: config.agentId, error: errorMessage }
+          'processDueSchedules',
+          schedule.tenantId ?? 'system',
+          `Failed to dispatch schedule ${schedule.id} (${schedule.seedKey}): ${errorMessage}`,
+          { scheduleId: schedule.id, seedKey: schedule.seedKey, error: errorMessage }
         )
       }
     }
 
-    this.log.success('processScheduledAgents', 'system', {
-      totalConfigs: scheduledConfigs.length,
-      dispatched,
-    })
+    if (dispatched > 0) {
+      this.log.success('processDueSchedules', 'system', {
+        totalDue: dueSchedules.length,
+        dispatched,
+      })
+    }
 
     return dispatched
   }
 
-  /**
-   * Dispatches the reporting agent for each active tenant.
-   * Intended to run once per day to generate daily digest reports.
-   */
-  @Cron('0 0 6 * * *')
-  async runDailyDigests(): Promise<number> {
-    const tenants = await this.prisma.tenant.findMany({
-      select: { id: true },
-    })
+  /* ---------------------------------------------------------------- */
+  /* PRIVATE: Dispatch a single schedule                               */
+  /* ---------------------------------------------------------------- */
 
-    const results = await Promise.allSettled(
-      tenants.map(tenant =>
-        this.orchestratorService.dispatchAgentTask({
-          tenantId: tenant.id,
-          agentId: AiAgentId.REPORTING,
-          actionType: AgentActionType.REPORT,
-          payload: { type: 'daily_digest' },
-          triggeredBy: 'system:scheduler',
-        })
-      )
+  private async dispatchSchedule(schedule: ScheduleRecord): Promise<void> {
+    const startTime = Date.now()
+
+    // Mark run started and compute next run time
+    await this.scheduleService.markRunStarted(
+      schedule.id,
+      schedule.cronExpression,
+      schedule.timezone
     )
 
-    for (let index = 0; index < results.length; index += 1) {
-      const result = results.at(index)
-      const tenant = tenants.at(index)
-      if (result?.status === 'rejected' && tenant) {
-        const errorMessage =
-          result.reason instanceof Error ? result.reason.message : 'Unknown error'
-        this.log.warn('runDailyDigests', tenant.id, `Daily digest failed: ${errorMessage}`, {
-          error: errorMessage,
-        })
-      }
+    try {
+      const effectiveTenantId = schedule.tenantId ?? 'system'
+
+      await this.orchestratorService.dispatchAgentTask({
+        tenantId: effectiveTenantId,
+        agentId: schedule.agentId,
+        actionType: AgentActionType.REVIEW,
+        payload: {
+          source: 'scheduler:heartbeat',
+          scheduleId: schedule.id,
+          module: schedule.module,
+          executionMode: schedule.executionMode,
+          riskMode: schedule.riskMode,
+        },
+        triggeredBy: 'system:scheduler',
+      })
+
+      const durationMs = Date.now() - startTime
+      await this.scheduleService.markRunCompleted(schedule.id, 'completed', durationMs)
+    } catch (error) {
+      const durationMs = Date.now() - startTime
+      await this.scheduleService.markRunCompleted(schedule.id, 'failed', durationMs)
+      throw error
     }
-
-    return this.countSuccessful(results)
-  }
-
-  /**
-   * Dispatches the provider-health agent for all tenants where it is enabled.
-   * Runs every 5 minutes to monitor AI provider availability.
-   */
-  @Cron('0 */5 * * * *')
-  async checkProviderHealth(): Promise<number> {
-    const tenants = await this.prisma.tenant.findMany({
-      select: { id: true },
-    })
-
-    const results = await Promise.allSettled(
-      tenants.map(tenant =>
-        this.orchestratorService.dispatchAgentTask({
-          tenantId: tenant.id,
-          agentId: AiAgentId.PROVIDER_HEALTH,
-          actionType: AgentActionType.VALIDATE,
-          payload: { source: 'scheduler:health-check' },
-          triggeredBy: 'system:scheduler',
-        })
-      )
-    )
-
-    return this.countSuccessful(results)
   }
 
   /* ---------------------------------------------------------------- */
