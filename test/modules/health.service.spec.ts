@@ -2,29 +2,25 @@ import { HealthStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { HealthService } from '../../src/modules/health/health.service'
 
-jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => ({
-    ping: jest.fn().mockResolvedValue('PONG'),
-    on: jest.fn(),
-  }))
-})
+const mockRedis = {
+  status: 'ready' as const,
+  ping: jest.fn().mockResolvedValue('PONG'),
+  set: jest.fn().mockResolvedValue('OK'),
+  get: jest.fn().mockResolvedValue(null),
+  del: jest.fn().mockResolvedValue(1),
+  exists: jest.fn().mockResolvedValue(0),
+  setex: jest.fn().mockResolvedValue('OK'),
+  expire: jest.fn().mockResolvedValue(1),
+  info: jest.fn().mockResolvedValue('redis_version:7.0.0'),
+  quit: jest.fn().mockResolvedValue('OK'),
+  on: jest.fn().mockReturnThis(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
-}
-
-const mockConfigService = {
-  get: jest.fn((key: string, defaultValue?: unknown) => {
-    const config: Record<string, unknown> = {
-      REDIS_HOST: 'localhost',
-      REDIS_PORT: 6379,
-      REDIS_PASSWORD: '',
-    }
-    return config[key] ?? defaultValue
-  }),
 }
 
 function createMockRepository() {
@@ -46,7 +42,7 @@ function createService(
 ) {
   return new HealthService(
     repository as never,
-    mockConfigService as never,
+    mockRedis as never,
     connectorsService as never,
     mockAppLogger as never
   )

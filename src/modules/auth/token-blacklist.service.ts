@@ -1,5 +1,4 @@
-import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import Redis from 'ioredis'
 import {
   REFRESH_FAMILY_PREFIX,
@@ -13,33 +12,16 @@ import {
 } from './token-blacklist.utilities'
 import { AppLogOutcome, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { REDIS_CLIENT } from '../../redis'
 
 @Injectable()
-export class TokenBlacklistService implements OnModuleDestroy {
+export class TokenBlacklistService {
   private readonly logger = new Logger(TokenBlacklistService.name)
-  private readonly redis: Redis
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly appLogger: AppLoggerService
-  ) {
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
-    const port = this.configService.get<number>('REDIS_PORT', 6379)
-    const password = this.configService.get<string>('REDIS_PASSWORD', '')
-
-    this.redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      connectTimeout: 5000,
-      maxRetriesPerRequest: 1,
-      retryStrategy: () => null,
-    })
-
-    this.redis.on('error', (error: Error) => {
-      this.logger.warn(`Redis connection error in TokenBlacklistService: ${error.message}`)
-    })
-  }
+  ) {}
 
   async blacklist(jti: string, expSeconds: number): Promise<void> {
     try {
@@ -55,7 +37,12 @@ export class TokenBlacklistService implements OnModuleDestroy {
       this.logger.warn(`Failed to blacklist token ${jti}: ${extractErrorMessage(error)}`)
       this.appLogger.error(
         'Failed to blacklist token',
-        buildBlacklistLogContext('blacklist', AppLogOutcome.FAILURE, undefined, extractErrorStack(error))
+        buildBlacklistLogContext(
+          'blacklist',
+          AppLogOutcome.FAILURE,
+          undefined,
+          extractErrorStack(error)
+        )
       )
     }
   }
@@ -204,14 +191,8 @@ export class TokenBlacklistService implements OnModuleDestroy {
       const key = `${REFRESH_FAMILY_PREFIX}${family}`
       await this.redis.del(key)
     } catch (error) {
-      this.logger.warn(
-        `Failed to delete family key for ${family}: ${extractErrorMessage(error)}`
-      )
+      this.logger.warn(`Failed to delete family key for ${family}: ${extractErrorMessage(error)}`)
     }
-  }
-
-  onModuleDestroy(): void {
-    this.redis.disconnect()
   }
 
   private async performFamilyInvalidation(family: string): Promise<void> {

@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import { Interval } from '@nestjs/schedule'
 import Redis from 'ioredis'
+import { REDIS_CLIENT } from '../../redis'
 import { JobStatus, JobType } from './enums/job.enums'
 import {
   JOB_LOCK_PREFIX,
@@ -31,7 +32,6 @@ import type { Job } from '@prisma/client'
 @Injectable()
 export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobProcessorService.name)
-  private readonly redis: Redis
   private readonly handlers = new Map<JobType, JobHandler>()
   private readonly concurrency: number
   private activeJobs = 0
@@ -39,6 +39,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
   private redisConnected = false
 
   constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly configService: ConfigService,
     private readonly jobService: JobService,
     private readonly jobRepository: JobRepository,
@@ -47,25 +48,27 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     @Inject(forwardRef(() => AgentEventListenerService))
     private readonly agentEventListener: AgentEventListenerService | null
   ) {
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
-    const port = this.configService.get<number>('REDIS_PORT', 6379)
-    const password = this.configService.get<string>('REDIS_PASSWORD', '')
-
-    this.redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      connectTimeout: 5000,
-      maxRetriesPerRequest: 1,
-      retryStrategy: () => null,
-    })
-
-    this.setupRedisListeners(host, port)
     this.concurrency = this.configService.get<number>('JOB_PROCESSOR_CONCURRENCY', 5)
     this.registerDefaultHandlers()
   }
 
   onModuleInit(): void {
+    this.redisConnected = this.redis.status === 'ready'
+
+    this.redis.on('connect', () => {
+      this.redisConnected = true
+    })
+
+    this.redis.on('error', () => {
+      this.redisConnected = false
+    })
+
+    this.redis.on('close', () => {
+      if (!this.shuttingDown) {
+        this.redisConnected = false
+      }
+    })
+
     this.appLogger.info('Job processor service initialized', {
       feature: AppLogFeature.JOBS,
       action: 'init',
@@ -78,6 +81,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
         pollIntervalMs: POLL_INTERVAL_MS,
         staleRecoveryIntervalMs: STALE_RECOVERY_INTERVAL_MS,
         registeredHandlers: [...this.handlers.keys()],
+        redisConnected: this.redisConnected,
       },
     })
   }
@@ -158,7 +162,6 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.shuttingDown = true
-    this.redis.disconnect()
     this.appLogger.info('Job processor service shutting down', {
       feature: AppLogFeature.JOBS,
       action: 'shutdown',
@@ -378,60 +381,6 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
   /* ---------------------------------------------------------------- */
   /* PRIVATE: Setup                                                    */
   /* ---------------------------------------------------------------- */
-
-  private setupRedisListeners(host: string, port: number): void {
-    this.redis.on('connect', () => {
-      this.redisConnected = true
-      this.logRedisConnected(host, port)
-    })
-
-    this.redis.on('error', (error: Error) => {
-      this.redisConnected = false
-      this.logRedisError(error, host, port)
-    })
-
-    this.redis.on('close', () => {
-      if (!this.shuttingDown) {
-        this.redisConnected = false
-        this.logRedisClosed()
-      }
-    })
-  }
-
-  private logRedisConnected(host: string, port: number): void {
-    this.appLogger.info('Redis connected for job processor', {
-      feature: AppLogFeature.JOBS,
-      action: 'redisConnect',
-      outcome: AppLogOutcome.SUCCESS,
-      sourceType: AppLogSourceType.JOB,
-      className: 'JobProcessorService',
-      functionName: 'constructor',
-      metadata: { host, port },
-    })
-  }
-
-  private logRedisError(error: Error, host: string, port: number): void {
-    this.appLogger.error(`Redis connection error in JobProcessor: ${error.message}`, {
-      feature: AppLogFeature.JOBS,
-      action: 'redisError',
-      outcome: AppLogOutcome.FAILURE,
-      sourceType: AppLogSourceType.JOB,
-      className: 'JobProcessorService',
-      functionName: 'constructor',
-      metadata: { error: error.message, host, port },
-    })
-  }
-
-  private logRedisClosed(): void {
-    this.appLogger.warn('Redis connection closed unexpectedly', {
-      feature: AppLogFeature.JOBS,
-      action: 'redisClose',
-      outcome: AppLogOutcome.WARNING,
-      sourceType: AppLogSourceType.JOB,
-      className: 'JobProcessorService',
-      functionName: 'constructor',
-    })
-  }
 
   private registerDefaultHandlers(): void {
     const jobTypes = Object.values(JobType)

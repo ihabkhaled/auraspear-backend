@@ -1,14 +1,19 @@
-const mockRedis = {
-  set: jest.fn(),
-  exists: jest.fn(),
-  ping: jest.fn(),
-  disconnect: jest.fn(),
-  on: jest.fn(),
-}
-
-jest.mock('ioredis', () => jest.fn().mockImplementation(() => mockRedis))
-
 import { TokenBlacklistService } from '../../src/modules/auth/token-blacklist.service'
+
+const mockRedis = {
+  status: 'ready' as const,
+  ping: jest.fn().mockResolvedValue('PONG'),
+  set: jest.fn().mockResolvedValue('OK'),
+  get: jest.fn().mockResolvedValue(null),
+  del: jest.fn().mockResolvedValue(1),
+  exists: jest.fn().mockResolvedValue(0),
+  setex: jest.fn().mockResolvedValue('OK'),
+  expire: jest.fn().mockResolvedValue(1),
+  info: jest.fn().mockResolvedValue('redis_version:7.0.0'),
+  quit: jest.fn().mockResolvedValue('OK'),
+  on: jest.fn().mockReturnThis(),
+  disconnect: jest.fn(),
+}
 
 const mockAppLogger = {
   info: jest.fn(),
@@ -17,23 +22,12 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-const mockConfigService = {
-  get: jest.fn((key: string, defaultValue?: unknown) => {
-    const config: Record<string, unknown> = {
-      REDIS_HOST: 'localhost',
-      REDIS_PORT: 6379,
-      REDIS_PASSWORD: '',
-    }
-    return config[key] ?? defaultValue
-  }),
-}
-
 describe('TokenBlacklistService', () => {
   let service: TokenBlacklistService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    service = new TokenBlacklistService(mockConfigService as never, mockAppLogger as never)
+    service = new TokenBlacklistService(mockRedis as never, mockAppLogger as never)
   })
 
   /* ------------------------------------------------------------------ */
@@ -201,18 +195,6 @@ describe('TokenBlacklistService', () => {
           action: 'isRedisHealthy',
         })
       )
-    })
-  })
-
-  /* ------------------------------------------------------------------ */
-  /* onModuleDestroy                                                     */
-  /* ------------------------------------------------------------------ */
-
-  describe('onModuleDestroy', () => {
-    it('should call redis.disconnect()', () => {
-      service.onModuleDestroy()
-
-      expect(mockRedis.disconnect).toHaveBeenCalledTimes(1)
     })
   })
 })

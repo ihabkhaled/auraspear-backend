@@ -802,6 +802,10 @@ Subject max length: 100 characters. No sentence-case, start-case, PascalCase, or
 26. **Every FK field and every field used in `where` filters must have an `@@index`** — Especially `tenantId` on high-traffic tables. `@unique` fields already have implicit indexes.
 27. **Dashboard analytics MUST stay query-driven and reusable** — Extend shared dashboard contracts and module utilities before adding endpoint-specific shaping in controllers or services.
 28. **Operational metrics changes MUST ship with tests and docs** — New dashboards, reports, session controls, or role-aware admin flows must include validation coverage plus README/INSTALL/docs updates when contributor workflows or product behavior change.
+29. **NEVER instantiate Redis directly with `new Redis()`** — Always inject the shared Redis client via `@Inject(REDIS_CLIENT)` from `src/redis`. The `RedisModule` is `@Global()` and provides a singleton connection. Creating separate Redis connections wastes resources, duplicates config, and makes connection management inconsistent. Import: `import { REDIS_CLIENT } from '../../redis'` and `import Redis from 'ioredis'` (for the type only).
+30. **NEVER hardcode AI agent IDs as string literals** — Use `AiAgentId` enum from `src/common/enums/ai-agent-config.enum.ts`. Write `AiAgentId.ALERT_TRIAGE` not `'alert-triage'`.
+31. **AI event listeners MUST be fire-and-forget** — Use `void this.agentEventListener.onX()` pattern wrapped in try-catch. AI failures must NEVER block core operations (alert creation, incident escalation, job processing). Use `@Optional()` + `@Inject(forwardRef(...))` for graceful degradation when AI module is unavailable.
+32. **Agent automation dispatch MUST go through OrchestratorService** — Never call AI directly from event listeners or schedulers. The orchestrator validates: agent enabled, automation mode, budget/quota, provider availability, and approval requirements before enqueuing jobs.
 
 ---
 

@@ -54,6 +54,7 @@ import { UsersModule } from './modules/users/users.module'
 import { UsersControlModule } from './modules/users-control/users-control.module'
 import { VulnerabilitiesModule } from './modules/vulnerabilities/vulnerabilities.module'
 import { PrismaModule } from './prisma/prisma.module'
+import { RedisModule } from './redis'
 
 @Module({
   controllers: [AppController],
@@ -88,6 +89,9 @@ import { PrismaModule } from './prisma/prisma.module'
 
     // Database
     PrismaModule,
+
+    // Redis (shared singleton — imported globally)
+    RedisModule,
 
     // Feature modules
     AgentConfigModule,

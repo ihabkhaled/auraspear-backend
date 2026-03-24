@@ -1,5 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import Redis from 'ioredis'
 import { HealthRepository } from './health.repository'
 import {
@@ -12,45 +11,23 @@ import {
   determineOverallStatus,
   extractErrorMessage,
 } from './health.utilities'
-import {
-  AppLogFeature,
-  AppLogOutcome,
-  AppLogSourceType,
-  HealthStatus,
-} from '../../common/enums'
+import { AppLogFeature, AppLogOutcome, AppLogSourceType, HealthStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { REDIS_CLIENT } from '../../redis'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
 
 @Injectable()
 export class HealthService {
   private readonly logger = new Logger(HealthService.name)
-  private readonly redis: Redis
 
   constructor(
     private readonly repository: HealthRepository,
-    private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly connectorsService: ConnectorsService,
     private readonly appLogger: AppLoggerService
-  ) {
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
-    const port = this.configService.get<number>('REDIS_PORT', 6379)
-    const password = this.configService.get<string>('REDIS_PASSWORD', '')
-
-    this.redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      connectTimeout: 5000,
-      maxRetriesPerRequest: 1,
-      retryStrategy: () => null,
-    })
-
-    this.redis.on('error', () => {
-      // Suppress connection errors — checked in health check
-    })
-  }
+  ) {}
 
   async getOverallHealthOrThrow(): Promise<OverallHealth> {
     const health = await this.getOverallHealth()
