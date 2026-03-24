@@ -73,7 +73,7 @@ describe('AgentEventListenerService', () => {
 
       await expect(service.onAlertCreated(TENANT_ID, 'alert-123')).resolves.toBeUndefined()
 
-      expect(appLogger.warn).toHaveBeenCalledWith(
+      expect(appLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('onAlertCreated'),
         expect.objectContaining({ tenantId: TENANT_ID })
       )
@@ -84,9 +84,9 @@ describe('AgentEventListenerService', () => {
 
       await service.onAlertCreated(TENANT_ID, 'alert-456')
 
-      expect(appLogger.warn).toHaveBeenCalledTimes(1)
-      expect(appLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Connection refused'),
+      expect(appLogger.error).toHaveBeenCalledTimes(1)
+      expect(appLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('onAlertCreated failed'),
         expect.objectContaining({
           metadata: expect.objectContaining({
             alertId: 'alert-456',
@@ -122,7 +122,7 @@ describe('AgentEventListenerService', () => {
         service.onIncidentStatusChanged(TENANT_ID, 'incident-001', 'escalated')
       ).resolves.toBeUndefined()
 
-      expect(appLogger.warn).toHaveBeenCalledTimes(1)
+      expect(appLogger.error).toHaveBeenCalledTimes(1)
     })
   })
 

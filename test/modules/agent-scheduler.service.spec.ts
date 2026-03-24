@@ -186,7 +186,7 @@ describe('AgentSchedulerService', () => {
       expect(dispatched).toBe(1)
       expect(appLogger.warn).toHaveBeenCalledTimes(1)
       expect(appLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('tenant-001'),
+        expect.stringContaining('Daily digest failed'),
         expect.objectContaining({ tenantId: 'tenant-001' })
       )
     })
