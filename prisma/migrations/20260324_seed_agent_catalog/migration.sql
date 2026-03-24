@@ -1,3 +1,49 @@
+-- Ensure tenant_agent_configs table exists before seeding.
+-- The table is created by 20260322_add_agent_config_osint_approval, but on fresh DBs
+-- Prisma may encounter ordering issues. This is idempotent.
+CREATE TABLE IF NOT EXISTS "tenant_agent_configs" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "agent_id" VARCHAR(50) NOT NULL,
+    "is_enabled" BOOLEAN NOT NULL DEFAULT true,
+    "provider_mode" VARCHAR(100) NOT NULL DEFAULT 'default',
+    "model" VARCHAR(255),
+    "temperature" DOUBLE PRECISION NOT NULL DEFAULT 0.7,
+    "max_tokens_per_call" INTEGER NOT NULL DEFAULT 2048,
+    "system_prompt" TEXT,
+    "prompt_suffix" TEXT,
+    "index_patterns" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "tokens_per_hour" INTEGER NOT NULL DEFAULT 50000,
+    "tokens_per_day" INTEGER NOT NULL DEFAULT 500000,
+    "tokens_per_month" INTEGER NOT NULL DEFAULT 5000000,
+    "tokens_used_hour" INTEGER NOT NULL DEFAULT 0,
+    "tokens_used_day" INTEGER NOT NULL DEFAULT 0,
+    "tokens_used_month" INTEGER NOT NULL DEFAULT 0,
+    "max_concurrent_runs" INTEGER NOT NULL DEFAULT 3,
+    "trigger_mode" VARCHAR(30) NOT NULL DEFAULT 'manual_only',
+    "trigger_config" JSONB NOT NULL DEFAULT '{}',
+    "osint_sources" JSONB NOT NULL DEFAULT '[]',
+    "output_format" VARCHAR(20) NOT NULL DEFAULT 'markdown',
+    "presentation_skills" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "last_reset_hour" TIMESTAMP(3),
+    "last_reset_day" TIMESTAMP(3),
+    "last_reset_month" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "tenant_agent_configs_pkey" PRIMARY KEY ("id")
+);
+
+-- Ensure indexes and FK exist
+CREATE UNIQUE INDEX IF NOT EXISTS "tenant_agent_configs_tenant_id_agent_id_key" ON "tenant_agent_configs"("tenant_id", "agent_id");
+CREATE INDEX IF NOT EXISTS "tenant_agent_configs_tenant_id_idx" ON "tenant_agent_configs"("tenant_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_agent_configs_tenant_id_fkey') THEN
+    ALTER TABLE "tenant_agent_configs" ADD CONSTRAINT "tenant_agent_configs_tenant_id_fkey"
+      FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
+
 -- Seed 22 specialized AI agent configs into tenant_agent_configs for every tenant.
 -- Each agent starts disabled (is_enabled = false) — tenant admin enables per-tenant.
 -- Uses INSERT ... ON CONFLICT DO NOTHING on the (tenant_id, agent_id) unique constraint.
