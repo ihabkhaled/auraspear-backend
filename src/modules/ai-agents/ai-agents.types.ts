@@ -45,4 +45,17 @@ export interface AgentTaskPayload {
   actorUserId?: string
   actorEmail?: string
   connector?: string
+  actionType?: string
+  triggeredBy?: string
+  automationMode?: string
+  requiresApproval?: boolean
+  alertId?: string
+  incidentId?: string
+  jobId?: string
+  jobType?: string
+  connectorId?: string
+  connectorType?: string
+  source?: string
+  type?: string
+  newStatus?: string
 }
