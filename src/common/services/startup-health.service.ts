@@ -1,5 +1,4 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import Redis from 'ioredis'
 import { AppLogOutcome } from '../enums'
 import { AppLoggerService } from './app-logger.service'
@@ -10,6 +9,7 @@ import {
   buildServiceCheckMessage,
 } from './startup-health.utilities'
 import { PrismaService } from '../../prisma/prisma.service'
+import { REDIS_CLIENT } from '../../redis'
 import type { ServiceCheck } from './startup-health.types'
 
 @Injectable()
@@ -18,7 +18,7 @@ export class StartupHealthService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly appLogger: AppLoggerService
   ) {}
 
@@ -38,10 +38,7 @@ export class StartupHealthService implements OnModuleInit {
     this.logIndividualChecks(checks)
   }
 
-  private logStartupSummary(
-    checks: ServiceCheck[],
-    metadata: Record<string, unknown>
-  ): void {
+  private logStartupSummary(checks: ServiceCheck[], metadata: Record<string, unknown>): void {
     const allHealthy = checks.every(c => c.status === 'up')
 
     if (allHealthy) {
@@ -95,39 +92,13 @@ export class StartupHealthService implements OnModuleInit {
 
   private async checkRedis(): Promise<ServiceCheck> {
     const start = Date.now()
-    const redis = this.createRedisCheckClient()
 
     try {
-      await redis.connect()
-      await redis.ping()
-      const latencyMs = Date.now() - start
-      redis.disconnect()
-      return { name: 'Redis', status: 'up', latencyMs }
+      await this.redis.ping()
+      return { name: 'Redis', status: 'up', latencyMs: Date.now() - start }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      redis.disconnect()
       return { name: 'Redis', status: 'down', latencyMs: Date.now() - start, error: errorMessage }
     }
-  }
-
-  private createRedisCheckClient(): Redis {
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost')
-    const port = this.configService.get<number>('REDIS_PORT', 6379)
-    const password = this.configService.get<string>('REDIS_PASSWORD', '')
-
-    const redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      connectTimeout: 5000,
-      maxRetriesPerRequest: 1,
-      retryStrategy: () => null,
-      lazyConnect: true,
-    })
-
-    // Suppress connection errors during check
-    redis.on('error', () => {})
-
-    return redis
   }
 }

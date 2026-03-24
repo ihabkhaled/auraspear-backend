@@ -6,10 +6,11 @@ import {
   ConnectorType,
 } from '../../../common/enums'
 import { AxiosService } from '../../../common/modules/axios'
+import { WebSocketService } from '../../../common/modules/websocket'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { normalizeTimeoutMs } from '../connectors.utilities'
 import {
-  createOpenClawConnection,
+  authenticateOpenClawConnection,
   safeCloseWebSocket,
   sendOpenClawChatAndCollect,
   sendOpenClawRequest,
@@ -23,7 +24,8 @@ export class OpenClawGatewayService {
 
   constructor(
     private readonly appLogger: AppLoggerService,
-    private readonly httpClient: AxiosService
+    private readonly httpClient: AxiosService,
+    private readonly webSocketService: WebSocketService
   ) {}
 
   /**
@@ -44,7 +46,8 @@ export class OpenClawGatewayService {
     let socket: WebSocket | undefined
 
     try {
-      socket = await createOpenClawConnection(baseUrl, apiKey, timeout)
+      socket = this.webSocketService.createConnection(baseUrl)
+      await authenticateOpenClawConnection(socket, apiKey, timeout)
       return await this.executeHealthCheck(socket, timeout)
     } catch (error: unknown) {
       return this.handleTestError(error)
@@ -69,7 +72,8 @@ export class OpenClawGatewayService {
 
     let socket: WebSocket | undefined
     try {
-      socket = await createOpenClawConnection(baseUrl, apiKey, timeout)
+      socket = this.webSocketService.createConnection(baseUrl)
+      await authenticateOpenClawConnection(socket, apiKey, timeout)
       const { text, runId } = await sendOpenClawChatAndCollect(
         socket,
         'agent:main:main',
@@ -88,15 +92,10 @@ export class OpenClawGatewayService {
   /* PRIVATE: Test Helpers                                             */
   /* ---------------------------------------------------------------- */
 
-  private async executeHealthCheck(
-    socket: WebSocket,
-    timeout: number
-  ): Promise<TestResult> {
+  private async executeHealthCheck(socket: WebSocket, timeout: number): Promise<TestResult> {
     const healthPayload = await sendOpenClawRequest(socket, 'health', undefined, timeout)
     const version =
-      healthPayload && typeof healthPayload.version === 'string'
-        ? healthPayload.version
-        : 'unknown'
+      healthPayload && typeof healthPayload.version === 'string' ? healthPayload.version : 'unknown'
 
     this.logActionSuccess('testConnection', { version })
 
@@ -140,11 +139,7 @@ export class OpenClawGatewayService {
     })
   }
 
-  private logInvokeSuccess(
-    taskType: string,
-    maxTokens: number,
-    taskId?: string
-  ): void {
+  private logInvokeSuccess(taskType: string, maxTokens: number, taskId?: string): void {
     this.appLogger.info('OpenClaw Gateway task invoked via WebSocket', {
       feature: AppLogFeature.CONNECTORS,
       action: 'invoke',

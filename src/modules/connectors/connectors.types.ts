@@ -207,3 +207,5 @@ export interface WazuhManagerInfoData {
   data?: Record<string, unknown>
   [key: string]: unknown
 }
+
+export type BedrockClient = InstanceType<AwsSdkTypes['BedrockRuntimeClient']>

@@ -265,13 +265,15 @@ describe('BedrockService', () => {
 
       await service.testConnection(VALID_CONFIG)
 
-      expect(MockBedrockRuntimeClient).toHaveBeenCalledWith({
-        region: 'us-east-1',
-        credentials: {
-          accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
-          secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-        },
-      })
+      expect(MockBedrockRuntimeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          region: 'us-east-1',
+          credentials: {
+            accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+            secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+          },
+        })
+      )
     })
 
     it('should send a minimal test prompt with max_tokens 10', async () => {

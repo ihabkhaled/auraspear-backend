@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common'
 import { AiReportController } from './ai-report.controller'
 import { AiReportService } from './ai-report.service'
+import { PdfGeneratorService } from './pdf-generator.service'
 import { ReportsGenerationRepository } from './reports-generation.repository'
 import { ReportsController } from './reports.controller'
 import { ReportsRepository } from './reports.repository'
@@ -18,8 +19,9 @@ import { JobsModule } from '../jobs/jobs.module'
     ReportsGenerationRepository,
     ReportsService,
     AiReportService,
+    PdfGeneratorService,
     DashboardsRepository,
   ],
-  exports: [ReportsRepository, ReportsGenerationRepository, ReportsService],
+  exports: [ReportsRepository, ReportsGenerationRepository, ReportsService, PdfGeneratorService],
 })
 export class ReportsModule {}

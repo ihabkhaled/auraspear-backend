@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
+import { PdfGeneratorService } from './pdf-generator.service'
 import { ReportsRepository } from './reports.repository'
 import {
   buildReportDownloadResponse,
@@ -15,6 +16,7 @@ import {
   AppLogFeature,
   AppLogOutcome,
   AppLogSourceType,
+  ReportFormat,
   ReportModule,
   ReportStatus,
   ReportTemplateKey,
@@ -48,7 +50,8 @@ export class ReportsService {
   constructor(
     private readonly repository: ReportsRepository,
     private readonly appLogger: AppLoggerService,
-    private readonly jobService: JobService
+    private readonly jobService: JobService,
+    private readonly pdfGeneratorService: PdfGeneratorService
   ) {
     this.log = new ServiceLogger(this.appLogger, AppLogFeature.REPORTS, 'ReportsService')
   }
@@ -516,8 +519,13 @@ export class ReportsService {
       const report = await this.fetchAndValidateReportForDownload(id, tenantId)
       const content = JSON.parse(report.generatedContent) as GeneratedReportContent
 
+      const pdfBuffer =
+        report.format === ReportFormat.PDF
+          ? await this.pdfGeneratorService.generateReportPdf(content)
+          : undefined
+
       this.log.success('downloadReport', tenantId, { reportId: id })
-      return buildReportDownloadResponse(report.name, report.format, content)
+      return buildReportDownloadResponse(report.name, report.format, content, pdfBuffer)
     } catch (error: unknown) {
       if (!(error instanceof BusinessException)) {
         this.log.error('downloadReport', tenantId, error)

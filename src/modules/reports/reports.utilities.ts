@@ -1,4 +1,3 @@
-import { generateReportPdf } from './pdf-generator.utility'
 import { ReportFormat, SortOrder } from '../../common/enums'
 import { toSortOrder } from '../../common/utils/query.utility'
 import type { UpdateReportDto } from './dto/update-report.dto'
@@ -190,16 +189,19 @@ export function buildReportStats(
 /* REPORT DOWNLOAD / FORMAT CONVERSION                               */
 /* ---------------------------------------------------------------- */
 
-export async function buildReportDownloadResponse(
+export function buildReportDownloadResponse(
   reportName: string,
   format: string,
-  content: GeneratedReportContent
-): Promise<ReportDownloadResponse> {
+  content: GeneratedReportContent,
+  pdfBuffer?: Buffer
+): ReportDownloadResponse {
   const safeName = reportName.replaceAll(/[^a-zA-Z0-9_-]/g, '_')
 
   switch (format) {
     case ReportFormat.PDF: {
-      const pdfBuffer = await generateReportPdf(content)
+      if (!pdfBuffer) {
+        throw new Error('PDF buffer is required for PDF format downloads')
+      }
       return { filename: `${safeName}.pdf`, contentType: 'application/pdf', content: pdfBuffer }
     }
     case ReportFormat.CSV:

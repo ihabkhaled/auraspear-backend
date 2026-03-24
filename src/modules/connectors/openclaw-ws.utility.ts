@@ -39,22 +39,22 @@ export function isOpenClawResponse(message: OpenClawWsIncoming): message is Open
 /* ---------------------------------------------------------------- */
 
 /**
- * Opens a WebSocket connection and completes the OpenClaw auth handshake.
+ * Completes the OpenClaw auth handshake on an already-created WebSocket.
  * Resolves with the authenticated WebSocket instance or rejects on error/timeout.
+ * The caller is responsible for creating the WebSocket instance (e.g. via WebSocketService).
  */
-export function createOpenClawConnection(
-  baseUrl: string,
+export function authenticateOpenClawConnection(
+  socket: WebSocket,
   apiKey: string,
   timeoutMs: number
 ): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     let settled = false
-    let socket: WebSocket | undefined
 
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true
-        socket?.close()
+        socket.close()
         reject(new Error(`Connection to OpenClaw Gateway timed out after ${String(timeoutMs)}ms`))
       }
     }, timeoutMs)
@@ -67,17 +67,9 @@ export function createOpenClawConnection(
       if (!settled) {
         settled = true
         cleanup()
-        socket?.close()
+        socket.close()
         reject(new Error(reason))
       }
-    }
-
-    try {
-      socket = new WebSocket(baseUrl)
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create WebSocket'
-      fail(`WebSocket creation failed: ${errorMessage}`)
-      return
     }
 
     socket.on('error', (error: Error) => {
@@ -115,7 +107,7 @@ export function createOpenClawConnection(
             scopes: ['operator', 'operator.write', 'operator.read', 'admin'],
           },
         }
-        socket?.send(JSON.stringify(connectRequest))
+        socket.send(JSON.stringify(connectRequest))
         return
       }
 
@@ -124,7 +116,7 @@ export function createOpenClawConnection(
         if (parsed.ok) {
           settled = true
           cleanup()
-          resolve(socket as WebSocket)
+          resolve(socket)
         } else {
           const errorDetail = parsed.error ?? 'unknown error'
           fail(`Authentication failed: ${errorDetail}`)

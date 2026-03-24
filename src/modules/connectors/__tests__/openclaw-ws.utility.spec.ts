@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { OpenClawFrameType } from '../../../common/enums'
 import {
-  createOpenClawConnection,
+  authenticateOpenClawConnection,
   sendOpenClawRequest,
   sendOpenClawChatAndCollect,
   safeCloseWebSocket,
@@ -23,24 +23,6 @@ class MockWebSocket extends EventEmitter {
 
   send = jest.fn()
   close = jest.fn()
-}
-
-jest.mock('../../../common/modules/websocket', () => {
-  const ctor = jest.fn().mockImplementation(() => {
-    const instance = new MockWebSocket()
-    // Schedule open event to simulate connection
-    setImmediate(() => {
-      instance.emit('open')
-    })
-    return instance
-  })
-  // Attach static constants so safeCloseWebSocket can read WebSocket.CLOSED / CLOSING
-  Object.assign(ctor, { OPEN: 1, CLOSED: 3, CLOSING: 2 })
-  return { WebSocket: ctor }
-})
-
-const { WebSocket: MockWebSocketClass } = jest.requireMock('../../../common/modules/websocket') as {
-  WebSocket: jest.Mock
 }
 
 /* ---------------------------------------------------------------- */
@@ -142,10 +124,10 @@ describe('isOpenClawResponse', () => {
 })
 
 /* ---------------------------------------------------------------- */
-/* createOpenClawConnection                                           */
+/* authenticateOpenClawConnection                                     */
 /* ---------------------------------------------------------------- */
 
-describe('createOpenClawConnection', () => {
+describe('authenticateOpenClawConnection', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     jest.useFakeTimers()
@@ -156,55 +138,55 @@ describe('createOpenClawConnection', () => {
   })
 
   it('completes auth handshake successfully', async () => {
-    let mockSocket: MockWebSocket | undefined
+    const mockSocket = new MockWebSocket()
 
-    MockWebSocketClass.mockImplementation(() => {
-      mockSocket = new MockWebSocket()
-      return mockSocket
-    })
+    const promise = authenticateOpenClawConnection(
+      mockSocket as unknown as WebSocket,
+      'test-key',
+      10000
+    )
 
-    const promise = createOpenClawConnection('ws://localhost:8080', 'test-key', 10000)
-
-    // Wait for constructor to run
+    // Wait for listeners to be registered
     await Promise.resolve()
 
     // Simulate challenge event
-    mockSocket?.emit('message', buildChallengeEvent())
+    mockSocket.emit('message', buildChallengeEvent())
 
     // Verify connect request was sent
-    expect(mockSocket?.send).toHaveBeenCalledWith(expect.stringContaining('"method":"connect"'))
+    expect(mockSocket.send).toHaveBeenCalledWith(expect.stringContaining('"method":"connect"'))
 
     // Simulate auth success response
-    mockSocket?.emit('message', buildAuthResponse(true))
+    mockSocket.emit('message', buildAuthResponse(true))
 
     const result = await promise
     expect(result).toBeDefined()
   })
 
   it('rejects on auth failure', async () => {
-    let mockSocket: MockWebSocket | undefined
+    const mockSocket = new MockWebSocket()
 
-    MockWebSocketClass.mockImplementation(() => {
-      mockSocket = new MockWebSocket()
-      return mockSocket
-    })
-
-    const promise = createOpenClawConnection('ws://localhost:8080', 'bad-key', 10000)
+    const promise = authenticateOpenClawConnection(
+      mockSocket as unknown as WebSocket,
+      'bad-key',
+      10000
+    )
 
     await Promise.resolve()
 
-    mockSocket?.emit('message', buildChallengeEvent())
-    mockSocket?.emit('message', buildAuthResponse(false, 'invalid token'))
+    mockSocket.emit('message', buildChallengeEvent())
+    mockSocket.emit('message', buildAuthResponse(false, 'invalid token'))
 
     await expect(promise).rejects.toThrow('Authentication failed: invalid token')
   })
 
   it('rejects on timeout', async () => {
-    MockWebSocketClass.mockImplementation(() => {
-      return new MockWebSocket()
-    })
+    const mockSocket = new MockWebSocket()
 
-    const promise = createOpenClawConnection('ws://localhost:8080', 'test-key', 1000)
+    const promise = authenticateOpenClawConnection(
+      mockSocket as unknown as WebSocket,
+      'test-key',
+      1000
+    )
 
     jest.advanceTimersByTime(1001)
 
@@ -212,47 +194,35 @@ describe('createOpenClawConnection', () => {
   })
 
   it('rejects on WebSocket error', async () => {
-    let mockSocket: MockWebSocket | undefined
+    const mockSocket = new MockWebSocket()
 
-    MockWebSocketClass.mockImplementation(() => {
-      mockSocket = new MockWebSocket()
-      return mockSocket
-    })
-
-    const promise = createOpenClawConnection('ws://localhost:8080', 'test-key', 10000)
+    const promise = authenticateOpenClawConnection(
+      mockSocket as unknown as WebSocket,
+      'test-key',
+      10000
+    )
 
     await Promise.resolve()
 
-    mockSocket?.emit('error', new Error('ECONNREFUSED'))
+    mockSocket.emit('error', new Error('ECONNREFUSED'))
 
     await expect(promise).rejects.toThrow('WebSocket error: ECONNREFUSED')
   })
 
   it('rejects when WebSocket closes before auth completes', async () => {
-    let mockSocket: MockWebSocket | undefined
+    const mockSocket = new MockWebSocket()
 
-    MockWebSocketClass.mockImplementation(() => {
-      mockSocket = new MockWebSocket()
-      return mockSocket
-    })
-
-    const promise = createOpenClawConnection('ws://localhost:8080', 'test-key', 10000)
+    const promise = authenticateOpenClawConnection(
+      mockSocket as unknown as WebSocket,
+      'test-key',
+      10000
+    )
 
     await Promise.resolve()
 
-    mockSocket?.emit('close')
+    mockSocket.emit('close')
 
     await expect(promise).rejects.toThrow('WebSocket closed before authentication completed')
-  })
-
-  it('rejects when WebSocket constructor throws', async () => {
-    MockWebSocketClass.mockImplementation(() => {
-      throw new Error('Invalid URL')
-    })
-
-    const promise = createOpenClawConnection('invalid-url', 'test-key', 10000)
-
-    await expect(promise).rejects.toThrow('WebSocket creation failed: Invalid URL')
   })
 })
 

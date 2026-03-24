@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import {
@@ -8,28 +8,62 @@ import {
   loadAwsBedrockSdk,
   parseBedrockResponse,
 } from '../connectors.utilities'
-import type { BedrockInvokeResult, TestResult } from '../connectors.types'
+import type { BedrockClient, BedrockInvokeResult, TestResult } from '../connectors.types'
 
 @Injectable()
-export class BedrockService {
+export class BedrockService implements OnModuleDestroy {
   private readonly logger = new Logger(BedrockService.name)
+  private readonly clientCache = new Map<string, BedrockClient>()
 
   constructor(private readonly appLogger: AppLoggerService) {}
+
+  onModuleDestroy(): void {
+    this.clientCache.clear()
+  }
+
+  private async getOrCreateClient(
+    region: string,
+    accessKeyId: string | undefined,
+    secretAccessKey: string | undefined,
+    endpoint?: string
+  ): Promise<BedrockClient> {
+    const cacheKey = `${region}:${accessKeyId ?? ''}:${endpoint ?? ''}`
+    const cached = this.clientCache.get(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const { BedrockRuntimeClient } = await loadAwsBedrockSdk()
+    const client = new BedrockRuntimeClient({
+      region,
+      credentials: { accessKeyId, secretAccessKey },
+      requestHandler: { requestTimeout: 30_000 },
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+    })
+
+    this.clientCache.set(cacheKey, client)
+    return client
+  }
 
   /**
    * Test AWS Bedrock connection.
    * Uses AWS SDK to list foundation models and verify access.
    */
   async testConnection(config: Record<string, unknown>): Promise<TestResult> {
-    const { region, accessKeyId, secretAccessKey, modelId, endpoint } =
-      extractBedrockConfig(config)
+    const { region, accessKeyId, secretAccessKey, modelId, endpoint } = extractBedrockConfig(config)
 
     if (!accessKeyId || !secretAccessKey) {
       return { ok: false, details: 'AWS access key ID and secret access key are required' }
     }
 
     try {
-      return await this.executeTestInvocation(region, accessKeyId, secretAccessKey, modelId, endpoint)
+      return await this.executeTestInvocation(
+        region,
+        accessKeyId,
+        secretAccessKey,
+        modelId,
+        endpoint
+      )
     } catch (error) {
       return this.handleTestError(error, region)
     }
@@ -44,11 +78,16 @@ export class BedrockService {
     prompt: string,
     maxTokens: number = 1024
   ): Promise<BedrockInvokeResult> {
-    const { region, accessKeyId, secretAccessKey, modelId, endpoint } =
-      extractBedrockConfig(config)
+    const { region, accessKeyId, secretAccessKey, modelId, endpoint } = extractBedrockConfig(config)
 
     const response = await this.sendBedrockCommand(
-      region, accessKeyId, secretAccessKey, modelId, endpoint, prompt, maxTokens
+      region,
+      accessKeyId,
+      secretAccessKey,
+      modelId,
+      endpoint,
+      prompt,
+      maxTokens
     )
 
     const result = parseBedrockResponse(response.body)
@@ -70,14 +109,8 @@ export class BedrockService {
     prompt: string,
     maxTokens: number
   ): Promise<{ body: Uint8Array }> {
-    const { BedrockRuntimeClient, InvokeModelCommand } = await loadAwsBedrockSdk()
-
-    const client = new BedrockRuntimeClient({
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      requestHandler: { requestTimeout: 30_000 },
-      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-    })
+    const { InvokeModelCommand } = await loadAwsBedrockSdk()
+    const client = await this.getOrCreateClient(region, accessKeyId, secretAccessKey, endpoint)
 
     const command = new InvokeModelCommand({
       modelId,
@@ -105,13 +138,8 @@ export class BedrockService {
     modelId: string,
     endpoint: string | undefined
   ): Promise<TestResult> {
-    const { BedrockRuntimeClient, InvokeModelCommand } = await loadAwsBedrockSdk()
-
-    const client = new BedrockRuntimeClient({
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-    })
+    const { InvokeModelCommand } = await loadAwsBedrockSdk()
+    const client = await this.getOrCreateClient(region, accessKeyId, secretAccessKey, endpoint)
 
     const command = new InvokeModelCommand({
       modelId,
