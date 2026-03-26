@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common'
-import { ConfigModule } from '@nestjs/config'
+import { ConfigModule, ConfigService } from '@nestjs/config'
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'
 import { LoggerModule } from 'nestjs-pino'
@@ -66,7 +66,15 @@ import { RedisModule } from './redis'
     }),
 
     // Rate limiting
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          ttl: config.get<number>('RATE_LIMIT_THROTTLE_TTL', 60_000),
+          limit: config.get<number>('RATE_LIMIT_THROTTLE_LIMIT', 250),
+        },
+      ],
+    }),
 
     // Structured logging
     LoggerModule.forRoot({

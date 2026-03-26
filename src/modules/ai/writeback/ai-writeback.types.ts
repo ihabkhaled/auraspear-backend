@@ -10,6 +10,10 @@ export interface AiWritebackParameters {
   actionType: string
   /** True when the sessionId corresponds to a real AiAgentSession record (FK-linked to AiAgent). */
   hasRealSession?: boolean
+  /** Schedule ID if triggered by a schedule */
+  scheduleId?: string
+  /** Duration of the AI execution in milliseconds */
+  durationMs?: number
 }
 
 export interface AiWritebackResponse {

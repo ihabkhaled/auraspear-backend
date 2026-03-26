@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common'
 import { APPROVAL_REQUIRED_MODES, DISABLED_MODES, HIGH_RISK_LEVELS } from './orchestrator.constants'
 import { OrchestratorRepository } from './orchestrator.repository'
@@ -224,15 +225,13 @@ export class OrchestratorService {
       successCount24h,
       failureCount24h,
       pendingApprovals,
-      activeAgents,
-      totalAgents,
+      allAgentConfigs,
     ] = await Promise.all([
       this.repository.countJobsSince(tenantId, since24h),
       this.repository.countJobsSince(tenantId, since24h, 'completed'),
       this.repository.countJobsSince(tenantId, since24h, 'failed'),
       this.repository.countPendingApprovals(tenantId),
-      this.repository.countActiveAgentConfigs(tenantId),
-      this.repository.countTotalAgentConfigs(tenantId),
+      this.agentConfigService.getAgentConfigs(tenantId),
     ])
 
     return {
@@ -240,8 +239,8 @@ export class OrchestratorService {
       successCount24h,
       failureCount24h,
       pendingApprovals,
-      activeAgents,
-      totalAgents,
+      activeAgents: allAgentConfigs.filter(c => c.isEnabled).length,
+      totalAgents: allAgentConfigs.length,
     }
   }
 
@@ -267,7 +266,7 @@ export class OrchestratorService {
         ...payload,
       },
       maxAttempts: 2,
-      idempotencyKey: `orchestrator:${agentId}:${actionType}:${Date.now().toString(36)}`,
+      idempotencyKey: `orchestrator:${agentId}:${actionType}:${randomUUID()}`,
       createdBy: triggeredBy,
     })
   }

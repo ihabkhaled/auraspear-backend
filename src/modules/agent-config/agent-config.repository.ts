@@ -189,4 +189,18 @@ export class AgentConfigRepository {
 
     return updated as AiApprovalRequestRecord
   }
+
+  async bulkToggleAgents(tenantId: string, enabled: boolean): Promise<Prisma.BatchPayload> {
+    return this.prisma.tenantAgentConfig.updateMany({
+      where: { tenantId },
+      data: { isEnabled: enabled },
+    })
+  }
+
+  async bulkToggleOsintSources(tenantId: string, enabled: boolean): Promise<Prisma.BatchPayload> {
+    return this.prisma.osintSourceConfig.updateMany({
+      where: { tenantId },
+      data: { isEnabled: enabled },
+    })
+  }
 }

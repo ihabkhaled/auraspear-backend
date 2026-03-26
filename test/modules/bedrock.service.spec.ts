@@ -25,7 +25,7 @@ const VALID_CONFIG: Record<string, unknown> = {
   region: 'us-east-1',
   accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
   secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-  modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+  modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,7 +87,7 @@ describe('BedrockService', () => {
       expect(result.ok).toBe(true)
       expect(result.details).toContain('AWS Bedrock accessible')
       expect(result.details).toContain('us-east-1')
-      expect(result.details).toContain('anthropic.claude-3-sonnet')
+      expect(result.details).toContain('global.anthropic.claude-sonnet-4-5-20250929-v1:0')
       expect(result.details).toContain('end_turn')
     })
 
@@ -124,7 +124,7 @@ describe('BedrockService', () => {
 
       expect(MockInvokeModelCommand).toHaveBeenCalledWith(
         expect.objectContaining({
-          modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+          modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         })
       )
     })
@@ -405,7 +405,7 @@ describe('BedrockService', () => {
 
       expect(MockInvokeModelCommand).toHaveBeenCalledWith(
         expect.objectContaining({
-          modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+          modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         })
       )
     })
@@ -426,7 +426,9 @@ describe('BedrockService', () => {
       const body = JSON.parse(callArguments?.body as string) as Record<string, unknown>
       const messages = body.messages as Array<Record<string, unknown>>
 
-      expect(messages).toEqual([{ role: 'user', content: 'Analyze this IOC' }])
+      expect(messages).toEqual([
+        { role: 'user', content: [{ type: 'text', text: 'Analyze this IOC' }] },
+      ])
     })
 
     it('should log success after invocation', async () => {

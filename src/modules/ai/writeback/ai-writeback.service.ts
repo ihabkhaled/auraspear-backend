@@ -94,7 +94,10 @@ export class AiWritebackService {
         summary: params.aiResponse.result.substring(0, AI_NOTIFICATION_MESSAGE_MAX_LENGTH),
       })
 
-      // 6. Log completion
+      // 6. Persist job run summary for the AI Job Runs dashboard
+      await this.persistJobRunSummary(params, findings.length)
+
+      // 7. Log completion
       this.log.success('processSystemTriggeredResult', params.tenantId, {
         sessionId: params.sessionId,
         agentId: params.agentId,
@@ -241,6 +244,45 @@ export class AiWritebackService {
         body: `**AI Analysis (${response.model}):**\n\n${summaryText}`,
       },
     })
+  }
+
+  private async persistJobRunSummary(
+    params: AiWritebackParameters,
+    findingsCount: number
+  ): Promise<void> {
+    try {
+      const scheduleId = params.scheduleId ?? null
+      await this.prisma.aiJobRunSummary.create({
+        data: {
+          tenantId: params.tenantId,
+          jobId: params.sessionId,
+          scheduleId,
+          jobKey: `agent.${params.agentId}`,
+          agentId: params.agentId,
+          triggerType: params.sourceModule.startsWith('scheduler:') ? 'scheduled' : 'manual',
+          status: 'completed',
+          startedAt: new Date(Date.now() - (params.durationMs ?? 0)),
+          completedAt: new Date(),
+          durationMs: params.durationMs ?? null,
+          providerKey: params.aiResponse.provider,
+          modelKey: params.aiResponse.model,
+          tokensUsed:
+            (params.aiResponse.tokensUsed?.input ?? 0) +
+            (params.aiResponse.tokensUsed?.output ?? 0),
+          findingsCount,
+          sourceModule: params.sourceModule,
+          sourceEntityId: params.sourceEntityId ?? null,
+          summaryText: params.aiResponse.result.substring(0, 500),
+          confidenceScore: params.aiResponse.confidence ?? null,
+        },
+      })
+    } catch (error) {
+      this.log.warn(
+        'persistJobRunSummary',
+        params.tenantId,
+        `Failed to persist run summary: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+    }
   }
 
   private async updateSessionCounts(sessionId: string, findingsCount: number): Promise<void> {

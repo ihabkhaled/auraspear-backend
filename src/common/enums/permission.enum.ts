@@ -210,6 +210,12 @@ export enum Permission {
   AI_CONFIG_MANAGE_OSINT = 'ai.config.manage_osint',
   AI_APPROVALS_MANAGE = 'ai.approvals.manage',
   AI_USAGE_VIEW = 'ai.usage.view',
+
+  // AI Module Copilots
+  AI_VULNERABILITY_COPILOT = 'ai.vulnerabilities.copilot',
+  AI_CLOUD_TRIAGE = 'ai.cloudSecurity.triage',
+  AI_UEBA_NARRATIVE = 'ai.ueba.narrative',
+  AI_ATTACK_PATH_SUMMARY = 'ai.attackPaths.summary',
 }
 
 /**

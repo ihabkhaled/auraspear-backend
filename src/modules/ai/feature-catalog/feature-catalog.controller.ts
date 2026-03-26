@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
 import { UpdateFeatureConfigSchema } from './dto/update-feature-config.dto'
 import { FeatureCatalogService } from './feature-catalog.service'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 import { RequirePermission } from '../../../common/decorators/permission.decorator'
+import { TenantId } from '../../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../../common/enums'
 import { AuthGuard } from '../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../common/guards/tenant.guard'
@@ -58,5 +60,16 @@ export class FeatureCatalogController {
   ): Promise<AiFeatureConfigResponse> {
     const validKey = this.featureCatalogService.validateFeatureKey(featureKey)
     return this.featureCatalogService.update(user.tenantId, validKey, dto, user.email)
+  }
+
+  /** POST /ai-features/bulk-toggle — Enable/disable all features at once */
+  @Post('bulk-toggle')
+  @RequirePermission(Permission.AI_CONFIG_EDIT)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async bulkToggle(
+    @TenantId() tenantId: string,
+    @Body('enabled') enabled: boolean
+  ): Promise<{ updated: number }> {
+    return this.featureCatalogService.bulkToggle(tenantId, enabled)
   }
 }

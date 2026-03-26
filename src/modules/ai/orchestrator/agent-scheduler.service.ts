@@ -101,10 +101,12 @@ export class AgentSchedulerService {
       })
 
       const durationMs = Date.now() - startTime
-      await this.scheduleService.markRunCompleted(schedule.id, 'completed', durationMs)
+      await this.scheduleService.markRunCompleted(schedule.id, 'dispatched', durationMs)
     } catch (error) {
       const durationMs = Date.now() - startTime
+      const reason = error instanceof Error ? error.message : 'Unknown dispatch error'
       await this.scheduleService.markRunCompleted(schedule.id, 'failed', durationMs)
+      await this.scheduleService.setDisabledReason(schedule.id, reason)
       throw error
     }
   }

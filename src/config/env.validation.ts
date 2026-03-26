@@ -40,6 +40,10 @@ export const envSchema = z
       .min(12, { message: 'PLATFORM_ADMIN_PASSWORD must be at least 12 characters when set' })
       .optional(),
 
+    // Rate limiting
+    RATE_LIMIT_THROTTLE_TTL: z.coerce.number().default(60_000),
+    RATE_LIMIT_THROTTLE_LIMIT: z.coerce.number().default(250),
+
     // Application
     PORT: z.coerce.number().default(4000),
     NODE_ENV: z.nativeEnum(NodeEnvironment).default(NodeEnvironment.PRODUCTION),
@@ -125,7 +129,7 @@ export const envSchema = z
     AWS_REGION: z.string().default('us-east-1'),
     AWS_ACCESS_KEY_ID: z.string().optional(),
     AWS_SECRET_ACCESS_KEY: z.string().optional(),
-    AWS_BEDROCK_MODEL_ID: z.string().default('anthropic.claude-3-sonnet-20240229-v1:0'),
+    AWS_BEDROCK_MODEL_ID: z.string().default('global.anthropic.claude-sonnet-4-5-20250929-v1:0'),
   })
   .superRefine((data, ctx) => {
     // OIDC vars must be all-or-nothing — partial config causes runtime failures

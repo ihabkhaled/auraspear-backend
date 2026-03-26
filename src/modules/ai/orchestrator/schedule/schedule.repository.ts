@@ -31,14 +31,14 @@ export class ScheduleRepository {
   }
 
   /**
-   * Lists schedules visible to a tenant: own schedules + global schedules (tenantId IS NULL).
+   * Lists schedules belonging to a tenant.
    */
   async findAllForTenant(
     tenantId: string,
     options?: FindAllForTenantOptions
   ): Promise<ScheduleRecord[]> {
     const where: Prisma.AiAgentScheduleWhereInput = {
-      OR: [{ tenantId }, { tenantId: null }],
+      tenantId,
     }
 
     if (options?.module) {
@@ -139,6 +139,13 @@ export class ScheduleRepository {
   /**
    * Computes the next run time from a cron expression and timezone.
    */
+  async bulkToggle(tenantId: string, enabled: boolean): Promise<{ count: number }> {
+    return this.prisma.aiAgentSchedule.updateMany({
+      where: { tenantId },
+      data: { isEnabled: enabled },
+    })
+  }
+
   computeNextRun(cronExpression: string, timezone: string): Date {
     const expression = CronExpressionParser.parse(cronExpression, {
       currentDate: new Date(),

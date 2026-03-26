@@ -911,4 +911,28 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.aiConfig.viewUsage',
     sortOrder: 2706,
   },
+  {
+    key: Permission.AI_VULNERABILITY_COPILOT,
+    module: 'vulnerabilities',
+    labelKey: 'roleSettings.permissions.vulnerabilities.aiCopilot',
+    sortOrder: 2800,
+  },
+  {
+    key: Permission.AI_CLOUD_TRIAGE,
+    module: 'cloudSecurity',
+    labelKey: 'roleSettings.permissions.cloudSecurity.aiTriage',
+    sortOrder: 2810,
+  },
+  {
+    key: Permission.AI_UEBA_NARRATIVE,
+    module: 'ueba',
+    labelKey: 'roleSettings.permissions.ueba.aiNarrative',
+    sortOrder: 2820,
+  },
+  {
+    key: Permission.AI_ATTACK_PATH_SUMMARY,
+    module: 'attackPaths',
+    labelKey: 'roleSettings.permissions.attackPaths.aiSummary',
+    sortOrder: 2830,
+  },
 ]

@@ -1,4 +1,5 @@
 import { MAX_REMOTE_ERROR_LENGTH, MINIMUM_TIMEOUT_MS, URL_KEYS } from './connectors.constants'
+import { BedrockModelFamily } from './connectors.enums'
 import { REDACTED_PLACEHOLDER } from '../../common/utils/mask.utility'
 import type {
   AwsSdkTypes,
@@ -417,26 +418,95 @@ export function extractBedrockConfig(config: Record<string, unknown>): BedrockCo
     region: (config.region ?? 'us-east-1') as string,
     accessKeyId: config.accessKeyId as string | undefined,
     secretAccessKey: config.secretAccessKey as string | undefined,
-    modelId: (config.modelId ?? 'anthropic.claude-3-sonnet-20240229-v1:0') as string,
+    modelId: (config.modelId ?? 'global.anthropic.claude-sonnet-4-5-20250929-v1:0') as string,
     endpoint: config.endpoint as string | undefined,
   }
 }
 
 /**
- * Creates a Bedrock InvokeModel command body for the Anthropic Messages API.
+ * Detects the Bedrock model family from a model ID string.
  */
-export function buildBedrockRequestBody(prompt: string, maxTokens: number): string {
-  return JSON.stringify({
-    anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: maxTokens,
-    messages: [{ role: 'user', content: prompt }],
-  })
+export function detectBedrockModelFamily(modelId: string): BedrockModelFamily {
+  if (modelId.includes('anthropic.')) {
+    return BedrockModelFamily.ANTHROPIC
+  }
+  if (modelId.includes('amazon.nova')) {
+    return BedrockModelFamily.AMAZON_NOVA
+  }
+  if (modelId.includes('meta.llama')) {
+    return BedrockModelFamily.META_LLAMA
+  }
+  return BedrockModelFamily.UNKNOWN
+}
+
+/**
+ * Wraps a prompt in Meta Llama 3 instruct template.
+ */
+function buildLlamaInstructPrompt(prompt: string): string {
+  return `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n${prompt}\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n`
+}
+
+/**
+ * Creates a Bedrock InvokeModel command body appropriate for the model family.
+ *
+ * - Anthropic: Messages API with `anthropic_version` and `max_tokens`
+ * - Amazon Nova: Converse API with `inferenceConfig.maxTokens`
+ * - Meta Llama: Native InvokeModel with `prompt` and `max_gen_len`
+ * - Unknown: Falls back to Converse API shape (Amazon Nova style)
+ */
+export function buildBedrockRequestBody(
+  prompt: string,
+  maxTokens: number,
+  modelId: string
+): string {
+  const family = detectBedrockModelFamily(modelId)
+
+  switch (family) {
+    case BedrockModelFamily.ANTHROPIC: {
+      return JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      })
+    }
+    case BedrockModelFamily.AMAZON_NOVA: {
+      return JSON.stringify({
+        messages: [{ role: 'user', content: [{ text: prompt }] }],
+        inferenceConfig: {
+          maxTokens,
+          temperature: 0.3,
+          topP: 0.9,
+        },
+      })
+    }
+    case BedrockModelFamily.META_LLAMA: {
+      return JSON.stringify({
+        prompt: buildLlamaInstructPrompt(prompt),
+        max_gen_len: maxTokens,
+        temperature: 0.3,
+        top_p: 0.9,
+      })
+    }
+    default: {
+      return JSON.stringify({
+        messages: [{ role: 'user', content: [{ text: prompt }] }],
+        inferenceConfig: {
+          maxTokens,
+        },
+      })
+    }
+  }
 }
 
 /**
  * Parses the Bedrock response body and extracts text and token usage.
+ * Handles Anthropic, Amazon Nova, and Meta Llama response shapes.
  */
-export function parseBedrockResponse(bodyBytes: Uint8Array): {
+export function parseBedrockResponse(
+  bodyBytes: Uint8Array,
+  modelId: string
+): {
   text: string
   inputTokens: number
   outputTokens: number
@@ -444,14 +514,50 @@ export function parseBedrockResponse(bodyBytes: Uint8Array): {
 } {
   const bodyString = new TextDecoder().decode(bodyBytes)
   const body = JSON.parse(bodyString) as Record<string, unknown>
-  const content = body.content as Array<{ text: string }> | undefined
-  const usage = body.usage as { input_tokens: number; output_tokens: number } | undefined
+  const family = detectBedrockModelFamily(modelId)
 
-  return {
-    text: content?.[0]?.text ?? '',
-    inputTokens: usage?.input_tokens ?? 0,
-    outputTokens: usage?.output_tokens ?? 0,
-    stopReason: (body.stop_reason as string) ?? 'ok',
+  switch (family) {
+    case BedrockModelFamily.ANTHROPIC: {
+      const content = body.content as Array<{ text: string }> | undefined
+      const usage = body.usage as { input_tokens: number; output_tokens: number } | undefined
+      return {
+        text: content?.[0]?.text ?? '',
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+        stopReason: (body.stop_reason as string) ?? 'ok',
+      }
+    }
+    case BedrockModelFamily.AMAZON_NOVA: {
+      const output = body.output as { message?: { content?: Array<{ text: string }> } } | undefined
+      const usage = body.usage as { inputTokens: number; outputTokens: number } | undefined
+      return {
+        text: output?.message?.content?.[0]?.text ?? '',
+        inputTokens: usage?.inputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+        stopReason: (body.stopReason as string) ?? 'ok',
+      }
+    }
+    case BedrockModelFamily.META_LLAMA: {
+      const generation = (body.generation as string) ?? ''
+      const promptTokenCount = (body.prompt_token_count as number) ?? 0
+      const generationTokenCount = (body.generation_token_count as number) ?? 0
+      return {
+        text: generation,
+        inputTokens: promptTokenCount,
+        outputTokens: generationTokenCount,
+        stopReason: (body.stop_reason as string) ?? 'ok',
+      }
+    }
+    default: {
+      const content = body.content as Array<{ text: string }> | undefined
+      const usage = body.usage as { input_tokens: number; output_tokens: number } | undefined
+      return {
+        text: content?.[0]?.text ?? '',
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+        stopReason: (body.stop_reason as string) ?? 'ok',
+      }
+    }
   }
 }
 

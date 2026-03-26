@@ -39,4 +39,20 @@ export class FeatureCatalogRepository {
       where: { id, tenantId },
     })
   }
+
+  async bulkToggle(
+    tenantId: string,
+    enabled: boolean,
+    allFeatureKeys: string[]
+  ): Promise<{ count: number }> {
+    const operations = allFeatureKeys.map(featureKey =>
+      this.prisma.aiFeatureConfig.upsert({
+        where: { tenantId_featureKey: { tenantId, featureKey } },
+        create: { tenantId, featureKey, enabled },
+        update: { enabled },
+      })
+    )
+    const results = await this.prisma.$transaction(operations)
+    return { count: results.length }
+  }
 }

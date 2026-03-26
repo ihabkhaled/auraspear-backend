@@ -540,6 +540,8 @@ model Tenant {
   aiApprovalRequests      AiApprovalRequest[]
   aiExecutionFindings     AiExecutionFinding[]
   aiAgentSchedules        AiAgentSchedule[]
+  aiFindingOutputLinks    AiFindingOutputLink[]
+  aiJobRunSummaries       AiJobRunSummary[]
 
   @@map("tenants")
 }
@@ -2326,7 +2328,8 @@ model AiExecutionFinding {
   appliedAt       DateTime? @map("applied_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outputLinks AiFindingOutputLink[]
 
   @@index([tenantId])
   @@index([tenantId, sessionId])
@@ -2378,4 +2381,96 @@ model AiAgentSchedule {
   @@index([agentId])
   @@index([nextRunAt])
   @@map("ai_agent_schedules")
+}
+
+// ─── AI Schedule Templates ───────────────────────────────
+
+model AiScheduleTemplate {
+  id                      String   @id @default(uuid()) @db.Uuid
+  jobKey                  String   @unique @map("job_key") @db.VarChar(80)
+  displayName             String   @map("display_name") @db.VarChar(255)
+  description             String   @default("") @db.Text
+  sourceModule            String   @map("source_module") @db.VarChar(50)
+  targetModule            String   @map("target_module") @db.VarChar(50)
+  defaultCron             String   @map("default_cron") @db.VarChar(100)
+  defaultTimezone         String   @default("UTC") @map("default_timezone") @db.VarChar(50)
+  defaultEnabled          Boolean  @default(false) @map("default_enabled")
+  defaultConcurrency      Int      @default(1) @map("default_concurrency")
+  defaultTimeoutSeconds   Int      @default(300) @map("default_timeout_seconds")
+  defaultRetryMax         Int      @default(2) @map("default_retry_max")
+  defaultApprovalMode     String   @default("not_required") @map("default_approval_mode") @db.VarChar(30)
+  defaultRiskMode         String   @default("low") @map("default_risk_mode") @db.VarChar(20)
+  defaultExecutionMode    String   @default("suggest_only") @map("default_execution_mode") @db.VarChar(30)
+  defaultNotificationMode String   @default("on_failure") @map("default_notification_mode") @db.VarChar(30)
+  defaultVisibilityMode   String   @default("findings_panel") @map("default_visibility_mode") @db.VarChar(30)
+  triggerType             String   @default("scheduled") @map("trigger_type") @db.VarChar(20)
+  outputEntityType        String?  @map("output_entity_type") @db.VarChar(50)
+  outputDestination       String   @default("ai_execution_findings") @map("output_destination") @db.VarChar(100)
+  tenantOverrideAllowed   Boolean  @default(true) @map("tenant_override_allowed")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @default(now()) @map("updated_at")
+
+  @@index([sourceModule])
+  @@index([targetModule])
+  @@map("ai_schedule_templates")
+}
+
+// ─── AI Finding Output Links ─────────────────────────────
+
+model AiFindingOutputLink {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  findingId        String   @map("finding_id") @db.Uuid
+  jobId            String?  @map("job_id") @db.Uuid
+  linkedModule     String   @map("linked_module") @db.VarChar(50)
+  linkedEntityType String   @map("linked_entity_type") @db.VarChar(50)
+  linkedEntityId   String   @map("linked_entity_id") @db.VarChar(255)
+  relationshipType String   @default("produced_by") @map("relationship_type") @db.VarChar(30)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  finding AiExecutionFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([findingId])
+  @@index([tenantId, linkedModule, linkedEntityId])
+  @@index([jobId])
+  @@map("ai_finding_output_links")
+}
+
+// ─── AI Job Run Summaries ────────────────────────────────
+
+model AiJobRunSummary {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  jobId           String    @map("job_id") @db.Uuid
+  scheduleId      String?   @map("schedule_id") @db.Uuid
+  jobKey          String    @map("job_key") @db.VarChar(80)
+  agentId         String?   @map("agent_id") @db.VarChar(50)
+  triggerType     String    @default("scheduled") @map("trigger_type") @db.VarChar(30)
+  status          String    @default("pending") @db.VarChar(20)
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  durationMs      Int?      @map("duration_ms")
+  providerKey     String?   @map("provider_key") @db.VarChar(100)
+  modelKey        String?   @map("model_key") @db.VarChar(255)
+  tokensUsed      Int       @default(0) @map("tokens_used")
+  findingsCount   Int       @default(0) @map("findings_count")
+  writebacksCount Int       @default(0) @map("writebacks_count")
+  sourceModule    String?   @map("source_module") @db.VarChar(50)
+  sourceEntityId  String?   @map("source_entity_id") @db.VarChar(255)
+  summaryText     String?   @map("summary_text") @db.Text
+  confidenceScore Float?    @map("confidence_score")
+  errorMessage    String?   @map("error_message") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([jobId])
+  @@index([scheduleId])
+  @@index([tenantId, jobKey])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("ai_job_run_summaries")
 }

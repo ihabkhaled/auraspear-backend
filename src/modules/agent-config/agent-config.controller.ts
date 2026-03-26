@@ -78,6 +78,17 @@ export class AgentConfigController {
     return this.agentConfigService.resetUsage(tenantId, agentId, period, actor)
   }
 
+  @Post('agents/bulk-toggle')
+  @RequirePermission(Permission.AI_CONFIG_EDIT)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async bulkToggleAgents(
+    @TenantId() tenantId: string,
+    @Body('enabled') enabled: boolean,
+    @CurrentUser('email') actor: string
+  ): Promise<{ updated: number }> {
+    return this.agentConfigService.bulkToggleAgents(tenantId, enabled, actor)
+  }
+
   // ─── OSINT Sources ─────────────────────────────────────────
 
   @Get('osint-sources')
@@ -136,6 +147,16 @@ export class AgentConfigController {
     @CurrentUser('email') actor: string
   ): Promise<OsintTestResult> {
     return this.agentConfigService.testOsintSource(id, tenantId, actor)
+  }
+
+  @Post('osint-sources/bulk-toggle')
+  @RequirePermission(Permission.AI_CONFIG_MANAGE_OSINT)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async bulkToggleOsintSources(
+    @TenantId() tenantId: string,
+    @Body('enabled') enabled: boolean
+  ): Promise<{ updated: number }> {
+    return this.agentConfigService.bulkToggleOsintSources(tenantId, enabled)
   }
 
   // ─── Approvals ─────────────────────────────────────────────

@@ -152,4 +152,10 @@ export class FeatureCatalogService {
       updatedAt: now,
     }
   }
+
+  async bulkToggle(tenantId: string, enabled: boolean): Promise<{ updated: number }> {
+    const allKeys = Object.values(AiFeatureKey)
+    const result = await this.repository.bulkToggle(tenantId, enabled, allKeys)
+    return { updated: result.count }
+  }
 }

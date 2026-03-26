@@ -90,7 +90,7 @@ export class BedrockService implements OnModuleDestroy {
       maxTokens
     )
 
-    const result = parseBedrockResponse(response.body)
+    const result = parseBedrockResponse(response.body, modelId)
     this.logInvokeSuccess(region, modelId, maxTokens, result.inputTokens, result.outputTokens)
 
     return {
@@ -116,7 +116,7 @@ export class BedrockService implements OnModuleDestroy {
       modelId,
       contentType: 'application/json',
       accept: 'application/json',
-      body: buildBedrockRequestBody(prompt, maxTokens),
+      body: buildBedrockRequestBody(prompt, maxTokens, modelId),
     })
 
     return Promise.race([
@@ -145,11 +145,11 @@ export class BedrockService implements OnModuleDestroy {
       modelId,
       contentType: 'application/json',
       accept: 'application/json',
-      body: buildBedrockRequestBody('Hi', 10),
+      body: buildBedrockRequestBody('Hi', 10, modelId),
     })
 
     const response = await client.send(command)
-    const { stopReason } = parseBedrockResponse(response.body)
+    const { stopReason } = parseBedrockResponse(response.body, modelId)
     this.logTestSuccess(region, modelId)
 
     return {

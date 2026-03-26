@@ -1,6 +1,6 @@
 import { AiAgentId, ConnectorType } from '../../common/enums'
 
-export const AI_DEFAULT_MODEL = 'anthropic.claude-3-sonnet'
+export const AI_DEFAULT_MODEL = 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
 export const AI_FALLBACK_MODEL = 'rule-based'
 export const AI_BEDROCK_MAX_TOKENS = 2048
 export const AI_LLM_APIS_MAX_TOKENS = 2048

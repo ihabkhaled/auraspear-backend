@@ -10,14 +10,14 @@ AuraSpear supports three AI provider paths plus dynamically configured LLM conne
 
 ### 1. AWS Bedrock (`bedrock`)
 
-| Property       | Value                             |
-| -------------- | --------------------------------- |
-| Connector Type | `ConnectorType.BEDROCK`           |
-| Service        | `BedrockService`                  |
-| Default Model  | `anthropic.claude-3-sonnet`       |
-| Max Tokens     | 2048                              |
-| Authentication | AWS IAM (access key + secret key) |
-| Configuration  | Region, model ID, AWS credentials |
+| Property       | Value                                              |
+| -------------- | -------------------------------------------------- |
+| Connector Type | `ConnectorType.BEDROCK`                            |
+| Service        | `BedrockService`                                   |
+| Default Model  | `global.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| Max Tokens     | 2048                                               |
+| Authentication | AWS IAM (access key + secret key)                  |
+| Configuration  | Region, model ID, AWS credentials                  |
 
 Direct integration with Amazon Bedrock for Claude model invocation. Requires an AWS account with Bedrock access enabled for the target region and model.
 
@@ -26,7 +26,7 @@ Direct integration with Amazon Bedrock for Claude model invocation. Requires an 
 - `awsRegion` -- AWS region (e.g., `us-east-1`)
 - `awsAccessKeyId` -- IAM access key
 - `awsSecretAccessKey` -- IAM secret access key
-- `modelId` -- Bedrock model identifier (e.g., `anthropic.claude-3-sonnet-20240229-v1:0`)
+- `modelId` -- Bedrock model identifier (e.g., `global.anthropic.claude-sonnet-4-5-20250929-v1:0`)
 
 ### 2. LLM APIs (`llm_apis`)
 

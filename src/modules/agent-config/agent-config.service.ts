@@ -116,6 +116,22 @@ export class AgentConfigService {
     return this.getAgentConfig(tenantId, agentId)
   }
 
+  async bulkToggleAgents(
+    tenantId: string,
+    enabled: boolean,
+    actor: string
+  ): Promise<{ updated: number }> {
+    const result = await this.repository.bulkToggleAgents(tenantId, enabled)
+    this.log.success('bulkToggleAgents', tenantId, { enabled, actor, updated: result.count })
+    return { updated: result.count }
+  }
+
+  async bulkToggleOsintSources(tenantId: string, enabled: boolean): Promise<{ updated: number }> {
+    const result = await this.repository.bulkToggleOsintSources(tenantId, enabled)
+    this.log.success('bulkToggleOsintSources', tenantId, { enabled, updated: result.count })
+    return { updated: result.count }
+  }
+
   async resetUsage(
     tenantId: string,
     agentId: string,

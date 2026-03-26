@@ -18,9 +18,7 @@ import {
   buildHuntPrompt,
   buildInvestigationPrompt,
   buildBedrockHuntResponse,
-  buildFallbackHuntResponse,
   buildBedrockInvestigateResponse,
-  buildFallbackInvestigateResponse,
   buildAgentTaskPrompt,
   buildBedrockAgentTaskResponse,
   buildFallbackAgentTaskResponse,
@@ -36,8 +34,7 @@ import {
   checkAgentQuota,
   filterConnectorsBySelection,
   buildFallbackGenericResponse,
-  buildFallbackExplainResponse,
-  buildGenericAiResponse,
+  buildFeatureAwareResponse,
   assembleFinalPrompt,
   resolveSelectedConnector,
 } from './ai.utilities'
@@ -144,25 +141,17 @@ export class AiService {
 
   async aiHunt(dto: AiHuntDto, user: JwtPayload): Promise<AiResponse> {
     this.logAction('aiHunt', user, 'AiHunt', undefined, { queryLength: dto.query.length })
-    await this.ensureAiEnabled(user.tenantId)
 
-    const startTime = Date.now()
-    const connectors = await this.findAvailableAiConnectors(user.tenantId)
-    const response =
-      (await this.tryConnectorsInOrder(connectors, c => this.routeHunt(c, dto, user))) ??
-      buildFallbackHuntResponse(dto.query)
-
-    const latencyMs = Date.now() - startTime
-    await this.logAudit(
-      this.buildAuditRecord(user, AiAuditAction.HUNT, response, latencyMs, dto.query)
-    )
-
-    this.logAction('aiHunt', user, 'AiHunt', undefined, {
-      model: response.model,
-      confidence: response.confidence,
-      latencyMs,
+    return this.executeAiTask({
+      tenantId: user.tenantId,
+      userId: user.sub,
+      userEmail: user.email,
+      featureKey: AiFeatureKey.HUNT_HYPOTHESIS,
+      context: {
+        query: dto.query,
+        additionalContext: dto.context?.slice(0, 500) ?? '',
+      },
     })
-    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -171,30 +160,37 @@ export class AiService {
 
   async aiInvestigate(dto: AiInvestigateDto, user: JwtPayload): Promise<AiResponse> {
     this.logAction('aiInvestigate', user, 'Alert', dto.alertId)
-    await this.ensureAiEnabled(user.tenantId)
 
     const fullAlert = await this.loadAndValidateAlert(dto.alertId, user)
     const relatedAlerts = await this.loadRelatedAlerts(fullAlert, user.tenantId)
 
-    const startTime = Date.now()
-    const connectors = await this.findAvailableAiConnectors(user.tenantId)
-    const response =
-      (await this.tryConnectorsInOrder(connectors, c =>
-        this.routeInvestigate(c, fullAlert, relatedAlerts, dto.alertId, user)
-      )) ?? buildFallbackInvestigateResponse(fullAlert, relatedAlerts, dto.alertId)
+    const relatedSummary = relatedAlerts
+      .slice(0, 10)
+      .map(ra => `[${ra.severity}] ${ra.title} at ${ra.timestamp.toISOString()}`)
+      .join('\n')
 
-    const latencyMs = Date.now() - startTime
-    await this.logAudit(
-      this.buildAuditRecord(user, AiAuditAction.INVESTIGATE, response, latencyMs, dto.alertId)
-    )
-
-    this.logAction('aiInvestigate', user, 'Alert', dto.alertId, {
-      model: response.model,
-      confidence: response.confidence,
-      latencyMs,
-      relatedAlertCount: relatedAlerts.length,
+    return this.executeAiTask({
+      tenantId: user.tenantId,
+      userId: user.sub,
+      userEmail: user.email,
+      featureKey: AiFeatureKey.ALERT_SUMMARIZE,
+      context: {
+        alertTitle: fullAlert.title ?? '',
+        alertDescription: fullAlert.description ?? '',
+        alertSeverity: fullAlert.severity,
+        alertSource: fullAlert.source ?? '',
+        alertRule: fullAlert.ruleName ?? '',
+        alertTimestamp: fullAlert.timestamp?.toISOString() ?? '',
+        alertRawData: JSON.stringify(fullAlert.rawEvent ?? {}).slice(0, 2000),
+        sourceIp: fullAlert.sourceIp ?? '',
+        destinationIp: fullAlert.destinationIp ?? '',
+        agentName: fullAlert.agentName ?? '',
+        mitreTactics: fullAlert.mitreTactics.join(', ') || 'None',
+        mitreTechniques: fullAlert.mitreTechniques.join(', ') || 'None',
+        relatedAlerts: relatedSummary || 'None found',
+        relatedAlertCount: String(relatedAlerts.length),
+      },
     })
-    return response
   }
 
   /* ---------------------------------------------------------------- */
@@ -203,25 +199,17 @@ export class AiService {
 
   async aiExplain(body: { prompt: string }, user: JwtPayload): Promise<AiResponse> {
     this.logAction('aiExplain', user, 'AiExplain', undefined, { promptLength: body.prompt.length })
-    await this.ensureAiEnabled(user.tenantId)
 
-    const startTime = Date.now()
-    const connectors = await this.findAvailableAiConnectors(user.tenantId)
-    const response =
-      (await this.tryConnectorsInOrder(connectors, c => this.routeExplain(c, body.prompt, user))) ??
-      buildFallbackExplainResponse(body.prompt)
-
-    const latencyMs = Date.now() - startTime
-    await this.logAudit(
-      this.buildAuditRecord(user, AiAuditAction.EXPLAIN, response, latencyMs, body.prompt)
-    )
-
-    this.logAction('aiExplain', user, 'AiExplain', undefined, {
-      model: response.model,
-      confidence: response.confidence,
-      latencyMs,
+    return this.executeAiTask({
+      tenantId: user.tenantId,
+      userId: user.sub,
+      userEmail: user.email,
+      featureKey: AiFeatureKey.AGENT_TASK,
+      context: {
+        prompt: body.prompt,
+      },
+      connector: undefined,
     })
-    return response
   }
 
   async runAgentTask(input: AgentTaskExecutionInput): Promise<AiResponse> {
@@ -318,9 +306,7 @@ export class AiService {
     response: AiResponse,
     latencyMs: number
   ): Promise<void> {
-    await this.logAudit(
-      this.buildAgentTaskAuditRecord(input, response, latencyMs)
-    )
+    await this.logAudit(this.buildAgentTaskAuditRecord(input, response, latencyMs))
     this.logAgentTaskSuccess(input, response, latencyMs)
   }
 
@@ -395,13 +381,16 @@ export class AiService {
 
     const finalPrompt = await this.buildExecuteAiTaskPrompt(params, agentConfig)
     const connectors = await this.resolveExecuteAiTaskConnectors(
-      params, agentConfig, agentId, featureConfig.preferredProvider
+      params,
+      agentConfig,
+      agentId,
+      featureConfig.preferredProvider
     )
     const maxTokens = agentConfig.maxTokensPerCall ?? featureConfig.maxTokens
 
     const startTime = Date.now()
     const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
-      this.routeGenericTask(c, finalPrompt, maxTokens)
+      this.routeGenericTask(c, finalPrompt, maxTokens, params.featureKey, params.context)
     )
     const response = aiResponse ?? buildFallbackGenericResponse(params.featureKey, finalPrompt)
     const latencyMs = Date.now() - startTime
@@ -467,7 +456,10 @@ export class AiService {
     )
     await this.enrichContextWithOsint(params, agentConfig)
     return assembleFinalPrompt(
-      promptContent, params.context, agentConfig.systemPrompt, agentConfig.promptSuffix
+      promptContent,
+      params.context,
+      agentConfig.systemPrompt,
+      agentConfig.promptSuffix
     )
   }
 
@@ -479,7 +471,10 @@ export class AiService {
   ): Promise<ResolvedAiConnector[]> {
     const allConnectors = await this.findAvailableAiConnectors(params.tenantId)
     const selectedConnector = resolveSelectedConnector(
-      params.connector, agentConfig.providerMode, AI_DEFAULT_PROVIDER_KEY, preferredProvider
+      params.connector,
+      agentConfig.providerMode,
+      AI_DEFAULT_PROVIDER_KEY,
+      preferredProvider
     )
 
     if (!selectedConnector || selectedConnector === AI_DEFAULT_PROVIDER_KEY) {
@@ -651,10 +646,12 @@ export class AiService {
   private async routeGenericTask(
     connector: ResolvedAiConnector,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    featureKey?: string,
+    context?: Record<string, unknown>
   ): Promise<AiResponse | undefined> {
     try {
-      return await this.invokeGenericConnector(connector, prompt, maxTokens)
+      return await this.invokeGenericConnector(connector, prompt, maxTokens, featureKey, context)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(`Generic AI task routing failed for ${connector.type}: ${errorMessage}`)
@@ -665,15 +662,17 @@ export class AiService {
   private async invokeGenericConnector(
     connector: ResolvedAiConnector,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    featureKey?: string,
+    context?: Record<string, unknown>
   ): Promise<AiResponse | undefined> {
     switch (connector.type) {
       case ConnectorType.BEDROCK:
-        return this.invokeGenericBedrock(connector, prompt, maxTokens)
+        return this.invokeGenericBedrock(connector, prompt, maxTokens, featureKey, context)
       case ConnectorType.LLM_APIS:
-        return this.invokeGenericLlmApis(connector, prompt, maxTokens)
+        return this.invokeGenericLlmApis(connector, prompt, maxTokens, featureKey, context)
       case ConnectorType.OPENCLAW_GATEWAY:
-        return this.invokeGenericOpenClaw(connector, prompt, maxTokens)
+        return this.invokeGenericOpenClaw(connector, prompt, maxTokens, featureKey, context)
       default:
         return undefined
     }
@@ -682,42 +681,65 @@ export class AiService {
   private async invokeGenericBedrock(
     connector: ResolvedAiConnector,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    featureKey?: string,
+    context?: Record<string, unknown>
   ): Promise<AiResponse> {
     const aiResult = await this.bedrockService.invoke(connector.config, prompt, maxTokens)
     const model = (connector.config.modelId as string) ?? AI_DEFAULT_MODEL
-    return buildGenericAiResponse(
-      aiResult.text, model, 'bedrock', aiResult.inputTokens, aiResult.outputTokens,
-      'Processed by AI model via Bedrock'
+    return buildFeatureAwareResponse(
+      aiResult.text,
+      model,
+      'bedrock',
+      aiResult.inputTokens,
+      aiResult.outputTokens,
+      featureKey,
+      context
     )
   }
 
   private async invokeGenericLlmApis(
     connector: ResolvedAiConnector,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    featureKey?: string,
+    context?: Record<string, unknown>
   ): Promise<AiResponse> {
     const aiResult = await this.llmApisService.invoke(connector.config, prompt, maxTokens)
     const model = (connector.config.defaultModel as string) ?? 'gpt-4'
     const provider = connector.name ? `llm_apis(${connector.name})` : 'llm_apis'
-    return buildGenericAiResponse(
-      aiResult.text, model, provider, aiResult.inputTokens, aiResult.outputTokens,
-      'Processed by AI model via LLM API'
+    return buildFeatureAwareResponse(
+      aiResult.text,
+      model,
+      provider,
+      aiResult.inputTokens,
+      aiResult.outputTokens,
+      featureKey,
+      context
     )
   }
 
   private async invokeGenericOpenClaw(
     connector: ResolvedAiConnector,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    featureKey?: string,
+    context?: Record<string, unknown>
   ): Promise<AiResponse> {
     const aiResult = await this.openClawGatewayService.invoke(
-      connector.config, prompt, maxTokens, 'generic'
+      connector.config,
+      prompt,
+      maxTokens,
+      'generic'
     )
-    return buildGenericAiResponse(
-      aiResult.text, 'openclaw-gateway', 'openclaw_gateway',
-      aiResult.inputTokens, aiResult.outputTokens,
-      'Processed by AI model via OpenClaw Gateway'
+    return buildFeatureAwareResponse(
+      aiResult.text,
+      'openclaw-gateway',
+      'openclaw_gateway',
+      aiResult.inputTokens,
+      aiResult.outputTokens,
+      featureKey,
+      context
     )
   }
 
@@ -1123,8 +1145,12 @@ export class AiService {
       const aiResult = await this.llmApisService.invoke(config, prompt, AI_LLM_APIS_MAX_TOKENS)
       const modelId = (config.defaultModel as string) ?? 'gpt-4'
       return buildLlmApisAgentTaskResponse(
-        aiResult.text, input.agentName, modelId,
-        aiResult.inputTokens, aiResult.outputTokens, connectorName
+        aiResult.text,
+        input.agentName,
+        modelId,
+        aiResult.inputTokens,
+        aiResult.outputTokens,
+        connectorName
       )
     } catch (error) {
       this.logAgentTaskProviderFailure('LLM APIs', error, input)
@@ -1191,11 +1217,19 @@ export class AiService {
     try {
       const prompt = buildInvestigationPrompt(alert, relatedAlerts)
       const aiResult = await this.openClawGatewayService.invoke(
-        config, prompt, AI_OPENCLAW_MAX_TOKENS, 'investigate'
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'investigate'
       )
       return buildOpenClawInvestigateResponse(
-        aiResult.text, alertId, relatedAlerts.length,
-        alert, relatedAlerts, aiResult.inputTokens, aiResult.outputTokens
+        aiResult.text,
+        alertId,
+        relatedAlerts.length,
+        alert,
+        relatedAlerts,
+        aiResult.inputTokens,
+        aiResult.outputTokens
       )
     } catch (error) {
       this.logProviderFailure('OpenClaw Gateway', 'aiInvestigate', error, user.tenantId, user.sub, {
@@ -1213,10 +1247,16 @@ export class AiService {
     try {
       const prompt = this.buildAgentTaskPromptFromInput(input)
       const aiResult = await this.openClawGatewayService.invoke(
-        config, prompt, AI_OPENCLAW_MAX_TOKENS, 'agent_task'
+        config,
+        prompt,
+        AI_OPENCLAW_MAX_TOKENS,
+        'agent_task'
       )
       return buildOpenClawAgentTaskResponse(
-        aiResult.text, input.agentName, aiResult.inputTokens, aiResult.outputTokens
+        aiResult.text,
+        input.agentName,
+        aiResult.inputTokens,
+        aiResult.outputTokens
       )
     } catch (error) {
       this.logAgentTaskProviderFailure('OpenClaw Gateway', error, input)
@@ -1321,9 +1361,7 @@ export class AiService {
     }
   }
 
-  private async checkAiConnectorAvailability(
-    tenantId: string
-  ): Promise<[unknown[], boolean]> {
+  private async checkAiConnectorAvailability(tenantId: string): Promise<[unknown[], boolean]> {
     return Promise.all([
       this.aiRepository.findEnabledConnectorByTypes(tenantId, [
         ConnectorType.BEDROCK,

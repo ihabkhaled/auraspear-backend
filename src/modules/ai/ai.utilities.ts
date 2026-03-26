@@ -920,6 +920,232 @@ export function buildGenericAiResponse(
 }
 
 /* ---------------------------------------------------------------- */
+/* FEATURE-AWARE AI RESPONSE BUILDER                                 */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Builds a rich AiResponse with domain-specific reasoning steps and
+ * context-aware confidence, matching the quality of the per-provider
+ * hunt/investigate/explain response builders.
+ */
+export function buildFeatureAwareResponse(
+  aiText: string,
+  model: string,
+  provider: string,
+  inputTokens: number,
+  outputTokens: number,
+  featureKey?: string,
+  context?: Record<string, unknown>
+): AiResponse {
+  const reasoning = buildFeatureReasoning(featureKey, context)
+  const confidence = computeFeatureConfidence(featureKey, context)
+
+  return {
+    result: aiText,
+    reasoning,
+    confidence,
+    model,
+    provider,
+    tokensUsed: { input: inputTokens, output: outputTokens },
+  }
+}
+
+function buildFeatureReasoning(featureKey?: string, context?: Record<string, unknown>): string[] {
+  if (!featureKey) {
+    return ['Processed by AI model']
+  }
+
+  const key = featureKey.toLowerCase()
+
+  if (key.startsWith('alert.')) {
+    const title = (context?.alertTitle as string) ?? 'alert'
+    const severity = (context?.alertSeverity as string) ?? 'unknown'
+    return [
+      `Loading alert details: "${title}" (${severity})`,
+      'Analyzing alert context, raw event data, and IOC indicators',
+      'Mapping to MITRE ATT&CK tactics and techniques',
+      `Generating AI-powered ${key.replace('alert.', '')} analysis via ${featureKey}`,
+    ]
+  }
+
+  if (key.startsWith('case.')) {
+    const title = (context?.caseTitle as string) ?? 'case'
+    return [
+      `Loading case details: "${title}"`,
+      'Analyzing case timeline, artifacts, and linked alerts',
+      'Evaluating severity, status, and response progress',
+      `Generating AI-powered ${key.replace('case.', '')} via ${featureKey}`,
+    ]
+  }
+
+  if (key.startsWith('hunt.')) {
+    const query = (context?.query as string) ?? ''
+    return [
+      `Analyzing hunt query: "${query.slice(0, 80)}"`,
+      'Decomposing query into threat hypotheses',
+      'Generating detection queries and MITRE ATT&CK mapping',
+      `Producing ${key.replace('hunt.', '')} via AI`,
+    ]
+  }
+
+  if (key.startsWith('detection.')) {
+    const ruleName = (context?.ruleName as string) ?? 'rule'
+    return [
+      `Loading detection rule: "${ruleName}"`,
+      'Analyzing rule conditions, hit count, and false positive rate',
+      'Evaluating MITRE coverage and detection gaps',
+      `Generating ${key.replace('detection.', '')} recommendation via AI`,
+    ]
+  }
+
+  if (key.startsWith('intel.')) {
+    const iocValue = (context?.iocValue as string) ?? ''
+    return [
+      `Processing threat intelligence for: ${iocValue.slice(0, 50)}`,
+      'Querying OSINT sources and threat feeds',
+      'Correlating with known campaigns and threat actors',
+      `Generating ${key.replace('intel.', '')} analysis via AI`,
+    ]
+  }
+
+  if (key.startsWith('report.')) {
+    return [
+      'Collecting operational metrics and KPIs',
+      'Analyzing alert volumes, resolution rates, and trends',
+      'Evaluating team performance and SLA compliance',
+      `Generating ${key.replace('report.', '')} via AI`,
+    ]
+  }
+
+  if (key.startsWith('entity.')) {
+    const entityValue = (context?.entityValue as string) ?? ''
+    return [
+      `Loading entity details: ${entityValue.slice(0, 50)}`,
+      'Analyzing risk score breakdown and contributing factors',
+      'Evaluating relationship graph and temporal activity',
+      `Generating ${key.replace('entity.', '')} analysis via AI`,
+    ]
+  }
+
+  if (key.startsWith('normalization.')) {
+    const pipeline = (context?.pipelineName as string) ?? 'pipeline'
+    return [
+      `Loading normalization pipeline: "${pipeline}"`,
+      'Analyzing field mappings and parser configuration',
+      'Comparing sample events against normalized output',
+      'Generating field-level verification report via AI',
+    ]
+  }
+
+  if (key.startsWith('soar.')) {
+    return [
+      'Loading existing playbook catalog for reference',
+      'Analyzing incident type, trigger conditions, and response steps',
+      'Generating structured SOAR playbook draft via AI',
+    ]
+  }
+
+  if (key.startsWith('dashboard.')) {
+    const metric = (context?.metric as string) ?? 'metric'
+    return [
+      `Analyzing dashboard metric: ${metric}`,
+      'Comparing current value against historical baseline',
+      'Identifying anomalies and contributing factors',
+      'Generating anomaly explanation via AI',
+    ]
+  }
+
+  if (key.startsWith('knowledge.')) {
+    return [
+      'Searching knowledge base for relevant runbooks',
+      'Analyzing operational procedures and decision points',
+      `Generating ${key.replace('knowledge.', '')} via AI`,
+    ]
+  }
+
+  // Fallback for agent tasks and unknown features
+  return [
+    `Processing AI task: ${featureKey}`,
+    'Loading context and applying agent configuration',
+    'Generating AI-powered response',
+  ]
+}
+
+function computeFeatureConfidence(featureKey?: string, context?: Record<string, unknown>): number {
+  if (!featureKey) return 0.9
+
+  const key = featureKey.toLowerCase()
+
+  // Alert investigation confidence varies by severity
+  if (key.startsWith('alert.')) {
+    const severity = (context?.alertSeverity as string) ?? ''
+    let base = 0.7
+    switch (severity) {
+      case 'critical': {
+        base = 0.92
+        break
+      }
+      case 'high': {
+        base = 0.88
+        break
+      }
+      case 'medium': {
+        base = 0.82
+        break
+      }
+      case 'low':
+        {
+          base = 0.75
+          // No default
+        }
+        break
+    }
+
+    // Boost if raw data is present
+    if (context?.alertRawData) base = Math.min(base + 0.03, 0.95)
+    return base
+  }
+
+  // Case confidence boosted by artifacts and timeline
+  if (key.startsWith('case.')) {
+    let base = 0.8
+    if (context?.artifacts) base += 0.03
+    if (context?.timelineEvents) base += 0.03
+    if (context?.tasks) base += 0.02
+    return Math.min(base, 0.95)
+  }
+
+  // Hunt queries are exploratory — moderate confidence
+  if (key.startsWith('hunt.')) return 0.78
+
+  // Detection tuning based on hit/FP data — higher confidence
+  if (key.startsWith('detection.')) {
+    const hitCount = (context?.hitCount as number) ?? 0
+    return hitCount > 10 ? 0.88 : 0.8
+  }
+
+  // Intel enrichment depends on IOC type
+  if (key.startsWith('intel.')) return 0.82
+
+  // Reports and dashboards are data-driven
+  if (key.startsWith('report.') || key.startsWith('dashboard.')) return 0.85
+
+  // Entity risk has good data backing
+  if (key.startsWith('entity.')) return 0.84
+
+  // Normalization verification is structured
+  if (key.startsWith('normalization.')) return 0.88
+
+  // SOAR playbooks are suggestions
+  if (key.startsWith('soar.')) return 0.78
+
+  // Knowledge base is reference material
+  if (key.startsWith('knowledge.')) return 0.82
+
+  return 0.85
+}
+
+/* ---------------------------------------------------------------- */
 /* FINAL PROMPT ASSEMBLY                                             */
 /* ---------------------------------------------------------------- */
 

@@ -30,7 +30,7 @@ export class BedrockWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     const recentItems: WorkspaceRecentItem[] = []
     const entitiesPreview: WorkspaceEntity[] = []
 
-    const modelId = (config.modelId ?? 'anthropic.claude-3-sonnet-20240229-v1:0') as string
+    const modelId = (config.modelId ?? 'global.anthropic.claude-sonnet-4-5-20250929-v1:0') as string
     const region = (config.region ?? 'us-east-1') as string
 
     summaryCards.push(
@@ -98,7 +98,7 @@ export class BedrockWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     page: number,
     pageSize: number
   ): Promise<WorkspaceEntitiesResponse> {
-    const modelId = (config.modelId ?? 'anthropic.claude-3-sonnet-20240229-v1:0') as string
+    const modelId = (config.modelId ?? 'global.anthropic.claude-sonnet-4-5-20250929-v1:0') as string
     const region = (config.region ?? 'us-east-1') as string
 
     if (page > 1) {

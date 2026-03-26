@@ -56,10 +56,10 @@ const ACTORS = [
 
 const ACTIONS = ['ai_hunt', 'ai_hunt', 'ai_hunt', 'ai_investigate', 'ai_investigate', 'ai_explain']
 const MODELS = [
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-haiku',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'anthropic.claude-3-haiku-20240307-v1:0',
   'rule-based',
 ]
 

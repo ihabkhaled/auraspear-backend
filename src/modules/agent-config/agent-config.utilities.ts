@@ -22,7 +22,7 @@ export function buildAgentConfigWithDefaults(
       agentId,
       displayName: defaults.displayName,
       description: defaults.description,
-      isEnabled: true,
+      isEnabled: false,
       providerMode: AI_DEFAULT_PROVIDER_KEY,
       model: null,
       temperature: defaults.temperature,

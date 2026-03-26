@@ -340,7 +340,7 @@ const CONNECTOR_SEEDS: ConnectorSeed[] = [
     enabled: true,
     config: {
       region: 'us-east-1',
-      modelId: 'anthropic.claude-3-sonnet',
+      modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
       nlHuntingEnabled: true,
       explainableAiEnabled: true,
       auditLoggingEnabled: true,
@@ -1646,10 +1646,10 @@ const AI_AUDIT_ACTIONS = [
 ]
 
 const AI_AUDIT_MODELS = [
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-sonnet',
-  'anthropic.claude-3-haiku',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  'anthropic.claude-3-haiku-20240307-v1:0',
   'rule-based',
 ]
 
@@ -2861,7 +2861,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
       {
         name: 'Sentinel Triage Agent',
         description: 'Automated alert triage and initial classification using behavioral analysis.',
-        model: 'anthropic.claude-3-sonnet',
+        model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         tier: AiAgentTier.L1,
         status: AiAgentStatus.online,
         totalTasks: 4523,
@@ -2917,7 +2917,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
         name: 'Hunt Orchestrator',
         description:
           'Coordinates threat hunting campaigns using natural language queries across data sources.',
-        model: 'anthropic.claude-3-sonnet',
+        model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         tier: AiAgentTier.L2,
         status: AiAgentStatus.online,
         totalTasks: 1287,
@@ -2972,7 +2972,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
         name: 'Incident Responder',
         description:
           'Automated incident response orchestration with containment and remediation actions.',
-        model: 'anthropic.claude-3-sonnet',
+        model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         tier: AiAgentTier.L2,
         status: AiAgentStatus.online,
         totalTasks: 892,
@@ -3025,7 +3025,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
         name: 'Compliance Auditor',
         description:
           'Evaluates security controls against compliance frameworks and generates reports.',
-        model: 'anthropic.claude-3-haiku',
+        model: 'anthropic.claude-3-haiku-20240307-v1:0',
         tier: AiAgentTier.L1,
         status: AiAgentStatus.online,
         totalTasks: 234,
@@ -3057,7 +3057,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
         name: 'Vulnerability Prioritizer',
         description:
           'Prioritizes vulnerabilities based on asset criticality, exploit availability, and threat context.',
-        model: 'anthropic.claude-3-sonnet',
+        model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         tier: AiAgentTier.L3,
         status: AiAgentStatus.degraded,
         totalTasks: 567,
@@ -3103,7 +3103,7 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
         name: 'Report Generator',
         description:
           'Generates executive and technical security reports with AI-powered analysis summaries.',
-        model: 'anthropic.claude-3-haiku',
+        model: 'anthropic.claude-3-haiku-20240307-v1:0',
         tier: AiAgentTier.L0,
         status: AiAgentStatus.maintenance,
         totalTasks: 145,

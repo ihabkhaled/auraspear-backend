@@ -234,6 +234,20 @@ export class ScheduleService {
     }
   }
 
+  async setDisabledReason(id: string, reason: string): Promise<void> {
+    await this.repository.updateSchedule(id, { disabledReason: reason })
+  }
+
+  async bulkToggle(
+    tenantId: string,
+    enabled: boolean,
+    actor: string
+  ): Promise<{ updated: number }> {
+    const result = await this.repository.bulkToggle(tenantId, enabled)
+    this.log.success('bulkToggle', tenantId, { enabled, actor, updated: result.count })
+    return { updated: result.count }
+  }
+
   /* ---------------------------------------------------------------- */
   /* FIND DUE SCHEDULES (for heartbeat)                                */
   /* ---------------------------------------------------------------- */
@@ -329,8 +343,7 @@ export class ScheduleService {
       throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
     }
 
-    // Global schedules (tenantId = null) are visible to all tenants
-    if (schedule.tenantId && schedule.tenantId !== tenantId) {
+    if (schedule.tenantId !== tenantId) {
       throw new BusinessException(
         403,
         'Access denied to this schedule',

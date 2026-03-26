@@ -95,4 +95,15 @@ export class ScheduleController {
   ): Promise<ScheduleDetail> {
     return this.scheduleService.resetToDefault(tenantId, id, user.email)
   }
+
+  @Post('bulk-toggle')
+  @RequirePermission(Permission.AI_CONFIG_EDIT)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async bulkToggle(
+    @TenantId() tenantId: string,
+    @Body('enabled') enabled: boolean,
+    @CurrentUser() user: JwtPayload
+  ): Promise<{ updated: number }> {
+    return this.scheduleService.bulkToggle(tenantId, enabled, user.email)
+  }
 }
