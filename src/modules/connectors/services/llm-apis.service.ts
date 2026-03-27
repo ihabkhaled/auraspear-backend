@@ -56,10 +56,11 @@ export class LlmApisService {
     config: Record<string, unknown>,
     prompt: string,
     maxTokens: number = 1024,
-    model?: string
+    model?: string,
+    temperature?: number
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const resolvedModel = model ?? ((config.defaultModel ?? 'gpt-4') as string)
-    const res = await this.sendChatCompletion(config, prompt, maxTokens, resolvedModel)
+    const res = await this.sendChatCompletion(config, prompt, maxTokens, resolvedModel, temperature)
 
     if (res.status !== 200) {
       throw new Error(formatRemoteError('LLM API', res.status, res.data))
@@ -68,11 +69,66 @@ export class LlmApisService {
     return this.parseInvokeResponse(res.data, resolvedModel, maxTokens)
   }
 
+  /**
+   * Multi-turn chat invocation with conversation history.
+   */
+  async invokeChat(
+    config: Record<string, unknown>,
+    messages: Array<{ role: string; content: string }>,
+    maxTokens: number = 2048,
+    model?: string,
+    temperature?: number,
+    systemPrompt?: string
+  ): Promise<{ text: string; model: string; inputTokens: number; outputTokens: number }> {
+    const resolvedModel = model ?? ((config.defaultModel ?? 'gpt-4') as string)
+    const baseUrl = config.baseUrl as string
+    const apiKey = config.apiKey as string
+    const maxTokensParameter = this.resolveMaxTokensParameter(config)
+    const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 60_000)
+
+    const headers = buildLlmApiHeaders({
+      apiKey,
+      organizationId: config.organizationId as string | undefined,
+    })
+
+    const chatMessages: Array<{ role: string; content: string }> = []
+    if (systemPrompt) {
+      chatMessages.push({ role: 'system', content: systemPrompt })
+    }
+    chatMessages.push(...messages)
+
+    const requestBody: Record<string, unknown> = {
+      model: resolvedModel,
+      messages: chatMessages,
+      [maxTokensParameter]: maxTokens,
+    }
+    if (temperature !== undefined) {
+      requestBody.temperature = temperature
+    }
+
+    const body = JSON.stringify(requestBody)
+
+    const res = await this.httpClient.fetch(`${baseUrl}/chat/completions`, {
+      method: HttpMethod.POST,
+      headers,
+      body,
+      timeoutMs: timeout,
+    })
+
+    if (res.status !== 200) {
+      throw new Error(formatRemoteError('LLM API Chat', res.status, res.data))
+    }
+
+    const parsed = this.parseInvokeResponse(res.data, resolvedModel, maxTokens)
+    return { ...parsed, model: resolvedModel }
+  }
+
   private async sendChatCompletion(
     config: Record<string, unknown>,
     prompt: string,
     maxTokens: number,
-    resolvedModel: string
+    resolvedModel: string,
+    temperature?: number
   ): Promise<{ status: number; data: unknown }> {
     const baseUrl = config.baseUrl as string
     const apiKey = config.apiKey as string
@@ -84,11 +140,16 @@ export class LlmApisService {
       organizationId: config.organizationId as string | undefined,
     })
 
-    const body = JSON.stringify({
+    const requestBody: Record<string, unknown> = {
       model: resolvedModel,
       messages: [{ role: 'user', content: prompt }],
       [maxTokensParameter]: maxTokens,
-    })
+    }
+    if (temperature !== undefined) {
+      requestBody.temperature = temperature
+    }
+
+    const body = JSON.stringify(requestBody)
 
     return this.httpClient.fetch(`${baseUrl}/chat/completions`, {
       method: HttpMethod.POST,
@@ -156,11 +217,22 @@ export class LlmApisService {
   ): Promise<AxiosResponseData> {
     const maxTokensParameter = this.resolveMaxTokensParameter(config)
     const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 30_000)
-    const headers = buildLlmApiHeaders({ apiKey, organizationId: config.organizationId as string | undefined })
-    const body = JSON.stringify({ model, messages: [{ role: 'user', content: 'Hi' }], [maxTokensParameter]: 5 })
+    const headers = buildLlmApiHeaders({
+      apiKey,
+      organizationId: config.organizationId as string | undefined,
+    })
+    const body = JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: 'Hi' }],
+      [maxTokensParameter]: 5,
+    })
 
     return this.httpClient.fetch(`${baseUrl}/chat/completions`, {
-      method: HttpMethod.POST, headers, body, timeoutMs: timeout, allowPrivateNetwork: true,
+      method: HttpMethod.POST,
+      headers,
+      body,
+      timeoutMs: timeout,
+      allowPrivateNetwork: true,
     })
   }
 

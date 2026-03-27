@@ -542,6 +542,8 @@ model Tenant {
   aiAgentSchedules        AiAgentSchedule[]
   aiFindingOutputLinks    AiFindingOutputLink[]
   aiJobRunSummaries       AiJobRunSummary[]
+  aiChatThreads           AiChatThread[]
+  aiChatMessages          AiChatMessage[]
 
   @@map("tenants")
 }
@@ -2473,4 +2475,58 @@ model AiJobRunSummary {
   @@index([tenantId, status])
   @@index([tenantId, createdAt(sort: Desc)])
   @@map("ai_job_run_summaries")
+}
+
+// ─── AI Chat Threads ─────────────────────────────────────
+
+model AiChatThread {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  connectorId     String?   @map("connector_id") @db.Uuid
+  title           String?   @db.VarChar(255)
+  model           String?   @db.VarChar(255)
+  provider        String?   @db.VarChar(100)
+  outputFormat    String    @default("plain_text") @map("output_format") @db.VarChar(30)
+  temperature     Float     @default(0.7)
+  maxTokens       Int       @default(2048) @map("max_tokens")
+  systemPrompt    String?   @map("system_prompt") @db.Text
+  messageCount    Int       @default(0) @map("message_count")
+  totalTokensUsed Int       @default(0) @map("total_tokens_used")
+  lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
+  isArchived      Boolean   @default(false) @map("is_archived")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  messages AiChatMessage[]
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([tenantId, userId, lastActivityAt(sort: Desc)])
+  @@index([tenantId, isArchived])
+  @@map("ai_chat_threads")
+}
+
+// ─── AI Chat Messages ────────────────────────────────────
+
+model AiChatMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  threadId      String   @map("thread_id") @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  role          String   @db.VarChar(20)
+  content       String   @db.Text
+  model         String?  @db.VarChar(255)
+  provider      String?  @db.VarChar(100)
+  inputTokens   Int      @default(0) @map("input_tokens")
+  outputTokens  Int      @default(0) @map("output_tokens")
+  durationMs    Int?     @map("duration_ms")
+  sequenceNum   Int      @map("sequence_num")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  thread AiChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, sequenceNum])
+  @@index([tenantId])
+  @@map("ai_chat_messages")
 }

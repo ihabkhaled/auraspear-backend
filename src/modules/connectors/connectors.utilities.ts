@@ -457,7 +457,8 @@ function buildLlamaInstructPrompt(prompt: string): string {
 export function buildBedrockRequestBody(
   prompt: string,
   maxTokens: number,
-  modelId: string
+  modelId: string,
+  temperature: number = 0.3
 ): string {
   const family = detectBedrockModelFamily(modelId)
 
@@ -466,7 +467,7 @@ export function buildBedrockRequestBody(
       return JSON.stringify({
         anthropic_version: 'bedrock-2023-05-31',
         max_tokens: maxTokens,
-        temperature: 0.3,
+        temperature,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
       })
     }
@@ -475,7 +476,7 @@ export function buildBedrockRequestBody(
         messages: [{ role: 'user', content: [{ text: prompt }] }],
         inferenceConfig: {
           maxTokens,
-          temperature: 0.3,
+          temperature,
           topP: 0.9,
         },
       })
@@ -484,7 +485,7 @@ export function buildBedrockRequestBody(
       return JSON.stringify({
         prompt: buildLlamaInstructPrompt(prompt),
         max_gen_len: maxTokens,
-        temperature: 0.3,
+        temperature,
         top_p: 0.9,
       })
     }

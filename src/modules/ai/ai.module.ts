@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { AiController } from './ai.controller'
 import { AiRepository } from './ai.repository'
 import { AiService } from './ai.service'
+import { AiChatModule } from './chat/ai-chat.module'
 import { FeatureCatalogModule } from './feature-catalog/feature-catalog.module'
 import { OrchestratorModule } from './orchestrator/orchestrator.module'
 import { PromptRegistryModule } from './prompt-registry/prompt-registry.module'
@@ -24,6 +25,7 @@ import { OsintExecutorModule } from '../osint-executor/osint-executor.module'
     PromptRegistryModule,
     FeatureCatalogModule,
     UsageBudgetModule,
+    AiChatModule,
     AiWritebackModule,
   ],
   controllers: [AiController],

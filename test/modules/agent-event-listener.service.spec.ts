@@ -26,6 +26,16 @@ function createMockAppLogger() {
   }
 }
 
+function createMockAgentConfigService() {
+  return {
+    getAgentConfig: jest.fn().mockResolvedValue({
+      isEnabled: true,
+      triggerMode: 'auto_on_alert',
+      triggerConfig: {},
+    }),
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Tests                                                               */
 /* ------------------------------------------------------------------ */
@@ -34,14 +44,20 @@ describe('AgentEventListenerService', () => {
   const TENANT_ID = 'tenant-001'
 
   let orchestratorService: ReturnType<typeof createMockOrchestratorService>
+  let agentConfigService: ReturnType<typeof createMockAgentConfigService>
   let appLogger: ReturnType<typeof createMockAppLogger>
   let service: AgentEventListenerService
 
   beforeEach(() => {
     jest.clearAllMocks()
     orchestratorService = createMockOrchestratorService()
+    agentConfigService = createMockAgentConfigService()
     appLogger = createMockAppLogger()
-    service = new AgentEventListenerService(orchestratorService as never, appLogger as never)
+    service = new AgentEventListenerService(
+      orchestratorService as never,
+      agentConfigService as never,
+      appLogger as never
+    )
   })
 
   /* ---------------------------------------------------------------- */

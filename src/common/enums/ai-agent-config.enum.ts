@@ -41,6 +41,7 @@ export enum AiOutputFormat {
   STRUCTURED_JSON = 'structured_json',
   MARKDOWN = 'markdown',
   RICH_CARDS = 'rich_cards',
+  PLAIN_TEXT = 'plain_text',
 }
 
 export enum OsintSourceType {

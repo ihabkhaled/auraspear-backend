@@ -76,7 +76,9 @@ export class BedrockService implements OnModuleDestroy {
   async invoke(
     config: Record<string, unknown>,
     prompt: string,
-    maxTokens: number = 1024
+    maxTokens: number = 1024,
+    _model?: string,
+    temperature?: number
   ): Promise<BedrockInvokeResult> {
     const { region, accessKeyId, secretAccessKey, modelId, endpoint } = extractBedrockConfig(config)
 
@@ -87,7 +89,8 @@ export class BedrockService implements OnModuleDestroy {
       modelId,
       endpoint,
       prompt,
-      maxTokens
+      maxTokens,
+      temperature
     )
 
     const result = parseBedrockResponse(response.body, modelId)
@@ -107,7 +110,8 @@ export class BedrockService implements OnModuleDestroy {
     modelId: string,
     endpoint: string | undefined,
     prompt: string,
-    maxTokens: number
+    maxTokens: number,
+    temperature?: number
   ): Promise<{ body: Uint8Array }> {
     const { InvokeModelCommand } = await loadAwsBedrockSdk()
     const client = await this.getOrCreateClient(region, accessKeyId, secretAccessKey, endpoint)
@@ -116,7 +120,7 @@ export class BedrockService implements OnModuleDestroy {
       modelId,
       contentType: 'application/json',
       accept: 'application/json',
-      body: buildBedrockRequestBody(prompt, maxTokens, modelId),
+      body: buildBedrockRequestBody(prompt, maxTokens, modelId, temperature),
     })
 
     return Promise.race([

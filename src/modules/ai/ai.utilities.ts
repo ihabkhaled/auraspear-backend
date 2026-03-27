@@ -1,5 +1,5 @@
 import { AiProvider, AiResponseModel } from './ai.enums'
-import { AlertSeverity } from '../../common/enums'
+import { AiOutputFormat, AlertSeverity } from '../../common/enums'
 import type {
   AgentTaskPromptParameters,
   AgentTaskResponseParameters,
@@ -1153,16 +1153,72 @@ export function assembleFinalPrompt(
   promptContent: string,
   context: Record<string, unknown>,
   systemPrompt: string | null,
-  promptSuffix: string | null
+  promptSuffix: string | null,
+  outputFormat?: string,
+  presentationSkills?: string[]
 ): string {
   let finalPrompt = buildPromptFromTemplate(promptContent, context)
   if (systemPrompt) {
     finalPrompt = `${systemPrompt}\n\n${finalPrompt}`
   }
+
+  const formatInstructions = buildOutputFormatInstructions(outputFormat, presentationSkills)
+  if (formatInstructions) {
+    finalPrompt = `${finalPrompt}\n\n${formatInstructions}`
+  }
+
   if (promptSuffix) {
     finalPrompt = `${finalPrompt}\n\n${promptSuffix}`
   }
   return finalPrompt
+}
+
+function buildOutputFormatInstructions(
+  outputFormat?: string,
+  presentationSkills?: string[]
+): string | null {
+  const parts: string[] = []
+
+  switch (outputFormat) {
+    case AiOutputFormat.STRUCTURED_JSON: {
+      parts.push(
+        'IMPORTANT: Return your response as valid JSON. Structure with keys: "summary", "findings", "recommendations", "confidence", "severity".'
+      )
+
+      break
+    }
+    case AiOutputFormat.RICH_CARDS: {
+      parts.push(
+        'IMPORTANT: Structure your response as distinct cards separated by markdown ## headers. Each card should have a title, content, severity (if applicable), and action items.'
+      )
+
+      break
+    }
+    case AiOutputFormat.MARKDOWN: {
+      parts.push(
+        'Format your response in clean markdown with headers, bullet points, and code blocks where appropriate.'
+      )
+
+      break
+    }
+    case AiOutputFormat.PLAIN_TEXT: {
+      parts.push(
+        'Respond in plain, conversational language. Do not use markdown formatting, headers, or bullet points unless explicitly asked. Write as if explaining to a colleague in a direct message — clear, concise, and human-readable.'
+      )
+
+      break
+    }
+    // No default
+  }
+
+  if (presentationSkills && presentationSkills.length > 0) {
+    const skillList = presentationSkills.join(', ')
+    parts.push(
+      `Include these visualization elements where relevant: ${skillList}. Structure your response to support rendering these components.`
+    )
+  }
+
+  return parts.length > 0 ? parts.join('\n\n') : null
 }
 
 /* ---------------------------------------------------------------- */

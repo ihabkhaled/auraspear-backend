@@ -387,10 +387,20 @@ export class AiService {
       featureConfig.preferredProvider
     )
     const maxTokens = agentConfig.maxTokensPerCall ?? featureConfig.maxTokens
+    const temperature = agentConfig.temperature ?? 0.7
+    const modelOverride = agentConfig.model ?? undefined
 
     const startTime = Date.now()
     const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
-      this.routeGenericTask(c, finalPrompt, maxTokens, params.featureKey, params.context)
+      this.routeGenericTask(
+        c,
+        finalPrompt,
+        maxTokens,
+        params.featureKey,
+        params.context,
+        temperature,
+        modelOverride
+      )
     )
     const response = aiResponse ?? buildFallbackGenericResponse(params.featureKey, finalPrompt)
     const latencyMs = Date.now() - startTime
@@ -455,11 +465,14 @@ export class AiService {
       params.featureKey
     )
     await this.enrichContextWithOsint(params, agentConfig)
+    this.enrichContextWithIndexPatterns(params, agentConfig)
     return assembleFinalPrompt(
       promptContent,
       params.context,
       agentConfig.systemPrompt,
-      agentConfig.promptSuffix
+      agentConfig.promptSuffix,
+      agentConfig.outputFormat,
+      agentConfig.presentationSkills
     )
   }
 
@@ -603,6 +616,24 @@ export class AiService {
     await this.performOsintEnrichment(params, iocType, iocValue, sourceIds)
   }
 
+  /**
+   * If the agent has indexPatterns configured, inject them into the context
+   * so the prompt and AI response are scoped to the correct data sources.
+   */
+  private enrichContextWithIndexPatterns(
+    params: ExecuteAiTaskInput,
+    agentConfig: AgentConfigWithDefaults
+  ): void {
+    const patterns = agentConfig.indexPatterns
+    if (!Array.isArray(patterns) || patterns.length === 0) {
+      return
+    }
+
+    params.context['indexPatterns'] = patterns.join(', ')
+    params.context['dataSourceScope'] =
+      `This analysis should focus on data from these indices/sources: ${patterns.join(', ')}. Reference these data sources in your findings.`
+  }
+
   private extractOsintSourceIds(agentConfig: AgentConfigWithDefaults): string[] {
     const { osintSources } = agentConfig
     if (!Array.isArray(osintSources) || osintSources.length === 0) {
@@ -648,10 +679,20 @@ export class AiService {
     prompt: string,
     maxTokens: number,
     featureKey?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    temperature?: number,
+    modelOverride?: string
   ): Promise<AiResponse | undefined> {
     try {
-      return await this.invokeGenericConnector(connector, prompt, maxTokens, featureKey, context)
+      return await this.invokeGenericConnector(
+        connector,
+        prompt,
+        maxTokens,
+        featureKey,
+        context,
+        temperature,
+        modelOverride
+      )
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(`Generic AI task routing failed for ${connector.type}: ${errorMessage}`)
@@ -664,15 +705,39 @@ export class AiService {
     prompt: string,
     maxTokens: number,
     featureKey?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    temperature?: number,
+    modelOverride?: string
   ): Promise<AiResponse | undefined> {
     switch (connector.type) {
       case ConnectorType.BEDROCK:
-        return this.invokeGenericBedrock(connector, prompt, maxTokens, featureKey, context)
+        return this.invokeGenericBedrock(
+          connector,
+          prompt,
+          maxTokens,
+          featureKey,
+          context,
+          temperature
+        )
       case ConnectorType.LLM_APIS:
-        return this.invokeGenericLlmApis(connector, prompt, maxTokens, featureKey, context)
+        return this.invokeGenericLlmApis(
+          connector,
+          prompt,
+          maxTokens,
+          featureKey,
+          context,
+          temperature,
+          modelOverride
+        )
       case ConnectorType.OPENCLAW_GATEWAY:
-        return this.invokeGenericOpenClaw(connector, prompt, maxTokens, featureKey, context)
+        return this.invokeGenericOpenClaw(
+          connector,
+          prompt,
+          maxTokens,
+          featureKey,
+          context,
+          temperature
+        )
       default:
         return undefined
     }
@@ -683,9 +748,16 @@ export class AiService {
     prompt: string,
     maxTokens: number,
     featureKey?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    temperature?: number
   ): Promise<AiResponse> {
-    const aiResult = await this.bedrockService.invoke(connector.config, prompt, maxTokens)
+    const aiResult = await this.bedrockService.invoke(
+      connector.config,
+      prompt,
+      maxTokens,
+      undefined,
+      temperature
+    )
     const model = (connector.config.modelId as string) ?? AI_DEFAULT_MODEL
     return buildFeatureAwareResponse(
       aiResult.text,
@@ -703,10 +775,19 @@ export class AiService {
     prompt: string,
     maxTokens: number,
     featureKey?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    temperature?: number,
+    modelOverride?: string
   ): Promise<AiResponse> {
-    const aiResult = await this.llmApisService.invoke(connector.config, prompt, maxTokens)
-    const model = (connector.config.defaultModel as string) ?? 'gpt-4'
+    const resolvedModel = modelOverride ?? (connector.config.defaultModel as string) ?? 'gpt-4'
+    const aiResult = await this.llmApisService.invoke(
+      connector.config,
+      prompt,
+      maxTokens,
+      resolvedModel,
+      temperature
+    )
+    const model = resolvedModel
     const provider = connector.name ? `llm_apis(${connector.name})` : 'llm_apis'
     return buildFeatureAwareResponse(
       aiResult.text,
@@ -724,7 +805,8 @@ export class AiService {
     prompt: string,
     maxTokens: number,
     featureKey?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    _temperature?: number
   ): Promise<AiResponse> {
     const aiResult = await this.openClawGatewayService.invoke(
       connector.config,

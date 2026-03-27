@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common'
 import { OrchestratorService } from './orchestrator.service'
-import { AgentActionType, AiAgentId, AppLogFeature } from '../../../common/enums'
+import { AgentActionType, AiAgentId, AiTriggerMode, AppLogFeature } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
+import { AgentConfigService } from '../../agent-config/agent-config.service'
 
 /**
  * Listens for domain events and dispatches agent tasks via the orchestrator.
+ * Checks agent triggerMode and triggerConfig before dispatching.
  * All methods are fire-and-forget — they never throw and never block the caller.
  */
 @Injectable()
@@ -14,6 +16,7 @@ export class AgentEventListenerService {
 
   constructor(
     private readonly orchestratorService: OrchestratorService,
+    private readonly agentConfigService: AgentConfigService,
     private readonly appLogger: AppLoggerService
   ) {
     this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI, 'AgentEventListenerService')
@@ -21,18 +24,51 @@ export class AgentEventListenerService {
 
   /**
    * Called after a new alert is persisted.
-   * Dispatches the alert-triage agent to auto-triage the alert.
+   * Dispatches the alert-triage agent IF triggerMode is auto_on_alert
+   * AND the alert severity matches the triggerConfig filter (if any).
    */
-  async onAlertCreated(tenantId: string, alertId: string): Promise<void> {
+  async onAlertCreated(tenantId: string, alertId: string, alertSeverity?: string): Promise<void> {
     try {
+      const config = await this.agentConfigService.getAgentConfig(tenantId, AiAgentId.ALERT_TRIAGE)
+
+      if (!config.isEnabled) {
+        return
+      }
+
+      if (
+        config.triggerMode !== AiTriggerMode.AUTO_ON_ALERT &&
+        config.triggerMode !== AiTriggerMode.MANUAL_ONLY
+      ) {
+        return
+      }
+
+      // If triggerMode is manual_only, skip auto dispatch
+      if (config.triggerMode === AiTriggerMode.MANUAL_ONLY) {
+        return
+      }
+
+      // Check triggerConfig severity filter
+      const triggerConfig = config.triggerConfig as Record<string, unknown>
+      if (triggerConfig && alertSeverity) {
+        const minSeverities = triggerConfig.minSeverities as string[] | undefined
+        if (minSeverities && minSeverities.length > 0 && !minSeverities.includes(alertSeverity)) {
+          this.log.debug(
+            'onAlertCreated',
+            tenantId,
+            `Skipping: alert severity "${alertSeverity}" not in filter ${JSON.stringify(minSeverities)}`
+          )
+          return
+        }
+      }
+
       await this.orchestratorService.dispatchAgentTask({
         tenantId,
         agentId: AiAgentId.ALERT_TRIAGE,
         actionType: AgentActionType.TRIAGE,
-        payload: { alertId },
+        payload: { alertId, alertSeverity },
         triggeredBy: 'system:event-listener',
       })
-      this.log.success('onAlertCreated', tenantId, { alertId })
+      this.log.success('onAlertCreated', tenantId, { alertId, alertSeverity })
     } catch (error) {
       this.log.error('onAlertCreated', tenantId, error, { alertId })
     }
@@ -40,7 +76,7 @@ export class AgentEventListenerService {
 
   /**
    * Called after an incident status changes (e.g., escalation).
-   * Dispatches the incident-escalation agent.
+   * Dispatches the incident-escalation agent if trigger mode allows.
    */
   async onIncidentStatusChanged(
     tenantId: string,
@@ -48,6 +84,24 @@ export class AgentEventListenerService {
     newStatus: string
   ): Promise<void> {
     try {
+      const config = await this.agentConfigService.getAgentConfig(
+        tenantId,
+        AiAgentId.INCIDENT_ESCALATION
+      )
+
+      if (!config.isEnabled || config.triggerMode === AiTriggerMode.MANUAL_ONLY) {
+        return
+      }
+
+      // Check triggerConfig status filter
+      const triggerConfig = config.triggerConfig as Record<string, unknown>
+      if (triggerConfig) {
+        const onStatuses = triggerConfig.onStatuses as string[] | undefined
+        if (onStatuses && onStatuses.length > 0 && !onStatuses.includes(newStatus)) {
+          return
+        }
+      }
+
       await this.orchestratorService.dispatchAgentTask({
         tenantId,
         agentId: AiAgentId.INCIDENT_ESCALATION,
