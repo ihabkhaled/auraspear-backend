@@ -21,7 +21,13 @@ export class MemoryRetrievalService {
     query: string,
     limit: number = this.topN
   ): Promise<RetrievedMemory[]> {
-    const queryEmbedding = await this.embeddingService.generateEmbedding(tenantId, query)
+    let queryEmbedding: number[] = []
+    try {
+      queryEmbedding = await this.embeddingService.generateEmbedding(tenantId, query)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(`Embedding generation failed, falling back to recent: ${message}`)
+    }
 
     if (queryEmbedding.length === 0) {
       // Fallback: return most recent memories if embeddings unavailable

@@ -195,10 +195,8 @@ export class LlmApisService {
   async generateEmbedding(config: Record<string, unknown>, text: string): Promise<number[]> {
     const baseUrl = config.baseUrl as string
     const apiKey = config.apiKey as string
-    const embeddingModel =
-      (config.embeddingModel as string | undefined) ??
-      (config.defaultModel as string | undefined) ??
-      'text-embedding-ada-002'
+    // Use dedicated embedding model — never fall back to the chat model
+    const embeddingModel = (config.embeddingModel as string | undefined) ?? 'text-embedding-004'
     const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 30_000)
 
     const headers = buildLlmApiHeaders({

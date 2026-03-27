@@ -231,16 +231,22 @@ export class AiChatService {
       content: m.content,
     }))
 
-    // Retrieve relevant memories for context injection
-    const memoryContext = await this.memoryRetrievalService.formatForPrompt(
-      tenantId,
-      userId,
-      content,
-      500
-    )
-    const enhancedSystemPrompt = memoryContext
-      ? `${memoryContext}\n\n${thread.systemPrompt ?? ''}`
-      : (thread.systemPrompt ?? undefined)
+    // Retrieve relevant memories for context injection (non-blocking — never fail chat)
+    let enhancedSystemPrompt: string | undefined = thread.systemPrompt ?? undefined
+    try {
+      const memoryContext = await this.memoryRetrievalService.formatForPrompt(
+        tenantId,
+        userId,
+        content,
+        500
+      )
+      if (memoryContext) {
+        enhancedSystemPrompt = `${memoryContext}\n\n${thread.systemPrompt ?? ''}`
+      }
+    } catch (memError) {
+      const message = memError instanceof Error ? memError.message : 'Unknown error'
+      this.logger.warn(`Memory retrieval failed (non-blocking): ${message}`)
+    }
 
     // Resolve connector chain (priority-ordered)
     const connectorChain = await this.resolveConnectorConfigs(tenantId, requestedConnectorId)
