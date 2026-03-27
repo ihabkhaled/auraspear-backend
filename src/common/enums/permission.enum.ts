@@ -216,6 +216,9 @@ export enum Permission {
   AI_CLOUD_TRIAGE = 'ai.cloudSecurity.triage',
   AI_UEBA_NARRATIVE = 'ai.ueba.narrative',
   AI_ATTACK_PATH_SUMMARY = 'ai.attackPaths.summary',
+
+  // AI Chat
+  AI_CHAT_ACCESS = 'ai.chat.access',
 }
 
 /**

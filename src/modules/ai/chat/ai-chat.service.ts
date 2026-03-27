@@ -30,8 +30,10 @@ export class AiChatService {
       where['lastActivityAt'] = { lt: new Date(cursor) }
     }
 
+    const userSelect = { id: true, name: true, email: true }
     const threads = await this.prisma.aiChatThread.findMany({
       where,
+      include: { user: { select: userSelect } },
       orderBy: { lastActivityAt: 'desc' },
       take: limit + 1,
     })
@@ -72,8 +74,24 @@ export class AiChatService {
       }
     }
 
-    // Auto-select first enabled LLM connector if none resolved
+    // Auto-select: check fixed connectors first, then custom LLM connectors
     if (!connectorId) {
+      const fixedTypes = ['llm_apis', 'openclaw_gateway', 'bedrock']
+      for (const fixedType of fixedTypes) {
+        const cfg = await this.connectorsService.getDecryptedConfig(tenantId, fixedType)
+        if (cfg) {
+          // Fixed connectors have no UUID — store null connectorId, use provider field
+          connectorId = null
+          provider = fixedType
+          if (!model) {
+            model = (cfg.defaultModel as string) ?? null
+          }
+          break
+        }
+      }
+    }
+
+    if (!connectorId && !provider) {
       const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
       const first = enabledConfigs.at(0)
       if (first) {
@@ -85,7 +103,7 @@ export class AiChatService {
       }
     }
 
-    if (!connectorId) {
+    if (!connectorId && !provider) {
       throw new BusinessException(
         400,
         'No LLM connector available. Configure one in Connectors settings.',
@@ -104,6 +122,7 @@ export class AiChatService {
         outputFormat: AiOutputFormat.PLAIN_TEXT,
         systemPrompt: options.systemPrompt ?? null,
       },
+      include: { user: { select: { id: true, name: true, email: true } } },
     })
   }
 
@@ -169,7 +188,8 @@ export class AiChatService {
 
     // Determine requested model/connector (per-message override or thread default)
     const requestedModel = overrides?.model ?? thread.model ?? null
-    const requestedConnectorId = overrides?.connectorId ?? thread.connectorId
+    // Use connectorId if UUID, otherwise use provider as the connector key (for fixed connectors)
+    const requestedConnectorId = overrides?.connectorId ?? thread.connectorId ?? thread.provider
     const requestedProvider = thread.provider ?? null
 
     // If per-message connector override, update thread settings too
@@ -209,50 +229,73 @@ export class AiChatService {
       content: m.content,
     }))
 
-    // Execute AI call
+    // Resolve connector chain (priority-ordered)
+    const connectorChain = await this.resolveConnectorConfigs(tenantId, requestedConnectorId)
+
     const startTime = Date.now()
     let responseText = ''
     let actualModel = requestedModel ?? 'unknown'
-    const actualProvider = requestedProvider ?? 'unknown'
+    let actualProvider = requestedProvider ?? 'unknown'
     let fallbackModel: string | null = null
     let fallbackReason: string | null = null
     let messageStatus = 'completed'
     let inputTokens = 0
     let outputTokens = 0
 
-    try {
-      const config = await this.resolveConnectorConfig(tenantId, requestedConnectorId, threadId)
-
-      if (config) {
-        const result = await this.llmApisService.invokeChat(
-          config,
-          conversationHistory,
-          thread.maxTokens,
-          requestedModel ?? undefined,
-          thread.temperature,
-          thread.systemPrompt ?? undefined
-        )
-        responseText = result.text
-        actualModel = result.model ?? actualModel
-        inputTokens = result.inputTokens
-        outputTokens = result.outputTokens
-
-        // Detect fallback: actual model differs from requested
-        if (requestedModel && result.model && result.model !== requestedModel) {
-          fallbackModel = result.model
-          fallbackReason = 'Provider returned different model'
-        }
-      } else {
-        responseText = 'No LLM connector available. Please configure one in Connectors settings.'
-        messageStatus = 'failed'
-        fallbackReason = 'No connector available'
-      }
-    } catch (error) {
-      const errMessage = error instanceof Error ? error.message : 'Unknown error'
-      this.logger.warn(`Chat AI invocation failed: ${errMessage}`)
-      responseText = `AI provider error: ${errMessage}`
+    if (connectorChain.length === 0) {
+      responseText = 'No LLM connector available. Please configure one in Connectors settings.'
       messageStatus = 'failed'
-      fallbackReason = errMessage
+      fallbackReason = 'No connector available'
+    } else {
+      // Try each connector in priority order; stop on first success
+      let lastError: string | null = null
+      let succeeded = false
+
+      for (const entry of connectorChain) {
+        try {
+          const modelForRequest = overrides?.model ?? entry.model ?? requestedModel ?? undefined
+
+          const result = await this.llmApisService.invokeChat(
+            entry.config,
+            conversationHistory,
+            thread.maxTokens,
+            modelForRequest,
+            thread.temperature,
+            thread.systemPrompt ?? undefined
+          )
+
+          responseText = result.text
+          actualModel = result.model ?? modelForRequest ?? 'unknown'
+          actualProvider = entry.provider
+          inputTokens = result.inputTokens
+          outputTokens = result.outputTokens
+          succeeded = true
+
+          // Detect fallback: used a different connector than the first choice
+          if (entry !== connectorChain.at(0)) {
+            const firstProvider = connectorChain.at(0)?.provider ?? 'unknown'
+            fallbackReason = `Primary connector (${firstProvider}) failed, used ${entry.provider}`
+          }
+
+          // Detect model fallback
+          if (requestedModel && result.model && result.model !== requestedModel) {
+            fallbackModel = result.model
+            fallbackReason = `Provider returned different model (requested: ${requestedModel})`
+          }
+
+          this.logger.log(`Chat message sent via ${entry.provider} using model ${actualModel}`)
+          break
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Unknown error'
+          this.logger.warn(`Chat connector ${entry.provider} failed: ${lastError}, trying next...`)
+        }
+      }
+
+      if (!succeeded) {
+        responseText = `All connectors failed. Last error: ${lastError ?? 'unknown'}`
+        messageStatus = 'failed'
+        fallbackReason = lastError
+      }
     }
 
     const durationMs = Date.now() - startTime
@@ -278,14 +321,13 @@ export class AiChatService {
       },
     })
 
-    // Update thread metadata
+    // Update thread metadata (do NOT overwrite model/provider — preserve user's connector choice)
     await this.prisma.aiChatThread.update({
       where: { id: threadId },
       data: {
         messageCount: nextSeq + 1,
         totalTokensUsed: { increment: inputTokens + outputTokens },
         lastActivityAt: new Date(),
-        model: actualModel,
         title: thread.title ?? this.generateTitle(content),
       },
     })
@@ -301,13 +343,20 @@ export class AiChatService {
   ): Promise<AiChatThread> {
     await this.verifyThreadAccess(tenantId, userId, threadId)
 
-    const data: Record<string, unknown> = {}
+    const data: {
+      connectorId?: string | null
+      provider?: string | null
+      model?: string | null
+    } = {}
 
     if (settings.connectorId) {
-      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
-        settings.connectorId
-      )
-      if (isUuid) {
+      if (settings.connectorId === 'default') {
+        // Reset to auto-select
+        data.connectorId = null
+        data.provider = null
+      } else if (
+        /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(settings.connectorId)
+      ) {
         // Custom LLM connector
         const connector = await this.llmConnectorsService.getById(settings.connectorId, tenantId)
         data.connectorId = settings.connectorId
@@ -316,19 +365,17 @@ export class AiChatService {
           data.model = connector.defaultModel ?? null
         }
       } else {
-        // Non-UUID value (e.g. "default") — auto-select first enabled connector
-        const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
-        const first = enabledConfigs.at(0)
-        if (first) {
-          data.connectorId = first.id
-          data.provider = first.name
-          if (!settings.model) {
-            data.model = (first.config.defaultModel as string) ?? null
-          }
-        } else {
-          // No connector available — clear connector
-          data.connectorId = null
-          data.provider = null
+        // Fixed connector type string (e.g. "llm_apis", "bedrock")
+        // connectorId column is UUID — can't store type strings
+        // Store null for connectorId, use provider field to track the fixed type
+        data.connectorId = null
+        data.provider = settings.connectorId
+        const fixedConfig = await this.connectorsService.getDecryptedConfig(
+          tenantId,
+          settings.connectorId
+        )
+        if (fixedConfig && !settings.model) {
+          data.model = (fixedConfig.defaultModel as string) ?? null
         }
       }
     }
@@ -340,6 +387,7 @@ export class AiChatService {
     return this.prisma.aiChatThread.update({
       where: { id: threadId },
       data,
+      include: { user: { select: { id: true, name: true, email: true } } },
     })
   }
 
@@ -352,54 +400,68 @@ export class AiChatService {
   }
 
   /**
-   * Resolves connector config from either:
-   * - Custom LLM connector (UUID) via LlmConnectorsService
-   * - Fixed connector (type string like "llm_apis") via ConnectorsService
-   * - Auto-select first enabled if null
+   * Resolves an ordered list of connector configs to try.
+   * When a specific connector is selected, returns only that one.
+   * When "default" (null), checks fixed connectors first (llm_apis, openclaw_gateway, bedrock),
+   * then custom LLM connectors — so the first enabled one wins.
    */
-  private async resolveConnectorConfig(
+  private async resolveConnectorConfigs(
     tenantId: string,
-    connectorId: string | null,
-    threadId: string
-  ): Promise<Record<string, unknown> | null> {
+    connectorId: string | null
+  ): Promise<Array<{ config: Record<string, unknown>; provider: string; model: string | null }>> {
     const isUuid = connectorId
       ? /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(connectorId)
       : false
 
     // Case 1: Explicit custom LLM connector (UUID)
     if (connectorId && isUuid) {
-      return this.llmConnectorsService.getDecryptedConfig(connectorId, tenantId)
+      const cfg = await this.llmConnectorsService.getDecryptedConfig(connectorId, tenantId)
+      if (cfg) {
+        return [{ config: cfg, provider: connectorId, model: (cfg.defaultModel as string) ?? null }]
+      }
+      return []
     }
 
-    // Case 2: Fixed connector type (e.g., "llm_apis", "bedrock")
+    // Case 2: Fixed connector type string (e.g., "llm_apis", "bedrock")
     if (connectorId && !isUuid) {
-      const fixedConfig = await this.connectorsService.getDecryptedConfig(tenantId, connectorId)
-      return fixedConfig ?? null
+      const cfg = await this.connectorsService.getDecryptedConfig(tenantId, connectorId)
+      if (cfg) {
+        return [{ config: cfg, provider: connectorId, model: (cfg.defaultModel as string) ?? null }]
+      }
+      return []
     }
 
-    // Case 3: No connector — auto-select first enabled custom LLM
-    const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
-    const first = enabledConfigs.at(0)
-    if (first) {
-      // Save resolved connector to thread for future messages
-      await this.prisma.aiChatThread.update({
-        where: { id: threadId },
-        data: { connectorId: first.id, provider: first.name },
+    // Case 3: Default / auto — build priority list:
+    //   1. Fixed connectors: llm_apis → openclaw_gateway → bedrock
+    //   2. Custom LLM connectors (all enabled, in DB order)
+    const results: Array<{
+      config: Record<string, unknown>
+      provider: string
+      model: string | null
+    }> = []
+
+    const fixedTypes = ['llm_apis', 'openclaw_gateway', 'bedrock']
+    for (const fixedType of fixedTypes) {
+      const cfg = await this.connectorsService.getDecryptedConfig(tenantId, fixedType)
+      if (cfg) {
+        results.push({
+          config: cfg,
+          provider: fixedType,
+          model: (cfg.defaultModel as string) ?? null,
+        })
+      }
+    }
+
+    const enabledCustom = await this.llmConnectorsService.getEnabledConfigs(tenantId)
+    for (const custom of enabledCustom) {
+      results.push({
+        config: custom.config,
+        provider: custom.name,
+        model: (custom.config.defaultModel as string) ?? null,
       })
-      return first.config
     }
 
-    // Case 4: Try fixed llm_apis connector as last resort
-    const fixedLlmConfig = await this.connectorsService.getDecryptedConfig(tenantId, 'llm_apis')
-    if (fixedLlmConfig) {
-      await this.prisma.aiChatThread.update({
-        where: { id: threadId },
-        data: { connectorId: 'llm_apis', provider: 'LLM APIs' },
-      })
-      return fixedLlmConfig
-    }
-
-    return null
+    return results
   }
 
   private async verifyThreadAccess(

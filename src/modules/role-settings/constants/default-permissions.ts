@@ -58,6 +58,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.TENANT_ADMIN]: [
@@ -243,6 +244,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.INCIDENT_RESPONDER]: [
@@ -298,6 +300,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.THREAT_INTEL_ANALYST]: [
@@ -332,6 +335,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.SOAR_ENGINEER]: [
@@ -363,6 +367,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.THREAT_HUNTER]: [
@@ -400,6 +405,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.SOC_ANALYST_L2]: [
@@ -451,6 +457,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.SOC_ANALYST_L1]: [
@@ -476,6 +483,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.EXECUTIVE_READONLY]: [
@@ -494,6 +502,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 
   [UserRole.AUDITOR_READONLY]: [
@@ -528,6 +537,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.PROFILE_UPDATE,
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
+    Permission.AI_CHAT_ACCESS,
   ],
 }
 

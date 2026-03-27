@@ -29,7 +29,7 @@ export class AiChatController {
 
   /** GET /ai-chat/threads — List user's chat threads with cursor pagination */
   @Get('threads')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   async listThreads(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -42,7 +42,7 @@ export class AiChatController {
 
   /** POST /ai-chat/threads — Create a new chat thread */
   @Post('threads')
-  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async createThread(
     @TenantId() tenantId: string,
@@ -54,7 +54,7 @@ export class AiChatController {
 
   /** GET /ai-chat/threads/:id/messages — Get cursor-paginated messages for a thread */
   @Get('threads/:id/messages')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   async getMessages(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -70,7 +70,7 @@ export class AiChatController {
 
   /** POST /ai-chat/threads/:id/messages — Send a message and get AI response */
   @Post('threads/:id/messages')
-  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async sendMessage(
     @TenantId() tenantId: string,
@@ -86,7 +86,7 @@ export class AiChatController {
 
   /** PATCH /ai-chat/threads/:id — Update thread settings (model, connector) */
   @Patch('threads/:id')
-  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   async updateThread(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,
@@ -98,7 +98,7 @@ export class AiChatController {
 
   /** DELETE /ai-chat/threads/:id — Archive a chat thread */
   @Delete('threads/:id')
-  @RequirePermission(Permission.AI_AGENTS_EXECUTE)
+  @RequirePermission(Permission.AI_CHAT_ACCESS)
   async archiveThread(
     @TenantId() tenantId: string,
     @CurrentUser() user: JwtPayload,

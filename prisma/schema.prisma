@@ -2490,7 +2490,7 @@ model AiChatThread {
   provider        String?   @db.VarChar(100)
   outputFormat    String    @default("plain_text") @map("output_format") @db.VarChar(30)
   temperature     Float     @default(0.7)
-  maxTokens       Int       @default(2048) @map("max_tokens")
+  maxTokens       Int       @default(16384) @map("max_tokens")
   systemPrompt    String?   @map("system_prompt") @db.Text
   messageCount    Int       @default(0) @map("message_count")
   totalTokensUsed Int       @default(0) @map("total_tokens_used")

@@ -75,7 +75,7 @@ export class LlmApisService {
   async invokeChat(
     config: Record<string, unknown>,
     messages: Array<{ role: string; content: string }>,
-    maxTokens: number = 2048,
+    maxTokens: number = 16384,
     model?: string,
     temperature?: number,
     systemPrompt?: string

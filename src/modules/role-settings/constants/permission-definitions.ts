@@ -935,4 +935,11 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.attackPaths.aiSummary',
     sortOrder: 2830,
   },
+  // ─── AI Chat ───
+  {
+    key: Permission.AI_CHAT_ACCESS,
+    module: 'aiChat',
+    labelKey: 'roleSettings.permissions.aiChat.access',
+    sortOrder: 2840,
+  },
 ]
