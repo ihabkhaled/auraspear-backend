@@ -46,7 +46,7 @@ export class UserMemoryService {
     userId: string,
     input: { content: string; category?: string }
   ): Promise<UserMemoryRecord> {
-    const embedding = await this.embeddingService.generateEmbedding(tenantId, input.content)
+    const embedding = await this.safeGenerateEmbedding(tenantId, input.content)
 
     return getUserMemoryDelegate(this.prisma).create({
       data: {
@@ -71,7 +71,7 @@ export class UserMemoryService {
     const embedding =
       input.content === memory.content
         ? memory.embedding
-        : await this.embeddingService.generateEmbedding(tenantId, input.content)
+        : await this.safeGenerateEmbedding(tenantId, input.content)
 
     return getUserMemoryDelegate(this.prisma).update({
       where: { id: memoryId },
@@ -103,6 +103,16 @@ export class UserMemoryService {
 
     this.logger.log(`All memories (${String(result.count)}) soft-deleted for user ${userId}`)
     return result.count
+  }
+
+  private async safeGenerateEmbedding(tenantId: string, text: string): Promise<number[]> {
+    try {
+      return await this.embeddingService.generateEmbedding(tenantId, text)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(`Embedding generation failed (saving without embedding): ${message}`)
+      return []
+    }
   }
 
   private async verifyOwnership(

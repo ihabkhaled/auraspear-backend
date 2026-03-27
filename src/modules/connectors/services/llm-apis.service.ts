@@ -190,19 +190,83 @@ export class LlmApisService {
   }
 
   /**
-   * Generate an embedding vector for the given text using the /embeddings endpoint.
+   * Generate an embedding vector for the given text.
+   * Supports both OpenAI-compatible (/embeddings) and Gemini (:embedContent) endpoints.
    */
   async generateEmbedding(config: Record<string, unknown>, text: string): Promise<number[]> {
     const baseUrl = config.baseUrl as string
     const apiKey = config.apiKey as string
-    // Use dedicated embedding model — never fall back to the chat model
-    const embeddingModel = (config.embeddingModel as string | undefined) ?? 'text-embedding-004'
     const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 30_000)
+    const isGemini =
+      baseUrl.includes('generativelanguage.googleapis.com') || baseUrl.includes('gemini')
 
     const headers = buildLlmApiHeaders({
       apiKey,
       organizationId: config.organizationId as string | undefined,
     })
+
+    if (isGemini) {
+      return this.generateGeminiEmbedding(baseUrl, apiKey, text, timeout, config)
+    }
+
+    return this.generateOpenAiEmbedding(baseUrl, headers, text, timeout, config)
+  }
+
+  private async generateGeminiEmbedding(
+    baseUrl: string,
+    apiKey: string,
+    text: string,
+    timeout: number,
+    config: Record<string, unknown>
+  ): Promise<number[]> {
+    const embeddingModel = (config.embeddingModel as string | undefined) ?? 'text-embedding-004'
+
+    // Gemini uses: POST /models/{model}:embedContent?key={apiKey}
+    // Strip trailing path segments like /v1beta, /v1main, /v1beta/openai, etc.
+    const versionIndex = baseUrl.indexOf('/v1')
+    const geminiBase = versionIndex > 0 ? baseUrl.substring(0, versionIndex) : baseUrl
+    const url = `${geminiBase}/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`
+
+    const requestBody = JSON.stringify({
+      model: `models/${embeddingModel}`,
+      content: { parts: [{ text }] },
+    })
+
+    const res = await this.httpClient.fetch(url, {
+      method: HttpMethod.POST,
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody,
+      timeoutMs: timeout,
+    })
+
+    if (res.status !== 200) {
+      throw new Error(formatRemoteError('Gemini Embedding', res.status, res.data))
+    }
+
+    const parsed = res.data as { embedding?: { values?: number[] } }
+    const embedding = parsed.embedding?.values
+    if (!embedding) {
+      throw new Error('Gemini embedding response missing embedding.values')
+    }
+
+    this.logActionSuccess('embedding', {
+      model: embeddingModel,
+      provider: 'gemini',
+      inputLength: text.length,
+      dimensions: embedding.length,
+    })
+
+    return embedding
+  }
+
+  private async generateOpenAiEmbedding(
+    baseUrl: string,
+    headers: Record<string, string>,
+    text: string,
+    timeout: number,
+    config: Record<string, unknown>
+  ): Promise<number[]> {
+    const embeddingModel = (config.embeddingModel as string | undefined) ?? 'text-embedding-ada-002'
 
     const requestBody = JSON.stringify({
       model: embeddingModel,
@@ -228,6 +292,7 @@ export class LlmApisService {
 
     this.logActionSuccess('embedding', {
       model: embeddingModel,
+      provider: 'openai-compatible',
       inputLength: text.length,
       dimensions: embedding.length,
     })
