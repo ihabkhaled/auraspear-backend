@@ -219,6 +219,10 @@ export enum Permission {
 
   // AI Chat
   AI_CHAT_ACCESS = 'ai.chat.access',
+
+  // AI Memory
+  AI_MEMORY_VIEW = 'ai.memory.view',
+  AI_MEMORY_EDIT = 'ai.memory.edit',
 }
 
 /**

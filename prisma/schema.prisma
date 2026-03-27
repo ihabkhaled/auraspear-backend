@@ -544,6 +544,7 @@ model Tenant {
   aiJobRunSummaries       AiJobRunSummary[]
   aiChatThreads           AiChatThread[]
   aiChatMessages          AiChatMessage[]
+  userMemories            UserMemory[]
 
   @@map("tenants")
 }
@@ -605,6 +606,7 @@ model User {
   refreshTokenFamilies RefreshTokenFamily[]
   sessions             UserSession[]
   aiChatThreads        AiChatThread[]
+  userMemories         UserMemory[]
 
   @@map("users")
 }
@@ -2021,6 +2023,7 @@ enum JobType {
   hunt_execution
   ai_agent_task
   report_generation
+  memory_extraction
 }
 
 model Job {
@@ -2537,4 +2540,29 @@ model AiChatMessage {
   @@index([threadId, createdAt])
   @@index([tenantId])
   @@map("ai_chat_messages")
+}
+
+// ─── User Memory (Cross-Chat Long-Term Context) ─────────────
+
+model UserMemory {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  content     String    @db.Text
+  category    String    @default("fact") @db.VarChar(50)
+  embedding   Float[]
+  sourceType  String    @map("source_type") @db.VarChar(50)
+  sourceId    String?   @map("source_id") @db.Uuid
+  sourceLabel String?   @map("source_label") @db.VarChar(255)
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([tenantId, userId, isDeleted])
+  @@index([tenantId, userId, updatedAt(sort: Desc)])
+  @@map("user_memories")
 }

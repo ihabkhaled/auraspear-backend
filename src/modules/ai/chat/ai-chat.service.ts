@@ -5,6 +5,7 @@ import { PrismaService } from '../../../prisma/prisma.service'
 import { ConnectorsService } from '../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../connectors/services/llm-apis.service'
+import { MemoryRetrievalService } from '../memory/memory-retrieval.service'
 import type { AiChatMessage, AiChatThread } from '@prisma/client'
 
 @Injectable()
@@ -15,7 +16,8 @@ export class AiChatService {
     private readonly prisma: PrismaService,
     private readonly connectorsService: ConnectorsService,
     private readonly llmConnectorsService: LlmConnectorsService,
-    private readonly llmApisService: LlmApisService
+    private readonly llmApisService: LlmApisService,
+    private readonly memoryRetrievalService: MemoryRetrievalService
   ) {}
 
   async listThreads(
@@ -229,6 +231,17 @@ export class AiChatService {
       content: m.content,
     }))
 
+    // Retrieve relevant memories for context injection
+    const memoryContext = await this.memoryRetrievalService.formatForPrompt(
+      tenantId,
+      userId,
+      content,
+      500
+    )
+    const enhancedSystemPrompt = memoryContext
+      ? `${memoryContext}\n\n${thread.systemPrompt ?? ''}`
+      : (thread.systemPrompt ?? undefined)
+
     // Resolve connector chain (priority-ordered)
     const connectorChain = await this.resolveConnectorConfigs(tenantId, requestedConnectorId)
 
@@ -261,7 +274,7 @@ export class AiChatService {
             thread.maxTokens,
             modelForRequest,
             thread.temperature,
-            thread.systemPrompt ?? undefined
+            enhancedSystemPrompt
           )
 
           responseText = result.text
@@ -332,6 +345,9 @@ export class AiChatService {
       },
     })
 
+    // Trigger async memory extraction
+    void this.dispatchMemoryExtraction(tenantId, userId, threadId)
+
     return assistantMessage
   }
 
@@ -397,6 +413,27 @@ export class AiChatService {
       where: { id: threadId },
       data: { isArchived: true },
     })
+  }
+
+  private async dispatchMemoryExtraction(
+    tenantId: string,
+    userId: string,
+    threadId: string
+  ): Promise<void> {
+    try {
+      await this.prisma.job.create({
+        data: {
+          tenantId,
+          type: 'memory_extraction' as never,
+          status: 'pending',
+          payload: { tenantId, userId, threadId },
+          maxAttempts: 2,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(`Failed to dispatch memory extraction job: ${message}`)
+    }
   }
 
   /**

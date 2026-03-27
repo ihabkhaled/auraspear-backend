@@ -16,4 +16,5 @@ export enum JobType {
   HUNT_EXECUTION = 'hunt_execution',
   AI_AGENT_TASK = 'ai_agent_task',
   REPORT_GENERATION = 'report_generation',
+  MEMORY_EXTRACTION = 'memory_extraction',
 }

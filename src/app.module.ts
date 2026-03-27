@@ -16,6 +16,7 @@ import { StartupHealthService } from './common/services/startup-health.service'
 import { validateEnvironment } from './config/env.validation'
 import { AgentConfigModule } from './modules/agent-config/agent-config.module'
 import { AiModule } from './modules/ai/ai.module'
+import { MemoryModule } from './modules/ai/memory/memory.module'
 import { AiAgentsModule } from './modules/ai-agents/ai-agents.module'
 import { AlertsModule } from './modules/alerts/alerts.module'
 import { AppLogsModule } from './modules/app-logs/app-logs.module'
@@ -125,6 +126,7 @@ import { RedisModule } from './redis'
     NotificationsModule,
     AiAgentsModule,
     AiModule,
+    MemoryModule,
     HealthModule,
     UsersModule,
     UsersControlModule,

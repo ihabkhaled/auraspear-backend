@@ -1,5 +1,6 @@
 import { forwardRef, Module, type OnModuleInit } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
+import { MemoryModule } from '../ai/memory/memory.module'
 import { OrchestratorModule } from '../ai/orchestrator/orchestrator.module'
 import { AiAgentTaskHandler } from '../ai-agents/ai-agent-task.handler'
 import { AiAgentsModule } from '../ai-agents/ai-agents.module'
@@ -18,6 +19,7 @@ import { ConnectorSyncHandler } from './handlers/connector-sync.handler'
 import { CorrelationHandler } from './handlers/correlation.handler'
 import { DetectionExecutionHandler } from './handlers/detection-execution.handler'
 import { HuntExecutionHandler } from './handlers/hunt-execution.handler'
+import { MemoryExtractionHandler } from './handlers/memory-extraction.handler'
 import { NormalizationHandler } from './handlers/normalization.handler'
 import { ReportGenerationHandler } from './handlers/report-generation.handler'
 import { SoarPlaybookHandler } from './handlers/soar-playbook.handler'
@@ -38,6 +40,7 @@ import { JobService } from './jobs.service'
     DetectionRulesModule,
     EntitiesModule,
     forwardRef(() => HuntsModule),
+    MemoryModule,
     NormalizationModule,
     ReportsModule,
     SoarModule,
@@ -53,6 +56,7 @@ import { JobService } from './jobs.service'
     CorrelationHandler,
     DetectionExecutionHandler,
     HuntExecutionHandler,
+    MemoryExtractionHandler,
     NormalizationHandler,
     ReportGenerationHandler,
     SoarPlaybookHandler,
@@ -66,6 +70,7 @@ export class JobsModule implements OnModuleInit {
     private readonly correlationHandler: CorrelationHandler,
     private readonly detectionHandler: DetectionExecutionHandler,
     private readonly huntHandler: HuntExecutionHandler,
+    private readonly memoryExtractionHandler: MemoryExtractionHandler,
     private readonly normalizationHandler: NormalizationHandler,
     private readonly reportHandler: ReportGenerationHandler,
     private readonly soarHandler: SoarPlaybookHandler,
@@ -83,6 +88,9 @@ export class JobsModule implements OnModuleInit {
       this.detectionHandler.handle(job)
     )
     this.processor.registerHandler(JobType.HUNT_EXECUTION, job => this.huntHandler.handle(job))
+    this.processor.registerHandler(JobType.MEMORY_EXTRACTION, job =>
+      this.memoryExtractionHandler.handle(job)
+    )
     this.processor.registerHandler(JobType.NORMALIZATION_PIPELINE, job =>
       this.normalizationHandler.handle(job)
     )

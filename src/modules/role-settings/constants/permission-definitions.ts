@@ -942,4 +942,17 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.aiChat.access',
     sortOrder: 2840,
   },
+  // ─── AI Memory ───
+  {
+    key: Permission.AI_MEMORY_VIEW,
+    module: 'aiMemory',
+    labelKey: 'roleSettings.permissions.aiMemory.view',
+    sortOrder: 2850,
+  },
+  {
+    key: Permission.AI_MEMORY_EDIT,
+    module: 'aiMemory',
+    labelKey: 'roleSettings.permissions.aiMemory.edit',
+    sortOrder: 2851,
+  },
 ]

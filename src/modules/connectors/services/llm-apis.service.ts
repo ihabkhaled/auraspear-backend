@@ -189,6 +189,54 @@ export class LlmApisService {
     return models
   }
 
+  /**
+   * Generate an embedding vector for the given text using the /embeddings endpoint.
+   */
+  async generateEmbedding(config: Record<string, unknown>, text: string): Promise<number[]> {
+    const baseUrl = config.baseUrl as string
+    const apiKey = config.apiKey as string
+    const embeddingModel =
+      (config.embeddingModel as string | undefined) ??
+      (config.defaultModel as string | undefined) ??
+      'text-embedding-ada-002'
+    const timeout = normalizeTimeoutMs((config.timeout as number | undefined) ?? 30_000)
+
+    const headers = buildLlmApiHeaders({
+      apiKey,
+      organizationId: config.organizationId as string | undefined,
+    })
+
+    const requestBody = JSON.stringify({
+      model: embeddingModel,
+      input: text,
+    })
+
+    const res = await this.httpClient.fetch(`${baseUrl}/embeddings`, {
+      method: HttpMethod.POST,
+      headers,
+      body: requestBody,
+      timeoutMs: timeout,
+    })
+
+    if (res.status !== 200) {
+      throw new Error(formatRemoteError('LLM API Embedding', res.status, res.data))
+    }
+
+    const parsed = res.data as { data?: Array<{ embedding?: number[] }> }
+    const embedding = parsed.data?.at(0)?.embedding
+    if (!embedding) {
+      throw new Error('Embedding response missing data[0].embedding')
+    }
+
+    this.logActionSuccess('embedding', {
+      model: embeddingModel,
+      inputLength: text.length,
+      dimensions: embedding.length,
+    })
+
+    return embedding
+  }
+
   /* ---------------------------------------------------------------- */
   /* PRIVATE: Test Helpers                                             */
   /* ---------------------------------------------------------------- */

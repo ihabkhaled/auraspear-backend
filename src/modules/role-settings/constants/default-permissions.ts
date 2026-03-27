@@ -59,6 +59,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.TENANT_ADMIN]: [
@@ -200,6 +202,9 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.USERS_CONTROL_VIEW_SESSIONS,
     Permission.USERS_CONTROL_FORCE_LOGOUT,
     Permission.USERS_CONTROL_FORCE_LOGOUT_ALL,
+    Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.DETECTION_ENGINEER]: [
@@ -245,6 +250,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.INCIDENT_RESPONDER]: [
@@ -301,6 +308,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.THREAT_INTEL_ANALYST]: [
@@ -336,6 +345,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.SOAR_ENGINEER]: [
@@ -368,6 +379,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.THREAT_HUNTER]: [
@@ -406,6 +419,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.SOC_ANALYST_L2]: [
@@ -458,6 +473,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.SOC_ANALYST_L1]: [
@@ -484,6 +501,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.EXECUTIVE_READONLY]: [
@@ -503,6 +522,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 
   [UserRole.AUDITOR_READONLY]: [
@@ -538,6 +559,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.SETTINGS_VIEW,
     Permission.SETTINGS_UPDATE,
     Permission.AI_CHAT_ACCESS,
+    Permission.AI_MEMORY_VIEW,
+    Permission.AI_MEMORY_EDIT,
   ],
 }
 

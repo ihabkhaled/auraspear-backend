@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../prisma/prisma.service'
 import { ConnectorsService } from '../../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../../connectors/services/llm-apis.service'
+import { MemoryRetrievalService } from '../../memory/memory-retrieval.service'
 import { AiChatService } from '../ai-chat.service'
 import type { AiChatMessage, AiChatThread } from '@prisma/client'
 
@@ -98,6 +99,11 @@ const mockLlmApisService = {
   invokeChat: jest.fn(),
 }
 
+const mockMemoryRetrievalService = {
+  formatForPrompt: jest.fn().mockResolvedValue(null),
+  retrieveRelevant: jest.fn().mockResolvedValue([]),
+}
+
 /* ---------------------------------------------------------------- */
 /* Test suite                                                        */
 /* ---------------------------------------------------------------- */
@@ -115,6 +121,7 @@ describe('AiChatService', () => {
         { provide: ConnectorsService, useValue: mockConnectorsService },
         { provide: LlmConnectorsService, useValue: mockLlmConnectorsService },
         { provide: LlmApisService, useValue: mockLlmApisService },
+        { provide: MemoryRetrievalService, useValue: mockMemoryRetrievalService },
       ],
     }).compile()
 
