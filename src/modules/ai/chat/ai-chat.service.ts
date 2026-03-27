@@ -1,11 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AiOutputFormat } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
-import { buildPaginationMeta } from '../../../common/interfaces/pagination.interface'
 import { PrismaService } from '../../../prisma/prisma.service'
+import { ConnectorsService } from '../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../connectors/services/llm-apis.service'
-import type { PaginatedResponse } from '../../../common/interfaces/pagination.interface'
 import type { AiChatMessage, AiChatThread } from '@prisma/client'
 
 @Injectable()
@@ -14,6 +13,7 @@ export class AiChatService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly connectorsService: ConnectorsService,
     private readonly llmConnectorsService: LlmConnectorsService,
     private readonly llmApisService: LlmApisService
   ) {}
@@ -21,22 +21,30 @@ export class AiChatService {
   async listThreads(
     tenantId: string,
     userId: string,
-    page: number,
-    limit: number
-  ): Promise<PaginatedResponse<AiChatThread>> {
-    const where = { tenantId, userId, isArchived: false }
+    limit: number,
+    cursor?: string
+  ): Promise<{ data: AiChatThread[]; nextCursor: string | null; hasMore: boolean }> {
+    const where: Record<string, unknown> = { tenantId, userId, isArchived: false }
 
-    const [data, total] = await Promise.all([
-      this.prisma.aiChatThread.findMany({
-        where,
-        orderBy: { lastActivityAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.aiChatThread.count({ where }),
-    ])
+    if (cursor) {
+      where['lastActivityAt'] = { lt: new Date(cursor) }
+    }
 
-    return { data, pagination: buildPaginationMeta(page, limit, total) }
+    const threads = await this.prisma.aiChatThread.findMany({
+      where,
+      orderBy: { lastActivityAt: 'desc' },
+      take: limit + 1,
+    })
+
+    const hasMore = threads.length > limit
+    if (hasMore) {
+      threads.pop()
+    }
+
+    const nextCursor =
+      hasMore && threads.length > 0 ? (threads.at(-1)?.lastActivityAt.toISOString() ?? null) : null
+
+    return { data: threads, nextCursor, hasMore }
   }
 
   async createThread(
@@ -44,22 +52,52 @@ export class AiChatService {
     userId: string,
     options: { connectorId?: string; model?: string; systemPrompt?: string }
   ): Promise<AiChatThread> {
+    const rawConnectorId = options.connectorId ?? null
+    let connectorId: string | null = null
     let provider: string | null = null
     let model: string | null = options.model ?? null
 
-    if (options.connectorId) {
-      const connector = await this.llmConnectorsService.getById(options.connectorId, tenantId)
+    // Only treat as a specific connector if it looks like a UUID
+    const isUuid = rawConnectorId
+      ? /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(rawConnectorId)
+      : false
+
+    if (rawConnectorId && isUuid) {
+      // Explicit custom LLM connector selected
+      connectorId = rawConnectorId
+      const connector = await this.llmConnectorsService.getById(connectorId, tenantId)
       provider = connector.name
       if (!model) {
         model = connector.defaultModel ?? null
       }
     }
 
+    // Auto-select first enabled LLM connector if none resolved
+    if (!connectorId) {
+      const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
+      const first = enabledConfigs.at(0)
+      if (first) {
+        connectorId = first.id
+        provider = first.name
+        if (!model) {
+          model = (first.config.defaultModel as string) ?? null
+        }
+      }
+    }
+
+    if (!connectorId) {
+      throw new BusinessException(
+        400,
+        'No LLM connector available. Configure one in Connectors settings.',
+        'errors.chat.noConnectorAvailable'
+      )
+    }
+
     return this.prisma.aiChatThread.create({
       data: {
         tenantId,
         userId,
-        connectorId: options.connectorId ?? null,
+        connectorId,
         title: null,
         model,
         provider,
@@ -73,30 +111,53 @@ export class AiChatService {
     tenantId: string,
     userId: string,
     threadId: string,
-    page: number,
-    limit: number
-  ): Promise<PaginatedResponse<AiChatMessage>> {
+    limit: number,
+    cursor?: string,
+    direction: 'older' | 'newer' = 'older'
+  ): Promise<{ data: AiChatMessage[]; nextCursor: string | null; hasMore: boolean }> {
     await this.verifyThreadAccess(tenantId, userId, threadId)
 
-    const where = { threadId, tenantId }
-    const [data, total] = await Promise.all([
-      this.prisma.aiChatMessage.findMany({
-        where,
-        orderBy: { sequenceNum: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.aiChatMessage.count({ where }),
-    ])
+    const where: Record<string, unknown> = { threadId, tenantId }
 
-    return { data: data.reverse(), pagination: buildPaginationMeta(page, limit, total) }
+    if (cursor) {
+      where['createdAt'] =
+        direction === 'older' ? { lt: new Date(cursor) } : { gt: new Date(cursor) }
+    }
+
+    const orderDir = direction === 'older' ? 'desc' : 'asc'
+
+    const messages = await this.prisma.aiChatMessage.findMany({
+      where,
+      orderBy: { createdAt: orderDir as 'asc' | 'desc' },
+      take: limit + 1,
+    })
+
+    const hasMore = messages.length > limit
+    if (hasMore) {
+      messages.pop()
+    }
+
+    // Always return in chronological order
+    if (direction === 'older') {
+      messages.reverse()
+    }
+
+    const nextCursor =
+      hasMore && messages.length > 0
+        ? ((direction === 'older'
+            ? messages.at(0)?.createdAt.toISOString()
+            : messages.at(-1)?.createdAt.toISOString()) ?? null)
+        : null
+
+    return { data: messages, nextCursor, hasMore }
   }
 
   async sendMessage(
     tenantId: string,
     userId: string,
     threadId: string,
-    content: string
+    content: string,
+    overrides?: { model?: string; connectorId?: string }
   ): Promise<AiChatMessage> {
     const thread = await this.verifyThreadAccess(tenantId, userId, threadId)
 
@@ -106,6 +167,24 @@ export class AiChatService {
 
     const nextSeq = thread.messageCount + 1
 
+    // Determine requested model/connector (per-message override or thread default)
+    const requestedModel = overrides?.model ?? thread.model ?? null
+    const requestedConnectorId = overrides?.connectorId ?? thread.connectorId
+    const requestedProvider = thread.provider ?? null
+
+    // If per-message connector override, update thread settings too
+    if (overrides?.connectorId && overrides.connectorId !== thread.connectorId) {
+      await this.updateThreadSettings(tenantId, userId, threadId, {
+        connectorId: overrides.connectorId,
+        model: overrides.model,
+      })
+    } else if (overrides?.model && overrides.model !== thread.model) {
+      await this.prisma.aiChatThread.update({
+        where: { id: threadId },
+        data: { model: overrides.model },
+      })
+    }
+
     // Persist user message
     await this.prisma.aiChatMessage.create({
       data: {
@@ -114,76 +193,84 @@ export class AiChatService {
         role: 'user',
         content: content.trim(),
         sequenceNum: nextSeq,
+        status: 'completed',
       },
     })
 
-    // Build conversation history for context (last 20 messages)
+    // Build conversation history (last 20 messages)
     const recentMessages = await this.prisma.aiChatMessage.findMany({
       where: { threadId },
       orderBy: { sequenceNum: 'desc' },
       take: 20,
       select: { role: true, content: true },
     })
-
     const conversationHistory = recentMessages.reverse().map(m => ({
       role: m.role,
       content: m.content,
     }))
 
-    // Get AI response from connector
+    // Execute AI call
     const startTime = Date.now()
     let responseText = ''
-    let responseModel = thread.model ?? 'unknown'
-    const responseProvider = thread.provider ?? 'unknown'
+    let actualModel = requestedModel ?? 'unknown'
+    const actualProvider = requestedProvider ?? 'unknown'
+    let fallbackModel: string | null = null
+    let fallbackReason: string | null = null
+    let messageStatus = 'completed'
     let inputTokens = 0
     let outputTokens = 0
 
     try {
-      if (thread.connectorId) {
-        const config = await this.llmConnectorsService.getDecryptedConfig(
-          thread.connectorId,
-          tenantId
-        )
-        if (!config) {
-          throw new BusinessException(
-            400,
-            'Connector config not available',
-            'errors.chat.connectorUnavailable'
-          )
-        }
+      const config = await this.resolveConnectorConfig(tenantId, requestedConnectorId, threadId)
+
+      if (config) {
         const result = await this.llmApisService.invokeChat(
           config,
           conversationHistory,
           thread.maxTokens,
-          thread.model ?? undefined,
+          requestedModel ?? undefined,
           thread.temperature,
           thread.systemPrompt ?? undefined
         )
         responseText = result.text
-        responseModel = result.model ?? responseModel
+        actualModel = result.model ?? actualModel
         inputTokens = result.inputTokens
         outputTokens = result.outputTokens
+
+        // Detect fallback: actual model differs from requested
+        if (requestedModel && result.model && result.model !== requestedModel) {
+          fallbackModel = result.model
+          fallbackReason = 'Provider returned different model'
+        }
       } else {
-        responseText =
-          'No LLM connector configured for this chat. Please create the thread with a connector ID.'
+        responseText = 'No LLM connector available. Please configure one in Connectors settings.'
+        messageStatus = 'failed'
+        fallbackReason = 'No connector available'
       }
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.warn(`Chat AI invocation failed: ${errMessage}`)
       responseText = `AI provider error: ${errMessage}`
+      messageStatus = 'failed'
+      fallbackReason = errMessage
     }
 
     const durationMs = Date.now() - startTime
 
-    // Persist assistant response
+    // Persist assistant response with full model attribution
     const assistantMessage = await this.prisma.aiChatMessage.create({
       data: {
         threadId,
         tenantId,
         role: 'assistant',
         content: responseText,
-        model: responseModel,
-        provider: responseProvider,
+        requestedModel,
+        requestedProvider,
+        model: actualModel,
+        provider: actualProvider,
+        fallbackModel,
+        fallbackReason,
+        status: messageStatus,
         inputTokens,
         outputTokens,
         durationMs,
@@ -198,11 +285,62 @@ export class AiChatService {
         messageCount: nextSeq + 1,
         totalTokensUsed: { increment: inputTokens + outputTokens },
         lastActivityAt: new Date(),
+        model: actualModel,
         title: thread.title ?? this.generateTitle(content),
       },
     })
 
     return assistantMessage
+  }
+
+  async updateThreadSettings(
+    tenantId: string,
+    userId: string,
+    threadId: string,
+    settings: { connectorId?: string; model?: string }
+  ): Promise<AiChatThread> {
+    await this.verifyThreadAccess(tenantId, userId, threadId)
+
+    const data: Record<string, unknown> = {}
+
+    if (settings.connectorId) {
+      const isUuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
+        settings.connectorId
+      )
+      if (isUuid) {
+        // Custom LLM connector
+        const connector = await this.llmConnectorsService.getById(settings.connectorId, tenantId)
+        data.connectorId = settings.connectorId
+        data.provider = connector.name
+        if (!settings.model) {
+          data.model = connector.defaultModel ?? null
+        }
+      } else {
+        // Non-UUID value (e.g. "default") — auto-select first enabled connector
+        const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
+        const first = enabledConfigs.at(0)
+        if (first) {
+          data.connectorId = first.id
+          data.provider = first.name
+          if (!settings.model) {
+            data.model = (first.config.defaultModel as string) ?? null
+          }
+        } else {
+          // No connector available — clear connector
+          data.connectorId = null
+          data.provider = null
+        }
+      }
+    }
+
+    if (settings.model) {
+      data.model = settings.model
+    }
+
+    return this.prisma.aiChatThread.update({
+      where: { id: threadId },
+      data,
+    })
   }
 
   async archiveThread(tenantId: string, userId: string, threadId: string): Promise<void> {
@@ -211,6 +349,57 @@ export class AiChatService {
       where: { id: threadId },
       data: { isArchived: true },
     })
+  }
+
+  /**
+   * Resolves connector config from either:
+   * - Custom LLM connector (UUID) via LlmConnectorsService
+   * - Fixed connector (type string like "llm_apis") via ConnectorsService
+   * - Auto-select first enabled if null
+   */
+  private async resolveConnectorConfig(
+    tenantId: string,
+    connectorId: string | null,
+    threadId: string
+  ): Promise<Record<string, unknown> | null> {
+    const isUuid = connectorId
+      ? /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(connectorId)
+      : false
+
+    // Case 1: Explicit custom LLM connector (UUID)
+    if (connectorId && isUuid) {
+      return this.llmConnectorsService.getDecryptedConfig(connectorId, tenantId)
+    }
+
+    // Case 2: Fixed connector type (e.g., "llm_apis", "bedrock")
+    if (connectorId && !isUuid) {
+      const fixedConfig = await this.connectorsService.getDecryptedConfig(tenantId, connectorId)
+      return fixedConfig ?? null
+    }
+
+    // Case 3: No connector — auto-select first enabled custom LLM
+    const enabledConfigs = await this.llmConnectorsService.getEnabledConfigs(tenantId)
+    const first = enabledConfigs.at(0)
+    if (first) {
+      // Save resolved connector to thread for future messages
+      await this.prisma.aiChatThread.update({
+        where: { id: threadId },
+        data: { connectorId: first.id, provider: first.name },
+      })
+      return first.config
+    }
+
+    // Case 4: Try fixed llm_apis connector as last resort
+    const fixedLlmConfig = await this.connectorsService.getDecryptedConfig(tenantId, 'llm_apis')
+    if (fixedLlmConfig) {
+      await this.prisma.aiChatThread.update({
+        where: { id: threadId },
+        data: { connectorId: 'llm_apis', provider: 'LLM APIs' },
+      })
+      return fixedLlmConfig
+    }
+
+    return null
   }
 
   private async verifyThreadAccess(

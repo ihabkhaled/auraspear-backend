@@ -604,6 +604,7 @@ model User {
   preference  UserPreference?
   refreshTokenFamilies RefreshTokenFamily[]
   sessions             UserSession[]
+  aiChatThreads        AiChatThread[]
 
   @@map("users")
 }
@@ -2500,6 +2501,7 @@ model AiChatThread {
 
   messages AiChatMessage[]
   tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, userId])
   @@index([tenantId, userId, lastActivityAt(sort: Desc)])
@@ -2510,23 +2512,29 @@ model AiChatThread {
 // ─── AI Chat Messages ────────────────────────────────────
 
 model AiChatMessage {
-  id            String   @id @default(uuid()) @db.Uuid
-  threadId      String   @map("thread_id") @db.Uuid
-  tenantId      String   @map("tenant_id") @db.Uuid
-  role          String   @db.VarChar(20)
-  content       String   @db.Text
-  model         String?  @db.VarChar(255)
-  provider      String?  @db.VarChar(100)
-  inputTokens   Int      @default(0) @map("input_tokens")
-  outputTokens  Int      @default(0) @map("output_tokens")
-  durationMs    Int?     @map("duration_ms")
-  sequenceNum   Int      @map("sequence_num")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid()) @db.Uuid
+  threadId           String   @map("thread_id") @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  role               String   @db.VarChar(20)
+  content            String   @db.Text
+  requestedModel     String?  @map("requested_model") @db.VarChar(255)
+  requestedProvider  String?  @map("requested_provider") @db.VarChar(100)
+  model              String?  @db.VarChar(255)
+  provider           String?  @db.VarChar(100)
+  fallbackModel      String?  @map("fallback_model") @db.VarChar(255)
+  fallbackReason     String?  @map("fallback_reason") @db.VarChar(500)
+  status             String   @default("completed") @db.VarChar(20)
+  inputTokens        Int      @default(0) @map("input_tokens")
+  outputTokens       Int      @default(0) @map("output_tokens")
+  durationMs         Int?     @map("duration_ms")
+  sequenceNum        Int      @map("sequence_num")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   thread AiChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([threadId, sequenceNum])
+  @@index([threadId, createdAt])
   @@index([tenantId])
   @@map("ai_chat_messages")
 }
