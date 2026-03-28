@@ -76,11 +76,18 @@ export class AiWritebackRepository {
           conditions.push(`f."search_vector" @@ phraseto_tsquery('english', $${parameterIndex})`)
           params.push(trimmed.slice(1, -1))
         } else {
-          // Convert words to tsquery with & operator
-          const words = trimmed.split(/\s+/).filter(w => w.length > 0)
-          const tsqueryText = words.map(w => `${w}:*`).join(' & ')
-          conditions.push(`f."search_vector" @@ to_tsquery('english', $${parameterIndex})`)
-          params.push(tsqueryText)
+          // Strip non-alphanumeric chars, split into words, build safe tsquery
+          const sanitized = trimmed.replaceAll(/[^\w\s]/g, ' ')
+          const words = sanitized.split(/\s+/).filter(w => w.length > 0)
+          if (words.length === 0) {
+            // All special chars — fall back to ILIKE
+            conditions.push(`(f."title" ILIKE $${parameterIndex} OR f."summary" ILIKE $${parameterIndex})`)
+            params.push(`%${trimmed}%`)
+          } else {
+            const tsqueryText = words.map(w => `${w}:*`).join(' & ')
+            conditions.push(`f."search_vector" @@ to_tsquery('english', $${parameterIndex})`)
+            params.push(tsqueryText)
+          }
         }
         parameterIndex++
       }
