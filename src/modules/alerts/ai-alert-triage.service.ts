@@ -4,6 +4,7 @@ import { AiFeatureKey, AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { toIso } from '../../common/utils/date-time.utility'
 import { AiService } from '../ai/ai.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { AiResponse } from '../ai/ai.types'
@@ -80,7 +81,7 @@ export class AiAlertTriageService {
       alertSeverity: alert.severity,
       alertSource: alert.source ?? '',
       alertRule: alert.ruleName ?? '',
-      alertTimestamp: alert.timestamp?.toISOString() ?? '',
+      alertTimestamp: alert.timestamp ? toIso(alert.timestamp) : '',
       alertRawData: JSON.stringify(alert.rawEvent ?? {}).slice(0, 3000),
     }
   }

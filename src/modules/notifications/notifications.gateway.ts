@@ -15,6 +15,7 @@ import {
   PermissionUpdateReason,
 } from './notifications.enums'
 import { UrlProtocol } from '../../common/enums'
+import { toIso } from '../../common/utils/date-time.utility'
 import { AuthService } from '../auth/auth.service'
 import type { NotificationHandshakeAuth, NotificationResponse } from './notifications.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -120,7 +121,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     this.server.to(room).emit(NotificationGatewayEvent.PERMISSIONS_UPDATED, {
       tenantId,
       reason,
-      changedAt: new Date().toISOString(),
+      changedAt: toIso(),
     })
   }
 

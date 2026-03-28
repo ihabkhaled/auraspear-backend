@@ -2,6 +2,7 @@ import { HttpException, HttpStatus } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { ZodError } from 'zod'
 import { STATUS_MESSAGE_KEYS } from './http-exception.constants'
+import { toIso } from '../utils/date-time.utility'
 import type { ErrorResponse, ParsedExceptionResult } from './http-exception.types'
 import type { ZodInvalidTypeIssue, ZodIssue, ZodTooBigIssue, ZodTooSmallIssue } from 'zod'
 
@@ -71,13 +72,24 @@ function parseHttpException(exception: HttpException): ParsedExceptionResult {
   } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
     const responseObject = exceptionResponse as Record<string, unknown>
     const rawMessage = responseObject.message
-    message = Array.isArray(rawMessage) ? rawMessage.join(', ') : (rawMessage as string) ?? exception.message
+    message = Array.isArray(rawMessage)
+      ? rawMessage.join(', ')
+      : ((rawMessage as string) ?? exception.message)
     error = (responseObject.error as string) ?? 'Error'
     messageKey = responseObject.messageKey as string | undefined
     errors = responseObject.errors as string[] | undefined
   }
 
-  return { status, message, error, messageKey, errors, logAction: 'none', logMessage: undefined, logStack: undefined }
+  return {
+    status,
+    message,
+    error,
+    messageKey,
+    errors,
+    logAction: 'none',
+    logMessage: undefined,
+    logStack: undefined,
+  }
 }
 
 function parseZodException(exception: ZodError): ParsedExceptionResult {
@@ -96,7 +108,9 @@ function parseZodException(exception: ZodError): ParsedExceptionResult {
   }
 }
 
-function parsePrismaKnownRequestError(exception: Prisma.PrismaClientKnownRequestError): ParsedExceptionResult {
+function parsePrismaKnownRequestError(
+  exception: Prisma.PrismaClientKnownRequestError
+): ParsedExceptionResult {
   return {
     status: HttpStatus.INTERNAL_SERVER_ERROR,
     message: 'A database error occurred',
@@ -109,7 +123,9 @@ function parsePrismaKnownRequestError(exception: Prisma.PrismaClientKnownRequest
   }
 }
 
-function parsePrismaValidationError(exception: Prisma.PrismaClientValidationError): ParsedExceptionResult {
+function parsePrismaValidationError(
+  exception: Prisma.PrismaClientValidationError
+): ParsedExceptionResult {
   return {
     status: HttpStatus.BAD_REQUEST,
     message: 'Invalid database query',
@@ -122,7 +138,9 @@ function parsePrismaValidationError(exception: Prisma.PrismaClientValidationErro
   }
 }
 
-function parsePrismaInitializationError(exception: Prisma.PrismaClientInitializationError): ParsedExceptionResult {
+function parsePrismaInitializationError(
+  exception: Prisma.PrismaClientInitializationError
+): ParsedExceptionResult {
   return {
     status: HttpStatus.SERVICE_UNAVAILABLE,
     message: 'Service temporarily unavailable',
@@ -197,7 +215,7 @@ export function buildErrorResponse(
     message: sanitizedMessage,
     messageKey,
     error: sanitizeMessage(parsed.error),
-    timestamp: new Date().toISOString(),
+    timestamp: toIso(),
     path: requestPath.split('?')[0] ?? '',
   }
 

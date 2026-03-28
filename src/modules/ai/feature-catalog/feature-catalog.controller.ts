@@ -9,6 +9,7 @@ import { Permission } from '../../../common/enums'
 import { AuthGuard } from '../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../common/guards/tenant.guard'
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { UpdateFeatureConfigDto } from './dto/update-feature-config.dto'
 import type { AiFeatureConfigResponse } from './feature-catalog.types'
 import type { JwtPayload } from '../../../common/interfaces/authenticated-request.interface'
@@ -34,7 +35,7 @@ export class FeatureCatalogController {
   ): Promise<AiFeatureConfigResponse> {
     const validKey = this.featureCatalogService.validateFeatureKey(featureKey)
     const config = await this.featureCatalogService.getConfig(user.tenantId, validKey)
-    const now = new Date().toISOString()
+    const now = toIso()
 
     return {
       id: '',

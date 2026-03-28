@@ -8,6 +8,7 @@ import {
   NotificationReadFilter,
   NotificationTitle,
 } from './notifications.enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   NotificationActorRecord,
@@ -77,7 +78,7 @@ export function buildNotificationPayload(
     caseId,
     caseCommentId,
     isRead: false,
-    createdAt: new Date(),
+    createdAt: nowDate(),
   }
 }
 

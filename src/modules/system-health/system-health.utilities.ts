@@ -1,5 +1,6 @@
 import { HEALTH_CHECK_SORT_FIELDS, METRIC_SORT_FIELDS } from './system-health.constants'
 import { ServiceStatus } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   HealthCheckRecord,
@@ -122,7 +123,7 @@ export function buildSystemHealthStats(latestChecks: HealthCheckRecord[]): Syste
 
   let lastCheckedAt: Date | null = null
   if (latestChecks.length > 0) {
-    lastCheckedAt = latestChecks[0]?.checkedAt ?? new Date()
+    lastCheckedAt = latestChecks[0]?.checkedAt ?? nowDate()
     for (const hc of latestChecks) {
       if (hc.checkedAt > lastCheckedAt) {
         lastCheckedAt = hc.checkedAt

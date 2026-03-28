@@ -1,4 +1,5 @@
 import { RULE_SORT_FIELDS } from './correlation.constants'
+import { toIso } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   CorrelationEvent,
@@ -181,7 +182,7 @@ export function buildCorrelationEvents(events: Record<string, unknown>[]): Corre
     timestamp:
       typeof Reflect.get(event, 'timestamp') === 'string'
         ? (Reflect.get(event, 'timestamp') as string)
-        : new Date().toISOString(),
+        : toIso(),
     data: event,
   }))
 }

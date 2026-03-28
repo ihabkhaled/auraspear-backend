@@ -1,4 +1,5 @@
 import { APP_LOGS_SORT_FIELDS } from './app-logs.constants'
+import { toDay } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { SearchAppLogsDto } from './dto/search-app-logs.dto'
 import type { Prisma } from '@prisma/client'
@@ -83,11 +84,11 @@ function applyDateRangeFilter(
   const dateFilter: Prisma.DateTimeFilter = {}
 
   if (from) {
-    dateFilter.gte = new Date(from)
+    dateFilter.gte = toDay(from).toDate()
   }
 
   if (to) {
-    dateFilter.lte = new Date(to)
+    dateFilter.lte = toDay(to).toDate()
   }
 
   where.createdAt = dateFilter

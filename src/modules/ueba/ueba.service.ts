@@ -15,6 +15,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import type { CreateEntityDto } from './dto/create-entity.dto'
 import type { UpdateEntityDto } from './dto/update-entity.dto'
 import type {
@@ -347,8 +348,7 @@ export class UebaService {
     this.log.entry('getUebaStats', tenantId, {})
 
     try {
-      const twentyFourHoursAgo = new Date()
-      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
+      const twentyFourHoursAgo = daysAgo(1)
 
       const [totalEntities, criticalRiskEntities, highRiskEntities, anomalies24h, activeModels] =
         await Promise.all([

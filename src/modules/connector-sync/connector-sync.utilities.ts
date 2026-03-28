@@ -1,4 +1,5 @@
 import { AlertSeverity, AlertStatus } from '../../common/enums'
+import { nowMs, toDay, toIso } from '../../common/utils/date-time.utility'
 import type { Prisma } from '@prisma/client'
 
 export function mapGraylogPriorityToSeverity(priority: number): AlertSeverity {
@@ -20,10 +21,10 @@ export function buildGraylogAlertData(
   const wrapper = rawEvent
   const event = (wrapper.event ?? wrapper) as Record<string, unknown>
 
-  const externalId = (event.id ?? `graylog-${Date.now()}-${Math.random()}`) as string
+  const externalId = (event.id ?? `graylog-${nowMs()}-${Math.random()}`) as string
   const message = (event.message ?? event.key ?? 'Graylog Event') as string
   const priority = (event.priority ?? 2) as number
-  const timestamp = new Date((event.timestamp ?? new Date().toISOString()) as string)
+  const timestamp = toDay((event.timestamp ?? toIso()) as string).toDate()
   const source = (event.source ?? '') as string
 
   const createData: Prisma.AlertUncheckedCreateInput = {
@@ -52,9 +53,10 @@ export function buildGraylogAlertData(
   return { externalId, createData, updateData }
 }
 
-export function countFulfilledResults<T>(
-  results: Array<PromiseSettledResult<T>>
-): { fulfilled: T[]; failedCount: number } {
+export function countFulfilledResults<T>(results: Array<PromiseSettledResult<T>>): {
+  fulfilled: T[]
+  failedCount: number
+} {
   const fulfilled: T[] = []
   let failedCount = 0
 

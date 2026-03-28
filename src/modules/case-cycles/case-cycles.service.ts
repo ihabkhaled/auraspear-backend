@@ -16,6 +16,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate } from '../../common/utils/date-time.utility'
 import type { CaseCycleDetail, CaseCycleRecord, PaginatedCaseCycles } from './case-cycles.types'
 import type { CloseCaseCycleDto } from './dto/close-case-cycle.dto'
 import type { CreateCaseCycleDto } from './dto/create-case-cycle.dto'
@@ -235,7 +236,7 @@ export class CaseCyclesService {
     const existing = await this.findCycleWithCountsOrThrow(id, user.tenantId)
     this.guardAlreadyClosed(existing.status, id, user)
 
-    const now = new Date()
+    const now = nowDate()
     await this.caseCyclesRepository.update(id, user.tenantId, {
       status: CaseCycleStatus.CLOSED,
       closedBy: user.email,

@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { KnowledgeService } from '../../src/modules/knowledge/knowledge.service'
 
 const mockAppLogger = {
@@ -25,8 +26,8 @@ function buildRunbook(overrides: Record<string, unknown> = {}) {
     tags: ['incident', 'response'],
     createdBy: USER_EMAIL,
     updatedBy: null,
-    createdAt: new Date('2026-01-01').toISOString(),
-    updatedAt: new Date('2026-01-01').toISOString(),
+    createdAt: toDay('2026-01-01T00:00:00.000Z').toDate().toISOString(),
+    updatedAt: toDay('2026-01-01T00:00:00.000Z').toDate().toISOString(),
     ...overrides,
   }
 }

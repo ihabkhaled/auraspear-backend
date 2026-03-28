@@ -6,6 +6,7 @@ jest.mock('bcryptjs', () => ({
 import * as bcrypt from 'bcryptjs'
 import { DashboardDensity, DashboardPanelKey } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { UsersService } from '../../src/modules/users/users.service'
 
 const mockedBcrypt = bcrypt as jest.Mocked<typeof bcrypt>
@@ -35,8 +36,8 @@ const mockTenant = {
   id: TENANT_ID,
   name: 'AuraSpear',
   slug: 'auraspear',
-  createdAt: new Date('2025-01-01'),
-  updatedAt: new Date('2025-01-01'),
+  createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
 }
 
 const mockPreference = {
@@ -48,8 +49,8 @@ const mockPreference = {
   collapsedDashboardPanels: [DashboardPanelKey.MITRE_TECHNIQUES, DashboardPanelKey.TARGETED_ASSETS],
   notificationsEmail: true,
   notificationsInApp: false,
-  createdAt: new Date('2025-01-01'),
-  updatedAt: new Date('2025-01-01'),
+  createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
 }
 
 const expectedDefaultPreferences = {
@@ -106,8 +107,8 @@ const mockUserWithMemberships = {
   role: 'ANALYST',
   isProtected: false,
   avatarUrl: null,
-  createdAt: new Date('2025-01-01'),
-  updatedAt: new Date('2025-01-01'),
+  createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
   preference: mockPreference,
   memberships: [{ tenant: mockTenant }],
 }
@@ -121,8 +122,8 @@ const mockUserPlain = {
   role: 'ANALYST',
   isProtected: false,
   avatarUrl: null,
-  createdAt: new Date('2025-01-01'),
-  updatedAt: new Date('2025-01-01'),
+  createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
 }
 
 describe('UsersService', () => {

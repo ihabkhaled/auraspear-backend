@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common'
+import { nowDate, toIso } from '../../../common/utils/date-time.utility'
 import { AgentEventListenerService } from '../../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsRepository } from '../../connectors/connectors.repository'
 import type { Job } from '@prisma/client'
@@ -35,13 +36,13 @@ export class ConnectorSyncHandler {
     // Actual sync logic would be connector-type-specific
     // For now, update the lastSyncedAt timestamp
     await this.connectorsRepository.updateById(connectorId, {
-      lastSyncAt: new Date(),
+      lastSyncAt: nowDate(),
     })
 
     const result = {
       connectorId,
       connectorType: connector.type,
-      syncedAt: new Date().toISOString(),
+      syncedAt: toIso(),
     }
 
     // Fire-and-forget — notify AI after successful connector sync

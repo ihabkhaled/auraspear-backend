@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ConnectorType } from '../../../common/enums'
+import { daysAgo, toDay } from '../../../common/utils/date-time.utility'
 
 /** Valid connector types — matches Prisma ConnectorType enum */
 const ConnectorTypeParameter = z.nativeEnum(ConnectorType)
@@ -32,8 +33,8 @@ export const WorkspaceSearchSchema = z.object({
     .refine(
       value => {
         if (!value) return true
-        const date = new Date(value)
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        const date = toDay(value).toDate()
+        const thirtyDaysAgo = daysAgo(30)
         return date >= thirtyDaysAgo
       },
       { message: 'from date cannot be more than 30 days in the past' }

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { TenantAlertCounts, TenantCaseCounts, TenantHuntCounts } from './dashboards.types'
 
@@ -84,7 +85,7 @@ export class MsspDashboardRepository {
   }
 
   async countAiUsageByTenant(tenantId: string): Promise<number> {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const thirtyDaysAgo = daysAgo(30)
 
     return this.prisma.aiUsageLedger.count({
       where: { tenantId, createdAt: { gte: thirtyDaysAgo } },

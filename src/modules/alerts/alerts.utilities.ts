@@ -1,6 +1,6 @@
 import { ALERT_SORT_FIELDS, VALID_SEVERITIES, VALID_STATUSES } from './alerts.constants'
 import { AlertStatus, SortOrder } from '../../common/enums'
-import { daysAgo } from '../../common/utils/date-time.utility'
+import { daysAgo, nowDate, toDay, toIso } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { WazuhUpsertOp } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
@@ -75,17 +75,17 @@ function applyTimeFilter(where: Prisma.AlertWhereInput, query: SearchAlertsDto):
         from = daysAgo(30)
         break
       default:
-        from = new Date()
+        from = nowDate()
         break
     }
     where.timestamp = { gte: from }
   } else if (query.from ?? query.to) {
     where.timestamp = {}
     if (query.from) {
-      where.timestamp.gte = new Date(query.from)
+      where.timestamp.gte = toDay(query.from).toDate()
     }
     if (query.to) {
-      where.timestamp.lte = new Date(query.to)
+      where.timestamp.lte = toDay(query.to).toDate()
     }
   }
 }
@@ -126,8 +126,8 @@ export function mapWazuhLevel(
 /* ---------------------------------------------------------------- */
 
 export function buildWazuhUpsertOps(hits: unknown[]): WazuhUpsertOp[] {
-  const now = new Date()
-  return hits.map(rawHit => mapSingleWazuhHit(rawHit, now))
+  const fallback = nowDate()
+  return hits.map(rawHit => mapSingleWazuhHit(rawHit, fallback))
 }
 
 function mapSingleWazuhHit(rawHit: unknown, fallbackTimestamp: Date): WazuhUpsertOp {
@@ -149,7 +149,7 @@ function mapSingleWazuhHit(rawHit: unknown, fallbackTimestamp: Date): WazuhUpser
     severity: mapWazuhLevel(rule?.level as number | undefined),
     mitreTactics,
     mitreTechniques,
-    timestamp: new Date((source.timestamp ?? fallbackTimestamp) as string),
+    timestamp: toDay((source.timestamp as string | undefined) ?? fallbackTimestamp).toDate(),
   }
 }
 
@@ -257,14 +257,14 @@ export function countIngestedResults(results: Array<PromiseSettledResult<unknown
 /* ---------------------------------------------------------------- */
 
 export function buildWazuhIngestionQuery(): Record<string, unknown> {
-  const now = new Date()
-  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const now = nowDate()
+  const oneDayAgo = toDay(now).subtract(1, 'day').toDate()
 
   return {
     size: 500,
     query: {
       bool: {
-        must: [{ range: { timestamp: { gte: oneDayAgo.toISOString(), lte: now.toISOString() } } }],
+        must: [{ range: { timestamp: { gte: toIso(oneDayAgo), lte: toIso(now) } } }],
       },
     },
     sort: [{ timestamp: { order: SortOrder.DESC } }],

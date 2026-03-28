@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -29,7 +30,7 @@ function getBedrockSeverity(event: Record<string, unknown>): string {
   const errorSeverity = getSeverityFromErrorCode(event['errorCode'] as string | undefined)
   if (errorSeverity) return errorSeverity
 
-  const eventName = ((event['eventName'] as string) ?? '')
+  const eventName = (event['eventName'] as string) ?? ''
   return getSeverityFromEventName(eventName)
 }
 
@@ -66,7 +67,7 @@ export function mapBedrockToOcsf(
     title,
     description,
     severity: getBedrockSeverity(event),
-    timestamp: (event['eventTime'] as string) ?? new Date().toISOString(),
+    timestamp: (event['eventTime'] as string) ?? toIso(),
     source: { product: 'Amazon Bedrock', vendor: 'Amazon Web Services' },
     tenantId,
     eventId: (event['requestID'] as string) ?? (event['eventID'] as string) ?? undefined,

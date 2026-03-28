@@ -6,6 +6,7 @@ import {
   IncidentStatus,
   ReportStatus,
 } from '../../common/enums'
+import { toDay } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 
 @Injectable()
@@ -86,7 +87,7 @@ export class ReportsGenerationRepository {
     limit: number,
     since?: Date
   ): Promise<Array<{ technique: string; count: bigint }>> {
-    const sinceFilter = since ?? new Date(0)
+    const sinceFilter = since ?? toDay(0).toDate()
     return this.prisma.$queryRaw<Array<{ technique: string; count: bigint }>>`
       SELECT unnest(mitre_techniques) AS technique, COUNT(*)::bigint AS count
       FROM alerts
@@ -103,7 +104,7 @@ export class ReportsGenerationRepository {
     limit: number,
     since?: Date
   ): Promise<Array<{ rule_name: string; count: bigint }>> {
-    const sinceFilter = since ?? new Date(0)
+    const sinceFilter = since ?? toDay(0).toDate()
     return this.prisma.$queryRaw<Array<{ rule_name: string; count: bigint }>>`
       SELECT rule_description AS rule_name, COUNT(*)::bigint AS count
       FROM alerts
@@ -117,7 +118,7 @@ export class ReportsGenerationRepository {
   }
 
   async getAvgAlertResolutionMs(tenantId: string, since?: Date): Promise<number> {
-    const sinceFilter = since ?? new Date(0)
+    const sinceFilter = since ?? toDay(0).toDate()
     const result = await this.prisma.$queryRaw<Array<{ avg_ms: number | null }>>`
       SELECT AVG(EXTRACT(EPOCH FROM (closed_at - timestamp)) * 1000)::float AS avg_ms
       FROM alerts

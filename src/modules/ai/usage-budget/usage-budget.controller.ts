@@ -6,6 +6,7 @@ import { TenantId } from '../../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../../common/enums'
 import { AuthGuard } from '../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../common/guards/tenant.guard'
+import { nowDate, startOf, toDay } from '../../../common/utils/date-time.utility'
 import type { MonthlyUsageResponse, UsageSummaryResponse } from './usage-budget.types'
 
 @ApiTags('ai-usage')
@@ -22,10 +23,10 @@ export class UsageBudgetController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ): Promise<UsageSummaryResponse> {
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const start = startDate ? new Date(startDate) : monthStart
-    const end = endDate ? new Date(endDate) : now
+    const now = nowDate()
+    const monthStart = startOf('month')
+    const start = startDate ? toDay(startDate).toDate() : monthStart
+    const end = endDate ? toDay(endDate).toDate() : now
     return this.usageBudgetService.getUsageSummary(tenantId, start, end)
   }
 

@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { AppLogsService } from '../../src/modules/app-logs/app-logs.service'
 
 function createMockRepository() {
@@ -102,8 +103,8 @@ describe('AppLogsService', () => {
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
       expect(callArguments.where.createdAt).toEqual({
-        gte: new Date(from),
-        lte: new Date(to),
+        gte: toDay(from).toDate(),
+        lte: toDay(to).toDate(),
       })
     })
 

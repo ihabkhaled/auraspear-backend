@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { getYear, nowDate } from '../../common/utils/date-time.utility'
 import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
@@ -210,7 +211,7 @@ export class CasesRepository {
 
       // Generate case number with advisory lock
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('case_number_gen'))::text`
-      const year = new Date().getFullYear()
+      const year = getYear()
       const prefix = `SOC-${year}-`
       const latestCase = await tx.case.findFirst({
         where: { caseNumber: { startsWith: prefix } },
@@ -325,7 +326,7 @@ export class CasesRepository {
     return this.prisma.$transaction(async tx => {
       await tx.case.updateMany({
         where: { id, tenantId },
-        data: { status, closedAt: new Date() },
+        data: { status, closedAt: nowDate() },
       })
       await tx.caseTimeline.create({
         data: {

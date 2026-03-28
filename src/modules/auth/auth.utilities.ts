@@ -3,6 +3,12 @@ import { DEFAULT_REFRESH_EXPIRY_SECONDS } from './auth.constants'
 import { AuthExpiryUnit } from './auth.enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import {
+  expiresInSeconds,
+  fromUnixToDate,
+  nowUnix,
+  remainingSecondsUntilDate,
+} from '../../common/utils/date-time.utility'
 import type {
   AuthUserIdentity,
   MembershipWithTenant,
@@ -52,16 +58,15 @@ export function preserveImpersonationClaims(newPayload: JwtPayload, original: Jw
 /* ---------------------------------------------------------------- */
 
 export function computeRemainingTtl(exp: number): number {
-  const now = Math.floor(Date.now() / 1000)
-  return Math.max(exp - now, 0)
+  return Math.max(exp - nowUnix(), 0)
 }
 
 export function computeRemainingTtlFromDate(expiresAt: Date): number {
-  return Math.max(Math.ceil((expiresAt.getTime() - Date.now()) / 1000), 0)
+  return remainingSecondsUntilDate(expiresAt)
 }
 
 export function buildExpiryDateFromSeconds(ttlSeconds: number): Date {
-  return new Date(Date.now() + ttlSeconds * 1000)
+  return expiresInSeconds(ttlSeconds)
 }
 
 export function hashTokenIdentifier(identifier: string): string {
@@ -169,7 +174,7 @@ export function extractFamilyFromPayload(payload: JwtPayload): string | undefine
 }
 
 export function buildEpochToDate(epochSeconds: number | undefined): Date | undefined {
-  return epochSeconds === undefined ? undefined : new Date(epochSeconds * 1000)
+  return epochSeconds === undefined ? undefined : fromUnixToDate(epochSeconds)
 }
 
 export function stripTokenMetaClaims(

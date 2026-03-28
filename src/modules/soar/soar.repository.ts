@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { PLAYBOOK_WITH_TENANT_INCLUDE, EXECUTION_WITH_PLAYBOOK_INCLUDE } from './soar.constants'
 import { SoarExecutionStatus } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { PlaybookWithTenantPrisma, ExecutionWithPlaybookPrisma } from './soar.types'
 import type { SoarPlaybook, SoarExecution } from '@prisma/client'
@@ -119,7 +120,7 @@ export class SoarRepository {
           tenantId: params.tenantId,
           status: SoarExecutionStatus.RUNNING,
           triggeredBy: params.triggeredBy,
-          startedAt: new Date(),
+          startedAt: nowDate(),
         },
         include: EXECUTION_WITH_PLAYBOOK_INCLUDE,
       })
@@ -128,7 +129,7 @@ export class SoarRepository {
         where: { id: params.playbookId, tenantId: params.tenantId },
         data: {
           executionCount: { increment: 1 },
-          lastExecutedAt: new Date(),
+          lastExecutedAt: nowDate(),
         },
       })
 

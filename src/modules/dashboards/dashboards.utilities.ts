@@ -5,6 +5,7 @@ import {
   SoarExecutionStatus,
   SyncJobStatus,
 } from '../../common/enums'
+import { toIso, toDay } from '../../common/utils/date-time.utility'
 import type {
   AlertTrend,
   AlertTrendEntry,
@@ -74,7 +75,7 @@ export function calculateComplianceScore(
 }
 
 function toUtcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10)
+  return toIso(date).slice(0, 10)
 }
 
 function createEmptyAlertTrendEntry(date: string): AlertTrendEntry {
@@ -109,12 +110,12 @@ function initializeAlertTrendMap(startDate?: Date, endDate?: Date): Map<string, 
   const trendMap = new Map<string, AlertTrendEntry>()
 
   if (startDate && endDate) {
-    const cursor = new Date(startDate)
+    let cursor = toDay(startDate)
 
-    while (cursor <= endDate) {
-      const date = toUtcDateString(cursor)
+    while (cursor.toDate() <= endDate) {
+      const date = toUtcDateString(cursor.toDate())
       trendMap.set(date, createEmptyAlertTrendEntry(date))
-      cursor.setUTCDate(cursor.getUTCDate() + 1)
+      cursor = cursor.add(1, 'day')
     }
   }
 

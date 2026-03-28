@@ -1,5 +1,6 @@
 import { ConnectorType } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { nowDate } from '../../src/common/utils/date-time.utility'
 import { HuntsService } from '../../src/modules/hunts/hunts.service'
 
 const mockAppLogger = {
@@ -73,7 +74,7 @@ describe('HuntsService', () => {
       status: 'running' as const,
       startedBy: USER_EMAIL,
       reasoning: ['Querying Wazuh Indexer for matching events'],
-      startedAt: new Date(),
+      startedAt: nowDate(),
       completedAt: null,
       eventsFound: null,
     }
@@ -119,7 +120,7 @@ describe('HuntsService', () => {
       const updatedSession = {
         ...mockSession,
         status: 'completed',
-        completedAt: new Date(),
+        completedAt: nowDate(),
         eventsFound: 2,
         events: [],
       }
@@ -316,8 +317,8 @@ describe('HuntsService', () => {
           query: 'failed login',
           status: 'completed',
           startedBy: USER_EMAIL,
-          startedAt: new Date(),
-          completedAt: new Date(),
+          startedAt: nowDate(),
+          completedAt: nowDate(),
           eventsFound: 5,
           reasoning: [],
         },
@@ -327,7 +328,7 @@ describe('HuntsService', () => {
           query: 'suspicious process',
           status: 'running',
           startedBy: USER_EMAIL,
-          startedAt: new Date(),
+          startedAt: nowDate(),
           completedAt: null,
           eventsFound: null,
           reasoning: [],
@@ -373,8 +374,8 @@ describe('HuntsService', () => {
           query: 'port scan',
           status: 'completed',
           startedBy: USER_EMAIL,
-          startedAt: new Date(),
-          completedAt: new Date(),
+          startedAt: nowDate(),
+          completedAt: nowDate(),
           eventsFound: 10,
           reasoning: [],
         },
@@ -408,15 +409,15 @@ describe('HuntsService', () => {
         query: 'failed login',
         status: 'completed',
         startedBy: USER_EMAIL,
-        startedAt: new Date(),
-        completedAt: new Date(),
+        startedAt: nowDate(),
+        completedAt: nowDate(),
         eventsFound: 2,
         reasoning: ['Querying Wazuh Indexer for matching events', 'Found 2 matching events'],
         events: [
           {
             id: 'event-001',
             huntSessionId: 'session-001',
-            timestamp: new Date(),
+            timestamp: nowDate(),
             severity: 'critical',
             eventId: 'wazuh-evt-001',
             sourceIp: '192.168.1.100',
@@ -426,7 +427,7 @@ describe('HuntsService', () => {
           {
             id: 'event-002',
             huntSessionId: 'session-001',
-            timestamp: new Date(),
+            timestamp: nowDate(),
             severity: 'medium',
             eventId: 'wazuh-evt-002',
             sourceIp: '10.0.0.5',
@@ -467,7 +468,7 @@ describe('HuntsService', () => {
         {
           id: 'event-001',
           huntSessionId: 'session-001',
-          timestamp: new Date(),
+          timestamp: nowDate(),
           severity: 'critical',
           eventId: 'wazuh-evt-001',
           sourceIp: '192.168.1.100',
@@ -477,7 +478,7 @@ describe('HuntsService', () => {
         {
           id: 'event-002',
           huntSessionId: 'session-001',
-          timestamp: new Date(),
+          timestamp: nowDate(),
           severity: 'high',
           eventId: 'wazuh-evt-002',
           sourceIp: '10.0.0.5',
@@ -524,7 +525,7 @@ describe('HuntsService', () => {
         {
           id: 'event-011',
           huntSessionId: 'session-001',
-          timestamp: new Date(),
+          timestamp: nowDate(),
           severity: 'low',
           eventId: 'wazuh-evt-011',
           sourceIp: null,

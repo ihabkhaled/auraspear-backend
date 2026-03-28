@@ -6,6 +6,7 @@ import { AgentActionType, AppLogFeature } from '../../../../common/enums'
 import { BusinessException } from '../../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../../common/services/service-logger'
+import { toIso } from '../../../../common/utils/date-time.utility'
 import { OrchestratorService } from '../orchestrator.service'
 import type { UpdateScheduleDto } from './dto/update-schedule.dto'
 import type {
@@ -405,14 +406,14 @@ export class ScheduleService {
       providerPreference: schedule.providerPreference,
       modelPreference: schedule.modelPreference,
       isSystemDefault: schedule.isSystemDefault,
-      lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
-      nextRunAt: schedule.nextRunAt?.toISOString() ?? null,
+      lastRunAt: schedule.lastRunAt ? toIso(schedule.lastRunAt) : null,
+      nextRunAt: schedule.nextRunAt ? toIso(schedule.nextRunAt) : null,
       lastStatus: schedule.lastStatus,
       lastDurationMs: schedule.lastDurationMs,
       failureStreak: schedule.failureStreak,
       successStreak: schedule.successStreak,
-      createdAt: schedule.createdAt.toISOString(),
-      updatedAt: schedule.updatedAt.toISOString(),
+      createdAt: toIso(schedule.createdAt),
+      updatedAt: toIso(schedule.updatedAt),
     }
   }
 

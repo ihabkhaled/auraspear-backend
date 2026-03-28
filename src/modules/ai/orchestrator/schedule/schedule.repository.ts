@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { CronExpressionParser } from 'cron-parser'
+import { nowDate } from '../../../../common/utils/date-time.utility'
 import { PrismaService } from '../../../../prisma/prisma.service'
 import type {
   FindAllForTenantOptions,
@@ -23,7 +24,7 @@ export class ScheduleRepository {
       where: {
         isEnabled: true,
         isPaused: false,
-        nextRunAt: { lte: new Date() },
+        nextRunAt: { lte: nowDate() },
       },
       orderBy: [{ nextRunAt: 'asc' }],
       take: limit,
@@ -103,7 +104,7 @@ export class ScheduleRepository {
     return this.prisma.aiAgentSchedule.update({
       where: { id },
       data: {
-        lastRunAt: new Date(),
+        lastRunAt: nowDate(),
         nextRunAt,
         lastStatus: 'running',
       },
@@ -180,7 +181,7 @@ export class ScheduleRepository {
 
   computeNextRun(cronExpression: string, timezone: string): Date {
     const expression = CronExpressionParser.parse(cronExpression, {
-      currentDate: new Date(),
+      currentDate: nowDate(),
       tz: timezone,
     })
     return expression.next().toDate()

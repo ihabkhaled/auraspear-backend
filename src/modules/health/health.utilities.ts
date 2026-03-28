@@ -1,4 +1,5 @@
 import { HealthStatus } from '../../common/enums'
+import { toIso } from '../../common/utils/date-time.utility'
 import type { ComponentCheck, OverallHealth, ServiceHealthResult } from './health.types'
 
 export function determineOverallStatus(
@@ -23,7 +24,7 @@ export function buildOverallHealthResponse(
 ): OverallHealth {
   return {
     status,
-    timestamp: new Date().toISOString(),
+    timestamp: toIso(),
     checks: { database, redis },
   }
 }

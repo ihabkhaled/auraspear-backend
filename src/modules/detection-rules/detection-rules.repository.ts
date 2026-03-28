@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { getYear } from '../../common/utils/date-time.utility'
 import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
@@ -123,7 +124,7 @@ export class DetectionRulesRepository {
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('detection_rule_number_gen'))::text`
 
-    const year = new Date().getFullYear()
+    const year = getYear()
     const prefix = `DR-${year}-`
 
     const latestRule = await tx.detectionRule.findFirst({

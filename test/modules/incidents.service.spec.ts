@@ -1,5 +1,6 @@
 import { IncidentStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { IncidentsService } from '../../src/modules/incidents/incidents.service'
 
 const mockAppLogger = {
@@ -66,8 +67,8 @@ function buildMockIncident(overrides: Record<string, unknown> = {}) {
     mitreTechniques: ['T1021'],
     createdBy: USER_EMAIL,
     resolvedAt: null,
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     tenant: { name: 'Test Tenant' },
     timeline: [],
     ...overrides,
@@ -569,7 +570,7 @@ describe('IncidentsService', () => {
 
       const resolvedIncident = buildMockIncident({
         status: IncidentStatus.RESOLVED,
-        resolvedAt: new Date(),
+        resolvedAt: nowDate(),
       })
       repository.updateIncidentWithTimeline.mockResolvedValue(resolvedIncident)
 
@@ -586,7 +587,7 @@ describe('IncidentsService', () => {
     it('should clear resolvedAt when reopening', async () => {
       const existing = buildMockIncident({
         status: IncidentStatus.RESOLVED,
-        resolvedAt: new Date(),
+        resolvedAt: nowDate(),
       })
       repository.findFirstWithRelations.mockResolvedValue(existing)
       repository.findUserById.mockResolvedValue(null)
@@ -720,7 +721,7 @@ describe('IncidentsService', () => {
           event: 'Incident created',
           actorType: 'user',
           actorName: USER_EMAIL,
-          timestamp: new Date(),
+          timestamp: nowDate(),
         },
       ]
       repository.findManyTimeline.mockResolvedValue(timelineEntries)
@@ -764,7 +765,7 @@ describe('IncidentsService', () => {
         event: 'Custom note added',
         actorType: 'user',
         actorName: USER_EMAIL,
-        timestamp: new Date(),
+        timestamp: nowDate(),
       }
       repository.createTimelineEntry.mockResolvedValue(newEntry)
 
@@ -814,7 +815,7 @@ describe('IncidentsService', () => {
         event: 'AI analysis',
         actorType: 'ai_agent',
         actorName: USER_EMAIL,
-        timestamp: new Date(),
+        timestamp: nowDate(),
       }
       repository.createTimelineEntry.mockResolvedValue(newEntry)
 

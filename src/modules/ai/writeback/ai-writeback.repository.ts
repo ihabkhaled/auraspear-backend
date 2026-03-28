@@ -5,6 +5,7 @@ import {
   buildPaginationMeta,
   type PaginatedResponse,
 } from '../../../common/interfaces/pagination.interface'
+import { nowDate } from '../../../common/utils/date-time.utility'
 import { PrismaService } from '../../../prisma/prisma.service'
 import type {
   AlertAiFieldsData,
@@ -367,7 +368,7 @@ export class AiWritebackRepository {
 
     const updateData: Record<string, unknown> = { status: newStatus }
     if (newStatus === AiFindingStatus.APPLIED) {
-      updateData['appliedAt'] = new Date()
+      updateData['appliedAt'] = nowDate()
     }
 
     return this.prisma.aiExecutionFinding.update({

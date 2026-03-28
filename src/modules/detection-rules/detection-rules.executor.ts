@@ -8,6 +8,7 @@ import {
 import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowMs, elapsedMs, toIso } from '../../common/utils/date-time.utility'
 import type {
   DetectionExecutionResult,
   DetectionRuleMatch,
@@ -31,7 +32,7 @@ export class DetectionRulesExecutor {
     rule: EvaluatableDetectionRule,
     events: Record<string, unknown>[]
   ): Promise<DetectionExecutionResult> {
-    const startTime = Date.now()
+    const startTime = nowMs()
 
     this.log.entry('evaluateRule', '', {
       ruleId: rule.id,
@@ -52,13 +53,13 @@ export class DetectionRulesExecutor {
             ruleName: rule.name,
             severity: rule.severity,
             matchedEvent: event,
-            matchedAt: new Date().toISOString(),
+            matchedAt: toIso(),
             description: buildDetectionMatchDescription(rule.name, detectionProgram.engine),
           })
         }
       }
 
-      const durationMs = Date.now() - startTime
+      const durationMs = elapsedMs(startTime)
       this.logger.log(
         `Rule ${rule.id} evaluated against ${String(events.length)} events: ${String(matches.length)} matches in ${String(durationMs)}ms`
       )
@@ -76,12 +77,12 @@ export class DetectionRulesExecutor {
         status: matches.length > 0 ? 'matched' : 'no_match',
         matchCount: matches.length,
         matches,
-        executedAt: new Date().toISOString(),
+        executedAt: toIso(),
         durationMs,
         engine: detectionProgram.engine,
       }
     } catch (error: unknown) {
-      const durationMs = Date.now() - startTime
+      const durationMs = elapsedMs(startTime)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.logger.error(`Rule ${rule.id} evaluation failed: ${errorMessage}`)
 
@@ -96,7 +97,7 @@ export class DetectionRulesExecutor {
         status: 'error',
         matchCount: 0,
         matches: [],
-        executedAt: new Date().toISOString(),
+        executedAt: toIso(),
         durationMs,
         engine: DetectionExecutionEngine.UNKNOWN,
         error: errorMessage,

@@ -9,6 +9,7 @@ import {
   SyncJobStatus,
   VulnerabilitySeverity,
 } from '../../src/common/enums'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { DashboardsService } from '../../src/modules/dashboards/dashboards.service'
 import { JobStatus } from '../../src/modules/jobs/enums/job.enums'
 
@@ -259,7 +260,7 @@ describe('DashboardsService', () => {
 
   describe('getAlertTrend', () => {
     beforeEach(() => {
-      jest.useFakeTimers().setSystemTime(new Date('2026-03-20T12:00:00Z'))
+      jest.useFakeTimers().setSystemTime(toDay('2026-03-20T12:00:00Z').toDate())
     })
 
     afterEach(() => {
@@ -279,8 +280,8 @@ describe('DashboardsService', () => {
 
       expect(repository.getAlertCountsByDateAndSeverity).toHaveBeenCalledWith(
         TENANT_ID,
-        new Date('2026-03-14T00:00:00.000Z'),
-        new Date('2026-03-21T00:00:00.000Z')
+        toDay('2026-03-14T00:00:00.000Z').toDate(),
+        toDay('2026-03-21T00:00:00.000Z').toDate()
       )
       expect(result.tenantId).toBe(TENANT_ID)
       expect(result.days).toBe(7)
@@ -562,7 +563,7 @@ describe('DashboardsService', () => {
 
   describe('getTopTargetedAssets', () => {
     it('should return hostname, alertCount, criticalCount, and lastSeen', async () => {
-      const lastSeen = new Date('2026-03-10T12:00:00Z')
+      const lastSeen = toDay('2026-03-10T12:00:00Z').toDate()
       repository.getTopTargetedAssets.mockResolvedValueOnce([
         { hostname: 'web-01', alert_count: 50n, critical_count: 5n, last_seen: lastSeen },
         { hostname: 'db-01', alert_count: 30n, critical_count: 2n, last_seen: lastSeen },
@@ -583,7 +584,7 @@ describe('DashboardsService', () => {
           hostname: 'app-01',
           alert_count: 9999n,
           critical_count: 100n,
-          last_seen: new Date(),
+          last_seen: nowDate(),
         },
       ])
 
@@ -614,7 +615,7 @@ describe('DashboardsService', () => {
         {
           type: 'wazuh',
           name: 'Wazuh SIEM',
-          lastTestAt: new Date('2026-03-10T10:00:00Z'),
+          lastTestAt: toDay('2026-03-10T10:00:00Z').toDate(),
           lastTestOk: true,
           lastError: null,
         },
@@ -634,7 +635,7 @@ describe('DashboardsService', () => {
         {
           type: 'misp',
           name: 'MISP Feed',
-          lastTestAt: new Date('2026-03-10T09:00:00Z'),
+          lastTestAt: toDay('2026-03-10T09:00:00Z').toDate(),
           lastTestOk: false,
           lastError: 'Connection refused',
         },
@@ -668,14 +669,14 @@ describe('DashboardsService', () => {
         {
           type: 'wazuh',
           name: 'Wazuh',
-          lastTestAt: new Date(),
+          lastTestAt: nowDate(),
           lastTestOk: true,
           lastError: null,
         },
         {
           type: 'misp',
           name: 'MISP',
-          lastTestAt: new Date(),
+          lastTestAt: nowDate(),
           lastTestOk: false,
           lastError: 'Timeout',
         },
@@ -740,14 +741,14 @@ describe('DashboardsService', () => {
         {
           type: 'wazuh',
           name: 'Wazuh',
-          lastTestAt: new Date('2026-03-10T10:00:00Z'),
+          lastTestAt: toDay('2026-03-10T10:00:00Z').toDate(),
           lastTestOk: true,
           lastError: null,
         },
         {
           type: 'misp',
           name: 'MISP',
-          lastTestAt: new Date('2026-03-10T10:00:00Z'),
+          lastTestAt: toDay('2026-03-10T10:00:00Z').toDate(),
           lastTestOk: false,
           lastError: 'Timeout',
         },
@@ -849,7 +850,7 @@ describe('DashboardsService', () => {
           name: 'Credential Abuse',
           hitCount: 40,
           falsePositiveCount: 4,
-          lastTriggeredAt: new Date('2026-03-20T08:00:00Z'),
+          lastTriggeredAt: toDay('2026-03-20T08:00:00Z').toDate(),
         },
       ])
       repository.findTopNoisyDetectionRules.mockResolvedValueOnce([
@@ -858,7 +859,7 @@ describe('DashboardsService', () => {
           name: 'Admin Login Spike',
           hitCount: 10,
           falsePositiveCount: 6,
-          lastTriggeredAt: new Date('2026-03-20T07:00:00Z'),
+          lastTriggeredAt: toDay('2026-03-20T07:00:00Z').toDate(),
         },
       ])
       repository.groupConnectorSyncJobsByStatusSince.mockResolvedValueOnce([

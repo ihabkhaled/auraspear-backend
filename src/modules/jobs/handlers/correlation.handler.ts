@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { nowDate, toIso } from '../../../common/utils/date-time.utility'
 import { CorrelationExecutor } from '../../correlation/correlation.executor'
 import { CorrelationRepository } from '../../correlation/correlation.repository'
 import type { CorrelationEvent } from '../../correlation/correlation.types'
@@ -74,7 +75,7 @@ export class CorrelationHandler {
         where: { id: ruleId, tenantId: job.tenantId },
         data: {
           hitCount: rule.hitCount + 1,
-          lastFiredAt: new Date(),
+          lastFiredAt: nowDate(),
         },
       })
     }
@@ -87,7 +88,7 @@ export class CorrelationHandler {
       triggeredAt: result.triggeredAt ?? null,
       description: result.description ?? null,
       durationMs: result.durationMs,
-      executedAt: new Date().toISOString(),
+      executedAt: toIso(),
     }
   }
 }

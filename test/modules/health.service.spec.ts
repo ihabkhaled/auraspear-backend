@@ -1,5 +1,6 @@
 import { HealthStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { HealthService } from '../../src/modules/health/health.service'
 
 const mockRedis = {
@@ -119,7 +120,7 @@ describe('HealthService', () => {
       const result = await service.getOverallHealth()
 
       expect(result.timestamp).toBeDefined()
-      const parsed = new Date(result.timestamp)
+      const parsed = toDay(result.timestamp).toDate()
       expect(parsed.toISOString()).toBe(result.timestamp)
     })
 

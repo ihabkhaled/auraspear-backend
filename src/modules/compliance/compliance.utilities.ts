@@ -1,5 +1,6 @@
 import { FRAMEWORK_SORT_FIELDS } from './compliance.constants'
 import { ComplianceControlStatus } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   ComplianceFrameworkRecord,
@@ -77,7 +78,7 @@ export function buildControlUpdateData(
   if (dto.description !== undefined) data['description'] = dto.description
   if (dto.status !== undefined) {
     data['status'] = dto.status
-    data['assessedAt'] = new Date()
+    data['assessedAt'] = nowDate()
     data['assessedBy'] = userEmail
   }
   if (dto.evidence !== undefined) data['evidence'] = dto.evidence

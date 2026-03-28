@@ -5,6 +5,7 @@ import { AiFeatureKey, AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { toIso } from '../../common/utils/date-time.utility'
 import { AiService } from '../ai/ai.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { AiResponse } from '../ai/ai.types'
@@ -81,8 +82,8 @@ export class AiEntityService {
       riskScore: entity.riskScore,
       riskBreakdown: JSON.stringify(breakdown.factors),
       relationCount: relations.length,
-      firstSeen: entity.firstSeen.toISOString(),
-      lastSeen: entity.lastSeen.toISOString(),
+      firstSeen: toIso(entity.firstSeen),
+      lastSeen: toIso(entity.lastSeen),
       metadata: JSON.stringify(entity.metadata ?? {}).slice(0, 2000),
     }
   }

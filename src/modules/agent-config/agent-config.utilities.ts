@@ -1,5 +1,6 @@
 import { AGENT_DEFAULTS_MAP, AI_DEFAULT_PROVIDER_KEY } from './agent-config.constants'
 import { AiAgentId, TokenResetPeriod } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import type {
   AgentConfigWithDefaults,
   OsintSourceRedacted,
@@ -104,7 +105,7 @@ export function redactOsintSource(source: OsintSourceConfigRecord): OsintSourceR
 }
 
 export function buildTokenResetData(period: TokenResetPeriod): Record<string, unknown> {
-  const now = new Date()
+  const now = nowDate()
 
   switch (period) {
     case TokenResetPeriod.HOUR:

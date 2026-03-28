@@ -2,6 +2,14 @@ import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import {
+  nowMs,
+  nowDate,
+  elapsedMs,
+  toIso,
+  toDay,
+  subtractDuration,
+} from '../../common/utils/date-time.utility'
 import type { CorrelationEvent, CorrelationResult, CorrelationRuleInput } from './correlation.types'
 
 @Injectable()
@@ -21,7 +29,7 @@ export class CorrelationExecutor {
     rule: CorrelationRuleInput,
     events: CorrelationEvent[]
   ): Promise<CorrelationResult> {
-    const startTime = Date.now()
+    const startTime = nowMs()
 
     this.log.entry('evaluateRule', '', {
       ruleId: rule.id,
@@ -31,12 +39,12 @@ export class CorrelationExecutor {
     })
 
     try {
-      const windowEnd = new Date()
-      const windowStart = new Date(windowEnd.getTime() - rule.timeWindowMinutes * 60 * 1000)
+      const windowEnd = nowDate()
+      const windowStart = subtractDuration(windowEnd, rule.timeWindowMinutes, 'minute')
 
       // Filter events by type and time window
       const relevantEvents = events.filter(event => {
-        const eventTime = new Date(event.timestamp)
+        const eventTime = toDay(event.timestamp).toDate()
         return (
           rule.eventTypes.includes(event.type) && eventTime >= windowStart && eventTime <= windowEnd
         )
@@ -62,12 +70,12 @@ export class CorrelationExecutor {
       }
 
       if (relevantEvents.length >= rule.threshold) {
-        const durationMs = Date.now() - startTime
+        const durationMs = elapsedMs(startTime)
         const result: CorrelationResult = {
           ruleId: rule.id,
           status: 'triggered',
           eventsCorrelated: relevantEvents.length,
-          triggeredAt: new Date().toISOString(),
+          triggeredAt: toIso(),
           description: `${String(relevantEvents.length)} matching events within ${String(rule.timeWindowMinutes)}min (threshold: ${String(rule.threshold)})`,
           durationMs,
         }
@@ -85,7 +93,7 @@ export class CorrelationExecutor {
         ruleId: rule.id,
         status: 'not_triggered',
         eventsCorrelated: relevantEvents.length,
-        durationMs: Date.now() - startTime,
+        durationMs: elapsedMs(startTime),
       }
       this.log.success('evaluateRule', '', {
         ruleId: rule.id,
@@ -102,14 +110,14 @@ export class CorrelationExecutor {
       this.log.error('evaluateRule', '', error, {
         ruleId: rule.id,
         eventCount: events.length,
-        durationMs: Date.now() - startTime,
+        durationMs: elapsedMs(startTime),
       })
 
       return {
         ruleId: rule.id,
         status: 'error',
         eventsCorrelated: 0,
-        durationMs: Date.now() - startTime,
+        durationMs: elapsedMs(startTime),
         error: errorMessage,
       }
     }
@@ -126,7 +134,7 @@ export class CorrelationExecutor {
         ruleId: rule.id,
         status: 'not_triggered',
         eventsCorrelated: 0,
-        durationMs: Date.now() - startTime,
+        durationMs: elapsedMs(startTime),
       }
     }
 
@@ -145,7 +153,7 @@ export class CorrelationExecutor {
     // Check if any group exceeds threshold
     for (const [groupValue, count] of groups) {
       if (count >= rule.threshold) {
-        const durationMs = Date.now() - startTime
+        const durationMs = elapsedMs(startTime)
         this.logger.warn(
           `Correlation rule ${rule.id} triggered: ${String(count)} events for ${groupByField}=${groupValue}`
         )
@@ -153,7 +161,7 @@ export class CorrelationExecutor {
           ruleId: rule.id,
           status: 'triggered',
           eventsCorrelated: count,
-          triggeredAt: new Date().toISOString(),
+          triggeredAt: toIso(),
           description: `${String(count)} events for ${groupByField}=${groupValue} within ${String(rule.timeWindowMinutes)}min (threshold: ${String(rule.threshold)})`,
           durationMs,
         }
@@ -164,7 +172,7 @@ export class CorrelationExecutor {
       ruleId: rule.id,
       status: 'not_triggered',
       eventsCorrelated: relevantEvents.length,
-      durationMs: Date.now() - startTime,
+      durationMs: elapsedMs(startTime),
     }
   }
 }

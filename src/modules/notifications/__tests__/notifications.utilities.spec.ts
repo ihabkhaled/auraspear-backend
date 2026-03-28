@@ -1,4 +1,5 @@
 import { NotificationEntityType, NotificationType } from '../../../common/enums'
+import { toDay, nowMs } from '../../../common/utils/date-time.utility'
 import {
   buildActorMap,
   buildNotificationOrderBy,
@@ -24,7 +25,7 @@ describe('mapNotificationToResponse', () => {
     caseId: 'c1',
     caseCommentId: null,
     readAt: null as Date | null,
-    createdAt: new Date('2025-01-01'),
+    createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
   }
 
   it('maps a notification row with a known actor', () => {
@@ -56,7 +57,7 @@ describe('mapNotificationToResponse', () => {
   })
 
   it('maps readAt non-null to isRead true', () => {
-    const row = { ...baseRow, readAt: new Date('2025-01-02') }
+    const row = { ...baseRow, readAt: toDay('2025-01-02T00:00:00.000Z').toDate() }
     const actorMap = new Map([['u1', { name: 'Alice', email: 'alice@example.com' }]])
     const result = mapNotificationToResponse(row, actorMap)
 
@@ -120,7 +121,7 @@ describe('buildActorMap', () => {
 
 describe('buildNotificationPayload', () => {
   it('returns the correct shape with isRead=false', () => {
-    const before = Date.now()
+    const before = nowMs()
     const result = buildNotificationPayload(
       'id1',
       NotificationType.CASE_ASSIGNED,
@@ -133,7 +134,7 @@ describe('buildNotificationPayload', () => {
       'c1',
       null
     )
-    const after = Date.now()
+    const after = nowMs()
 
     expect(result.id).toBe('id1')
     expect(result.type).toBe(NotificationType.CASE_ASSIGNED)

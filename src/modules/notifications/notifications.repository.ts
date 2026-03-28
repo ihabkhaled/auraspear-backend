@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   CaseNumberSelect,
@@ -41,14 +42,14 @@ export class NotificationsRepository {
   async markAsRead(notificationId: string, tenantId: string): Promise<Prisma.BatchPayload> {
     return this.prisma.notification.updateMany({
       where: { id: notificationId, tenantId },
-      data: { readAt: new Date() },
+      data: { readAt: nowDate() },
     })
   }
 
   async markAllAsRead(tenantId: string, recipientUserId: string): Promise<Prisma.BatchPayload> {
     return this.prisma.notification.updateMany({
       where: { tenantId, recipientUserId, readAt: null },
-      data: { readAt: new Date() },
+      data: { readAt: nowDate() },
     })
   }
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { AiChatRepository } from './ai-chat.repository'
 import { AiOutputFormat } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
+import { elapsedMs, nowDate, nowMs, toDay, toIso } from '../../../common/utils/date-time.utility'
 import { ConnectorsService } from '../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../connectors/services/llm-apis.service'
@@ -29,7 +30,7 @@ export class AiChatService {
     const where: Record<string, unknown> = { tenantId, userId, isArchived: false }
 
     if (cursor) {
-      where['lastActivityAt'] = { lt: new Date(cursor) }
+      where['lastActivityAt'] = { lt: toDay(cursor).toDate() }
     }
 
     const threads = await this.repository.findThreads({
@@ -44,7 +45,7 @@ export class AiChatService {
     }
 
     const nextCursor =
-      hasMore && threads.length > 0 ? (threads.at(-1)?.lastActivityAt.toISOString() ?? null) : null
+      hasMore && threads.length > 0 ? (toIso(threads.at(-1)?.lastActivityAt) ?? null) : null
 
     return { data: threads, nextCursor, hasMore }
   }
@@ -137,7 +138,7 @@ export class AiChatService {
 
     if (cursor) {
       where['createdAt'] =
-        direction === 'older' ? { lt: new Date(cursor) } : { gt: new Date(cursor) }
+        direction === 'older' ? { lt: toDay(cursor).toDate() } : { gt: toDay(cursor).toDate() }
     }
 
     const orderDir = direction === 'older' ? 'desc' : 'asc'
@@ -161,8 +162,8 @@ export class AiChatService {
     const nextCursor =
       hasMore && messages.length > 0
         ? ((direction === 'older'
-            ? messages.at(0)?.createdAt.toISOString()
-            : messages.at(-1)?.createdAt.toISOString()) ?? null)
+            ? toIso(messages.at(0)?.createdAt)
+            : toIso(messages.at(-1)?.createdAt)) ?? null)
         : null
 
     return { data: messages, nextCursor, hasMore }
@@ -241,7 +242,7 @@ export class AiChatService {
     // Resolve connector chain (priority-ordered)
     const connectorChain = await this.resolveConnectorConfigs(tenantId, requestedConnectorId)
 
-    const startTime = Date.now()
+    const startTime = nowMs()
     let responseText = ''
     let actualModel = requestedModel ?? 'unknown'
     let actualProvider = requestedProvider ?? 'unknown'
@@ -307,7 +308,7 @@ export class AiChatService {
       }
     }
 
-    const durationMs = Date.now() - startTime
+    const durationMs = elapsedMs(startTime)
 
     // Persist assistant response with full model attribution
     const assistantMessage = await this.repository.createMessage({
@@ -332,7 +333,7 @@ export class AiChatService {
     await this.repository.updateThread(threadId, {
       messageCount: nextSeq + 1,
       totalTokensUsed: { increment: inputTokens + outputTokens },
-      lastActivityAt: new Date(),
+      lastActivityAt: nowDate(),
       title: thread.title ?? this.generateTitle(content),
     })
 

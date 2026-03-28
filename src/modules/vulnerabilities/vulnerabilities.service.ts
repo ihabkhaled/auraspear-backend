@@ -13,7 +13,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
-import { daysAgo } from '../../common/utils/date-time.utility'
+import { daysAgo, nowDate } from '../../common/utils/date-time.utility'
 import type { CreateVulnerabilityDto } from './dto/create-vulnerability.dto'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type {
@@ -158,7 +158,7 @@ export class VulnerabilitiesService {
         patchStatus: dto.patchStatus as PrismaPatchStatus,
         affectedSoftware: dto.affectedSoftware ?? null,
         remediation: dto.remediation ?? null,
-        discoveredAt: new Date(),
+        discoveredAt: nowDate(),
       })
 
       this.log.success('createVulnerability', user.tenantId, {

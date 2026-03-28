@@ -14,7 +14,7 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
-import { daysAgo } from '../../common/utils/date-time.utility'
+import { daysAgo, nowDate } from '../../common/utils/date-time.utility'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
@@ -79,7 +79,7 @@ export class AlertsService {
     const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
       status: AlertStatus.ACKNOWLEDGED,
       acknowledgedBy: email,
-      acknowledgedAt: new Date(),
+      acknowledgedAt: nowDate(),
     })
 
     if (!updated) {
@@ -139,7 +139,7 @@ export class AlertsService {
     const updated = await this.alertsRepository.updateByIdAndTenant(id, tenantId, {
       status: AlertStatus.CLOSED,
       resolution,
-      closedAt: new Date(),
+      closedAt: nowDate(),
       closedBy: email,
     })
 

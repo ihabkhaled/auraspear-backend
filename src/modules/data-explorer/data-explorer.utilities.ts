@@ -1,4 +1,5 @@
 import { ShuffleWorkflowValidity } from '../../common/enums'
+import { nowDate, toIso, fromUnixToDate } from '../../common/utils/date-time.utility'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -37,7 +38,7 @@ export function mapConnectorOverview(
     type: c.type,
     enabled: c.enabled,
     configured: c.lastTestOk === true,
-    lastSyncAt: c.lastSyncAt?.toISOString() ?? null,
+    lastSyncAt: c.lastSyncAt ? toIso(c.lastSyncAt) : null,
   }))
 }
 
@@ -207,7 +208,7 @@ export function mapGrafanaDashboardUpsert(
     tags: Array.isArray(dashboard['tags']) ? (dashboard['tags'] as string[]) : [],
     type: String(dashboard['type'] ?? 'dash-db'),
     isStarred: Boolean(dashboard['isStarred']),
-    syncedAt: new Date(),
+    syncedAt: nowDate(),
   }
   return {
     uid,
@@ -235,10 +236,10 @@ export function mapVelociraptorEndpointUpsert(
   const labels = Array.isArray(client['labels']) ? (client['labels'] as string[]) : []
   const ipAddress = String(client['last_ip'] ?? '')
   const lastSeenAt = client['last_seen_at']
-    ? new Date(Number(client['last_seen_at']) / 1000)
-    : new Date()
+    ? fromUnixToDate(Number(client['last_seen_at']) / 1000)
+    : nowDate()
 
-  const data = { hostname, os, labels, ipAddress, lastSeenAt, syncedAt: new Date() }
+  const data = { hostname, os, labels, ipAddress, lastSeenAt, syncedAt: nowDate() }
   return {
     clientId,
     create: { tenantId, clientId, ...data },
@@ -268,7 +269,7 @@ export function mapVelociraptorHuntUpsert(
     artifacts: Array.isArray(hunt['artifacts']) ? (hunt['artifacts'] as string[]) : [],
     totalClients: Number(stats['total_clients_scheduled'] ?? 0),
     finishedClients: Number(stats['total_clients_with_results'] ?? 0),
-    syncedAt: new Date(),
+    syncedAt: nowDate(),
   }
 
   return {
@@ -277,7 +278,9 @@ export function mapVelociraptorHuntUpsert(
       tenantId,
       huntId,
       ...data,
-      createdAt: hunt['create_time'] ? new Date(Number(hunt['create_time']) / 1000) : new Date(),
+      createdAt: hunt['create_time']
+        ? fromUnixToDate(Number(hunt['create_time']) / 1000)
+        : nowDate(),
     },
     update: data,
   }
@@ -302,7 +305,7 @@ export function mapShuffleWorkflowUpsert(
     isValid: Boolean(workflow['is_valid']),
     triggerCount: Number((workflow['triggers'] as unknown[] | undefined)?.length ?? 0),
     tags: Array.isArray(workflow['tags']) ? (workflow['tags'] as string[]) : [],
-    syncedAt: new Date(),
+    syncedAt: nowDate(),
   }
   return {
     workflowId,
@@ -358,7 +361,7 @@ export function mapLogstashPipelineEntry(
   return {
     tenantId,
     pipelineId,
-    timestamp: new Date(),
+    timestamp: nowDate(),
     level: logLevel,
     message: `Pipeline ${pipelineId} stats snapshot`,
     source: pipelineId,
@@ -367,6 +370,6 @@ export function mapLogstashPipelineEntry(
     eventsFiltered: Number(events['filtered'] ?? 0),
     durationMs: Number(events['duration_in_millis'] ?? 0),
     metadata: JSON.parse(JSON.stringify(pipelineStat)),
-    syncedAt: new Date(),
+    syncedAt: nowDate(),
   }
 }

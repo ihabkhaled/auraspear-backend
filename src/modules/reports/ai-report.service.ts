@@ -3,6 +3,7 @@ import { AI_REPORT_SERVICE_CLASS_NAME, AI_REPORT_TIME_RANGE_DAYS } from './repor
 import { ReportsRepository } from './reports.repository'
 import { AiFeatureKey, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { daysAgo, nowDate, toIso } from '../../common/utils/date-time.utility'
 import { AiService } from '../ai/ai.service'
 import { DashboardsRepository } from '../dashboards/dashboards.repository'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -39,11 +40,7 @@ export class AiReportService {
     })
   }
 
-  private logExecutiveReportRequest(
-    tenantId: string,
-    timeRange: string,
-    user: JwtPayload
-  ): void {
+  private logExecutiveReportRequest(tenantId: string, timeRange: string, user: JwtPayload): void {
     this.appLogger.info('AI executive report requested', {
       feature: AppLogFeature.AI,
       action: 'generateExecutiveReport',
@@ -64,8 +61,8 @@ export class AiReportService {
   ): Promise<Record<string, unknown>> {
     const days = Reflect.get(AI_REPORT_TIME_RANGE_DAYS, timeRange) as number | undefined
     const periodDays = days ?? 7
-    const since = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
-    const now = new Date()
+    const since = daysAgo(periodDays)
+    const now = nowDate()
 
     const [alertsCount, resolvedCount, openCases, criticalAlerts] = await Promise.all([
       this.dashboardsRepository.countAlertsBetween(tenantId, since, now),
@@ -81,7 +78,7 @@ export class AiReportService {
       resolvedAlerts: resolvedCount,
       openCases,
       criticalAlerts,
-      generatedAt: now.toISOString(),
+      generatedAt: toIso(now),
     }
   }
 }

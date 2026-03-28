@@ -16,6 +16,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { subtractDuration, nowDate } from '../../common/utils/date-time.utility'
 import { AUTH_SESSION_ONLINE_WINDOW_MS } from '../auth/auth-session.constants'
 import { RefreshTokenFamilyRevocationReason } from '../auth/auth.enums'
 import { AuthService } from '../auth/auth.service'
@@ -48,7 +49,11 @@ export class UsersControlService {
     assertUsersControlRole(actor.role)
     const scopedTenantId = this.getScopedTenantId(actor, tenantId)
     const where = buildUsersControlUserWhere(undefined, scopedTenantId)
-    const onlineThreshold = new Date(Date.now() - AUTH_SESSION_ONLINE_WINDOW_MS)
+    const onlineThreshold = subtractDuration(
+      nowDate(),
+      AUTH_SESSION_ONLINE_WINDOW_MS,
+      'millisecond'
+    )
     const [totalUsers, onlineUsers, activeSessions] = await Promise.all([
       this.repository.countScopedUsers(where),
       this.repository.countScopedOnlineUsers(onlineThreshold, scopedTenantId),

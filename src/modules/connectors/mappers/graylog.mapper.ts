@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -12,7 +13,7 @@ export function mapGraylogAlertToOcsf(
     title: (event['message'] as string) ?? 'Graylog Event',
     description: (event['full_message'] as string) ?? undefined,
     severity: (event['level'] as string) ?? 'medium',
-    timestamp: (event['timestamp'] as string) ?? new Date().toISOString(),
+    timestamp: (event['timestamp'] as string) ?? toIso(),
     source: { product: 'Graylog', vendor: 'Graylog Inc.' },
     tenantId,
     eventId: (event['_id'] as string) ?? undefined,

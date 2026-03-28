@@ -4,6 +4,7 @@ import {
   CloudFindingStatus,
 } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { CloudSecurityService } from '../../src/modules/cloud-security/cloud-security.service'
 
 const mockAppLogger = {
@@ -35,11 +36,11 @@ function buildMockAccount(overrides: Record<string, unknown> = {}) {
     alias: 'Production AWS',
     region: 'us-east-1',
     status: CloudAccountStatus.CONNECTED,
-    lastScanAt: new Date('2025-06-01T12:00:00Z'),
+    lastScanAt: toDay('2025-06-01T12:00:00Z').toDate(),
     findingsCount: 15,
     complianceScore: 85,
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -56,10 +57,10 @@ function buildMockFinding(overrides: Record<string, unknown> = {}) {
     resourceId: 'arn:aws:s3:::my-bucket',
     resourceType: 's3_bucket',
     remediationSteps: 'Disable public access',
-    detectedAt: new Date('2025-06-01T10:00:00Z'),
+    detectedAt: toDay('2025-06-01T10:00:00Z').toDate(),
     resolvedAt: null,
-    createdAt: new Date('2025-06-01T10:00:00Z'),
-    updatedAt: new Date('2025-06-01T10:00:00Z'),
+    createdAt: toDay('2025-06-01T10:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T10:00:00Z').toDate(),
     ...overrides,
   }
 }

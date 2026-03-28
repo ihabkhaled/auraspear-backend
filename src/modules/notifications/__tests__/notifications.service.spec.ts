@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { UserRole } from '../../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { toDay, nowDate } from '../../../common/utils/date-time.utility'
 import { NotificationsGateway } from '../notifications.gateway'
 import { NotificationsRepository } from '../notifications.repository'
 import { NotificationsService } from '../notifications.service'
@@ -74,7 +75,7 @@ describe('NotificationsService', () => {
           caseId: 'c1',
           caseCommentId: null,
           readAt: null,
-          createdAt: new Date('2025-01-01'),
+          createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
         },
       ]
       mockRepository.findManyAndCount.mockResolvedValue([notifications, 1])
@@ -157,7 +158,7 @@ describe('NotificationsService', () => {
           caseId: null,
           caseCommentId: null,
           readAt: null,
-          createdAt: new Date(),
+          createdAt: nowDate(),
         },
         {
           id: 'n2',
@@ -172,7 +173,7 @@ describe('NotificationsService', () => {
           caseId: null,
           caseCommentId: null,
           readAt: null,
-          createdAt: new Date(),
+          createdAt: nowDate(),
         },
       ]
       mockRepository.findManyAndCount.mockResolvedValue([notifications, 2])
@@ -237,7 +238,7 @@ describe('NotificationsService', () => {
     it('skips update if already read', async () => {
       mockRepository.findFirstByIdAndRecipient.mockResolvedValue({
         id: 'n1',
-        readAt: new Date('2025-01-01'),
+        readAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
       })
 
       await service.markAsRead('n1', user)

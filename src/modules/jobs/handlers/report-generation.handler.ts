@@ -6,6 +6,7 @@ import {
   ReportModule,
   ReportType,
 } from '../../../common/enums'
+import { nowDate, daysAgo, toIso } from '../../../common/utils/date-time.utility'
 import { ReportsGenerationRepository } from '../../reports/reports-generation.repository'
 import {
   REPORT_DEFAULT_LOOKBACK_DAYS,
@@ -48,7 +49,7 @@ export class ReportGenerationHandler {
 
       await this.reportsRepository.updateReportById(reportId, job.tenantId, {
         status: 'completed',
-        generatedAt: new Date(),
+        generatedAt: nowDate(),
         generatedContent: contentJson,
         fileUrl: `/api/reports/${reportId}/download`,
         fileSize: Buffer.byteLength(contentJson, 'utf-8'),
@@ -64,7 +65,7 @@ export class ReportGenerationHandler {
         reportType: report.type,
         format: report.format,
         contentSize: Buffer.byteLength(contentJson, 'utf-8'),
-        generatedAt: new Date().toISOString(),
+        generatedAt: toIso(),
       }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown generation error'
@@ -87,8 +88,8 @@ export class ReportGenerationHandler {
     const parameters = report.parameters as Record<string, unknown> | null
     const lookbackDays =
       (parameters?.['lookbackDays'] as number | undefined) ?? REPORT_DEFAULT_LOOKBACK_DAYS
-    const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000)
-    const now = new Date()
+    const since = daysAgo(lookbackDays)
+    const now = nowDate()
 
     const sections = await this.buildSectionsByType(
       report.type as ReportType,
@@ -102,11 +103,11 @@ export class ReportGenerationHandler {
       reportName: report.name,
       reportType: report.type,
       module: report.module,
-      generatedAt: now.toISOString(),
+      generatedAt: toIso(now),
       tenantId,
       dateRange: {
-        from: since.toISOString(),
-        to: now.toISOString(),
+        from: toIso(since),
+        to: toIso(now),
       },
       sections,
     }

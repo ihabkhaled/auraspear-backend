@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CardVariant } from '../../../common/enums'
+import { daysAgo, toIso } from '../../../common/utils/date-time.utility'
 import {
   sanitizeEsQueryString,
   buildSafeQueryStringClause,
@@ -168,16 +169,15 @@ export class WazuhWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     recentItems: WorkspaceRecentItem[]
   ): Promise<void> {
     try {
-      const now = new Date()
-      const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      const dayAgo = daysAgo(1)
       const alertResult = await this.wazuhService.searchAlerts(config, {
         size: 10,
         sort: [{ timestamp: { order: 'desc' } }],
         query: {
           range: {
             timestamp: {
-              gte: dayAgo.toISOString(),
-              lte: now.toISOString(),
+              gte: toIso(dayAgo),
+              lte: toIso(),
             },
           },
         },

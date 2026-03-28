@@ -1,4 +1,5 @@
 import { CardVariant, Severity as SeverityEnum } from '../../common/enums'
+import { nowMs, toIso } from '../../common/utils/date-time.utility'
 import type {
   WorkspaceSummaryCard,
   WorkspaceRecentItem,
@@ -295,10 +296,7 @@ export function mapMispAttributeToSearchResult(attribute: unknown): WorkspaceRec
 /* LOGSTASH MAPPING UTILITIES                                        */
 /* ---------------------------------------------------------------- */
 
-export function mapLogstashPipelineToEntity(
-  name: string,
-  pipelineValue: unknown
-): WorkspaceEntity {
+export function mapLogstashPipelineToEntity(name: string, pipelineValue: unknown): WorkspaceEntity {
   const pipeline = pipelineValue as Record<string, unknown> | undefined
   return {
     id: name,
@@ -345,7 +343,7 @@ export function buildLogstashPipelineStatsItem(
     id: name,
     title: `Pipeline: ${name}`,
     description: `In: ${eventsIn} | Out: ${eventsOut} | Filtered: ${eventsFiltered}`,
-    timestamp: new Date().toISOString(),
+    timestamp: toIso(),
     severity: SeverityEnum.INFO,
     type: 'pipeline-stats',
     metadata: { eventsIn, eventsOut, eventsFiltered },
@@ -385,10 +383,7 @@ export function buildLogstashStatsSummaryCards(
   ]
 }
 
-export function mapLogstashActivityItem(
-  name: string,
-  statValue: unknown
-): WorkspaceRecentItem {
+export function mapLogstashActivityItem(name: string, statValue: unknown): WorkspaceRecentItem {
   const stat = statValue as Record<string, unknown> | undefined
   const events = stat?.events as Record<string, unknown> | undefined
 
@@ -396,7 +391,7 @@ export function mapLogstashActivityItem(
     id: name,
     title: `Pipeline: ${name}`,
     description: `In: ${events?.in ?? 0} | Out: ${events?.out ?? 0}`,
-    timestamp: new Date().toISOString(),
+    timestamp: toIso(),
     severity: SeverityEnum.INFO,
     type: 'pipeline-stats',
   }
@@ -466,9 +461,7 @@ export function mapVelociraptorClientToEntity(client: unknown): WorkspaceEntity 
     name: (info.fqdn ?? info.hostname ?? cl.client_id ?? 'Unknown') as string,
     status: cl.last_seen_at ? 'seen' : 'unknown',
     type: 'client',
-    lastSeen: cl.last_seen_at
-      ? new Date(Number(cl.last_seen_at) / 1000).toISOString()
-      : undefined,
+    lastSeen: cl.last_seen_at ? toIso(Number(cl.last_seen_at) / 1000) : undefined,
     metadata: { os: info.system, clientId: cl.client_id },
   }
 }
@@ -481,9 +474,7 @@ export function mapVelociraptorClientToOverviewEntity(client: unknown): Workspac
     name: (info.fqdn ?? info.hostname ?? cl.client_id ?? 'Unknown') as string,
     status: cl.last_seen_at ? 'seen' : 'unknown',
     type: 'client',
-    lastSeen: cl.last_seen_at
-      ? new Date(Number(cl.last_seen_at) / 1000).toISOString()
-      : undefined,
+    lastSeen: cl.last_seen_at ? toIso(Number(cl.last_seen_at) / 1000) : undefined,
     metadata: { os: info.system, release: info.release, clientId: cl.client_id },
   }
 }
@@ -494,7 +485,7 @@ export function mapVelociraptorClientToRecentItem(client: unknown): WorkspaceRec
   return {
     id: (cl.client_id ?? '') as string,
     title: `Client: ${(info.fqdn ?? info.hostname ?? cl.client_id) as string}`,
-    timestamp: cl.last_seen_at ? new Date(Number(cl.last_seen_at) / 1000).toISOString() : '',
+    timestamp: cl.last_seen_at ? toIso(Number(cl.last_seen_at) / 1000) : '',
     severity: SeverityEnum.INFO,
     type: 'client-activity',
   }
@@ -502,7 +493,7 @@ export function mapVelociraptorClientToRecentItem(client: unknown): WorkspaceRec
 
 export function isVelociraptorClientOnline(client: unknown): boolean {
   const cl = client as Record<string, unknown>
-  return Boolean(cl.last_seen_at) && Date.now() - Number(cl.last_seen_at) < 300_000_000
+  return Boolean(cl.last_seen_at) && nowMs() - Number(cl.last_seen_at) < 300_000_000
 }
 
 export function sortVelociraptorClientsByLastSeen(clients: unknown[]): unknown[] {

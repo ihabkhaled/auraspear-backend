@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { DataExplorerService } from '../../src/modules/data-explorer/data-explorer.service'
 
 const TENANT_ID = 'tenant-001'
@@ -108,7 +109,12 @@ describe('DataExplorerService', () => {
   describe('getOverview', () => {
     it('should return connectors and sync job summary', async () => {
       repository.findConnectorConfigs.mockResolvedValue([
-        { type: 'graylog', enabled: true, lastTestOk: true, lastSyncAt: new Date('2025-01-01') },
+        {
+          type: 'graylog',
+          enabled: true,
+          lastTestOk: true,
+          lastSyncAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+        },
         { type: 'grafana', enabled: false, lastTestOk: false, lastSyncAt: null },
       ])
       repository.groupBySyncJobStatus.mockResolvedValue([
@@ -360,9 +366,9 @@ describe('DataExplorerService', () => {
           isStarred: false,
         },
       ])
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.upsertGrafanaDashboard.mockResolvedValue({})
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncGrafanaDashboards(TENANT_ID)
@@ -394,8 +400,8 @@ describe('DataExplorerService', () => {
       services.grafana.getDashboards.mockResolvedValue([
         { title: 'No UID' }, // uid missing
       ])
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncGrafanaDashboards(TENANT_ID)
@@ -826,9 +832,9 @@ describe('DataExplorerService', () => {
       services.shuffle.getWorkflows.mockResolvedValue([
         { id: 'wf1', name: 'Alert Handler', is_valid: true, tags: ['alert'] },
       ])
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.upsertShuffleWorkflow.mockResolvedValue({})
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncShuffleWorkflows(TENANT_ID)
@@ -853,8 +859,8 @@ describe('DataExplorerService', () => {
     it('should skip workflows with missing id', async () => {
       services.connectorsService.getDecryptedConfig.mockResolvedValue({ url: 'http://shuffle' })
       services.shuffle.getWorkflows.mockResolvedValue([{ name: 'No ID Workflow' }])
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncShuffleWorkflows(TENANT_ID)
@@ -891,10 +897,10 @@ describe('DataExplorerService', () => {
         ],
         columns: ['hunt_id'],
       })
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.upsertVelociraptorEndpoint.mockResolvedValue({})
       repository.upsertVelociraptorHunt.mockResolvedValue({})
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncVelociraptorMetadata(TENANT_ID)
@@ -917,8 +923,8 @@ describe('DataExplorerService', () => {
         { os_info: { fqdn: 'no-id', system: 'Linux' } },
       ])
       services.velociraptor.runVQL.mockResolvedValue({ rows: [], columns: [] })
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.syncVelociraptorMetadata(TENANT_ID)
@@ -971,11 +977,11 @@ describe('DataExplorerService', () => {
   describe('triggerSync', () => {
     it('should create a sync job and return job ID', async () => {
       services.connectorsService.getDecryptedConfig.mockResolvedValue({ url: 'http://grafana' })
-      repository.createSyncJob.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-99', startedAt: nowDate() })
 
       // Mock the background sync methods to prevent unhandled rejections
       services.grafana.getDashboards.mockResolvedValue([])
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-99', startedAt: new Date() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-99', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
 
       const result = await service.triggerSync(TENANT_ID, 'grafana' as never, 'admin@test.com')
@@ -1048,7 +1054,7 @@ describe('DataExplorerService', () => {
           id: 'log-1',
           tenantId: TENANT_ID,
           pipelineId: 'main',
-          timestamp: new Date(),
+          timestamp: nowDate(),
           level: 'info',
           message: 'Pipeline processing events',
           source: 'logstash-node-01',
@@ -1183,8 +1189,8 @@ describe('DataExplorerService', () => {
           },
         },
       })
-      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-1', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
       repository.createLogstashLog.mockResolvedValue({})
 
@@ -1229,8 +1235,8 @@ describe('DataExplorerService', () => {
           broken: { events: { in: 0, out: 0, filtered: 0, duration_in_millis: 0 } },
         },
       })
-      repository.createSyncJob.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
-      repository.findSyncJobById.mockResolvedValue({ id: 'job-2', startedAt: new Date() })
+      repository.createSyncJob.mockResolvedValue({ id: 'job-2', startedAt: nowDate() })
+      repository.findSyncJobById.mockResolvedValue({ id: 'job-2', startedAt: nowDate() })
       repository.updateSyncJob.mockResolvedValue({})
       repository.createLogstashLog
         .mockResolvedValueOnce({})

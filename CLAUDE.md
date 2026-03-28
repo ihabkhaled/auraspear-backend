@@ -723,6 +723,7 @@ Before committing any module:
 - [ ] No nested ternaries
 - [ ] No `await` in loops (use `Promise.all()` for independent operations)
 - [ ] No abbreviated names (`.utility.ts` not `.util.ts`, `definition` not `def`)
+- [ ] No raw `new Date()` or `Date.now()` — use `dayjs` via `date-time.utility.ts`
 - [ ] All queries tenant-scoped
 - [ ] All mutations have RBAC guards
 - [ ] All DTOs have Zod with `.max()`
@@ -749,6 +750,7 @@ Before committing any module:
 | `ioredis`           | Redis client                     | Cache operations                               |
 | `jwks-rsa`          | JWKS key retrieval               | JWT verification                               |
 | `jsonwebtoken`      | JWT parsing/verification         | Token validation                               |
+| `dayjs`             | Date/time operations             | via `src/common/utils/date-time.utility.ts`    |
 | `uuid`              | UUID generation                  | `randomUUID()` from `node:crypto` preferred    |
 
 ---
@@ -808,6 +810,22 @@ Subject max length: 100 characters. No sentence-case, start-case, PascalCase, or
 32. **Agent automation dispatch MUST go through OrchestratorService** — Never call AI directly from event listeners or schedulers. The orchestrator validates: agent enabled, automation mode, budget/quota, provider availability, and approval requirements before enqueuing jobs.
 33. **Cross-cutting libraries MUST be modularized as shared modules** — ANY library, utility, or infrastructure concern — even if used by only 1 module — MUST be wrapped in a dedicated shared module under `src/redis/`, `src/common/services/`, or a new top-level `src/<concern>/` directory. Never instantiate external library clients (Redis, Axios, S3, SMTP, crypto, Bull, WebSocket, etc.) directly in service constructors. Each shared module provides a `@Global()` NestJS module or a plain reusable class. Examples: `RedisModule` for Redis, `ServiceLogger` for logging, `PrismaModule` for database, `AxiosService` for HTTP. When adding ANY new infrastructure dependency, create a shared module first, then inject it.
 34. **Service logging MUST use `ServiceLogger` from `src/common/services/service-logger.ts`** — Never define inline `logEntry()`, `logError()`, `logSuccess()` helper methods in service files. Instead, instantiate `ServiceLogger` in the constructor: `this.log = new ServiceLogger(this.appLogger, AppLogFeature.X, 'ClassName')`. Then call `this.log.entry()`, `this.log.success()`, `this.log.error()`, `this.log.warn()`, `this.log.debug()`, `this.log.skipped()`. This eliminates ~83 duplicate helper methods across services and ensures consistent structured log format.
+35. **NEVER use raw `new Date()` or `Date.now()`** — All date/time operations MUST use `dayjs` via the shared utility at `src/common/utils/date-time.utility.ts`. This ensures consistent timezone handling, testability, and eliminates scattered date arithmetic. Use the following functions:
+    - `nowDate()` instead of `new Date()` for current timestamp
+    - `nowMs()` instead of `Date.now()` for performance timing
+    - `nowUnix()` instead of `Math.floor(Date.now() / 1000)` for epoch seconds
+    - `toIso(date?)` instead of `.toISOString()` for serialization
+    - `toDay(value)` instead of `new Date(value)` for parsing strings/numbers
+    - `daysAgo(n)` instead of manual date arithmetic for "N days ago" patterns
+    - `elapsedMs(startMs)` instead of `Date.now() - start` for latency tracking
+    - `startOf(unit, date?, { utc: true })` for UTC day/month boundaries
+    - `fromUnixToDate(epoch)` instead of `new Date(epoch * 1000)` for epoch conversion
+    - `diffMs(from, to)` instead of `.getTime() - .getTime()` for duration calculation
+    - `getYear()`, `getMonth()`, `getYearMonth()` instead of `.getFullYear()`, `.getMonth()`
+    - `expiresInSeconds(ttl)` instead of `new Date(Date.now() + ttl * 1000)` for expiry
+    - `remainingSecondsUntilEpoch(epoch)` / `remainingSecondsUntilDate(date)` for TTL computation
+    - `: Date` type annotations in interfaces/types MUST remain as native `Date` (Prisma compatibility)
+    - Date-only strings in tests MUST include explicit UTC timezone: `toDay('2025-01-01T00:00:00.000Z')` not `toDay('2025-01-01')`
 
 ---
 

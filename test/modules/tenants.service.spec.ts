@@ -8,6 +8,7 @@ import {
   MembershipStatus,
   UserRole,
 } from '../../src/common/interfaces/authenticated-request.interface'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { TenantsService } from '../../src/modules/tenants/tenants.service'
 
@@ -33,7 +34,7 @@ const USER_ID = 'user-001'
 const CALLER_ID = 'caller-001'
 const CALLER_EMAIL = 'admin@acme.com'
 
-const now = new Date('2025-06-01T00:00:00Z')
+const now = toDay('2025-06-01T00:00:00Z').toDate()
 
 function createMockRepository() {
   return {

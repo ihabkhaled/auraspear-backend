@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -53,10 +54,7 @@ export function mapShuffleToOcsf(
     title,
     description,
     severity: getShuffleSeverity(status),
-    timestamp:
-      (event['started_at'] as string) ??
-      (event['completed_at'] as string) ??
-      new Date().toISOString(),
+    timestamp: (event['started_at'] as string) ?? (event['completed_at'] as string) ?? toIso(),
     source: { product: 'Shuffle', vendor: 'Shuffle' },
     tenantId,
     eventId: (event['execution_id'] as string) ?? (event['workflow_id'] as string) ?? undefined,

@@ -28,6 +28,7 @@ import { AppLogFeature, AppLogOutcome, AppLogSourceType, HttpMethod } from '../.
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AxiosService } from '../../common/modules/axios/axios.service'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { nowMs, elapsedMs, toIso } from '../../common/utils/date-time.utility'
 import { decrypt } from '../../common/utils/encryption.utility'
 import { AgentConfigRepository } from '../agent-config/agent-config.repository'
 import type {
@@ -59,7 +60,7 @@ export class OsintExecutorService {
     iocType: string,
     iocValue: string
   ): Promise<OsintQueryResult> {
-    const startTime = Date.now()
+    const startTime = nowMs()
 
     const sourceOrFailure = await this.resolveAndValidateSource(sourceId, tenantId, startTime)
     if ('success' in sourceOrFailure) return sourceOrFailure
@@ -100,7 +101,7 @@ export class OsintExecutorService {
         source?.name ?? 'Unknown',
         source?.sourceType ?? 'unknown',
         'Source not found or disabled',
-        Date.now() - startTime
+        elapsedMs(startTime)
       )
     }
 
@@ -110,7 +111,7 @@ export class OsintExecutorService {
         source.name,
         source.sourceType,
         'Rate limit exceeded',
-        Date.now() - startTime
+        elapsedMs(startTime)
       )
     }
 
@@ -164,7 +165,7 @@ export class OsintExecutorService {
       totalSources: sourceIds.length,
       successCount,
       failureCount: results.length - successCount,
-      enrichedAt: new Date().toISOString(),
+      enrichedAt: toIso(),
     }
   }
 
@@ -184,9 +185,9 @@ export class OsintExecutorService {
     const testIocType = resolveTestIocType(source.sourceType)
     const testIocValue = Reflect.get(OSINT_TEST_IOC_VALUES, testIocType) as string
 
-    const startTime = Date.now()
+    const startTime = nowMs()
     const queryResult = await this.querySource(tenantId, sourceId, testIocType, testIocValue)
-    const responseTime = Date.now() - startTime
+    const responseTime = elapsedMs(startTime)
 
     this.logTestResult(source.name, queryResult.success, tenantId, actor, sourceId)
 
@@ -243,7 +244,7 @@ export class OsintExecutorService {
   ): Promise<OsintQueryResult> {
     this.validateFileUploadInput(file, sourceId)
 
-    const startTime = Date.now()
+    const startTime = nowMs()
     const source = await this.findEnabledOsintSource(sourceId, tenantId)
     const apiKey = this.decryptSourceApiKey(source.encryptedApiKey)
     const baseUrl = (source.baseUrl ?? '').replace(/\/+$/, '')
@@ -338,7 +339,7 @@ export class OsintExecutorService {
     attachVtAnalysisUrl(finalData, source.sourceType, vtAnalysisUrl)
 
     const data = extractResponseData(finalData, executionConfig.responsePath)
-    const responseTimeMs = Date.now() - startTime
+    const responseTimeMs = elapsedMs(startTime)
 
     this.logger.log(
       `OSINT response: ${String(response.status)} | source=${source.name} | ${String(responseTimeMs)}ms | dataExtracted=${String(data !== null && data !== undefined)}`
@@ -369,7 +370,7 @@ export class OsintExecutorService {
   ): Promise<OsintQueryResult> {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     const statusCode = (error as { statusCode?: number }).statusCode ?? null
-    const responseTimeMs = Date.now() - startTime
+    const responseTimeMs = elapsedMs(startTime)
 
     this.logger.warn(
       `OSINT error: source=${source.name} (${source.sourceType}) | url=${finalUrl} | status=${String(statusCode)} | ${String(responseTimeMs)}ms | error=${errorMessage}`
@@ -404,7 +405,7 @@ export class OsintExecutorService {
       body: form,
       timeoutMs: source.timeout,
     })
-    const responseTimeMs = Date.now() - startTime
+    const responseTimeMs = elapsedMs(startTime)
 
     if (response.status >= 400) {
       return buildFailedQueryResult(
@@ -460,7 +461,7 @@ export class OsintExecutorService {
     fileName: string,
     startTime: number
   ): OsintQueryResult {
-    const responseTimeMs = Date.now() - startTime
+    const responseTimeMs = elapsedMs(startTime)
     const errorMessage = error instanceof Error ? error.message : 'File upload failed'
 
     this.logFileUpload(
@@ -692,7 +693,7 @@ export class OsintExecutorService {
   }
 
   private checkRateLimit(sourceId: string): boolean {
-    const now = Date.now()
+    const now = nowMs()
     const entry = this.rateLimitMap.get(sourceId)
     if (!entry || now > entry.resetAt) {
       this.rateLimitMap.set(sourceId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })

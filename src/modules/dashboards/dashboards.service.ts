@@ -34,6 +34,13 @@ import {
 } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import {
+  nowDate,
+  daysAgo,
+  subtractDuration,
+  startOf,
+  toDay,
+} from '../../common/utils/date-time.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { JobStatus, JobType } from '../jobs/enums/job.enums'
 import type {
@@ -91,12 +98,10 @@ export class DashboardsService {
   private async fetchSummaryRawData(
     tenantId: string
   ): Promise<Omit<SummaryRawData, 'connectedSources'>> {
-    const now = new Date()
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const oneWeekAgo = new Date(
-      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    )
-    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+    const now = nowDate()
+    const twentyFourHoursAgo = daysAgo(1)
+    const oneWeekAgo = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
+    const twoWeeksAgo = daysAgo(14)
 
     const [currentPeriod, previousPeriod] = await Promise.all([
       this.fetchSummaryCurrentPeriod(tenantId, twentyFourHoursAgo, oneWeekAgo, now),
@@ -193,14 +198,11 @@ export class DashboardsService {
     this.logger.log(`getAlertTrend called for tenant ${tenantId}, days=${String(days)}`)
     this.log.debug('getAlertTrend', tenantId, 'Fetching alert trend', { days })
 
-    const todayUtc = new Date()
-    todayUtc.setUTCHours(0, 0, 0, 0)
+    const todayUtc = startOf('day', undefined, { utc: true })
 
-    const sinceUtc = new Date(todayUtc)
-    sinceUtc.setUTCDate(sinceUtc.getUTCDate() - (days - 1))
+    const sinceUtc = subtractDuration(todayUtc, days - 1, 'day')
 
-    const untilUtc = new Date(todayUtc)
-    untilUtc.setUTCDate(untilUtc.getUTCDate() + 1)
+    const untilUtc = toDay(todayUtc).add(1, 'day').toDate()
 
     const results = await this.dashboardsRepository.getAlertCountsByDateAndSeverity(
       tenantId,
@@ -219,7 +221,7 @@ export class DashboardsService {
     this.logger.log(`getSeverityDistribution called for tenant ${tenantId}`)
     this.log.debug('getSeverityDistribution', tenantId, 'Fetching severity distribution')
 
-    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    const since = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
     const counts = await this.dashboardsRepository.groupAlertsBySeveritySince(tenantId, since)
 
     const result = buildSeverityDistribution(tenantId, counts)
@@ -231,7 +233,7 @@ export class DashboardsService {
     this.logger.log(`getMitreTopTechniques called for tenant ${tenantId}`)
     this.log.debug('getMitreTopTechniques', tenantId, 'Fetching MITRE top techniques')
 
-    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    const since = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
     const results = await this.dashboardsRepository.getTopMitreTechniques(tenantId, since)
 
     const techniques = buildMitreTechniques(results).slice(0, DASHBOARD_TOP_TECHNIQUES_LIMIT)
@@ -245,7 +247,7 @@ export class DashboardsService {
     this.logger.log(`getTopTargetedAssets called for tenant ${tenantId}`)
     this.log.debug('getTopTargetedAssets', tenantId, 'Fetching top targeted assets')
 
-    const since = new Date(Date.now() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    const since = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
     const results = await this.dashboardsRepository.getTopTargetedAssets(tenantId, since)
 
     const assets = buildTopTargetedAssets(results).slice(0, DASHBOARD_TOP_TARGETED_ASSETS_LIMIT)
@@ -306,14 +308,10 @@ export class DashboardsService {
   }
 
   private async fetchAnalyticsRawData(tenantId: string): Promise<AnalyticsRawData> {
-    const now = new Date()
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-    const sevenDaysAgo = new Date(
-      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    )
-    const thirtyDaysAgo = new Date(
-      now.getTime() - DASHBOARD_REPORTS_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    )
+    const now = nowDate()
+    const twentyFourHoursAgo = daysAgo(1)
+    const sevenDaysAgo = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
+    const thirtyDaysAgo = daysAgo(DASHBOARD_REPORTS_WINDOW_DAYS)
 
     const [threats, automation, governance, infrastructure] = await Promise.all([
       this.fetchAnalyticsThreatData(tenantId, twentyFourHoursAgo, sevenDaysAgo, now),
@@ -495,22 +493,12 @@ export class DashboardsService {
   }
 
   private async fetchOperationsRawData(tenantId: string): Promise<OperationsRawData> {
-    const now = new Date()
-    const sevenDaysAgo = new Date(
-      now.getTime() - DASHBOARD_ANALYTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    )
-    const thirtyDaysAgo = new Date(
-      now.getTime() - DASHBOARD_REPORTS_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    )
-    const caseWarningThreshold = new Date(
-      now.getTime() - DASHBOARD_CASE_WARNING_DAYS * 24 * 60 * 60 * 1000
-    )
-    const caseCriticalThreshold = new Date(
-      now.getTime() - DASHBOARD_CASE_CRITICAL_DAYS * 24 * 60 * 60 * 1000
-    )
-    const staleRunningThreshold = new Date(
-      now.getTime() - DASHBOARD_STALE_RUNNING_JOB_HOURS * 60 * 60 * 1000
-    )
+    const now = nowDate()
+    const sevenDaysAgo = daysAgo(DASHBOARD_ANALYTICS_WINDOW_DAYS)
+    const thirtyDaysAgo = daysAgo(DASHBOARD_REPORTS_WINDOW_DAYS)
+    const caseWarningThreshold = daysAgo(DASHBOARD_CASE_WARNING_DAYS)
+    const caseCriticalThreshold = daysAgo(DASHBOARD_CASE_CRITICAL_DAYS)
+    const staleRunningThreshold = subtractDuration(now, DASHBOARD_STALE_RUNNING_JOB_HOURS, 'hour')
 
     const [caseAndIncident, rules, connectorAndJobs, aiAndSoar, exposure] = await Promise.all([
       this.fetchOpsCaseData(tenantId, caseWarningThreshold, caseCriticalThreshold),

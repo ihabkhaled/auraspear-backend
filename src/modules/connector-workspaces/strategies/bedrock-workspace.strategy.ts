@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CardVariant, Severity } from '../../../common/enums'
+import { toIso } from '../../../common/utils/date-time.utility'
 import { BedrockService } from '../../connectors/services/bedrock.service'
 import type {
   ConnectorWorkspaceStrategy,
@@ -72,7 +73,7 @@ export class BedrockWorkspaceStrategy implements ConnectorWorkspaceStrategy {
       id: 'config-status',
       title: `Bedrock configured with ${modelId}`,
       description: `Region: ${region}`,
-      timestamp: new Date().toISOString(),
+      timestamp: toIso(),
       severity: Severity.INFO,
       type: 'config',
     })

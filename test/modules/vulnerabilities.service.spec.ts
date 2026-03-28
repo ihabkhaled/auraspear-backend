@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { VulnerabilitiesService } from '../../src/modules/vulnerabilities/vulnerabilities.service'
 
 const mockAppLogger = {
@@ -51,9 +52,9 @@ function buildMockVulnerability(overrides: Record<string, unknown> = {}) {
     affectedSoftware: 'OpenSSL 3.0.x',
     remediation: 'Upgrade to OpenSSL 3.0.14',
     patchedAt: null,
-    discoveredAt: new Date('2025-06-01T12:00:00Z'),
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    discoveredAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     tenant: { name: 'Test Tenant' },
     ...overrides,
   }
@@ -465,7 +466,7 @@ describe('VulnerabilitiesService', () => {
       const created = buildMockVulnerability()
       repository.createWithTenant.mockResolvedValue(created)
 
-      const before = new Date()
+      const before = nowDate()
       await service.createVulnerability(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
@@ -771,7 +772,7 @@ describe('VulnerabilitiesService', () => {
     it('should filter patched30d by patchedAt within last 30 days', async () => {
       repository.count.mockResolvedValue(0)
 
-      const before = new Date()
+      const before = nowDate()
       await service.getVulnerabilityStats(TENANT_ID)
 
       // The 4th count call is for patched30d (index 3)

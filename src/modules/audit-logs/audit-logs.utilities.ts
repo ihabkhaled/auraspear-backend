@@ -1,4 +1,5 @@
 import { AUDIT_LOGS_SORT_FIELDS } from './audit-logs.constants'
+import { toDay } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { CreateAuditLogData } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
@@ -26,11 +27,11 @@ export function buildAuditLogsWhereClause(
     const dateFilter: Prisma.DateTimeFilter = {}
 
     if (query.from) {
-      dateFilter.gte = new Date(query.from)
+      dateFilter.gte = toDay(query.from).toDate()
     }
 
     if (query.to) {
-      dateFilter.lte = new Date(query.to)
+      dateFilter.lte = toDay(query.to).toDate()
     }
 
     where.createdAt = dateFilter

@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { EntitiesService } from '../../src/modules/entities/entities.service'
 
 const mockAppLogger = {
@@ -23,10 +24,10 @@ function buildEntity(overrides: Record<string, unknown> = {}) {
     displayName: 'Workstation-1',
     riskScore: 45,
     metadata: {},
-    firstSeen: new Date('2026-01-01'),
-    lastSeen: new Date('2026-03-15'),
-    createdAt: new Date('2026-01-01'),
-    updatedAt: new Date('2026-03-15'),
+    firstSeen: toDay('2026-01-01T00:00:00.000Z').toDate(),
+    lastSeen: toDay('2026-03-15T00:00:00.000Z').toDate(),
+    createdAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
+    updatedAt: toDay('2026-03-15T00:00:00.000Z').toDate(),
     ...overrides,
   }
 }

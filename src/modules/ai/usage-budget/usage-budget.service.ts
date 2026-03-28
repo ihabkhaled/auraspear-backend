@@ -4,6 +4,7 @@ import { UsageBudgetRepository } from './usage-budget.repository'
 import { buildMonthlyUsageResponse, buildUsageSummaryResponse } from './usage-budget.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { addDuration, getYearMonth, startOf } from '../../../common/utils/date-time.utility'
 import { FeatureCatalogService } from '../feature-catalog/feature-catalog.service'
 import type {
   BudgetCheckResult,
@@ -52,10 +53,10 @@ export class UsageBudgetService {
   }
 
   async getMonthlyUsage(tenantId: string): Promise<MonthlyUsageResponse> {
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    const monthLabel = `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const monthStart = startOf('month')
+    const monthEnd = addDuration(monthStart, 1, 'month')
+    const { year, month } = getYearMonth()
+    const monthLabel = `${String(year)}-${String(month + 1).padStart(2, '0')}`
 
     const rows = await this.repository.getMonthlyUsage(tenantId, monthStart, monthEnd)
     return buildMonthlyUsageResponse(tenantId, monthLabel, rows.at(0))
@@ -68,9 +69,8 @@ export class UsageBudgetService {
       return { allowed: true, used: 0, budget: null }
     }
 
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const monthStart = startOf('month')
+    const monthEnd = addDuration(monthStart, 1, 'month')
 
     const used = await this.repository.getMonthlyTokenCount(
       tenantId,

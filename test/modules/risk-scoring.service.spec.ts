@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate, nowMs } from '../../src/common/utils/date-time.utility'
 import { RiskScoringService } from '../../src/modules/entities/risk-scoring.service'
 
 const mockAppLogger = {
@@ -23,10 +24,10 @@ function buildEntity(overrides: Record<string, unknown> = {}) {
     displayName: 'Workstation-1',
     riskScore: 0,
     metadata: {},
-    firstSeen: new Date('2026-01-01'),
-    lastSeen: new Date(), // recent — within 1 day
-    createdAt: new Date('2026-01-01'),
-    updatedAt: new Date(),
+    firstSeen: toDay('2026-01-01T00:00:00.000Z').toDate(),
+    lastSeen: nowDate(), // recent — within 1 day
+    createdAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
+    updatedAt: nowDate(),
     ...overrides,
   }
 }
@@ -60,7 +61,7 @@ describe('RiskScoringService', () => {
 
   describe('calculateRiskScore', () => {
     it('should return base score + type weight + recency for a recent IP entity with no relations', () => {
-      const entity = buildEntity({ type: 'ip', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'ip', lastSeen: nowDate() })
 
       const score = service.calculateRiskScore(entity as never, 0)
 
@@ -69,7 +70,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should add relation weight (capped at 30)', () => {
-      const entity = buildEntity({ type: 'ip', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'ip', lastSeen: nowDate() })
 
       const score = service.calculateRiskScore(entity as never, 10)
 
@@ -78,7 +79,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should cap relation score at 30 even with many relations', () => {
-      const entity = buildEntity({ type: 'asset', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'asset', lastSeen: nowDate() })
 
       const scoreWith7 = service.calculateRiskScore(entity as never, 7)
       const scoreWith20 = service.calculateRiskScore(entity as never, 20)
@@ -91,7 +92,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should apply higher type weight for hash entities', () => {
-      const entity = buildEntity({ type: 'hash', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'hash', lastSeen: nowDate() })
 
       const score = service.calculateRiskScore(entity as never, 0)
 
@@ -100,7 +101,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should apply lower recency for entities seen 3 days ago', () => {
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+      const threeDaysAgo = toDay(nowMs() - 3 * 24 * 60 * 60 * 1000).toDate()
       const entity = buildEntity({ type: 'ip', lastSeen: threeDaysAgo })
 
       const score = service.calculateRiskScore(entity as never, 0)
@@ -110,7 +111,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should apply lower recency for entities seen 15 days ago', () => {
-      const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000)
+      const fifteenDaysAgo = toDay(nowMs() - 15 * 24 * 60 * 60 * 1000).toDate()
       const entity = buildEntity({ type: 'ip', lastSeen: fifteenDaysAgo })
 
       const score = service.calculateRiskScore(entity as never, 0)
@@ -120,7 +121,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should not add recency score for entities seen 60 days ago', () => {
-      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
+      const sixtyDaysAgo = toDay(nowMs() - 60 * 24 * 60 * 60 * 1000).toDate()
       const entity = buildEntity({ type: 'ip', lastSeen: sixtyDaysAgo })
 
       const score = service.calculateRiskScore(entity as never, 0)
@@ -130,7 +131,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should cap total score at 100', () => {
-      const entity = buildEntity({ type: 'hash', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'hash', lastSeen: nowDate() })
 
       const score = service.calculateRiskScore(entity as never, 100)
 
@@ -139,7 +140,7 @@ describe('RiskScoringService', () => {
     })
 
     it('should use fallback weight for unknown entity types', () => {
-      const entity = buildEntity({ type: 'custom_unknown', lastSeen: new Date() })
+      const entity = buildEntity({ type: 'custom_unknown', lastSeen: nowDate() })
 
       const score = service.calculateRiskScore(entity as never, 0)
 
@@ -155,7 +156,7 @@ describe('RiskScoringService', () => {
   describe('getEntityRiskBreakdown', () => {
     it('should return factor breakdown for an entity', async () => {
       repo.findFirstByIdAndTenant.mockResolvedValue(
-        buildEntity({ type: 'ip', lastSeen: new Date() })
+        buildEntity({ type: 'ip', lastSeen: nowDate() })
       )
       repo.findRelationsForEntity.mockResolvedValue([
         { id: 'rel-1', fromEntityId: 'entity-1', toEntityId: 'entity-2' },
@@ -188,7 +189,7 @@ describe('RiskScoringService', () => {
 
     it('should not include relation factor when no relations exist', async () => {
       repo.findFirstByIdAndTenant.mockResolvedValue(
-        buildEntity({ type: 'ip', lastSeen: new Date() })
+        buildEntity({ type: 'ip', lastSeen: nowDate() })
       )
       repo.findRelationsForEntity.mockResolvedValue([])
 
@@ -204,8 +205,8 @@ describe('RiskScoringService', () => {
 
   describe('recalculateForTenant', () => {
     it('should update entities whose risk score changed', async () => {
-      const entity1 = buildEntity({ id: 'e-1', riskScore: 10, type: 'ip', lastSeen: new Date() })
-      const entity2 = buildEntity({ id: 'e-2', riskScore: 40, type: 'ip', lastSeen: new Date() })
+      const entity1 = buildEntity({ id: 'e-1', riskScore: 10, type: 'ip', lastSeen: nowDate() })
+      const entity2 = buildEntity({ id: 'e-2', riskScore: 40, type: 'ip', lastSeen: nowDate() })
 
       repo.findAllByTenant.mockResolvedValue([entity1, entity2])
       repo.findRelationsForEntity.mockResolvedValue([])

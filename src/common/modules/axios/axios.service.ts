@@ -9,6 +9,7 @@ import {
   parseResponseBody,
 } from './axios.utilities'
 import { HttpMethod, NodeEnvironment, UrlProtocol } from '../../enums'
+import { nowMs, elapsedMs } from '../../utils/date-time.utility'
 import { isPrivateHost } from '../../utils/ssrf.utility'
 import type {
   AxiosRequestOptions,
@@ -38,9 +39,9 @@ export class AxiosService {
     const httpsAgent = buildHttpsAgent(isHttps, resolved)
     const requestConfig = buildAxiosRequestConfig(url, resolved, httpsAgent)
 
-    const start = Date.now()
+    const start = nowMs()
     const response = await axios.request(requestConfig)
-    const latencyMs = Date.now() - start
+    const latencyMs = elapsedMs(start)
 
     return {
       status: response.status,
@@ -120,11 +121,7 @@ export class AxiosService {
   /* PRIVATE — VALIDATION                                              */
   /* ---------------------------------------------------------------- */
 
-  private warnIfTlsDisabled(
-    isHttps: boolean,
-    rejectUnauthorized: boolean,
-    hostname: string
-  ): void {
+  private warnIfTlsDisabled(isHttps: boolean, rejectUnauthorized: boolean, hostname: string): void {
     if (isHttps && !rejectUnauthorized) {
       this.logger.warn(`TLS verification disabled for ${hostname}`)
     }
@@ -133,7 +130,12 @@ export class AxiosService {
   private validateUrl(url: string, isProduction: boolean, allowPrivateNetwork: boolean): URL {
     const parsed = new URL(url)
 
-    const allowedProtocols = new Set([UrlProtocol.HTTPS, UrlProtocol.HTTP, UrlProtocol.WS, UrlProtocol.WSS])
+    const allowedProtocols = new Set([
+      UrlProtocol.HTTPS,
+      UrlProtocol.HTTP,
+      UrlProtocol.WS,
+      UrlProtocol.WSS,
+    ])
     if (!allowedProtocols.has(parsed.protocol as UrlProtocol)) {
       throw new Error('Only HTTP(S) and WS(S) URLs are allowed')
     }

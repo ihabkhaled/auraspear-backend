@@ -6,6 +6,7 @@ import {
   STALE_RUNNING_WINDOW_MS,
 } from './jobs.constants'
 import { JobHandlerType } from './jobs.types'
+import { nowMs, expiresInMs, subtractDuration, nowDate } from '../../common/utils/date-time.utility'
 import type { JobStatsInput, JobRuntimeStats } from './jobs.types'
 import type { Job } from '@prisma/client'
 
@@ -20,7 +21,7 @@ export async function placeholderJobHandler(job: Job): Promise<Record<string, un
 export function computeRetryScheduledAt(nextAttempt: number): Date {
   const exponent = Math.max(nextAttempt - 1, 0)
   const delayMs = Math.min(BASE_RETRY_DELAY_MS * 2 ** exponent, MAX_RETRY_DELAY_MS)
-  return new Date(Date.now() + delayMs)
+  return expiresInMs(delayMs)
 }
 
 export function shouldRetryJob(nextAttempt: number, maxAttempts: number): boolean {
@@ -28,7 +29,7 @@ export function shouldRetryJob(nextAttempt: number, maxAttempts: number): boolea
 }
 
 export function getStaleRunningThreshold(): Date {
-  return new Date(Date.now() - STALE_RUNNING_WINDOW_MS)
+  return subtractDuration(nowDate(), STALE_RUNNING_WINDOW_MS, 'millisecond')
 }
 
 export function buildJobStats(params: JobStatsInput): JobRuntimeStats {
@@ -63,7 +64,7 @@ export function isJobTerminal(status: JobStatus): boolean {
  * idempotency keys, preventing duplicate jobs within the same window.
  */
 export function getCurrentScheduleWindow(): string {
-  const now = Date.now()
+  const now = nowMs()
   const windowStart = Math.floor(now / SCHEDULE_INTERVAL_MS) * SCHEDULE_INTERVAL_MS
   return String(windowStart)
 }
@@ -71,9 +72,10 @@ export function getCurrentScheduleWindow(): string {
 /**
  * Counts how many settled results were fulfilled vs rejected.
  */
-export function countScheduleResults(
-  results: PromiseSettledResult<unknown>[]
-): { enqueued: number; rejectedIndices: number[] } {
+export function countScheduleResults(results: PromiseSettledResult<unknown>[]): {
+  enqueued: number
+  rejectedIndices: number[]
+} {
   let enqueued = 0
   const rejectedIndices: number[] = []
 

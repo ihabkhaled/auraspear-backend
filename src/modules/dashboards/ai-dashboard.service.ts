@@ -3,6 +3,7 @@ import { AI_DASHBOARD_SERVICE_CLASS_NAME } from './dashboards.constants'
 import { DashboardsRepository } from './dashboards.repository'
 import { AiFeatureKey, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import { daysAgo, toIso } from '../../common/utils/date-time.utility'
 import { AiService } from '../ai/ai.service'
 import type { ExplainAnomalyInput } from './ai-dashboard.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -54,7 +55,7 @@ export class AiDashboardService {
   ): Promise<AiResponse> {
     this.logAiDashboardAction('generateDailySummary', tenantId, user)
 
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const twentyFourHoursAgo = daysAgo(1)
 
     const [alertsCount, resolvedCount, openCases] = await Promise.all([
       this.dashboardsRepository.countAlertsSince(tenantId, twentyFourHoursAgo),
@@ -71,7 +72,7 @@ export class AiDashboardService {
         alertsLast24h: alertsCount,
         resolvedLast24h: resolvedCount,
         openCases,
-        date: new Date().toISOString().split('T').at(0) ?? '',
+        date: toIso().split('T').at(0) ?? '',
       },
       connector,
     })

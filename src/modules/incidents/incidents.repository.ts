@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { getYear } from '../../common/utils/date-time.utility'
 import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { IncidentWithTenant, IncidentWithTenantAndTimeline } from './incidents.types'
@@ -250,7 +251,7 @@ export class IncidentsRepository {
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('incident_number_gen'))::text`
 
-    const year = new Date().getFullYear()
+    const year = getYear()
     const prefix = `INC-${year}-`
 
     const latestIncident = await tx.incident.findFirst({

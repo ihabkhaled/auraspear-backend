@@ -4,6 +4,7 @@ import {
   AUTH_SESSION_USER_AGENT_MAX_LENGTH,
 } from './auth-session.constants'
 import { UserSessionClientType, UserSessionOsFamily, UserSessionStatus } from '../../common/enums'
+import { nowMs } from '../../common/utils/date-time.utility'
 import type { AuthSessionContext } from './auth.types'
 import type { Request } from 'express'
 
@@ -110,7 +111,7 @@ export function buildAuthSessionContext(request: Request): AuthSessionContext {
 export function isUserSessionOnline(
   lastSeenAt: Date,
   status: UserSessionStatus,
-  now = Date.now()
+  now = nowMs()
 ): boolean {
   if (status !== UserSessionStatus.ACTIVE) {
     return false

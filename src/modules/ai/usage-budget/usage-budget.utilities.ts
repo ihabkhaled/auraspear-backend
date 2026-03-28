@@ -1,3 +1,4 @@
+import { toIso } from '../../../common/utils/date-time.utility'
 import type {
   MonthlyUsageRawRow,
   MonthlyUsageResponse,
@@ -46,8 +47,8 @@ export function buildUsageSummaryResponse(
 
   return {
     tenantId,
-    startDate: startDate.toISOString(),
-    endDate: endDate.toISOString(),
+    startDate: toIso(startDate),
+    endDate: toIso(endDate),
     entries,
     totals: {
       inputTokens: totalInput,

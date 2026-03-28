@@ -17,6 +17,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { daysAgo, getYear } from '../../common/utils/date-time.utility'
 import type {
   CorrelationResult,
   CorrelationStats,
@@ -261,7 +262,7 @@ export class CorrelationService {
     this.log.entry('getCorrelationStats', tenantId)
 
     try {
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      const twentyFourHoursAgo = daysAgo(1)
 
       const [correlationRules, sigmaRules, fired24hResult, linkedResult] = await Promise.all([
         this.repository.count({ tenantId, source: { not: 'sigma' } }),
@@ -332,7 +333,7 @@ export class CorrelationService {
   }
 
   private async generateRuleNumber(tenantId: string, prefix: string): Promise<string> {
-    const year = new Date().getFullYear()
+    const year = getYear()
     const searchPrefix = `${prefix}-${year}-`
     const lastRule = await this.repository.findLastRuleByPrefix(tenantId, searchPrefix)
 

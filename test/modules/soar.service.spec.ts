@@ -1,5 +1,6 @@
 import { SoarPlaybookStatus, SoarExecutionStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { SoarService } from '../../src/modules/soar/soar.service'
 
 const mockAppLogger = {
@@ -34,11 +35,11 @@ function buildMockPlaybook(overrides: Record<string, unknown> = {}) {
     triggerConditions: { severity: 'critical' },
     steps: [{ action: 'block_ip', target: 'firewall' }],
     executionCount: 5,
-    lastExecutedAt: new Date('2025-06-01T12:00:00Z'),
+    lastExecutedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     createdBy: USER_EMAIL,
     tenant: { name: 'Test Tenant' },
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -50,12 +51,12 @@ function buildMockExecution(overrides: Record<string, unknown> = {}) {
     tenantId: TENANT_ID,
     status: SoarExecutionStatus.RUNNING,
     triggeredBy: USER_EMAIL,
-    startedAt: new Date('2025-06-01T12:00:00Z'),
+    startedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     completedAt: null,
     output: null,
     error: null,
     playbook: { name: 'Block IP Playbook' },
-    createdAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }

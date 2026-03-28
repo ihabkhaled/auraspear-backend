@@ -1,5 +1,6 @@
 import { DetectionRuleStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { DetectionRulesService } from '../../src/modules/detection-rules/detection-rules.service'
 
 const mockAppLogger = {
@@ -36,10 +37,10 @@ function buildMockRule(overrides: Record<string, unknown> = {}) {
     actions: { notify: true, blockIp: false },
     hitCount: 42,
     falsePositiveCount: 3,
-    lastTriggeredAt: new Date('2025-06-01T12:00:00Z'),
+    lastTriggeredAt: toDay('2025-06-01T12:00:00Z').toDate(),
     createdBy: USER_EMAIL,
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }

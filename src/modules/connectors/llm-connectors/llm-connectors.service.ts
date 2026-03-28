@@ -6,6 +6,7 @@ import { AppLogFeature } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
+import { nowDate, nowMs, elapsedMs, toIso } from '../../../common/utils/date-time.utility'
 import { decrypt, encrypt } from '../../../common/utils/encryption.utility'
 import { buildLlmConnectorUpdateData } from '../connectors.utilities'
 import { LlmApisService } from '../services/llm-apis.service'
@@ -170,7 +171,7 @@ export class LlmConnectorsService {
     const config = this.buildDecryptedConfig(connector)
     const { ok, details, latencyMs } = await this.executeTest(connector.name, config)
 
-    const testedAt = new Date()
+    const testedAt = nowDate()
     await this.persistTestResult(id, tenantId, ok, details, testedAt)
 
     if (ok) {
@@ -184,24 +185,24 @@ export class LlmConnectorsService {
       })
     }
 
-    return { id, ok, details, testedAt: testedAt.toISOString() }
+    return { id, ok, details, testedAt: toIso(testedAt) }
   }
 
   private async executeTest(
     connectorName: string,
     config: Record<string, unknown>
   ): Promise<{ ok: boolean; details: string; latencyMs: number }> {
-    const start = Date.now()
+    const start = nowMs()
     try {
       const result = await this.llmApisService.testConnection(config)
-      return { ok: result.ok, details: result.details, latencyMs: Date.now() - start }
+      return { ok: result.ok, details: result.details, latencyMs: elapsedMs(start) }
     } catch (error) {
       const details = error instanceof Error ? error.message : 'Connection test failed'
       this.log.warn('executeTest', '', `LLM connector test failed for ${connectorName}`, {
         connectorName,
         error: details,
       })
-      return { ok: false, details, latencyMs: Date.now() - start }
+      return { ok: false, details, latencyMs: elapsedMs(start) }
     }
   }
 
@@ -342,11 +343,11 @@ export class LlmConnectorsService {
       organizationId: connector.organizationId,
       maxTokensParam: connector.maxTokensParam,
       timeout: connector.timeout,
-      lastTestAt: connector.lastTestAt?.toISOString() ?? null,
+      lastTestAt: connector.lastTestAt ? toIso(connector.lastTestAt) : null,
       lastTestOk: connector.lastTestOk,
       lastError: connector.lastError,
-      createdAt: connector.createdAt.toISOString(),
-      updatedAt: connector.updatedAt.toISOString(),
+      createdAt: toIso(connector.createdAt),
+      updatedAt: toIso(connector.updatedAt),
     }
   }
 }

@@ -1,5 +1,6 @@
 import { RANGE_MAP, SEVERITY_WEIGHTS } from './hunts.constants'
 import { AlertSeverity, SortOrder } from '../../common/enums'
+import { nowDate, toDay, toIso } from '../../common/utils/date-time.utility'
 import { sanitizeEsQueryString } from '../../common/utils/es-sanitize.utility'
 import type { HuntEventData } from './hunts.types'
 
@@ -11,9 +12,9 @@ export function buildHuntEsQuery(
   sanitizedQuery: string,
   timeRange: string
 ): Record<string, unknown> {
-  const now = new Date()
+  const now = nowDate()
   const rangeMs = RANGE_MAP.get(timeRange) ?? 24 * 60 * 60 * 1000
-  const from = new Date(now.getTime() - rangeMs)
+  const from = toDay(now).subtract(rangeMs, 'millisecond').toDate()
 
   return {
     query: {
@@ -38,7 +39,7 @@ export function buildHuntEsQuery(
             },
           },
         ],
-        filter: [{ range: { timestamp: { gte: from.toISOString(), lte: now.toISOString() } } }],
+        filter: [{ range: { timestamp: { gte: toIso(from), lte: toIso(now) } } }],
       },
     },
     sort: [{ timestamp: { order: SortOrder.DESC } }],
@@ -128,7 +129,7 @@ export function mapHitsToEventData(hits: unknown[], sessionId: string): HuntEven
 
     return {
       huntSessionId: sessionId,
-      timestamp: source?.timestamp ? new Date(source.timestamp as string) : new Date(),
+      timestamp: source?.timestamp ? toDay(source.timestamp as string).toDate() : nowDate(),
       severity: extractSeverity(source),
       eventId: id ?? 'unknown',
       sourceIp: extractNestedField(source, ['src_ip', 'data.srcip', 'agent.ip']),

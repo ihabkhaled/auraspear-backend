@@ -13,6 +13,7 @@ import {
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { daysAgo, diffMs, toIso } from '../../../common/utils/date-time.utility'
 import { AgentConfigService } from '../../agent-config/agent-config.service'
 import { JobType } from '../../jobs/enums/job.enums'
 import { JobService } from '../../jobs/jobs.service'
@@ -218,7 +219,7 @@ export class OrchestratorService {
   /* ---------------------------------------------------------------- */
 
   async getOrchestratorStats(tenantId: string): Promise<OrchestratorStatsResult> {
-    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const since24h = daysAgo(1)
 
     const [
       totalDispatches24h,
@@ -320,14 +321,14 @@ export class OrchestratorService {
   ): OrchestratorHistoryEntry[] {
     return jobs.map(job => {
       const durationMs =
-        job.startedAt && job.completedAt ? job.completedAt.getTime() - job.startedAt.getTime() : 0
+        job.startedAt && job.completedAt ? diffMs(job.startedAt, job.completedAt) : 0
 
       return {
         id: job.id,
         agentId,
         status: job.status,
-        startedAt: job.startedAt?.toISOString() ?? job.createdAt.toISOString(),
-        completedAt: job.completedAt?.toISOString() ?? null,
+        startedAt: job.startedAt ? toIso(job.startedAt) : toIso(job.createdAt),
+        completedAt: job.completedAt ? toIso(job.completedAt) : null,
         durationMs,
         tokensUsed: 0,
         model: null,

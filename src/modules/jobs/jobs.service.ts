@@ -11,6 +11,7 @@ import { AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate, toIso } from '../../common/utils/date-time.utility'
 import type { EnqueueParameters, JobRuntimeStats, ListJobsOptions } from './jobs.types'
 import type { Job, Prisma } from '@prisma/client'
 
@@ -48,7 +49,7 @@ export class JobService {
       jobId: job.id,
       jobType: params.type,
       maxAttempts: params.maxAttempts ?? 3,
-      scheduledAt: params.scheduledAt?.toISOString() ?? null,
+      scheduledAt: params.scheduledAt ? toIso(params.scheduledAt) : null,
       createdBy: params.createdBy ?? null,
       hasPayload: Boolean(params.payload),
     })
@@ -88,7 +89,7 @@ export class JobService {
       status: JobStatus.RUNNING,
       error: null,
       scheduledAt: null,
-      startedAt: new Date(),
+      startedAt: nowDate(),
     })
 
     this.log.success('markRunning', tenantId, { jobId })
@@ -108,7 +109,7 @@ export class JobService {
       result: (result as Prisma.InputJsonValue) ?? undefined,
       error: null,
       scheduledAt: null,
-      completedAt: new Date(),
+      completedAt: nowDate(),
     })
 
     this.log.success('markCompleted', tenantId, { jobId, hasResult: Boolean(result) })
@@ -134,7 +135,7 @@ export class JobService {
       error,
       attempts: nextAttempt,
       scheduledAt: retrying ? computeRetryScheduledAt(nextAttempt) : null,
-      completedAt: retrying ? null : new Date(),
+      completedAt: retrying ? null : nowDate(),
     })
 
     if (retrying) {
@@ -174,14 +175,14 @@ export class JobService {
       error,
       attempts,
       scheduledAt: null,
-      completedAt: new Date(),
+      completedAt: nowDate(),
     })
   }
 
   async getStats(tenantId: string): Promise<JobRuntimeStats> {
     this.log.entry('getStats', tenantId)
 
-    const now = new Date()
+    const now = nowDate()
     const [pending, running, retrying, failed, completed, cancelled, delayed, staleRunning, types] =
       await Promise.all([
         this.jobRepository.countByTenantAndStatus(tenantId, JobStatus.PENDING),
@@ -266,7 +267,7 @@ export class JobService {
       )
     }
 
-    const result = await this.jobRepository.retryJob(id, tenantId, new Date())
+    const result = await this.jobRepository.retryJob(id, tenantId, nowDate())
     if (result.count === 0) {
       throw new BusinessException(409, `Job ${id} could not be retried`, 'errors.jobs.cannotRetry')
     }

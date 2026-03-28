@@ -1,3 +1,4 @@
+import { toDay, nowMs } from '../../src/common/utils/date-time.utility'
 import { ConnectorSyncService } from '../../src/modules/connector-sync/connector-sync.service'
 
 const TENANT_ID = 'tenant-001'
@@ -170,7 +171,7 @@ describe('ConnectorSyncService', () => {
     })
 
     it('should skip connectors synced too recently', async () => {
-      const recentSync = new Date(Date.now() - 30_000) // 30 seconds ago (< 90s gap)
+      const recentSync = toDay(nowMs() - 30_000).toDate() // 30 seconds ago (< 90s gap)
       repository.findSyncableConnectors.mockResolvedValue([
         { tenantId: TENANT_ID, type: 'wazuh', lastSyncAt: recentSync },
       ])
@@ -181,7 +182,7 @@ describe('ConnectorSyncService', () => {
     })
 
     it('should sync connectors that are past the gap threshold', async () => {
-      const oldSync = new Date(Date.now() - 120_000) // 2 minutes ago (> 90s gap)
+      const oldSync = toDay(nowMs() - 120_000).toDate() // 2 minutes ago (> 90s gap)
       repository.findSyncableConnectors.mockResolvedValue([
         { tenantId: TENANT_ID, type: 'wazuh', lastSyncAt: oldSync },
       ])

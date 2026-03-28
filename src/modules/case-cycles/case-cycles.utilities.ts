@@ -1,5 +1,6 @@
 import { CYCLE_SORT_FIELDS } from './case-cycles.constants'
 import { CaseCycleStatus, CaseStatus } from '../../common/enums'
+import { nowDate, startOf } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { CaseCycleRecord } from './case-cycles.types'
 import type { CaseCycleStatus as PrismaCycleStatus, Prisma } from '@prisma/client'
@@ -91,21 +92,18 @@ export function datesOverlap(
 /* ---------------------------------------------------------------- */
 
 export function isTodayInRange(startDate: Date, endDate: Date | null): boolean {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const today = startOf('day')
   return startDate <= today && (endDate === null || endDate >= today)
 }
 
 export function isFutureStart(startDate: Date): boolean {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const today = startOf('day')
   return startDate > today
 }
 
 export function isPastEnd(endDate: Date | null): boolean {
   if (!endDate) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const today = startOf('day')
   return endDate < today
 }
 
@@ -139,6 +137,6 @@ export function applyAutoDeactivation(
   if (isTodayInRange(startDate, endDate)) return
 
   updateData['status'] = CaseCycleStatus.CLOSED
-  updateData['closedAt'] = new Date()
+  updateData['closedAt'] = nowDate()
   updateData['closedBy'] = closerEmail
 }

@@ -34,6 +34,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { RoleSettingsService } from '../role-settings/role-settings.service'
 import type {
   AuthSessionContext,
@@ -288,7 +289,7 @@ export class AuthService {
         this.authRepository.revokeRefreshTokenFamily(
           family,
           RefreshTokenFamilyRevocationReason.LOGOUT,
-          new Date(),
+          nowDate(),
           undefined,
           actorUserId
         )
@@ -583,7 +584,7 @@ export class AuthService {
       familyId: refreshToken.family,
       userId,
       tenantId,
-      lastLoginAt: new Date(),
+      lastLoginAt: nowDate(),
       currentAccessJti: accessToken.jti,
       currentAccessExpiresAt: accessToken.expiresAt,
       context: sessionContext,
@@ -604,7 +605,7 @@ export class AuthService {
     const updatedCount = await this.authRepository.touchUserSession({
       familyId: payload.family,
       tenantId,
-      touchedAt: new Date(),
+      touchedAt: nowDate(),
       currentAccessJti: payload.jti,
       currentAccessExpiresAt: buildEpochToDate(payload.exp),
       context: sessionContext,
@@ -672,7 +673,7 @@ export class AuthService {
         this.authRepository.revokeRefreshTokenFamily(
           target.familyId,
           reason,
-          new Date(),
+          nowDate(),
           undefined,
           revokedByUserId
         )
@@ -742,7 +743,7 @@ export class AuthService {
   }
 
   private assertFamilyNotExpired(rotation: RefreshRotationWithFamily): void {
-    const now = new Date()
+    const now = nowDate()
 
     if (
       rotation.family.status === RefreshTokenFamilyStatus.expired ||
@@ -780,7 +781,7 @@ export class AuthService {
     await this.authRepository.revokeRefreshTokenFamily(
       rotation.family.id,
       RefreshTokenFamilyRevocationReason.REPLAY_DETECTED,
-      new Date(),
+      nowDate(),
       rotation.id
     )
 
@@ -907,7 +908,7 @@ export class AuthService {
       await this.authRepository.revokeRefreshTokenFamily(
         family,
         RefreshTokenFamilyRevocationReason.IMPERSONATION_ENDED,
-        new Date(),
+        nowDate(),
         undefined,
         caller.impersonatorSub
       )
@@ -956,7 +957,7 @@ export class AuthService {
       nextJtiHash: hashTokenIdentifier(issuedRefresh.jti),
       nextExpiresAt: issuedRefresh.expiresAt,
       nextGeneration: issuedRefresh.generation,
-      rotatedAt: new Date(),
+      rotatedAt: nowDate(),
       tenantId,
       currentAccessJti: issuedAccess.jti,
       currentAccessExpiresAt: issuedAccess.expiresAt,

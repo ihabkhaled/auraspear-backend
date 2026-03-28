@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { RefreshTokenFamilyStatus, RefreshTokenRotationStatus } from '@prisma/client'
 import { RefreshTokenFamilyRevocationReason } from './auth.enums'
 import { UserSessionStatus } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   CreateRefreshTokenFamilyInput,
@@ -53,7 +54,7 @@ export class AuthRepository {
   async updateLastLogin(userId: string): Promise<User> {
     return this.prisma.user.update({
       where: { id: userId },
-      data: { lastLoginAt: new Date() },
+      data: { lastLoginAt: nowDate() },
     })
   }
 

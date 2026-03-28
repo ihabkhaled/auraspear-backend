@@ -5,6 +5,7 @@ import { ConnectorSyncService } from './connector-sync.service'
 import { RequirePermission } from '../../common/decorators/permission.decorator'
 import { TenantId } from '../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../common/enums'
+import { toIso } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 
 @ApiTags('connector-sync')
@@ -52,7 +53,7 @@ export class ConnectorSyncController {
 
     return connectors.map(c => ({
       type: c.type,
-      lastSyncAt: c.lastSyncAt ? c.lastSyncAt.toISOString() : null,
+      lastSyncAt: c.lastSyncAt ? toIso(c.lastSyncAt) : null,
       syncEnabled: c.syncEnabled,
       enabled: c.enabled,
     }))

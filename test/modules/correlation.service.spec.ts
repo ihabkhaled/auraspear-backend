@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { CorrelationService } from '../../src/modules/correlation/correlation.service'
 
 const mockAppLogger = {
@@ -59,8 +60,8 @@ function buildMockRule(overrides: Record<string, unknown> = {}) {
     linkedIncidents: 0,
     lastFiredAt: null,
     createdBy: USER_EMAIL,
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     tenant: { name: 'Test Tenant' },
     ...overrides,
   }
@@ -327,7 +328,7 @@ describe('CorrelationService', () => {
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      const year = new Date().getFullYear()
+      const year = nowDate().getFullYear()
       expect(callArguments.ruleNumber).toBe(`COR-${year}-0001`)
     })
 
@@ -341,7 +342,7 @@ describe('CorrelationService', () => {
       await service.createRule(sigmaDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      const year = new Date().getFullYear()
+      const year = nowDate().getFullYear()
       expect(callArguments.ruleNumber).toBe(`SIG-${year}-0001`)
     })
 
@@ -354,7 +355,7 @@ describe('CorrelationService', () => {
       await service.createRule(baseDto, buildMockJwtPayload() as never)
 
       const callArguments = repository.createWithTenant.mock.calls[0][0]
-      const year = new Date().getFullYear()
+      const year = nowDate().getFullYear()
       expect(callArguments.ruleNumber).toBe(`COR-${year}-0006`)
     })
 
@@ -612,7 +613,7 @@ describe('CorrelationService', () => {
       repository.count.mockResolvedValue(0)
       repository.aggregate.mockResolvedValue({ _sum: { hitCount: null, linkedIncidents: null } })
 
-      const before = new Date()
+      const before = nowDate()
       await service.getCorrelationStats(TENANT_ID)
 
       // The first aggregate call is for fired24h

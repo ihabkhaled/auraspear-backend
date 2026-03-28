@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing'
 import { BusinessException } from '../../../../common/exceptions/business.exception'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { ConnectorsService } from '../../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../../connectors/services/llm-apis.service'
@@ -35,10 +36,10 @@ function buildThread(overrides?: Partial<AiChatThread>): AiChatThread {
     systemPrompt: null,
     messageCount: 0,
     totalTokensUsed: 0,
-    lastActivityAt: new Date('2025-06-01T12:00:00Z'),
+    lastActivityAt: toDay('2025-06-01T12:00:00Z').toDate(),
     isArchived: false,
-    createdAt: new Date('2025-06-01T10:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T10:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   } as AiChatThread
 }
@@ -61,7 +62,7 @@ function buildMessage(overrides?: Partial<AiChatMessage>): AiChatMessage {
     inputTokens: 0,
     outputTokens: 0,
     durationMs: 0,
-    createdAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   } as AiChatMessage
 }
@@ -131,9 +132,9 @@ describe('AiChatService', () => {
   describe('listThreads', () => {
     it('returns threads with cursor pagination and hasMore=true when more exist', async () => {
       const threads = [
-        buildThread({ id: 't-1', lastActivityAt: new Date('2025-06-03') }),
-        buildThread({ id: 't-2', lastActivityAt: new Date('2025-06-02') }),
-        buildThread({ id: 't-3', lastActivityAt: new Date('2025-06-01') }),
+        buildThread({ id: 't-1', lastActivityAt: toDay('2025-06-03T00:00:00.000Z').toDate() }),
+        buildThread({ id: 't-2', lastActivityAt: toDay('2025-06-02T00:00:00.000Z').toDate() }),
+        buildThread({ id: 't-3', lastActivityAt: toDay('2025-06-01T00:00:00.000Z').toDate() }),
       ]
       // Service fetches limit+1 to detect hasMore, so for limit=2 it returns 3
       mockRepository.findThreads.mockResolvedValue([...threads])
@@ -166,7 +167,7 @@ describe('AiChatService', () => {
       expect(mockRepository.findThreads).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            lastActivityAt: { lt: new Date(cursor) },
+            lastActivityAt: { lt: toDay(cursor).toDate() },
           }),
         })
       )
@@ -265,8 +266,8 @@ describe('AiChatService', () => {
 
     it('returns messages in chronological order for older direction', async () => {
       const messages = [
-        buildMessage({ id: 'm-3', createdAt: new Date('2025-06-03') }),
-        buildMessage({ id: 'm-2', createdAt: new Date('2025-06-02') }),
+        buildMessage({ id: 'm-3', createdAt: toDay('2025-06-03T00:00:00.000Z').toDate() }),
+        buildMessage({ id: 'm-2', createdAt: toDay('2025-06-02T00:00:00.000Z').toDate() }),
       ]
       mockRepository.findMessages.mockResolvedValue(messages)
 
@@ -286,7 +287,7 @@ describe('AiChatService', () => {
       expect(mockRepository.findMessages).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            createdAt: { lt: new Date(cursor) },
+            createdAt: { lt: toDay(cursor).toDate() },
           }),
         })
       )
@@ -301,7 +302,7 @@ describe('AiChatService', () => {
       expect(mockRepository.findMessages).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            createdAt: { gt: new Date(cursor) },
+            createdAt: { gt: toDay(cursor).toDate() },
           }),
         })
       )

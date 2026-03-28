@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { CaseCycle, Prisma } from '@prisma/client'
 
@@ -116,7 +117,7 @@ export class CaseCyclesRepository {
         data: {
           status: 'closed',
           closedBy: closedByEmail,
-          closedAt: new Date(),
+          closedAt: nowDate(),
         },
       })
 

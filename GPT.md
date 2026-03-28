@@ -12,6 +12,7 @@ All rules in `CLAUDE.md` apply here in full, including:
 - DTO validation and `BusinessException` usage
 - migration, seeding, and idempotency requirements
 - testing, linting, TypeScript, and formatting requirements
+- dayjs for all date/time operations via `src/common/utils/date-time.utility.ts`
 
 If this file and `CLAUDE.md` ever differ, `CLAUDE.md` wins.
 

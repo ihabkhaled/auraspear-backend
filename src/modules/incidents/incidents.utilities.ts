@@ -1,5 +1,6 @@
 import { INCIDENT_SORT_FIELDS } from './incidents.constants'
 import { IncidentStatus } from '../../common/enums'
+import { diffMs, nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdateIncidentDto } from './dto/update-incident.dto'
 import type { Incident, Prisma } from '@prisma/client'
@@ -103,7 +104,7 @@ function applyResolvedAtTransition(
     (status === IncidentStatus.RESOLVED || status === IncidentStatus.CLOSED) &&
     !existingResolvedAt
   ) {
-    updateData['resolvedAt'] = new Date()
+    updateData['resolvedAt'] = nowDate()
   }
 
   if (
@@ -184,8 +185,8 @@ export function calculateAvgResolveHours(
   let totalHours = 0
   for (const incident of resolvedIncidents) {
     if (incident.resolvedAt) {
-      const diffMs = incident.resolvedAt.getTime() - incident.createdAt.getTime()
-      totalHours += diffMs / (1000 * 60 * 60)
+      const elapsed = diffMs(incident.createdAt, incident.resolvedAt)
+      totalHours += elapsed / (1000 * 60 * 60)
     }
   }
 

@@ -48,6 +48,7 @@ import {
   AppLogSourceType,
   ConnectorType,
 } from '../../common/enums'
+import { AppLoggerService } from '../../common/services/app-logger.service'
 import {
   AI_DEFAULT_PROVIDER_KEY,
   FEATURE_TO_AGENT_MAP,
@@ -60,7 +61,7 @@ import { FeatureCatalogService } from './feature-catalog/feature-catalog.service
 import { PromptRegistryService } from './prompt-registry/prompt-registry.service'
 import { UsageBudgetService } from './usage-budget/usage-budget.service'
 import { BusinessException } from '../../common/exceptions/business.exception'
-import { AppLoggerService } from '../../common/services/app-logger.service'
+import { daysAgo, elapsedMs, nowMs, toIso } from '../../common/utils/date-time.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { FIXED_AI_CONNECTORS } from '../connectors/llm-connectors/llm-connectors.constants'
 import { LlmConnectorsService } from '../connectors/llm-connectors/llm-connectors.service'
@@ -166,7 +167,7 @@ export class AiService {
 
     const relatedSummary = relatedAlerts
       .slice(0, 10)
-      .map(ra => `[${ra.severity}] ${ra.title} at ${ra.timestamp.toISOString()}`)
+      .map(ra => `[${ra.severity}] ${ra.title} at ${toIso(ra.timestamp)}`)
       .join('\n')
 
     return this.executeAiTask({
@@ -180,7 +181,7 @@ export class AiService {
         alertSeverity: fullAlert.severity,
         alertSource: fullAlert.source ?? '',
         alertRule: fullAlert.ruleName ?? '',
-        alertTimestamp: fullAlert.timestamp?.toISOString() ?? '',
+        alertTimestamp: fullAlert.timestamp ? toIso(fullAlert.timestamp) : '',
         alertRawData: JSON.stringify(fullAlert.rawEvent ?? {}).slice(0, 2000),
         sourceIp: fullAlert.sourceIp ?? '',
         destinationIp: fullAlert.destinationIp ?? '',
@@ -215,7 +216,7 @@ export class AiService {
   async runAgentTask(input: AgentTaskExecutionInput): Promise<AiResponse> {
     await this.ensureAiEnabled(input.tenantId)
 
-    const startTime = Date.now()
+    const startTime = nowMs()
     const connectors = await this.resolveAgentTaskConnectors(input)
 
     const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
@@ -232,7 +233,7 @@ export class AiService {
         tools: input.tools,
       })
 
-    const latencyMs = Date.now() - startTime
+    const latencyMs = elapsedMs(startTime)
     await this.logAgentTaskAudit(input, response, latencyMs)
 
     return response
@@ -325,7 +326,7 @@ export class AiService {
       outputTokens: response.tokensUsed.output,
       latencyMs,
       status: AiAuditStatus.SUCCESS,
-      createdAt: new Date().toISOString(),
+      createdAt: toIso(),
       prompt: input.prompt,
       response: response.result,
     }
@@ -390,7 +391,7 @@ export class AiService {
     const temperature = agentConfig.temperature ?? 0.7
     const modelOverride = agentConfig.model ?? undefined
 
-    const startTime = Date.now()
+    const startTime = nowMs()
     const aiResponse = await this.tryConnectorsInOrder(connectors, c =>
       this.routeGenericTask(
         c,
@@ -403,7 +404,7 @@ export class AiService {
       )
     )
     const response = aiResponse ?? buildFallbackGenericResponse(params.featureKey, finalPrompt)
-    const latencyMs = Date.now() - startTime
+    const latencyMs = elapsedMs(startTime)
 
     await this.recordUsageAndAudit(params, agentId, agentConfig, response, latencyMs, finalPrompt)
 
@@ -558,7 +559,7 @@ export class AiService {
       outputTokens: response.tokensUsed.output,
       latencyMs,
       status: AiAuditStatus.SUCCESS,
-      createdAt: new Date().toISOString(),
+      createdAt: toIso(),
       prompt: finalPrompt,
       response: response.result,
     })
@@ -1495,7 +1496,7 @@ export class AiService {
 
     if (orConditions.length === 0) return []
 
-    const sinceDate = new Date(Date.now() - 48 * 60 * 60 * 1000)
+    const sinceDate = daysAgo(2)
     return this.aiRepository.findRelatedAlerts(tenantId, alert.id, sinceDate, orConditions)
   }
 
@@ -1520,7 +1521,7 @@ export class AiService {
       outputTokens: response.tokensUsed.output,
       latencyMs,
       status: AiAuditStatus.SUCCESS,
-      createdAt: new Date().toISOString(),
+      createdAt: toIso(),
       prompt,
       response: response.result,
     }

@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { AiApprovalLevel, AiFeatureKey } from '../../../../common/enums'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { DEFAULT_FEATURE_CONFIG } from '../feature-catalog.constants'
 import { FeatureCatalogService } from '../feature-catalog.service'
 
@@ -13,7 +14,7 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-const NOW = new Date('2026-03-01T00:00:00Z')
+const NOW = toDay('2026-03-01T00:00:00Z').toDate()
 
 function buildConfig(overrides: Record<string, unknown> = {}) {
   return {

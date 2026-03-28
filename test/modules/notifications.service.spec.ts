@@ -1,5 +1,6 @@
 import { NotificationType, NotificationEntityType } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { nowDate } from '../../src/common/utils/date-time.utility'
 import { PermissionUpdateReason } from '../../src/modules/notifications/notifications.enums'
 import { NotificationsService } from '../../src/modules/notifications/notifications.service'
 
@@ -68,7 +69,7 @@ describe('NotificationsService', () => {
 
   describe('listNotifications', () => {
     it('should return paginated notifications with resolved actor names', async () => {
-      const now = new Date()
+      const now = nowDate()
       repository.findManyAndCount.mockResolvedValue([
         [
           {
@@ -121,7 +122,7 @@ describe('NotificationsService', () => {
             caseId: null,
             caseCommentId: null,
             readAt: null,
-            createdAt: new Date(),
+            createdAt: nowDate(),
           },
         ],
         1,
@@ -148,8 +149,8 @@ describe('NotificationsService', () => {
             entityId: 'e-1',
             caseId: null,
             caseCommentId: null,
-            readAt: new Date(),
-            createdAt: new Date(),
+            readAt: nowDate(),
+            createdAt: nowDate(),
           },
         ],
         1,
@@ -205,7 +206,7 @@ describe('NotificationsService', () => {
     it('should skip update if already read', async () => {
       repository.findFirstByIdAndRecipient.mockResolvedValue({
         id: 'notif-1',
-        readAt: new Date(),
+        readAt: nowDate(),
       })
 
       await service.markAsRead('notif-1', mockUser)

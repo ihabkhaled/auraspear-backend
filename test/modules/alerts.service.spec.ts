@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { AlertsService } from '../../src/modules/alerts/alerts.service'
 
 const mockAppLogger = {
@@ -73,9 +74,9 @@ function buildMockAlert(overrides: Record<string, unknown> = {}) {
     closedBy: null,
     closedAt: null,
     resolution: null,
-    timestamp: new Date('2025-06-01T12:00:00Z'),
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    timestamp: toDay('2025-06-01T12:00:00Z').toDate(),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -189,7 +190,7 @@ describe('AlertsService', () => {
     it('should filter by timeRange 24h', async () => {
       repository.findManyAndCount.mockResolvedValue([[], 0])
 
-      const before = new Date()
+      const before = nowDate()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '24h' }))
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
@@ -203,7 +204,7 @@ describe('AlertsService', () => {
     it('should filter by timeRange 7d', async () => {
       repository.findManyAndCount.mockResolvedValue([[], 0])
 
-      const before = new Date()
+      const before = nowDate()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '7d' }))
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
@@ -217,7 +218,7 @@ describe('AlertsService', () => {
     it('should filter by timeRange 30d', async () => {
       repository.findManyAndCount.mockResolvedValue([[], 0])
 
-      const before = new Date()
+      const before = nowDate()
       await service.search(TENANT_ID, buildDefaultQuery({ timeRange: '30d' }))
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
@@ -236,8 +237,8 @@ describe('AlertsService', () => {
       await service.search(TENANT_ID, buildDefaultQuery({ from, to }))
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
-      expect(callArguments.where.timestamp.gte).toEqual(new Date(from))
-      expect(callArguments.where.timestamp.lte).toEqual(new Date(to))
+      expect(callArguments.where.timestamp.gte).toEqual(toDay(from).toDate())
+      expect(callArguments.where.timestamp.lte).toEqual(toDay(to).toDate())
     })
 
     it('should prefer timeRange over explicit from/to', async () => {
@@ -375,7 +376,7 @@ describe('AlertsService', () => {
       const updatedAlert = buildMockAlert({
         status: 'acknowledged',
         acknowledgedBy: USER_EMAIL,
-        acknowledgedAt: new Date(),
+        acknowledgedAt: nowDate(),
       })
       repository.updateByIdAndTenant.mockResolvedValue(updatedAlert)
 
@@ -505,7 +506,7 @@ describe('AlertsService', () => {
         status: 'closed',
         resolution: RESOLUTION,
         closedBy: USER_EMAIL,
-        closedAt: new Date(),
+        closedAt: nowDate(),
       })
       repository.updateByIdAndTenant.mockResolvedValue(updatedAlert)
 

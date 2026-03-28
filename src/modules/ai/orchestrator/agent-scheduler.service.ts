@@ -5,6 +5,7 @@ import { ScheduleService } from './schedule/schedule.service'
 import { AgentActionType, AppLogFeature } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
+import { elapsedMs, nowMs } from '../../../common/utils/date-time.utility'
 import type { ScheduleRecord } from './schedule/schedule.types'
 
 /**
@@ -74,7 +75,7 @@ export class AgentSchedulerService {
   /* ---------------------------------------------------------------- */
 
   private async dispatchSchedule(schedule: ScheduleRecord): Promise<void> {
-    const startTime = Date.now()
+    const startTime = nowMs()
 
     // Mark run started and compute next run time
     await this.scheduleService.markRunStarted(
@@ -101,7 +102,7 @@ export class AgentSchedulerService {
         triggeredBy: 'system:scheduler',
       })
 
-      const durationMs = Date.now() - startTime
+      const durationMs = elapsedMs(startTime)
       await this.scheduleService.markRunCompleted(
         schedule.id,
         schedule.tenantId,
@@ -109,7 +110,7 @@ export class AgentSchedulerService {
         durationMs
       )
     } catch (error) {
-      const durationMs = Date.now() - startTime
+      const durationMs = elapsedMs(startTime)
       const reason = error instanceof Error ? error.message : 'Unknown dispatch error'
       await this.scheduleService.markRunCompleted(
         schedule.id,

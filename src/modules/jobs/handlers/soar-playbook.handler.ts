@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { nowDate, toIso } from '../../../common/utils/date-time.utility'
 import { SoarRepository } from '../../soar/soar.repository'
 import type { Job } from '@prisma/client'
 
@@ -30,14 +31,14 @@ export class SoarPlaybookHandler {
     // Update execution status
     await this.soarRepository.updateExecutionById(executionId, {
       status: 'completed',
-      completedAt: new Date(),
+      completedAt: nowDate(),
     })
 
     return {
       executionId,
       playbookId,
       playbookName: playbook.name,
-      completedAt: new Date().toISOString(),
+      completedAt: toIso(),
     }
   }
 }

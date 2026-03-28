@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { BusinessException } from '../../../../common/exceptions/business.exception'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { UserMemoryService } from '../user-memory.service'
 import type { PrismaService } from '../../../../prisma/prisma.service'
 import type { EmbeddingService } from '../embedding.service'
@@ -37,8 +38,8 @@ const baseMemory = {
   sourceId: null,
   sourceLabel: null,
   isDeleted: false,
-  createdAt: new Date('2026-01-01'),
-  updatedAt: new Date('2026-01-01'),
+  createdAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
 }
 
 describe('UserMemoryService', () => {

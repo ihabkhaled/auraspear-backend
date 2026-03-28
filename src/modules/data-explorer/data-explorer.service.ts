@@ -25,6 +25,7 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
+import { nowDate, diffMs } from '../../common/utils/date-time.utility'
 import { sanitizeEsQueryString } from '../../common/utils/es-sanitize.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GrafanaService } from '../connectors/services/grafana.service'
@@ -540,7 +541,7 @@ export class DataExplorerService {
       connectorType,
       status: SyncJobStatus.RUNNING,
       initiatedBy,
-      startedAt: new Date(),
+      startedAt: nowDate(),
     })
   }
 
@@ -551,13 +552,13 @@ export class DataExplorerService {
     recordsFailed: number
   ): Promise<void> {
     const job = await this.repository.findSyncJobById(jobId)
-    const durationMs = job ? Date.now() - job.startedAt.getTime() : null
+    const durationMs = job ? diffMs(job.startedAt, nowDate()) : null
     await this.repository.updateSyncJob(jobId, tenantId, {
       status: SyncJobStatus.COMPLETED,
       recordsSynced,
       recordsFailed,
       durationMs,
-      completedAt: new Date(),
+      completedAt: nowDate(),
     })
   }
 
@@ -568,13 +569,13 @@ export class DataExplorerService {
     error: unknown
   ): Promise<void> {
     const job = await this.repository.findSyncJobById(jobId)
-    const durationMs = job ? Date.now() - job.startedAt.getTime() : null
+    const durationMs = job ? diffMs(job.startedAt, nowDate()) : null
     await this.repository.updateSyncJob(jobId, tenantId, {
       status: SyncJobStatus.FAILED,
       recordsFailed,
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
       durationMs,
-      completedAt: new Date(),
+      completedAt: nowDate(),
     })
   }
 

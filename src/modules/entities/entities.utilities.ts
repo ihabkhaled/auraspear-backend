@@ -1,4 +1,5 @@
 import { ENTITY_SORT_FIELDS, ENTITY_TYPE_WEIGHTS } from './entities.constants'
+import { diffMs, nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { ListEntitiesQueryDto } from './dto/list-entities-query.dto'
 import type {
@@ -136,10 +137,7 @@ export function getEntityTypeWeight(entityType: string): number {
 }
 
 export function computeRecencyScore(lastSeen: Date): number {
-  const daysSinceLastSeen = Math.max(
-    0,
-    (Date.now() - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24)
-  )
+  const daysSinceLastSeen = Math.max(0, diffMs(lastSeen, nowDate()) / (1000 * 60 * 60 * 24))
   if (daysSinceLastSeen < 1) return 15
   if (daysSinceLastSeen < 7) return 10
   if (daysSinceLastSeen < 30) return 5
@@ -147,7 +145,7 @@ export function computeRecencyScore(lastSeen: Date): number {
 }
 
 export function computeDaysSinceLastSeen(lastSeen: Date): number {
-  return Math.max(0, (Date.now() - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24))
+  return Math.max(0, diffMs(lastSeen, nowDate()) / (1000 * 60 * 60 * 24))
 }
 
 export function buildRiskBreakdownFactors(

@@ -1,5 +1,6 @@
 import { SortOrder } from '../../src/common/enums'
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { RefreshTokenFamilyRevocationReason } from '../../src/modules/auth/auth.enums'
 import {
   UsersControlSessionSortField,
@@ -206,12 +207,12 @@ describe('UsersControlService', () => {
         {
           familyId: 'family-001',
           currentAccessJti: 'access-jti-001',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
         {
           familyId: 'family-002',
           currentAccessJti: 'access-jti-002',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
       ])
       mockAuthService.revokeSessionTargets.mockResolvedValue(2)
@@ -242,8 +243,8 @@ describe('UsersControlService', () => {
           id: 'user-010',
           name: 'Analyst One',
           email: 'analyst.one@auraspear.com',
-          createdAt: new Date('2026-03-15T10:00:00.000Z'),
-          lastLoginAt: new Date('2026-03-18T10:00:00.000Z'),
+          createdAt: toDay('2026-03-15T10:00:00.000Z').toDate(),
+          lastLoginAt: toDay('2026-03-18T10:00:00.000Z').toDate(),
           isProtected: false,
           mfaEnabled: true,
           memberships: [
@@ -264,8 +265,8 @@ describe('UsersControlService', () => {
           id: 'user-011',
           name: 'Analyst Two',
           email: 'analyst.two@auraspear.com',
-          createdAt: new Date('2026-03-16T10:00:00.000Z'),
-          lastLoginAt: new Date('2026-03-19T10:00:00.000Z'),
+          createdAt: toDay('2026-03-16T10:00:00.000Z').toDate(),
+          lastLoginAt: toDay('2026-03-19T10:00:00.000Z').toDate(),
           isProtected: false,
           mfaEnabled: true,
           memberships: [
@@ -296,9 +297,9 @@ describe('UsersControlService', () => {
               ipAddress: '10.0.0.11',
               userAgent: 'Mozilla/5.0',
               currentAccessJti: 'access-011',
-              currentAccessExpiresAt: new Date('2026-03-19T10:15:00.000Z'),
-              lastLoginAt: new Date('2026-03-19T10:00:00.000Z'),
-              lastSeenAt: new Date('2026-03-19T10:05:00.000Z'),
+              currentAccessExpiresAt: toDay('2026-03-19T10:15:00.000Z').toDate(),
+              lastLoginAt: toDay('2026-03-19T10:00:00.000Z').toDate(),
+              lastSeenAt: toDay('2026-03-19T10:05:00.000Z').toDate(),
               revokedAt: null,
               revokedByUserId: null,
               revokeReason: null,
@@ -335,7 +336,7 @@ describe('UsersControlService', () => {
         {
           familyId: 'family-010',
           currentAccessJti: 'access-jti-010',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
       ])
       mockAuthService.revokeSessionTargets.mockResolvedValue(1)
@@ -359,12 +360,12 @@ describe('UsersControlService', () => {
         {
           familyId: 'family-020',
           currentAccessJti: 'access-jti-020',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
         {
           familyId: 'family-021',
           currentAccessJti: 'access-jti-021',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
       ])
       mockAuthService.revokeSessionTargets.mockResolvedValue(2)
@@ -397,7 +398,7 @@ describe('UsersControlService', () => {
         {
           familyId: 'family-001',
           currentAccessJti: 'access-jti-001',
-          currentAccessExpiresAt: new Date(),
+          currentAccessExpiresAt: nowDate(),
         },
       ])
       mockAuthService.revokeSessionTargets.mockResolvedValue(1)

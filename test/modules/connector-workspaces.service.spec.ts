@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { ConnectorWorkspacesService } from '../../src/modules/connector-workspaces/connector-workspaces.service'
 import type {
   ConnectorWorkspaceStrategy,
@@ -63,7 +64,7 @@ function createMockConnectorResponse(overrides?: {
     type: overrides?.type ?? CONNECTOR_TYPE,
     enabled: overrides?.enabled ?? true,
     lastTestOk: hasLastTestOk ? overrides.lastTestOk : true,
-    lastTestAt: hasLastTestAt ? overrides.lastTestAt : new Date('2025-01-15T10:00:00Z'),
+    lastTestAt: hasLastTestAt ? overrides.lastTestAt : toDay('2025-01-15T10:00:00Z').toDate(),
     lastError: hasLastError ? overrides.lastError : null,
   }
 }

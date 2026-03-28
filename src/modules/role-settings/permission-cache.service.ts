@@ -3,6 +3,7 @@ import { CACHE_TTL_MS } from './role-settings.constants'
 import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowMs } from '../../common/utils/date-time.utility'
 import type { PermissionCacheEntry } from './role-settings.types'
 
 @Injectable()
@@ -32,7 +33,7 @@ export class PermissionCacheService {
       return null
     }
 
-    if (Date.now() > entry.expiresAt) {
+    if (nowMs() > entry.expiresAt) {
       this.cache.delete(key)
       this.log.success('cacheGet', tenantId, { role, hit: false, reason: 'expired' })
       return null
@@ -51,7 +52,7 @@ export class PermissionCacheService {
     const key = this.buildKey(tenantId, role)
     this.cache.set(key, {
       permissions,
-      expiresAt: Date.now() + CACHE_TTL_MS,
+      expiresAt: nowMs() + CACHE_TTL_MS,
     })
 
     this.log.success('cacheSet', tenantId, { role, permissionCount: permissions.size })

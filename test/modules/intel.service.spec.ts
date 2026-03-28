@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { IntelService } from '../../src/modules/intel/intel.service'
 
 const TENANT_ID = 'tenant-001'
@@ -130,7 +131,7 @@ describe('IntelService', () => {
           organization: 'APT28',
           threatLevel: 'high',
           info: 'Phishing campaign',
-          date: new Date('2025-06-01'),
+          date: toDay('2025-06-01T00:00:00.000Z').toDate(),
           tags: [],
           attributeCount: 15,
           published: true,
@@ -142,7 +143,7 @@ describe('IntelService', () => {
           organization: 'Turla',
           threatLevel: 'medium',
           info: 'Watering hole',
-          date: new Date('2025-05-15'),
+          date: toDay('2025-05-15T00:00:00.000Z').toDate(),
           tags: [],
           attributeCount: 8,
           published: true,
@@ -290,8 +291,8 @@ describe('IntelService', () => {
           source: 'MISP-100',
           severity: 'high',
           hitCount: 3,
-          firstSeen: new Date(),
-          lastSeen: new Date(),
+          firstSeen: nowDate(),
+          lastSeen: nowDate(),
           tags: [],
           active: true,
         },

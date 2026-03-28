@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { AiAgent, AiAgentSession, AiAgentTool, Prisma } from '@prisma/client'
 
@@ -228,7 +229,7 @@ export class AiAgentsRepository {
           tokensUsed: params.tokensUsed,
           cost: params.cost,
           durationMs: params.durationMs,
-          completedAt: new Date(),
+          completedAt: nowDate(),
         },
       })
 
@@ -285,7 +286,7 @@ export class AiAgentsRepository {
         durationMs: params.durationMs,
         model: params.model ?? null,
         provider: params.provider ?? null,
-        completedAt: new Date(),
+        completedAt: nowDate(),
       },
     })
   }

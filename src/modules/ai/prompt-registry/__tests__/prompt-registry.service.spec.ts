@@ -4,6 +4,7 @@ jest.mock('@prisma/client', () => ({
 
 import { AiFeatureKey } from '../../../../common/enums'
 import { BusinessException } from '../../../../common/exceptions/business.exception'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { DEFAULT_PROMPTS } from '../prompt-registry.constants'
 import { PromptRegistryService } from '../prompt-registry.service'
 
@@ -14,7 +15,7 @@ const mockAppLogger = {
   debug: jest.fn(),
 }
 
-const NOW = new Date('2026-03-01T00:00:00Z')
+const NOW = toDay('2026-03-01T00:00:00Z').toDate()
 
 function buildTemplate(overrides: Record<string, unknown> = {}) {
   return {

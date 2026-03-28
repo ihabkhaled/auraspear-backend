@@ -5,6 +5,7 @@ import * as bcrypt from 'bcryptjs'
 import * as jwt from 'jsonwebtoken'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
+import { toDay, nowDate, nowMs } from '../../src/common/utils/date-time.utility'
 import { AuthService } from '../../src/modules/auth/auth.service'
 import type { JwtPayload } from '../../src/common/interfaces/authenticated-request.interface'
 
@@ -95,9 +96,9 @@ const mockRefreshFamily = {
   status: 'active',
   revokedAt: null,
   revokedReason: null,
-  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  expiresAt: toDay(nowMs() + 60 * 60 * 1000).toDate(),
+  createdAt: nowDate(),
+  updatedAt: nowDate(),
 }
 
 const mockRefreshRotation = {
@@ -107,11 +108,11 @@ const mockRefreshRotation = {
   jtiHash: 'hashed-jti',
   parentRotationId: null,
   status: 'active',
-  issuedAt: new Date(),
+  issuedAt: nowDate(),
   usedAt: null,
   replacedAt: null,
   replayedAt: null,
-  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  expiresAt: toDay(nowMs() + 60 * 60 * 1000).toDate(),
 }
 
 describe('AuthService', () => {
@@ -494,7 +495,7 @@ describe('AuthService', () => {
       jti: 'old-refresh-jti',
       family: mockRefreshFamily.id,
       generation: 0,
-      exp: Math.floor(Date.now() / 1000) + 3600,
+      exp: Math.floor(nowMs() / 1000) + 3600,
       tokenType: 'refresh',
     }
 
@@ -584,7 +585,7 @@ describe('AuthService', () => {
 
   describe('logout', () => {
     it('should blacklist both tokens with correct TTLs', async () => {
-      const now = Math.floor(Date.now() / 1000)
+      const now = Math.floor(nowMs() / 1000)
       const accessExp = now + 900 // 15 minutes
       const refreshExp = now + 604800 // 7 days
 
@@ -855,7 +856,7 @@ describe('AuthService', () => {
       impersonatorSub: 'admin-001',
       impersonatorEmail: 'admin@auraspear.com',
       jti: 'impersonation-jti',
-      exp: Math.floor(Date.now() / 1000) + 900,
+      exp: Math.floor(nowMs() / 1000) + 900,
     }
 
     it('should return admin tokens when ending valid impersonation', async () => {

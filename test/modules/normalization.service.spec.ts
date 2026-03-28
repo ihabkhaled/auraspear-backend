@@ -1,5 +1,6 @@
 import { NormalizationPipelineStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { NormalizationService } from '../../src/modules/normalization/normalization.service'
 
 const mockAppLogger = {
@@ -34,9 +35,9 @@ function buildMockPipeline(overrides: Record<string, unknown> = {}) {
     fieldMappings: { source_ip: 'srcIp', dest_ip: 'dstIp' },
     processedCount: BigInt(15000),
     errorCount: 12,
-    lastProcessedAt: new Date('2025-06-01T12:00:00Z'),
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    lastProcessedAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }

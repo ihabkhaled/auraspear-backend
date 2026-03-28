@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -52,8 +53,7 @@ export function mapVelociraptorToOcsf(
     title,
     description,
     severity: getVelociraptorSeverity(event),
-    timestamp:
-      (event['Timestamp'] as string) ?? (event['timestamp'] as string) ?? new Date().toISOString(),
+    timestamp: (event['Timestamp'] as string) ?? (event['timestamp'] as string) ?? toIso(),
     source: { product: 'Velociraptor', vendor: 'Rapid7' },
     tenantId,
     eventId: (event['FlowId'] as string) ?? (event['HuntId'] as string) ?? undefined,

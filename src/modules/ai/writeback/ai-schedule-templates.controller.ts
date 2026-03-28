@@ -6,6 +6,7 @@ import { Permission } from '../../../common/enums'
 import { AuthGuard } from '../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../common/guards/tenant.guard'
 import { buildPaginationMeta } from '../../../common/interfaces/pagination.interface'
+import { daysAgo } from '../../../common/utils/date-time.utility'
 import { PrismaService } from '../../../prisma/prisma.service'
 import type { PaginatedResponse } from '../../../common/interfaces/pagination.interface'
 import type { AiJobRunSummary, AiScheduleTemplate } from '@prisma/client'
@@ -89,7 +90,7 @@ export class AiScheduleTemplatesController {
     avgDurationMs: number
     uniqueAgents: number
   }> {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const since = daysAgo(1)
 
     const [totalRuns, completed, failed, avgResult, uniqueAgents] = await Promise.all([
       this.prisma.aiJobRunSummary.count({ where: { tenantId, createdAt: { gte: since } } }),

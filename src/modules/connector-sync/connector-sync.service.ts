@@ -12,6 +12,7 @@ import { AppLogFeature, ConnectorType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
+import { diffMs, nowDate } from '../../common/utils/date-time.utility'
 import { AlertsService } from '../alerts/alerts.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { GraylogService } from '../connectors/services/graylog.service'
@@ -236,7 +237,7 @@ export class ConnectorSyncService {
 
   private shouldSkipSync(lastSyncAt: Date | null): boolean {
     if (!lastSyncAt) return false
-    const elapsed = Date.now() - lastSyncAt.getTime()
+    const elapsed = diffMs(lastSyncAt, nowDate())
     return elapsed < MIN_SYNC_GAP_MS
   }
 

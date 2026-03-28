@@ -5,10 +5,11 @@ jest.mock('@prisma/client', () => ({
 import { AiFeatureKey } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
 import { UserRole } from '../../src/common/interfaces/authenticated-request.interface'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { AiAlertTriageService } from '../../src/modules/alerts/ai-alert-triage.service'
 import type { JwtPayload } from '../../src/common/interfaces/authenticated-request.interface'
 
-const NOW = new Date('2026-03-15T10:00:00Z')
+const NOW = toDay('2026-03-15T10:00:00Z').toDate()
 
 const mockUser: JwtPayload = {
   sub: 'user-1',

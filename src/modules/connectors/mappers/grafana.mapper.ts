@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -46,8 +47,7 @@ export function mapGrafanaToOcsf(
     title,
     description,
     severity: getGrafanaSeverity(state),
-    timestamp:
-      (event['timestamp'] as string) ?? (event['evalDate'] as string) ?? new Date().toISOString(),
+    timestamp: (event['timestamp'] as string) ?? (event['evalDate'] as string) ?? toIso(),
     source: { product: 'Grafana', vendor: 'Grafana Labs' },
     tenantId,
     eventId: ruleId === undefined ? undefined : String(ruleId),

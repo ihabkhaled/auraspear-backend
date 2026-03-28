@@ -25,6 +25,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { toIso } from '../../common/utils/date-time.utility'
 import { JobType } from '../jobs/enums/job.enums'
 import { JobService } from '../jobs/jobs.service'
 import type { CreateReportFromTemplateDto } from './dto/create-report-from-template.dto'
@@ -80,7 +81,7 @@ export class ReportsService {
   }
 
   private buildGeneratedReportName(templateName: string): string {
-    const dateStamp = new Date().toISOString().slice(0, 10)
+    const dateStamp = toIso().slice(0, 10)
     return `${templateName} - ${dateStamp}`
   }
 

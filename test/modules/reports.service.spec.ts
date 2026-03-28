@@ -6,6 +6,7 @@ import {
   ReportType,
 } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { ReportsService } from '../../src/modules/reports/reports.service'
 
 const mockAppLogger = {
@@ -44,7 +45,7 @@ function buildMockReport(overrides: Record<string, unknown> = {}) {
     filterSnapshot: { scope: 'weekly' },
     fileUrl: 'https://storage.example.com/reports/report-001.pdf',
     fileSize: BigInt(102400),
-    generatedAt: new Date('2025-06-01T12:00:00Z'),
+    generatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     generatedBy: USER_EMAIL,
     tenant: { name: 'Test Tenant' },
     template: {
@@ -53,7 +54,7 @@ function buildMockReport(overrides: Record<string, unknown> = {}) {
       module: ReportModule.INCIDENTS,
       name: 'Incident Posture',
     },
-    createdAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -71,8 +72,8 @@ function buildMockTemplate(overrides: Record<string, unknown> = {}) {
     parameters: { range: '30d' },
     isSystem: true,
     tenant: null,
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }

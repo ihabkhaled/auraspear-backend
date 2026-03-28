@@ -1,3 +1,4 @@
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { AuditLogsService } from '../../src/modules/audit-logs/audit-logs.service'
 
 const mockAppLogger = {
@@ -111,8 +112,8 @@ describe('AuditLogsService', () => {
 
       const callArguments = repository.findManyAndCount.mock.calls[0][0]
       expect(callArguments.where.createdAt).toEqual({
-        gte: new Date(from),
-        lte: new Date(to),
+        gte: toDay(from).toDate(),
+        lte: toDay(to).toDate(),
       })
     })
 
@@ -159,7 +160,7 @@ describe('AuditLogsService', () => {
         details: 'Created new user',
         ipAddress: '192.168.1.1',
       }
-      const createdEntry = { id: 'audit-1', ...data, createdAt: new Date() }
+      const createdEntry = { id: 'audit-1', ...data, createdAt: nowDate() }
       repository.create.mockResolvedValueOnce(createdEntry)
 
       const result = await service.create(data)
@@ -191,7 +192,7 @@ describe('AuditLogsService', () => {
         resourceId: null,
         details: null,
         ipAddress: null,
-        createdAt: new Date(),
+        createdAt: nowDate(),
       }
       repository.create.mockResolvedValueOnce(createdEntry)
 

@@ -1,3 +1,4 @@
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { CorrelationExecutor } from '../../src/modules/correlation/correlation.executor'
 
 const mockAppLogger = {
@@ -16,7 +17,7 @@ describe('CorrelationExecutor', () => {
   })
 
   it('triggers when threshold is exceeded', async () => {
-    const now = new Date()
+    const now = nowDate()
     const rule = {
       id: 'cor-1',
       name: 'Failed Login Burst',
@@ -25,8 +26,20 @@ describe('CorrelationExecutor', () => {
       timeWindowMinutes: 5,
     }
     const events = [
-      { type: 'auth_failure', timestamp: new Date(now.getTime() - 60000).toISOString(), data: {} },
-      { type: 'auth_failure', timestamp: new Date(now.getTime() - 30000).toISOString(), data: {} },
+      {
+        type: 'auth_failure',
+        timestamp: toDay(now.getTime() - 60000)
+          .toDate()
+          .toISOString(),
+        data: {},
+      },
+      {
+        type: 'auth_failure',
+        timestamp: toDay(now.getTime() - 30000)
+          .toDate()
+          .toISOString(),
+        data: {},
+      },
       { type: 'auth_failure', timestamp: now.toISOString(), data: {} },
     ]
 
@@ -38,7 +51,7 @@ describe('CorrelationExecutor', () => {
   })
 
   it('does not trigger below threshold', async () => {
-    const now = new Date()
+    const now = nowDate()
     const rule = {
       id: 'cor-2',
       name: 'Test',
@@ -54,7 +67,7 @@ describe('CorrelationExecutor', () => {
   })
 
   it('groups by field and triggers per group', async () => {
-    const now = new Date()
+    const now = nowDate()
     const rule = {
       id: 'cor-3',
       name: 'Per-User Failed Logins',
@@ -88,7 +101,7 @@ describe('CorrelationExecutor', () => {
   })
 
   it('filters out events outside the time window', async () => {
-    const now = new Date()
+    const now = nowDate()
     const rule = {
       id: 'cor-4',
       name: 'Time Window Test',
@@ -99,7 +112,9 @@ describe('CorrelationExecutor', () => {
     const events = [
       {
         type: 'auth_failure',
-        timestamp: new Date(now.getTime() - 10 * 60 * 1000).toISOString(), // 10 min ago
+        timestamp: toDay(now.getTime() - 10 * 60 * 1000)
+          .toDate()
+          .toISOString(), // 10 min ago
         data: {},
       },
       { type: 'auth_failure', timestamp: now.toISOString(), data: {} },
@@ -111,7 +126,7 @@ describe('CorrelationExecutor', () => {
   })
 
   it('filters out non-matching event types', async () => {
-    const now = new Date()
+    const now = nowDate()
     const rule = {
       id: 'cor-5',
       name: 'Type Filter Test',

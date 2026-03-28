@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { AppLogFeature } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowMs, elapsedMs } from '../../common/utils/date-time.utility'
 import type {
   NormalizationOutput,
   NormalizationPipelineInput,
@@ -28,7 +29,7 @@ export class NormalizationExecutor {
     pipeline: NormalizationPipelineInput,
     events: Record<string, unknown>[]
   ): Promise<NormalizationOutput> {
-    const startTime = Date.now()
+    const startTime = nowMs()
     const normalizedEvents: Record<string, unknown>[] = []
     const errors: string[] = []
     let droppedCount = 0
@@ -56,7 +57,7 @@ export class NormalizationExecutor {
       }
     }
 
-    const durationMs = Date.now() - startTime
+    const durationMs = elapsedMs(startTime)
     this.logger.log(
       `Pipeline ${pipeline.id} processed ${String(events.length)} events: ${String(normalizedEvents.length)} normalized, ${String(droppedCount)} dropped in ${String(durationMs)}ms`
     )

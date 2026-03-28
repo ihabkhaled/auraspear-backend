@@ -1,3 +1,4 @@
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { ConnectorSyncController } from '../../src/modules/connector-sync/connector-sync.controller'
 
 const TENANT_ID = 'tenant-001'
@@ -56,7 +57,7 @@ describe('ConnectorSyncController', () => {
 
   describe('getSyncStatus', () => {
     it('should return formatted sync status for all connectors', async () => {
-      const now = new Date('2026-03-14T12:00:00Z')
+      const now = toDay('2026-03-14T12:00:00Z').toDate()
       prisma.connectorConfig.findMany.mockResolvedValue([
         { type: 'graylog', lastSyncAt: now, syncEnabled: true, enabled: true },
         { type: 'wazuh', lastSyncAt: null, syncEnabled: false, enabled: true },

@@ -19,6 +19,7 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
 import { processChunked } from '../../common/utils/batch.utility'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
 import type { HuntSessionRecord, PaginatedHuntSessions, PaginatedHuntEvents } from './hunts.types'
@@ -230,7 +231,7 @@ export class HuntsService {
       id: session.id,
       tenantId,
       status: HuntSessionStatus.completed,
-      completedAt: new Date(),
+      completedAt: nowDate(),
       eventsFound: result.total,
       uniqueIps: analysisData.uniqueIpCount,
       threatScore: analysisData.threatScoreValue,
@@ -291,7 +292,7 @@ export class HuntsService {
       id: session.id,
       tenantId,
       status: HuntSessionStatus.error,
-      completedAt: new Date(),
+      completedAt: nowDate(),
       reasoning: [
         'Querying Wazuh Indexer for matching events',
         'Wazuh/OpenSearch connector is not configured or not enabled for this tenant',
@@ -327,7 +328,7 @@ export class HuntsService {
       id: session.id,
       tenantId,
       status: HuntSessionStatus.error,
-      completedAt: new Date(),
+      completedAt: nowDate(),
       reasoning: ['Querying Wazuh Indexer for matching events', `Query failed: ${errorMessage}`],
     })
 

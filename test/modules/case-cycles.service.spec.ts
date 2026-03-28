@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { CaseCyclesService } from '../../src/modules/case-cycles/case-cycles.service'
 
 const TENANT_ID = 'tenant-001'
@@ -61,13 +62,13 @@ describe('CaseCyclesService', () => {
           name: 'Q1 2026',
           description: null,
           status: 'active',
-          startDate: new Date('2026-01-01'),
+          startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
           endDate: null,
           createdBy: 'admin@test.com',
           closedBy: null,
           closedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: nowDate(),
+          updatedAt: nowDate(),
           _count: { cases: 3 },
           cases: [{ status: 'open' }, { status: 'in_progress' }, { status: 'closed' }],
         },
@@ -100,13 +101,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: null,
         status: 'active',
-        startDate: new Date('2026-01-01'),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
         endDate: null,
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 2 },
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
@@ -143,13 +144,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: 'First quarter',
         status: 'active',
-        startDate: new Date('2026-01-01'),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
         endDate: null,
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 2 },
         cases: [
           {
@@ -157,14 +158,14 @@ describe('CaseCyclesService', () => {
             ownerUserId: 'user-001',
             status: 'open',
             tenant: { name: 'AuraSpear' },
-            createdAt: new Date(),
+            createdAt: nowDate(),
           },
           {
             id: 'case-2',
             ownerUserId: 'user-002',
             status: 'closed',
             tenant: { name: 'AuraSpear' },
-            createdAt: new Date(),
+            createdAt: nowDate(),
           },
         ],
       }
@@ -213,13 +214,13 @@ describe('CaseCyclesService', () => {
         name: 'Q2 2026',
         description: 'Second quarter',
         status: 'closed',
-        startDate: new Date('2026-04-01'),
+        startDate: toDay('2026-04-01T00:00:00.000Z').toDate(),
         endDate: null,
         createdBy: mockUser.email,
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
       }
 
       repository.create.mockResolvedValue(createdCycle)
@@ -227,7 +228,7 @@ describe('CaseCyclesService', () => {
       const dto = {
         name: 'Q2 2026',
         description: 'Second quarter',
-        startDate: new Date('2026-04-01'),
+        startDate: toDay('2026-04-01T00:00:00.000Z').toDate(),
       }
 
       const result = await service.createCycle(dto, mockUser as never)
@@ -251,15 +252,15 @@ describe('CaseCyclesService', () => {
         {
           id: 'cycle-existing',
           name: 'Q1 2026',
-          startDate: new Date('2026-01-01'),
-          endDate: new Date('2026-03-31'),
+          startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
+          endDate: toDay('2026-03-31T00:00:00.000Z').toDate(),
         },
       ])
 
       const dto = {
         name: 'Overlapping cycle',
-        startDate: new Date('2026-03-01'), // Overlaps with Q1
-        endDate: new Date('2026-06-30'),
+        startDate: toDay('2026-03-01T00:00:00.000Z').toDate(), // Overlaps with Q1
+        endDate: toDay('2026-06-30T00:00:00.000Z').toDate(),
       }
 
       await expect(service.createCycle(dto, mockUser as never)).rejects.toThrow(BusinessException)
@@ -274,8 +275,8 @@ describe('CaseCyclesService', () => {
     it('should reject when start date is after end date', async () => {
       const dto = {
         name: 'Bad dates',
-        startDate: new Date('2026-06-01'),
-        endDate: new Date('2026-01-01'),
+        startDate: toDay('2026-06-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
       }
 
       await expect(service.createCycle(dto, mockUser as never)).rejects.toThrow(BusinessException)
@@ -300,13 +301,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: null,
         status: 'closed',
-        startDate: new Date('2026-01-01'),
-        endDate: new Date('2026-03-31'),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2026-03-31T00:00:00.000Z').toDate(),
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 2 },
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
@@ -344,13 +345,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: null,
         status: 'closed',
-        startDate: new Date('2026-01-01'),
-        endDate: new Date('2026-03-31'),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2026-03-31T00:00:00.000Z').toDate(),
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 0 },
         cases: [],
       }
@@ -358,8 +359,8 @@ describe('CaseCyclesService', () => {
       repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(existingCycle)
 
       const dto = {
-        startDate: new Date('2026-06-01'),
-        endDate: new Date('2026-01-01'),
+        startDate: toDay('2026-06-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
       }
 
       await expect(service.updateCycle('cycle-1', dto, mockUser as never)).rejects.toThrow(
@@ -380,13 +381,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: null,
         status: 'closed',
-        startDate: new Date('2026-01-01'),
-        endDate: new Date('2026-03-31'),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2026-03-31T00:00:00.000Z').toDate(),
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 0 },
         cases: [],
       }
@@ -398,14 +399,14 @@ describe('CaseCyclesService', () => {
         {
           id: 'cycle-other',
           name: 'Q2 2026',
-          startDate: new Date('2026-04-01'),
-          endDate: new Date('2026-06-30'),
+          startDate: toDay('2026-04-01T00:00:00.000Z').toDate(),
+          endDate: toDay('2026-06-30T00:00:00.000Z').toDate(),
         },
       ])
 
       const dto = {
-        startDate: new Date('2026-05-01'), // overlaps with cycle-other
-        endDate: new Date('2026-07-31'),
+        startDate: toDay('2026-05-01T00:00:00.000Z').toDate(), // overlaps with cycle-other
+        endDate: toDay('2026-07-31T00:00:00.000Z').toDate(),
       }
 
       await expect(service.updateCycle('cycle-1', dto, mockUser as never)).rejects.toThrow(
@@ -428,7 +429,7 @@ describe('CaseCyclesService', () => {
     })
 
     it('should auto-deactivate when dates moved outside today', async () => {
-      const today = new Date()
+      const today = nowDate()
       today.setHours(0, 0, 0, 0)
 
       const existingCycle = {
@@ -437,13 +438,13 @@ describe('CaseCyclesService', () => {
         name: 'Active Cycle',
         description: null,
         status: 'active',
-        startDate: new Date('2025-01-01'),
+        startDate: toDay('2025-01-01T00:00:00.000Z').toDate(),
         endDate: null,
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 1 },
         cases: [{ status: 'open' }],
       }
@@ -451,8 +452,8 @@ describe('CaseCyclesService', () => {
       const updatedCycle = {
         ...existingCycle,
         status: 'closed',
-        startDate: new Date('2028-01-01'),
-        endDate: new Date('2028-06-30'),
+        startDate: toDay('2028-01-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2028-06-30T00:00:00.000Z').toDate(),
       }
 
       repository.findFirstByIdAndTenantWithCounts
@@ -465,8 +466,8 @@ describe('CaseCyclesService', () => {
 
       // Move dates far into the future (today is outside the range)
       const dto = {
-        startDate: new Date('2028-01-01'),
-        endDate: new Date('2028-06-30'),
+        startDate: toDay('2028-01-01T00:00:00.000Z').toDate(),
+        endDate: toDay('2028-06-30T00:00:00.000Z').toDate(),
       }
 
       await service.updateCycle('cycle-1', dto, mockUser as never)
@@ -497,11 +498,11 @@ describe('CaseCyclesService', () => {
 
   describe('activateCycle', () => {
     it('should successfully activate and deactivate previous active cycle', async () => {
-      const today = new Date()
+      const today = nowDate()
       today.setHours(0, 0, 0, 0)
 
       // Create a start date in the past and no end date (open-ended)
-      const pastStart = new Date(today)
+      const pastStart = toDay(today).toDate()
       pastStart.setMonth(pastStart.getMonth() - 1)
 
       const existingCycle = {
@@ -514,9 +515,9 @@ describe('CaseCyclesService', () => {
         endDate: null,
         createdBy: 'admin@test.com',
         closedBy: mockUser.email,
-        closedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        closedAt: nowDate(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 2 },
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
@@ -545,7 +546,7 @@ describe('CaseCyclesService', () => {
     })
 
     it('should reject if today is outside date range (future start)', async () => {
-      const futureStart = new Date()
+      const futureStart = nowDate()
       futureStart.setFullYear(futureStart.getFullYear() + 2)
 
       const existingCycle = {
@@ -559,8 +560,8 @@ describe('CaseCyclesService', () => {
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 0 },
         cases: [],
       }
@@ -579,9 +580,9 @@ describe('CaseCyclesService', () => {
     })
 
     it('should reject if today is outside date range (past end)', async () => {
-      const pastEnd = new Date()
+      const pastEnd = nowDate()
       pastEnd.setFullYear(pastEnd.getFullYear() - 1)
-      const pastStart = new Date(pastEnd)
+      const pastStart = toDay(pastEnd).toDate()
       pastStart.setMonth(pastStart.getMonth() - 3)
 
       const existingCycle = {
@@ -595,8 +596,8 @@ describe('CaseCyclesService', () => {
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 0 },
         cases: [],
       }
@@ -621,13 +622,13 @@ describe('CaseCyclesService', () => {
         name: 'Active Cycle',
         description: null,
         status: 'active',
-        startDate: new Date('2025-01-01'),
+        startDate: toDay('2025-01-01T00:00:00.000Z').toDate(),
         endDate: null,
         createdBy: 'admin@test.com',
         closedBy: null,
         closedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 0 },
         cases: [],
       }
@@ -749,13 +750,13 @@ describe('CaseCyclesService', () => {
         name: 'Q1 2026',
         description: null,
         status: 'closed',
-        startDate: new Date('2026-01-01'),
-        endDate: new Date(),
+        startDate: toDay('2026-01-01T00:00:00.000Z').toDate(),
+        endDate: nowDate(),
         createdBy: 'admin@test.com',
         closedBy: mockUser.email,
-        closedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        closedAt: nowDate(),
+        createdAt: nowDate(),
+        updatedAt: nowDate(),
         _count: { cases: 2 },
         cases: [{ status: 'open' }, { status: 'closed' }],
       }
@@ -766,7 +767,7 @@ describe('CaseCyclesService', () => {
 
       repository.update.mockResolvedValue(refreshedCycle)
 
-      const dto = { endDate: new Date() }
+      const dto = { endDate: nowDate() }
       const result = await service.closeCycle('cycle-1', dto, mockUser as never)
 
       expect(result.caseCount).toBe(2)
@@ -782,7 +783,7 @@ describe('CaseCyclesService', () => {
     it('should throw when cycle not found', async () => {
       repository.findFirstByIdAndTenantWithCounts.mockResolvedValue(null)
 
-      const dto = { endDate: new Date() }
+      const dto = { endDate: nowDate() }
 
       await expect(service.closeCycle('nonexistent', dto, mockUser as never)).rejects.toThrow(
         BusinessException
@@ -799,7 +800,7 @@ describe('CaseCyclesService', () => {
         cases: [],
       })
 
-      const dto = { endDate: new Date() }
+      const dto = { endDate: nowDate() }
 
       await expect(service.closeCycle('cycle-1', dto, mockUser as never)).rejects.toThrow(
         BusinessException

@@ -8,6 +8,7 @@ import {
 } from '../../../common/enums'
 import { AxiosService } from '../../../common/modules/axios'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { nowMs } from '../../../common/utils/date-time.utility'
 import {
   extractRemoteErrorMessage,
   extractSearchTotal,
@@ -61,7 +62,7 @@ export class WazuhService {
   ): Promise<string> {
     const cacheKey = `${managerUrl}:${username}`
     const cached = this.tokenCache.get(cacheKey)
-    if (cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.expiresAt > nowMs()) {
       return cached.token
     }
 
@@ -260,7 +261,7 @@ export class WazuhService {
   private cacheToken(cacheKey: string, token: string): void {
     this.tokenCache.set(cacheKey, {
       token,
-      expiresAt: Date.now() + 10 * 60 * 1000,
+      expiresAt: nowMs() + 10 * 60 * 1000,
     })
   }
 
@@ -344,9 +345,11 @@ export class WazuhService {
     })
   }
 
-  private parseScrollResponse(
-    data: unknown
-  ): { allHits: unknown[]; total: number; scrollId: string | undefined } {
+  private parseScrollResponse(data: unknown): {
+    allHits: unknown[]
+    total: number
+    scrollId: string | undefined
+  } {
     const body = data as Record<string, unknown>
     const hitsWrapper = body.hits as Record<string, unknown>
     const total = extractSearchTotal(hitsWrapper.total as Record<string, unknown> | number)
@@ -382,8 +385,13 @@ export class WazuhService {
     const nextScrollId = this.appendScrollBatch(scrollResponse.data, allHits)
 
     return this.collectScrollResults({
-      indexerUrl, authHeader, tlsOption,
-      scrollId: nextScrollId, allHits, total, maxEvents,
+      indexerUrl,
+      authHeader,
+      tlsOption,
+      scrollId: nextScrollId,
+      allHits,
+      total,
+      maxEvents,
     })
   }
 

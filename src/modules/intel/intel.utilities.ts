@@ -1,4 +1,5 @@
 import { IOC_SORT_FIELDS, IOC_TYPE_GROUPS, MISP_SORT_FIELDS } from './intel.constants'
+import { toDay, toIso } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { IOCMatch } from './intel.types'
 import type { Prisma } from '@prisma/client'
@@ -134,7 +135,7 @@ export function buildEventUpserts(
     )
     const threatLevel = mapThreatLevel(event['threat_level_id'] as string | number | undefined)
     const info = String(event['info'] ?? '')
-    const date = new Date(String(event['date'] ?? new Date().toISOString()))
+    const date = toDay(String(event['date'] ?? toIso())).toDate()
     const attributeCount = Number(event['attribute_count'] ?? 0)
     const published = Boolean(event['published'])
 
@@ -174,12 +175,12 @@ export function buildIOCUpserts(
     const eventId = attribute['event_id'] as string | undefined
     const source = eventId ? `MISP-${eventId}` : 'MISP'
     const severity = mapAttributeSeverity(attribute)
-    const firstSeen = new Date(
-      String(attribute['first_seen'] ?? attribute['timestamp'] ?? new Date().toISOString())
-    )
-    const lastSeen = new Date(
-      String(attribute['last_seen'] ?? attribute['timestamp'] ?? new Date().toISOString())
-    )
+    const firstSeen = toDay(
+      String(attribute['first_seen'] ?? attribute['timestamp'] ?? toIso())
+    ).toDate()
+    const lastSeen = toDay(
+      String(attribute['last_seen'] ?? attribute['timestamp'] ?? toIso())
+    ).toDate()
 
     upserts.push({
       where: { tenantId_iocValue_iocType: { tenantId, iocValue, iocType } },
@@ -301,8 +302,8 @@ export function buildIocEnrichContext(ioc: {
     iocValue: ioc.iocValue,
     source: ioc.source ?? '',
     tags: ioc.tags ?? [],
-    firstSeen: ioc.firstSeen?.toISOString() ?? '',
-    lastSeen: ioc.lastSeen?.toISOString() ?? '',
+    firstSeen: ioc.firstSeen ? toIso(ioc.firstSeen) : '',
+    lastSeen: ioc.lastSeen ? toIso(ioc.lastSeen) : '',
     active: ioc.active,
   }
 }
@@ -323,8 +324,8 @@ export function buildAdvisoryContext(
       iocValue: ioc.iocValue,
       source: ioc.source ?? '',
       tags: ioc.tags ?? [],
-      firstSeen: ioc.firstSeen?.toISOString() ?? '',
-      lastSeen: ioc.lastSeen?.toISOString() ?? '',
+      firstSeen: ioc.firstSeen ? toIso(ioc.firstSeen) : '',
+      lastSeen: ioc.lastSeen ? toIso(ioc.lastSeen) : '',
     })),
   }
 }

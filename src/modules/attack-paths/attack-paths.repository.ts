@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { getYear } from '../../common/utils/date-time.utility'
 import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { AttackPath, Prisma } from '@prisma/client'
@@ -126,7 +127,7 @@ export class AttackPathsRepository {
   ): Promise<string> {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('attack_path_number_gen'))::text`
 
-    const year = new Date().getFullYear()
+    const year = getYear()
     const prefix = `AP-${year}-`
 
     const lastPath = await tx.attackPath.findFirst({

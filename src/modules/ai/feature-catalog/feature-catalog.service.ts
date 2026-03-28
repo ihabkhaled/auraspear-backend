@@ -7,6 +7,7 @@ import { FeatureCatalogRepository } from './feature-catalog.repository'
 import { AiFeatureKey, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { UpdateFeatureConfigDto } from './dto/update-feature-config.dto'
 import type { AiFeatureConfigResponse, ResolvedFeatureConfig } from './feature-catalog.types'
 import type { AiFeatureConfig } from '@prisma/client'
@@ -132,13 +133,13 @@ export class FeatureCatalogService {
       maxTokens: config.maxTokens,
       approvalLevel: config.approvalLevel,
       monthlyTokenBudget: config.monthlyTokenBudget,
-      createdAt: config.createdAt.toISOString(),
-      updatedAt: config.updatedAt.toISOString(),
+      createdAt: toIso(config.createdAt),
+      updatedAt: toIso(config.updatedAt),
     }
   }
 
   private buildDefaultResponse(tenantId: string, featureKey: string): AiFeatureConfigResponse {
-    const now = new Date().toISOString()
+    const now = toIso()
     return {
       id: '',
       tenantId,

@@ -6,6 +6,7 @@ import {
   HuntTimeRange,
 } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { toIso } from '../../../common/utils/date-time.utility'
 import { HuntsService } from '../../hunts/hunts.service'
 import type { Job } from '@prisma/client'
 
@@ -69,7 +70,7 @@ export class HuntExecutionHandler {
       eventsFound: session.eventsFound,
       uniqueIps: session.uniqueIps,
       threatScore: session.threatScore,
-      executedAt: new Date().toISOString(),
+      executedAt: toIso(),
     }
   }
 }

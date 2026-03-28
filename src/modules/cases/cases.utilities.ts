@@ -1,5 +1,6 @@
 import { CASE_SORT_FIELDS } from './cases.constants'
 import { CaseStatus, CaseTaskStatus, CaseTimelineType } from '../../common/enums'
+import { diffMs, nowDate, toIso } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   CaseCommentResponse,
@@ -84,7 +85,7 @@ export function buildCaseUpdateData(
   if (dto.status !== undefined) updateData['status'] = dto.status
   if (dto.ownerUserId !== undefined) updateData['ownerUserId'] = dto.ownerUserId
   if (dto.cycleId !== undefined) updateData['cycleId'] = dto.cycleId
-  if (dto.status === CaseStatus.CLOSED) updateData['closedAt'] = new Date()
+  if (dto.status === CaseStatus.CLOSED) updateData['closedAt'] = nowDate()
   if (isReopening) updateData['closedAt'] = null
   return updateData
 }
@@ -126,7 +127,7 @@ export function calculateAvgResolutionHours(
   let count = 0
   for (const c of closedCases) {
     if (c.closedAt) {
-      totalHours += (c.closedAt.getTime() - c.createdAt.getTime()) / (1000 * 60 * 60)
+      totalHours += diffMs(c.createdAt, c.closedAt) / (1000 * 60 * 60)
       count++
     }
   }
@@ -392,7 +393,7 @@ export function buildCaseAiContext(caseItem: {
     timelineEvents: (caseItem.timeline ?? []).slice(0, 20).map(e => ({
       type: e.type,
       description: e.description,
-      timestamp: e.timestamp?.toISOString() ?? '',
+      timestamp: e.timestamp ? toIso(e.timestamp) : '',
     })),
   }
 }

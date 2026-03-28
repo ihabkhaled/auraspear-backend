@@ -4,6 +4,7 @@ import {
   VULNERABILITY_SORT_FIELDS,
 } from './vulnerabilities.constants'
 import { PatchStatus } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type { VulnerabilityRecord, VulnerabilityStats } from './vulnerabilities.types'
@@ -112,7 +113,7 @@ export function buildVulnerabilityUpdateData(
       dto.patchStatus === PatchStatus.MITIGATED &&
       existingPatchStatus !== PatchStatus.MITIGATED
     ) {
-      updateData.patchedAt = new Date()
+      updateData.patchedAt = nowDate()
     }
   }
   if (dto.affectedSoftware !== undefined) {

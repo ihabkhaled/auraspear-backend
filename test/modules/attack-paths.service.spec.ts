@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { AttackPathsService } from '../../src/modules/attack-paths/attack-paths.service'
 
 const mockAppLogger = {
@@ -55,8 +56,8 @@ function buildMockPath(overrides: Record<string, unknown> = {}) {
     killChainCoverage: 75,
     mitreTactics: ['Initial Access', 'Lateral Movement'],
     mitreTechniques: ['T1078', 'T1021'],
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }

@@ -1,4 +1,5 @@
 import { PLAYBOOK_SORT_FIELDS } from './soar.constants'
+import { diff } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdatePlaybookDto } from './dto/update-playbook.dto'
 import type {
@@ -103,7 +104,7 @@ function computeDurationSeconds(startedAt: Date, completedAt: Date | null): numb
   if (!completedAt) {
     return null
   }
-  return Math.round((completedAt.getTime() - startedAt.getTime()) / 1000)
+  return Math.round(diff(startedAt, completedAt, 'second'))
 }
 
 export function buildExecutionRecord(

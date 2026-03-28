@@ -1,5 +1,6 @@
 import { OSINT_MAX_RESPONSE_DATA_LENGTH, VT_PATH_BASED_TYPES } from './osint-executor.constants'
 import { HttpMethod, OsintAuthType, OsintIocType, OsintSourceType } from '../../common/enums'
+import { toIso } from '../../common/utils/date-time.utility'
 import type {
   OsintQueryResult,
   OsintRequestConfig,
@@ -354,7 +355,7 @@ export function buildFailedQueryResult(
     statusCode: null,
     messageKey: resolveErrorMessageKey(errorMessage),
     responseTimeMs,
-    queriedAt: new Date().toISOString(),
+    queriedAt: toIso(),
   }
 }
 
@@ -655,7 +656,7 @@ export function buildSuccessQueryResult(
     statusCode,
     messageKey: null,
     responseTimeMs,
-    queriedAt: new Date().toISOString(),
+    queriedAt: toIso(),
   }
 }
 
@@ -685,7 +686,7 @@ export function buildErrorQueryResult(
     statusCode,
     messageKey,
     responseTimeMs,
-    queriedAt: new Date().toISOString(),
+    queriedAt: toIso(),
   }
 }
 

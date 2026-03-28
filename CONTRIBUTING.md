@@ -20,6 +20,7 @@ Thank you for your interest in contributing to AuraSpear SOC.
 - **Enums over string literals** — all string unions must be enums
 - **Error handling** — throw `BusinessException` with i18n message keys, never expose internal details
 - **Security** — no `eval()`, no dynamic code execution, no secrets in logs
+- **dayjs for all date/time** — never use raw `new Date()` or `Date.now()`. Import from `src/common/utils/date-time.utility.ts`
 
 ## Architecture
 

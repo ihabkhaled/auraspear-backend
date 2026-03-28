@@ -10,6 +10,7 @@ import {
 } from './startup-health.utilities'
 import { PrismaService } from '../../prisma/prisma.service'
 import { REDIS_CLIENT } from '../../redis'
+import { nowMs, elapsedMs } from '../utils/date-time.utility'
 import type { ServiceCheck } from './startup-health.types'
 
 @Injectable()
@@ -75,30 +76,30 @@ export class StartupHealthService implements OnModuleInit {
   }
 
   private async checkPostgres(): Promise<ServiceCheck> {
-    const start = Date.now()
+    const start = nowMs()
     try {
       await this.prisma.$queryRaw`SELECT 1`
-      return { name: 'PostgreSQL', status: 'up', latencyMs: Date.now() - start }
+      return { name: 'PostgreSQL', status: 'up', latencyMs: elapsedMs(start) }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       return {
         name: 'PostgreSQL',
         status: 'down',
-        latencyMs: Date.now() - start,
+        latencyMs: elapsedMs(start),
         error: errorMessage,
       }
     }
   }
 
   private async checkRedis(): Promise<ServiceCheck> {
-    const start = Date.now()
+    const start = nowMs()
 
     try {
       await this.redis.ping()
-      return { name: 'Redis', status: 'up', latencyMs: Date.now() - start }
+      return { name: 'Redis', status: 'up', latencyMs: elapsedMs(start) }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      return { name: 'Redis', status: 'down', latencyMs: Date.now() - start, error: errorMessage }
+      return { name: 'Redis', status: 'down', latencyMs: elapsedMs(start), error: errorMessage }
     }
   }
 }

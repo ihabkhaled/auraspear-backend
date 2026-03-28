@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { nowDate } from '../../src/common/utils/date-time.utility'
 import { encrypt } from '../../src/common/utils/encryption.utility'
 import { REDACTED_PLACEHOLDER } from '../../src/common/utils/mask.utility'
 import { ConnectorsService } from '../../src/modules/connectors/connectors.service'
@@ -186,7 +187,7 @@ describe('ConnectorsService', () => {
         enabled: true,
         authType: 'api_key',
         encryptedConfig: buildEncryptedConfig(config),
-        lastTestAt: new Date(),
+        lastTestAt: nowDate(),
         lastTestOk: true,
         lastError: null,
       })

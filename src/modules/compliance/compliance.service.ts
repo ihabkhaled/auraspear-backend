@@ -15,6 +15,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate } from '../../common/utils/date-time.utility'
 import type {
   ComplianceFrameworkRecord,
   PaginatedFrameworks,
@@ -339,7 +340,7 @@ export class ComplianceService {
         description: dto.description ?? null,
         status: dto.status,
         evidence: dto.evidence ?? null,
-        assessedAt: new Date(),
+        assessedAt: nowDate(),
         assessedBy: user.email,
       })
 

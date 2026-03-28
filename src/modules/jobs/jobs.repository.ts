@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { JobStatus, JobType } from './enums/job.enums'
 import { SortOrder } from '../../common/enums'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { JobTypeCount, ListJobsOptions } from './jobs.types'
 import type { Job } from '@prisma/client'
@@ -59,7 +60,7 @@ export class JobRepository {
     const pendingStatuses: JobStatus[] = [JobStatus.PENDING, JobStatus.RETRYING]
     const baseWhere = {
       status: { in: pendingStatuses },
-      OR: [{ scheduledAt: null }, { scheduledAt: { lte: new Date() } }],
+      OR: [{ scheduledAt: null }, { scheduledAt: { lte: nowDate() } }],
     }
 
     // Priority: interactive jobs first

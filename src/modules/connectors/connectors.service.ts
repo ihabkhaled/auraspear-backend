@@ -27,6 +27,7 @@ import { AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate, nowMs, elapsedMs, toIso } from '../../common/utils/date-time.utility'
 import { encrypt, decrypt } from '../../common/utils/encryption.utility'
 import { maskSecrets } from '../../common/utils/mask.utility'
 import { resolveAndValidateUrl } from '../../common/utils/ssrf.utility'
@@ -224,7 +225,7 @@ export class ConnectorsService {
     const decryptedConfig = this.decryptConfig(config.encryptedConfig)
     const { ok, details, latencyMs } = await this.runConnectionTest(type, decryptedConfig, tenantId)
 
-    const testedAt = new Date()
+    const testedAt = nowDate()
     await this.connectorsRepository.updateByTenantAndType(tenantId, type, {
       lastTestAt: testedAt,
       lastTestOk: ok,
@@ -241,7 +242,7 @@ export class ConnectorsService {
         details: details.slice(0, 300),
       })
     }
-    return { type, ok, latencyMs, details, testedAt: testedAt.toISOString() }
+    return { type, ok, latencyMs, details, testedAt: toIso(testedAt) }
   }
 
   /* ---------------------------------------------------------------- */
@@ -370,27 +371,27 @@ export class ConnectorsService {
     config: Record<string, unknown>,
     tenantId: string
   ): Promise<{ ok: boolean; details: string; latencyMs: number }> {
-    const start = Date.now()
+    const start = nowMs()
     const service = this.testServiceMap.get(type)
 
     if (!service) {
       return {
         ok: false,
         details: `Unknown connector type: ${type}`,
-        latencyMs: Date.now() - start,
+        latencyMs: elapsedMs(start),
       }
     }
 
     try {
       const { ok, details } = await service.testConnection(config)
-      return { ok, details, latencyMs: Date.now() - start }
+      return { ok, details, latencyMs: elapsedMs(start) }
     } catch (error) {
       const details = sanitizeErrorDetails(error)
       this.log.error('runConnectionTest', tenantId, error, {
         connectorType: type,
-        latencyMs: Date.now() - start,
+        latencyMs: elapsedMs(start),
       })
-      return { ok: false, details, latencyMs: Date.now() - start }
+      return { ok: false, details, latencyMs: elapsedMs(start) }
     }
   }
 

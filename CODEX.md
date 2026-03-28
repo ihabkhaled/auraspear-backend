@@ -33,6 +33,7 @@ If this file and `CLAUDE.md` ever differ, `CLAUDE.md` wins.
    - frontend mirrored enums and UI checks
 6. When adding analytics or reporting capabilities, keep the contracts concrete and enum-driven.
 7. Reuse shared utilities and repository methods where possible instead of duplicating query logic.
+   7a. All date/time operations must use `dayjs` via `src/common/utils/date-time.utility.ts`. Never use raw `new Date()` or `Date.now()`.
 8. Keep seeders idempotent and safe for repeated runs.
 9. Add or update `messageKey` coverage whenever backend-visible behavior changes.
 10. Before finishing, run the relevant validation for changed areas and summarize anything that could not be verified.

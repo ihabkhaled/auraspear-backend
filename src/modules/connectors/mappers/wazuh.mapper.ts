@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -36,7 +37,7 @@ export function mapWazuhAlertToOcsf(
     title: (rule['description'] as string) ?? 'Wazuh Alert',
     description: (rule['description'] as string) ?? undefined,
     severity: getWazuhSeverity(ruleLevel),
-    timestamp: (alert['timestamp'] as string) ?? new Date().toISOString(),
+    timestamp: (alert['timestamp'] as string) ?? toIso(),
     source: { product: 'Wazuh', vendor: 'Wazuh Inc.' },
     tenantId,
     eventId: alert['id'] as string,

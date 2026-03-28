@@ -15,6 +15,7 @@ import { AppLogFeature, HealthStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowMs, elapsedMs } from '../../common/utils/date-time.utility'
 import { REDIS_CLIENT } from '../../redis'
 import { ConnectorsService } from '../connectors/connectors.service'
 import type { ServiceHealthResult, OverallHealth, ComponentCheck } from './health.types'
@@ -100,28 +101,28 @@ export class HealthService {
   }
 
   private async checkDatabase(): Promise<ComponentCheck> {
-    const start = Date.now()
+    const start = nowMs()
     try {
       await this.repository.pingDatabase()
-      return buildComponentCheckResult(HealthStatus.HEALTHY, Date.now() - start)
+      return buildComponentCheckResult(HealthStatus.HEALTHY, elapsedMs(start))
     } catch (error) {
       const message = extractErrorMessage(error)
       this.logger.error(`Database health check failed: ${message}`)
       this.log.error('checkDatabase', '', error, { error: message })
-      return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
+      return buildComponentCheckResult(HealthStatus.DOWN, elapsedMs(start))
     }
   }
 
   private async checkRedis(): Promise<ComponentCheck> {
-    const start = Date.now()
+    const start = nowMs()
     try {
       await this.redis.ping()
-      return buildComponentCheckResult(HealthStatus.HEALTHY, Date.now() - start)
+      return buildComponentCheckResult(HealthStatus.HEALTHY, elapsedMs(start))
     } catch (error) {
       const message = extractErrorMessage(error)
       this.logger.error(`Redis health check failed: ${message}`)
       this.log.error('checkRedis', '', error, { error: message })
-      return buildComponentCheckResult(HealthStatus.DOWN, Date.now() - start)
+      return buildComponentCheckResult(HealthStatus.DOWN, elapsedMs(start))
     }
   }
 }

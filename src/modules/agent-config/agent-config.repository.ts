@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   TenantAgentConfigRecord,
@@ -126,7 +127,7 @@ export class AgentConfigRepository {
   ): Promise<void> {
     await this.prisma.osintSourceConfig.updateMany({
       where: { id, tenantId },
-      data: { lastTestAt: new Date(), lastTestOk: ok, lastError: error },
+      data: { lastTestAt: nowDate(), lastTestOk: ok, lastError: error },
     })
   }
 

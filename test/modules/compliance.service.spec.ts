@@ -1,5 +1,6 @@
 import { ComplianceControlStatus } from '../../src/common/enums'
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { ComplianceService } from '../../src/modules/compliance/compliance.service'
 
 const mockAppLogger = {
@@ -32,8 +33,8 @@ function buildMockFramework(overrides: Record<string, unknown> = {}) {
     standard: 'ISO_27001',
     version: '2022',
     tenant: { name: 'Test Tenant' },
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T00:00:00Z'),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T00:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -47,10 +48,10 @@ function buildMockControl(overrides: Record<string, unknown> = {}) {
     description: 'Control description',
     status: ComplianceControlStatus.PASSED,
     evidence: 'Policy document reviewed',
-    assessedAt: new Date('2025-06-01T00:00:00Z'),
+    assessedAt: toDay('2025-06-01T00:00:00Z').toDate(),
     assessedBy: USER_EMAIL,
-    createdAt: new Date('2025-05-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T00:00:00Z'),
+    createdAt: toDay('2025-05-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T00:00:00Z').toDate(),
     ...overrides,
   }
 }

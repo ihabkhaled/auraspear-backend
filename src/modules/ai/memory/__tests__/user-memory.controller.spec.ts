@@ -5,6 +5,7 @@ jest.mock('@prisma/client', () => ({
 import { Test } from '@nestjs/testing'
 import { AuthGuard } from '../../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../../common/guards/tenant.guard'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { UserMemoryController } from '../user-memory.controller'
 import { UserMemoryService } from '../user-memory.service'
 
@@ -33,8 +34,8 @@ const baseMemory = {
   sourceId: null,
   sourceLabel: null,
   isDeleted: false,
-  createdAt: new Date('2026-01-01'),
-  updatedAt: new Date('2026-01-01'),
+  createdAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
+  updatedAt: toDay('2026-01-01T00:00:00.000Z').toDate(),
 }
 
 describe('UserMemoryController', () => {

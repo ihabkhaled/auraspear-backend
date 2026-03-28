@@ -4,6 +4,7 @@ import { AiFeatureKey, AppLogFeature } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { toIso } from '../../common/utils/date-time.utility'
 import { AiService } from '../ai/ai.service'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 import type { AiResponse } from '../ai/ai.types'
@@ -79,7 +80,7 @@ export class AiUebaService {
       severity: anomaly.severity,
       score: anomaly.score,
       resolved: anomaly.resolved,
-      detectedAt: anomaly.detectedAt.toISOString(),
+      detectedAt: toIso(anomaly.detectedAt),
       entityName: anomaly.entity.entityName,
       entityType: anomaly.entity.entityType,
     }

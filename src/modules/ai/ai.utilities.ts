@@ -1,5 +1,6 @@
 import { AiProvider, AiResponseModel } from './ai.enums'
 import { AiOutputFormat, AlertSeverity } from '../../common/enums'
+import { toIso } from '../../common/utils/date-time.utility'
 import type {
   AgentTaskPromptParameters,
   AgentTaskResponseParameters,
@@ -66,9 +67,7 @@ ${rawEventSnippet}
 ${
   relatedAlerts
     .slice(0, 10)
-    .map(
-      ra => `- [${ra.severity}] ${sanitizeForMarkdown(ra.title)} at ${ra.timestamp.toISOString()}`
-    )
+    .map(ra => `- [${ra.severity}] ${sanitizeForMarkdown(ra.title)} at ${toIso(ra.timestamp)}`)
     .join('\n') || 'None found'
 }
 
@@ -303,7 +302,7 @@ function buildRelatedSection(
     .slice(0, 5)
     .map(
       ra =>
-        `- [${ra.severity.toUpperCase()}] ${sanitizeForMarkdown(ra.title)} (${ra.timestamp.toISOString()})`
+        `- [${ra.severity.toUpperCase()}] ${sanitizeForMarkdown(ra.title)} (${toIso(ra.timestamp)})`
     )
     .join('\n')}`
 }

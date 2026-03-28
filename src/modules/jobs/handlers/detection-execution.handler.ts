@@ -3,6 +3,7 @@ import {
   DETECTION_ALERT_SOURCE,
   DETECTION_SEVERITY_TO_ALERT_SEVERITY,
 } from './detection-execution.constants'
+import { nowDate, toDay } from '../../../common/utils/date-time.utility'
 import { AlertsRepository } from '../../alerts/alerts.repository'
 import { DetectionRulesExecutor } from '../../detection-rules/detection-rules.executor'
 import { DetectionRulesRepository } from '../../detection-rules/detection-rules.repository'
@@ -69,7 +70,7 @@ export class DetectionExecutionHandler {
         where: { id: ruleId, tenantId: job.tenantId },
         data: {
           hitCount: rule.hitCount + result.matchCount,
-          lastTriggeredAt: new Date(),
+          lastTriggeredAt: nowDate(),
         },
       })
 
@@ -124,7 +125,7 @@ export class DetectionExecutionHandler {
         ruleName: match.ruleName,
         ruleId: ruleNumber,
         rawEvent: match.matchedEvent as Prisma.InputJsonValue,
-        timestamp: new Date(match.matchedAt),
+        timestamp: toDay(match.matchedAt).toDate(),
       }
     })
 

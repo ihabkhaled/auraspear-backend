@@ -3,6 +3,7 @@ jest.mock('@prisma/client', () => ({
 }))
 
 import { AiFeatureKey } from '../../../../common/enums'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { UsageBudgetService } from '../usage-budget.service'
 import type { RecordUsageInput } from '../usage-budget.types'
 
@@ -227,8 +228,8 @@ describe('UsageBudgetService', () => {
         },
       ])
 
-      const startDate = new Date('2026-03-01')
-      const endDate = new Date('2026-03-31')
+      const startDate = toDay('2026-03-01T00:00:00.000Z').toDate()
+      const endDate = toDay('2026-03-31T00:00:00.000Z').toDate()
 
       const result = await service.getUsageSummary('tenant-1', startDate, endDate)
 

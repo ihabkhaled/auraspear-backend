@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { nowDate, toIso } from '../../../common/utils/date-time.utility'
 import { NormalizationExecutor } from '../../normalization/normalization.executor'
 import { NormalizationRepository } from '../../normalization/normalization.repository'
 import type { NormalizationStep } from '../../normalization/normalization.types'
@@ -63,7 +64,7 @@ export class NormalizationHandler {
     await this.normalizationRepository.updateManyPipelinesByIdAndTenant(pipelineId, job.tenantId, {
       processedCount: BigInt(currentProcessedCount + result.outputCount),
       errorCount: pipeline.errorCount + result.errors.length,
-      lastProcessedAt: new Date(),
+      lastProcessedAt: nowDate(),
     })
 
     return {
@@ -75,7 +76,7 @@ export class NormalizationHandler {
       droppedCount: result.droppedCount,
       errorCount: result.errors.length,
       durationMs: result.durationMs,
-      executedAt: new Date().toISOString(),
+      executedAt: toIso(),
     }
   }
 }

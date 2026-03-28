@@ -1,3 +1,4 @@
+import { toDay } from '../../src/common/utils/date-time.utility'
 import {
   buildRulePerformanceEntries,
   calculateFalsePositiveRate,
@@ -21,7 +22,7 @@ describe('dashboard utilities', () => {
   })
 
   describe('buildRulePerformanceEntries', () => {
-    const now = new Date('2026-03-18T10:00:00.000Z')
+    const now = toDay('2026-03-18T10:00:00.000Z').toDate()
 
     const baseRow: DetectionRulePerformanceRow = {
       id: 'rule-1',

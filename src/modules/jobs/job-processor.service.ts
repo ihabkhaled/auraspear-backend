@@ -24,6 +24,13 @@ import { JobService } from './jobs.service'
 import { placeholderJobHandler } from './jobs.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType, RedisResponse } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
+import {
+  nowMs,
+  elapsedMs,
+  subtractDuration,
+  nowDate,
+  toIso,
+} from '../../common/utils/date-time.utility'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import type { JobHandler } from './jobs.types'
 import type { AppLogContext } from '../../common/services/app-logger.types'
@@ -138,7 +145,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     if (this.shuttingDown) return
 
     try {
-      const staleThreshold = new Date(Date.now() - STALE_RUNNING_WINDOW_MS)
+      const staleThreshold = subtractDuration(nowDate(), STALE_RUNNING_WINDOW_MS, 'millisecond')
       const result = await this.jobRepository.updateMany({
         where: {
           status: JobStatus.RUNNING,
@@ -178,7 +185,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
   /* ---------------------------------------------------------------- */
 
   private async processJob(job: Job): Promise<void> {
-    const startTime = Date.now()
+    const startTime = nowMs()
     const handler = this.handlers.get(job.type as JobType)
 
     if (!handler) {
@@ -220,14 +227,14 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
     this.logJobStarted(job)
 
     const result = await handler(job)
-    const durationMs = Date.now() - startTime
+    const durationMs = elapsedMs(startTime)
 
     await this.jobService.markCompleted(job.id, job.tenantId, result)
     this.logJobCompleted(job, durationMs, result)
   }
 
   private async handleJobError(job: Job, error: unknown, startTime: number): Promise<void> {
-    const durationMs = Date.now() - startTime
+    const durationMs = elapsedMs(startTime)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
     await this.jobService.markFailed(
@@ -541,7 +548,7 @@ export class JobProcessorService implements OnModuleInit, OnModuleDestroy {
       metadata: {
         recoveredCount: count,
         staleThresholdMs: STALE_RUNNING_WINDOW_MS,
-        staleThresholdDate: staleThreshold.toISOString(),
+        staleThresholdDate: toIso(staleThreshold),
       },
     })
   }

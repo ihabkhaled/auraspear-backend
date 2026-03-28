@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay, nowDate } from '../../src/common/utils/date-time.utility'
 import { UebaService } from '../../src/modules/ueba/ueba.service'
 
 const mockAppLogger = {
@@ -32,9 +33,9 @@ function buildMockEntity(overrides: Record<string, unknown> = {}) {
     riskScore: 85,
     riskLevel: 'high',
     topAnomaly: 'Unusual login hours',
-    lastSeenAt: new Date('2025-06-01T18:00:00Z'),
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    updatedAt: new Date('2025-06-01T18:00:00Z'),
+    lastSeenAt: toDay('2025-06-01T18:00:00Z').toDate(),
+    createdAt: toDay('2025-01-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T18:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -55,9 +56,9 @@ function buildMockAnomaly(overrides: Record<string, unknown> = {}) {
     score: 92.5,
     description: 'Login from unusual geolocation',
     resolved: false,
-    detectedAt: new Date('2025-06-01T14:00:00Z'),
-    createdAt: new Date('2025-06-01T14:00:00Z'),
-    updatedAt: new Date('2025-06-01T14:00:00Z'),
+    detectedAt: toDay('2025-06-01T14:00:00Z').toDate(),
+    createdAt: toDay('2025-06-01T14:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T14:00:00Z').toDate(),
     entity: {
       entityName: 'jdoe@company.com',
       entityType: 'user',
@@ -74,9 +75,9 @@ function buildMockModel(overrides: Record<string, unknown> = {}) {
     modelType: 'anomaly_detection',
     status: 'active',
     accuracy: 0.95,
-    lastTrained: new Date('2025-05-15T00:00:00Z'),
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    updatedAt: new Date('2025-05-15T00:00:00Z'),
+    lastTrained: toDay('2025-05-15T00:00:00Z').toDate(),
+    createdAt: toDay('2025-01-01T00:00:00Z').toDate(),
+    updatedAt: toDay('2025-05-15T00:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -614,7 +615,7 @@ describe('UebaService', () => {
       repository.countAnomalies.mockResolvedValue(0)
       repository.countModels.mockResolvedValue(0)
 
-      const before = new Date()
+      const before = nowDate()
       await service.getUebaStats(TENANT_ID)
 
       const anomalyCall = repository.countAnomalies.mock.calls[0][0]

@@ -1,4 +1,5 @@
 import { ServiceStatus } from '../../src/common/enums'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { SystemHealthService } from '../../src/modules/system-health/system-health.service'
 
 const mockAppLogger = {
@@ -20,8 +21,8 @@ function buildMockHealthCheck(overrides: Record<string, unknown> = {}) {
     responseTimeMs: 45,
     errorMessage: null,
     metadata: { version: '4.7.0' },
-    lastCheckedAt: new Date('2025-06-01T12:00:00Z'),
-    createdAt: new Date('2025-06-01T12:00:00Z'),
+    lastCheckedAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -35,8 +36,8 @@ function buildMockMetric(overrides: Record<string, unknown> = {}) {
     value: 65.5,
     unit: 'percent',
     tags: { host: 'server-01' },
-    recordedAt: new Date('2025-06-01T12:00:00Z'),
-    createdAt: new Date('2025-06-01T12:00:00Z'),
+    recordedAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -277,9 +278,9 @@ describe('SystemHealthService', () => {
     })
 
     it('should return the latest checkedAt across all checks', async () => {
-      const latestDate = new Date('2025-06-02T00:00:00Z')
+      const latestDate = toDay('2025-06-02T00:00:00Z').toDate()
       repository.findLatestHealthChecks.mockResolvedValue([
-        buildMockHealthCheck({ lastCheckedAt: new Date('2025-06-01T00:00:00Z') }),
+        buildMockHealthCheck({ lastCheckedAt: toDay('2025-06-01T00:00:00Z').toDate() }),
         buildMockHealthCheck({ id: 'hc-002', lastCheckedAt: latestDate }),
       ])
 

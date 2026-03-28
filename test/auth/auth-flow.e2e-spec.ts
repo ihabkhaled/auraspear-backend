@@ -15,6 +15,7 @@ import {
   UserRole,
 } from '../../src/common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../src/common/services/app-logger.service'
+import { nowDate } from '../../src/common/utils/date-time.utility'
 import { AuthController } from '../../src/modules/auth/auth.controller'
 import { AuthRepository } from '../../src/modules/auth/auth.repository'
 import { AuthService } from '../../src/modules/auth/auth.service'
@@ -131,8 +132,8 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
     name: 'SOC Analyst',
     passwordHash,
     oidcSub: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: nowDate(),
+    updatedAt: nowDate(),
     lastLoginAt: null,
     isProtected: false,
   }
@@ -144,8 +145,8 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
       tenantId: PRIMARY_TENANT.id,
       role: UserRole.TENANT_ADMIN,
       status: MembershipStatus.ACTIVE,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: nowDate(),
+      updatedAt: nowDate(),
       tenant: PRIMARY_TENANT,
     },
     {
@@ -154,8 +155,8 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
       tenantId: SECONDARY_TENANT.id,
       role: UserRole.THREAT_HUNTER,
       status: MembershipStatus.ACTIVE,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: nowDate(),
+      updatedAt: nowDate(),
       tenant: SECONDARY_TENANT,
     },
   ]
@@ -191,7 +192,7 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
     }),
     updateLastLogin: jest.fn(async () => ({
       ...baseUser,
-      lastLoginAt: new Date(),
+      lastLoginAt: nowDate(),
     })),
     findUserByIdWithActiveMembershipCheck: jest.fn(async (userIdToFind: string) => {
       if (userIdToFind !== userId) {
@@ -244,8 +245,8 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
           revokedAt: null,
           revokedReason: null,
           expiresAt: data.expiresAt,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: nowDate(),
+          updatedAt: nowDate(),
         }
         families.set(family.id, family)
         return family
@@ -267,7 +268,7 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
           jtiHash: data.jtiHash,
           parentRotationId: data.parentRotationId ?? null,
           status: 'active',
-          issuedAt: new Date(),
+          issuedAt: nowDate(),
           usedAt: null,
           replacedAt: null,
           replayedAt: null,
@@ -450,7 +451,7 @@ function buildMockRepository(passwordHash: string): Record<string, jest.Mock> {
       const family = families.get(familyId)
       if (family) {
         family.status = 'expired'
-        family.updatedAt = new Date()
+        family.updatedAt = nowDate()
         families.set(family.id, family)
       }
 

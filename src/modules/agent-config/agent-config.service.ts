@@ -14,6 +14,7 @@ import { AiAgentId, ApprovalStatus, AppLogFeature, TokenResetPeriod } from '../.
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { isAfter, nowDate } from '../../common/utils/date-time.utility'
 import { encrypt } from '../../common/utils/encryption.utility'
 import { validateUrl } from '../../common/utils/ssrf.utility'
 import { OsintExecutorService } from '../osint-executor/osint-executor.service'
@@ -317,7 +318,7 @@ export class AgentConfigService {
     const record = await this.repository.updateApprovalStatus(id, tenantId, {
       status: dto.status,
       reviewedBy: actor,
-      reviewedAt: new Date(),
+      reviewedAt: nowDate(),
       comment: dto.comment ?? null,
     })
 
@@ -347,7 +348,7 @@ export class AgentConfigService {
       )
     }
 
-    if (new Date() > existing.expiresAt) {
+    if (isAfter(nowDate(), existing.expiresAt)) {
       throw new BusinessException(400, 'Approval has expired', 'errors.agentConfig.approvalExpired')
     }
 

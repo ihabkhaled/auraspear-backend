@@ -20,6 +20,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { UserRole } from '../../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
+import { nowDate, subtractDuration } from '../../../common/utils/date-time.utility'
 import type {
   AiWritebackParameters,
   AiWritebackResponse,
@@ -263,7 +264,7 @@ export class AiWritebackService {
       aiSummary: response.result.substring(0, AI_SUMMARY_MAX_LENGTH),
       aiConfidence: response.confidence ?? null,
       aiSeveritySuggestion: this.extractSeveritySuggestion(response.result),
-      aiLastRunAt: new Date(),
+      aiLastRunAt: nowDate(),
       aiLastExecutionId: sessionId,
       aiStatus: 'completed',
     })
@@ -307,8 +308,8 @@ export class AiWritebackService {
         agentId: params.agentId,
         triggerType: params.sourceModule.startsWith('scheduler:') ? 'scheduled' : 'manual',
         status: 'completed',
-        startedAt: new Date(Date.now() - (params.durationMs ?? 0)),
-        completedAt: new Date(),
+        startedAt: subtractDuration(nowDate(), params.durationMs ?? 0, 'millisecond'),
+        completedAt: nowDate(),
         durationMs: params.durationMs ?? null,
         providerKey: params.aiResponse.provider,
         modelKey: params.aiResponse.model,

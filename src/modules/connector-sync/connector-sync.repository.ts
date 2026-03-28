@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { Alert, ConnectorType, Prisma } from '@prisma/client'
 
@@ -31,7 +32,7 @@ export class ConnectorSyncRepository {
   ): Promise<Prisma.BatchPayload> {
     return this.prisma.connectorConfig.updateMany({
       where: { tenantId, type },
-      data: { lastSyncAt: new Date() },
+      data: { lastSyncAt: nowDate() },
     })
   }
 

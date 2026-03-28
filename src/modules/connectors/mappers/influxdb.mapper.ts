@@ -1,4 +1,5 @@
 import { mapAlertToOcsfFinding } from '../../../common/ocsf'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { OcsfSecurityFinding } from '../../../common/ocsf'
 
 /**
@@ -51,7 +52,7 @@ export function mapInfluxDatabaseToOcsf(
     title: extractInfluxTitle(event),
     description,
     severity: getInfluxDatabaseSeverity(level),
-    timestamp: (event['time'] as string) ?? (event['_time'] as string) ?? new Date().toISOString(),
+    timestamp: (event['time'] as string) ?? (event['_time'] as string) ?? toIso(),
     source: { product: 'InfluxDB', vendor: 'InfluxData' },
     tenantId,
     eventId: (event['id'] as string) ?? (event['_check_id'] as string) ?? undefined,

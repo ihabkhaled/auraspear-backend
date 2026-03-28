@@ -1,4 +1,5 @@
 import { BusinessException } from '../../src/common/exceptions/business.exception'
+import { toDay } from '../../src/common/utils/date-time.utility'
 import { AiAgentsService } from '../../src/modules/ai-agents/ai-agents.service'
 
 const mockAppLogger = {
@@ -61,8 +62,8 @@ function buildMockAgent(overrides: Record<string, unknown> = {}) {
     soulMd: '# Agent Soul\nYou are an alert triage assistant.',
     totalTokens: 50000,
     totalCost: 1.25,
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:00:00Z'),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:00:00Z').toDate(),
     ...overrides,
   }
 }
@@ -83,10 +84,10 @@ function buildMockSession(overrides: Record<string, unknown> = {}) {
     status: 'completed',
     tokensUsed: 1500,
     cost: 0.03,
-    startedAt: new Date('2025-06-01T12:00:00Z'),
-    endedAt: new Date('2025-06-01T12:05:00Z'),
-    createdAt: new Date('2025-06-01T12:00:00Z'),
-    updatedAt: new Date('2025-06-01T12:05:00Z'),
+    startedAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    endedAt: toDay('2025-06-01T12:05:00Z').toDate(),
+    createdAt: toDay('2025-06-01T12:00:00Z').toDate(),
+    updatedAt: toDay('2025-06-01T12:05:00Z').toDate(),
     ...overrides,
   }
 }

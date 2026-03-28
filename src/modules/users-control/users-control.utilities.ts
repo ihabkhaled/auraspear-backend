@@ -8,6 +8,7 @@ import { type UsersControlSessionSortField, UsersControlUserSortField } from './
 import { type SortOrder, UserSessionBrowser, UserSessionStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { toDay } from '../../common/utils/date-time.utility'
 import { buildOrderBy } from '../../common/utils/query.utility'
 import { isUserSessionOnline } from '../auth/auth-session.utilities'
 import type {
@@ -119,8 +120,8 @@ function compareNullableStrings(
 }
 
 function compareNullableDates(left: Date | null, right: Date | null, sortOrder: SortOrder): number {
-  const leftValue = left?.getTime() ?? 0
-  const rightValue = right?.getTime() ?? 0
+  const leftValue = left ? toDay(left).valueOf() : 0
+  const rightValue = right ? toDay(right).valueOf() : 0
   const comparison = leftValue - rightValue
 
   return sortOrder === 'asc' ? comparison : comparison * -1
@@ -178,7 +179,7 @@ export function mapUsersControlSummary(
 
 function getLatestSessionDate(sessions: UsersControlUserRecord['sessions']): Date | null {
   const sorted = [...sessions].sort(
-    (left, right) => right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
+    (left, right) => toDay(right.lastSeenAt).valueOf() - toDay(left.lastSeenAt).valueOf()
   )
   return sorted[0]?.lastSeenAt ?? null
 }
@@ -230,7 +231,7 @@ export function mapUsersControlUser(
 
 function toNullableDate(value: Date | string | null): Date | null {
   if (!value) return null
-  return value instanceof Date ? value : new Date(value)
+  return value instanceof Date ? value : toDay(value).toDate()
 }
 
 function getUserSortComparator(

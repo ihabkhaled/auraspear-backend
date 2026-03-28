@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CardVariant } from '../../../common/enums'
+import { daysAgo, toIso } from '../../../common/utils/date-time.utility'
 import { sanitizeEsQueryString } from '../../../common/utils/es-sanitize.utility'
 import { GraylogService } from '../../connectors/services/graylog.service'
 import {
@@ -189,8 +190,8 @@ export class GraylogWorkspaceStrategy implements ConnectorWorkspaceStrategy {
     if (request.from ?? request.to) {
       filter.timerange = {
         type: 'absolute',
-        from: request.from ?? new Date(Date.now() - 86400000).toISOString(),
-        to: request.to ?? new Date().toISOString(),
+        from: request.from ?? toIso(daysAgo(1)),
+        to: request.to ?? toIso(),
       }
     }
 

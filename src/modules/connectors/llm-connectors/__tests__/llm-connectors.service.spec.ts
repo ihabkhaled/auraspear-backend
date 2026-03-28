@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config'
 import { Test } from '@nestjs/testing'
 import { BusinessException } from '../../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../../common/services/app-logger.service'
+import { toDay } from '../../../../common/utils/date-time.utility'
 import { LlmApisService } from '../../services/llm-apis.service'
 import { REDACTED } from '../llm-connectors.constants'
 import { LlmConnectorsRepository } from '../llm-connectors.repository'
@@ -32,8 +33,8 @@ function buildConnector(overrides?: Partial<LlmConnector>): LlmConnector {
     lastTestAt: null,
     lastTestOk: null,
     lastError: null,
-    createdAt: new Date('2025-01-01'),
-    updatedAt: new Date('2025-01-02'),
+    createdAt: toDay('2025-01-01T00:00:00.000Z').toDate(),
+    updatedAt: toDay('2025-01-02T00:00:00.000Z').toDate(),
     ...overrides,
   }
 }

@@ -4,6 +4,7 @@ import { PromptRegistryRepository } from './prompt-registry.repository'
 import { AiFeatureKey, AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
+import { toIso } from '../../../common/utils/date-time.utility'
 import type { CreatePromptDto } from './dto/create-prompt.dto'
 import type { UpdatePromptDto } from './dto/update-prompt.dto'
 import type { PromptTemplateResponse } from './prompt-registry.types'
@@ -196,9 +197,9 @@ export class PromptRegistryService {
       isActive: template.isActive,
       createdBy: template.createdBy,
       reviewedBy: template.reviewedBy,
-      reviewedAt: template.reviewedAt?.toISOString() ?? null,
-      createdAt: template.createdAt.toISOString(),
-      updatedAt: template.updatedAt.toISOString(),
+      reviewedAt: template.reviewedAt ? toIso(template.reviewedAt) : null,
+      createdAt: toIso(template.createdAt),
+      updatedAt: toIso(template.updatedAt),
     }
   }
 }

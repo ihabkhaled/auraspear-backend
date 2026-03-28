@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { nowDate } from '../../common/utils/date-time.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { EntityRecord, EntityRelationRecord } from './entities.types'
 import type { Prisma } from '@prisma/client'
@@ -108,7 +109,7 @@ export class EntitiesRepository {
     value: string,
     data: { displayName?: string; lastSeen?: Date }
   ): Promise<EntityRecord> {
-    const lastSeen = data.lastSeen ?? new Date()
+    const lastSeen = data.lastSeen ?? nowDate()
     return this.prisma.entity.upsert({
       where: { tenantId_type_value: { tenantId, type, value } },
       create: {

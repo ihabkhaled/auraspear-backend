@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AiAgentsRepository } from './ai-agents.repository'
+import { nowMs, elapsedMs } from '../../common/utils/date-time.utility'
 import { AI_COST_PER_1K_INPUT_TOKENS, AI_COST_PER_1K_OUTPUT_TOKENS } from '../ai/ai.constants'
 import { AiService } from '../ai/ai.service'
 import { AiWritebackService } from '../ai/writeback/ai-writeback.service'
@@ -44,7 +45,7 @@ export class AiAgentTaskHandler {
       throw new Error('agentId, sessionId, prompt, actorUserId, and actorEmail are required')
     }
 
-    const startedAt = Date.now()
+    const startedAt = nowMs()
     const agent = await this.repository.findFirstWithDetails({
       id: agentId,
       tenantId: job.tenantId,
@@ -85,7 +86,7 @@ export class AiAgentTaskHandler {
         connector,
       })
 
-      const durationMs = Date.now() - startedAt
+      const durationMs = elapsedMs(startedAt)
       const tokensUsed = response.tokensUsed.input + response.tokensUsed.output
       const estimatedCost =
         (response.tokensUsed.input / 1000) * AI_COST_PER_1K_INPUT_TOKENS +
@@ -105,7 +106,7 @@ export class AiAgentTaskHandler {
 
       return { agentId, sessionId, model: response.model, tokensUsed, estimatedCost, durationMs }
     } catch (error) {
-      const durationMs = Date.now() - startedAt
+      const durationMs = elapsedMs(startedAt)
       const message = error instanceof Error ? error.message : 'Unknown AI agent execution error'
       await this.repository.markSessionFailed({
         sessionId,
@@ -124,7 +125,7 @@ export class AiAgentTaskHandler {
   ): Promise<Record<string, unknown>> {
     const agentSlug = payload.agentId ?? 'unknown'
     const prompt = this.buildSystemPrompt(payload)
-    const startedAt = Date.now()
+    const startedAt = nowMs()
 
     this.logger.log(
       `System-triggered agent task: ${agentSlug} (${payload.actionType ?? 'execute'}) for tenant ${job.tenantId}`
@@ -143,7 +144,7 @@ export class AiAgentTaskHandler {
         sessionId
       )
 
-      const durationMs = Date.now() - startedAt
+      const durationMs = elapsedMs(startedAt)
       const tokensUsed = response.tokensUsed.input + response.tokensUsed.output
 
       await this.finalizeSystemSession(
@@ -176,7 +177,7 @@ export class AiAgentTaskHandler {
         durationMs,
       }
     } catch (error) {
-      const durationMs = Date.now() - startedAt
+      const durationMs = elapsedMs(startedAt)
       await this.handleSystemSessionFailure(agent, sessionId, agentSlug, error, durationMs)
       throw error
     }

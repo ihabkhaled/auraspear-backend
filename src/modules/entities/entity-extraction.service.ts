@@ -4,6 +4,7 @@ import { buildEntityListFromAlert, mapMispIocTypeToEntityType } from './entities
 import { AppLogFeature, CaseArtifactType, EntityRelationType, EntityType } from '../../common/enums'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { nowDate } from '../../common/utils/date-time.utility'
 import type {
   AlertExtractionInput,
   ArtifactExtractionInput,
@@ -147,7 +148,7 @@ export class EntityExtractionService {
     try {
       await this.entitiesRepository.upsertByTypeAndValue(tenantId, entity.type, entity.value, {
         displayName: entity.displayName,
-        lastSeen: new Date(),
+        lastSeen: nowDate(),
       })
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
