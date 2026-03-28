@@ -326,7 +326,7 @@ src/modules/<module>/
 | `prefer-number-properties`          | **error** | Use `Number.isNaN()`, `Number.parseInt()`, etc.                                                                     |
 | `prefer-math-trunc`                 | **error** | Use `Math.trunc()` instead of `~~x`                                                                                 |
 | `no-zero-fractions`                 | **error** | No `1.0` — just write `1`                                                                                           |
-| `prefer-date-now`                   | **error** | Use `Date.now()` instead of `new Date().getTime()`                                                                  |
+| `prefer-date-now`                   | **off**   | Disabled — raw `Date.now()` banned; use `nowMs()` from `date-time.utility.ts`                                       |
 | `prefer-type-error`                 | **error** | Throw `TypeError` for type-checking failures                                                                        |
 | `prefer-regexp-test`                | **error** | Use `.test()` instead of `.match()` for boolean checks                                                              |
 | `prefer-spread`                     | **warn**  | Use `[...arr]` instead of `Array.from(arr)`                                                                         |

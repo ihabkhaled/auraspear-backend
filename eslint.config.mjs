@@ -269,7 +269,7 @@ export default tseslint.config(
       'unicorn/no-zero-fractions': 'error',
 
       // Prefer modern patterns
-      'unicorn/prefer-date-now': 'error',
+      'unicorn/prefer-date-now': 'off', // raw Date.now() banned — use nowMs() from date-time.utility
       'unicorn/prefer-type-error': 'error',
       'unicorn/prefer-regexp-test': 'error',
       'unicorn/prefer-spread': 'warn',

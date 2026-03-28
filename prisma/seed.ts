@@ -65,6 +65,13 @@ import { PERMISSION_DEFINITIONS } from '../src/modules/role-settings/constants/p
 import { createHash, randomUUID } from 'node:crypto'
 import pino from 'pino'
 import { encrypt } from '../src/common/utils/encryption.utility'
+import {
+  addDuration,
+  getYear,
+  nowDate,
+  subtractDuration,
+  toIso,
+} from '../src/common/utils/date-time.utility'
 
 const logger = pino({
   transport: { target: 'pino-pretty' },
@@ -115,8 +122,8 @@ async function seedUserSession(
 ): Promise<void> {
   const familyId = buildDeterministicUuid(`family:${tenantId}:${userId}:${sessionKey}`)
   const currentAccessJti = buildDeterministicUuid(`access:${tenantId}:${userKey}:${sessionKey}`)
-  const currentAccessExpiresAt = new Date(lastSeenAt.getTime() + 15 * 60 * 1000)
-  const refreshExpiresAt = new Date(lastLoginAt.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const currentAccessExpiresAt = addDuration(lastSeenAt, 15, 'minute')
+  const refreshExpiresAt = addDuration(lastLoginAt, 7, 'day')
   const jtiHash = buildDeterministicJtiHash(`rotation:${tenantId}:${userKey}:${sessionKey}`)
 
   await prisma.refreshTokenFamily.upsert({
@@ -1262,7 +1269,7 @@ function randomIp(): string {
 }
 
 function randomDate(daysBack: number): Date {
-  return new Date(Date.now() - Math.floor(Math.random() * daysBack * 86_400_000))
+  return subtractDuration(nowDate(), Math.floor(Math.random() * daysBack), 'day')
 }
 
 function randomItem<T>(arr: T[]): T {
@@ -1393,9 +1400,9 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
           ? (buildRawEvent(template, agentName, srcIp, dstIp, timestamp) as Prisma.InputJsonValue)
           : Prisma.DbNull,
         acknowledgedBy: hasAcknowledged ? `analyst@${profile.slug}.io` : null,
-        acknowledgedAt: hasAcknowledged ? new Date(timestamp.getTime() + 300_000) : null,
+        acknowledgedAt: hasAcknowledged ? addDuration(timestamp, 5, 'minute') : null,
         closedBy: hasClosed ? `analyst@${profile.slug}.io` : null,
-        closedAt: hasClosed ? new Date(timestamp.getTime() + 3_600_000) : null,
+        closedAt: hasClosed ? addDuration(timestamp, 1, 'hour') : null,
         resolution: hasResolution ? randomItem(RESOLUTION_TEXTS) : null,
       },
       create: {
@@ -1418,9 +1425,9 @@ async function seedAlerts(tenantId: string, profile: TenantProfile): Promise<voi
           ? (buildRawEvent(template, agentName, srcIp, dstIp, timestamp) as Prisma.InputJsonValue)
           : undefined,
         acknowledgedBy: hasAcknowledged ? `analyst@${profile.slug}.io` : null,
-        acknowledgedAt: hasAcknowledged ? new Date(timestamp.getTime() + 300_000) : null,
+        acknowledgedAt: hasAcknowledged ? addDuration(timestamp, 5, 'minute') : null,
         closedBy: hasClosed ? `analyst@${profile.slug}.io` : null,
-        closedAt: hasClosed ? new Date(timestamp.getTime() + 3_600_000) : null,
+        closedAt: hasClosed ? addDuration(timestamp, 1, 'hour') : null,
         resolution: hasResolution ? randomItem(RESOLUTION_TEXTS) : null,
       },
     })
@@ -1433,7 +1440,7 @@ async function seedCases(
   cycleIds: string[],
   assignableUserIds: string[]
 ): Promise<void> {
-  const year = new Date().getFullYear()
+  const year = getYear()
   const templates = pickByIndices(CASE_TEMPLATES, profile.caseTemplateIndices)
 
   for (const [idx, template] of templates.entries()) {
@@ -1754,7 +1761,7 @@ function deterministicPick<T>(arr: T[], seed: number): T {
 function deterministicDate(seed: number, maxDaysBack: number): Date {
   const daysBack = deterministicRandom(seed) * maxDaysBack
   const hoursOffset = deterministicRandom(seed + 1000) * 24
-  return new Date(Date.now() - daysBack * 86_400_000 - hoursOffset * 3_600_000)
+  return subtractDuration(subtractDuration(nowDate(), daysBack, 'day'), hoursOffset, 'hour')
 }
 
 function deterministicInt(seed: number, min: number, max: number): number {
@@ -1856,7 +1863,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
       return
     }
 
-    const year = new Date().getFullYear()
+    const year = getYear()
     const incidents = [
       {
         title: 'Ransomware Outbreak on Finance Servers',
@@ -2058,7 +2065,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
       const inc = incidents[i]!
       const incidentNumber = `INC-${year}-${String(globalIncidentCounter).padStart(4, '0')}`
 
-      const createdAt = new Date(Date.now() - (incidents.length - i) * 86_400_000 * 2)
+      const createdAt = subtractDuration(nowDate(), (incidents.length - i) * 2, 'day')
       const timelineCount = 3 + (i % 4) // 3-6 entries
 
       await prisma.incident.upsert({
@@ -2075,7 +2082,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
           createdBy: `analyst.l2@${tenantSlug}.io`,
           resolvedAt:
             inc.status === IncidentStatus.resolved || inc.status === IncidentStatus.closed
-              ? new Date(createdAt.getTime() + 86_400_000 * 3)
+              ? addDuration(createdAt, 3, 'day')
               : null,
         },
         create: {
@@ -2091,7 +2098,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
           createdBy: `analyst.l2@${tenantSlug}.io`,
           resolvedAt:
             inc.status === IncidentStatus.resolved || inc.status === IncidentStatus.closed
-              ? new Date(createdAt.getTime() + 86_400_000 * 3)
+              ? addDuration(createdAt, 3, 'day')
               : null,
           createdAt,
           timeline: {
@@ -2101,7 +2108,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
                 event: tmpl.event,
                 actorType: tmpl.actorType,
                 actorName: tmpl.actorName,
-                timestamp: new Date(createdAt.getTime() + j * 3_600_000),
+                timestamp: addDuration(createdAt, j, 'hour'),
               }
             }),
           },
@@ -2119,7 +2126,7 @@ async function seedIncidents(tenantId: string, tenantSlug: string): Promise<void
 
 async function seedCorrelationRules(tenantId: string, tenantSlug: string): Promise<void> {
   try {
-    const year = new Date().getFullYear()
+    const year = getYear()
     const rules = [
       {
         title: 'Multiple Failed Logins Followed by Success',
@@ -3171,11 +3178,13 @@ async function seedAiAgents(tenantId: string, tenantSlug: string): Promise<void>
                 cost: s.cost,
                 durationMs: s.durationMs,
                 status: s.status,
-                startedAt: new Date(Date.now() - (agent.sessions.length - idx) * 3_600_000),
+                startedAt: subtractDuration(nowDate(), agent.sessions.length - idx, 'hour'),
                 completedAt:
                   s.status !== AiAgentSessionStatus.running
-                    ? new Date(
-                        Date.now() - (agent.sessions.length - idx) * 3_600_000 + s.durationMs
+                    ? addDuration(
+                        subtractDuration(nowDate(), agent.sessions.length - idx, 'hour'),
+                        s.durationMs,
+                        'millisecond'
                       )
                     : null,
               })),
@@ -3406,7 +3415,7 @@ async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
         }
 
         const trendData = Array.from({ length: 30 }, (_, i) => ({
-          date: new Date(Date.now() - (29 - i) * 86_400_000).toISOString().slice(0, 10),
+          date: toIso(subtractDuration(nowDate(), 29 - i, 'day')).slice(0, 10),
           score: Math.max(0, entity.risk + Math.sin(i * 0.5) * 15),
         }))
 
@@ -3532,7 +3541,7 @@ async function seedUeba(tenantId: string, tenantSlug: string): Promise<void> {
 
 async function seedAttackPaths(tenantId: string, tenantSlug: string): Promise<void> {
   try {
-    const year = new Date().getFullYear()
+    const year = getYear()
     const paths = [
       {
         title: 'External Phishing to Domain Admin',
@@ -4103,7 +4112,7 @@ async function seedSoar(tenantId: string, tenantSlug: string): Promise<void> {
                 : execStatus === SoarExecutionStatus.failed
                   ? Math.max(1, totalSteps - 2)
                   : 0
-          const startedAt = new Date(Date.now() - (execCount - e) * 86_400_000)
+          const startedAt = subtractDuration(nowDate(), execCount - e, 'day')
 
           await prisma.soarExecution.create({
             data: {
@@ -4119,7 +4128,7 @@ async function seedSoar(tenantId: string, tenantSlug: string): Promise<void> {
               completedAt:
                 execStatus === SoarExecutionStatus.running
                   ? null
-                  : new Date(startedAt.getTime() + 30_000 * totalSteps),
+                  : addDuration(startedAt, 30_000 * totalSteps, 'millisecond'),
               stepsCompleted,
               totalSteps,
               output:
@@ -4782,7 +4791,7 @@ async function seedSystemHealth(tenantId: string, tenantSlug: string): Promise<v
             serviceType: hc.serviceType,
             status: hc.status,
             responseTimeMs: hc.responseTimeMs,
-            lastCheckedAt: new Date(),
+            lastCheckedAt: nowDate(),
             errorMessage: 'error' in hc ? (hc as { error: string }).error : null,
             metadata: { version: '1.0.0', region: 'us-east-1' } as Prisma.InputJsonValue,
           },
@@ -4879,7 +4888,7 @@ async function seedSystemHealth(tenantId: string, tenantSlug: string): Promise<v
               value: m.value,
               unit: m.unit,
               tags: { host: 'soc-primary', environment: 'production' } as Prisma.InputJsonValue,
-              recordedAt: new Date(),
+              recordedAt: nowDate(),
             },
           })
         } catch (metricError) {
@@ -5043,7 +5052,7 @@ async function seedNormalization(tenantId: string, tenantSlug: string): Promise<
 
 async function seedDetectionRules(tenantId: string, tenantSlug: string): Promise<void> {
   try {
-    const year = new Date().getFullYear()
+    const year = getYear()
     const rules = [
       {
         name: 'Failed Login Threshold',
@@ -5649,7 +5658,7 @@ async function seedNotifications(
     const caseRecord = template.needsCase && cases.length > 0 ? cases[i % cases.length] : undefined
 
     const hoursAgo = (i + 1) * 2
-    const createdAt = new Date(Date.now() - hoursAgo * 60 * 60 * 1000)
+    const createdAt = subtractDuration(nowDate(), hoursAgo, 'hour')
     const isRead = i > NOTIFICATION_TARGET_COUNT / 2
 
     notifications.push({
@@ -5662,7 +5671,7 @@ async function seedNotifications(
       entityType: template.entityType,
       entityId: caseRecord?.id ?? recipientId,
       caseId: caseRecord?.id ?? null,
-      readAt: isRead ? new Date(createdAt.getTime() + 30 * 60 * 1000) : null,
+      readAt: isRead ? addDuration(createdAt, 30, 'minute') : null,
       createdAt,
     })
   }
@@ -5674,13 +5683,13 @@ async function seedNotifications(
 // ─── Main seed function ────────────────────────────────────────
 
 async function seedCaseCycles(tenantId: string, profile: TenantProfile): Promise<string[]> {
-  const now = new Date()
+  const now = nowDate()
   const cycleIds: string[] = []
 
   for (const template of CYCLE_TEMPLATES) {
     try {
-      const startDate = new Date(now.getTime() - template.daysAgo * 24 * 60 * 60 * 1000)
-      const endDate = new Date(startDate.getTime() + template.durationDays * 24 * 60 * 60 * 1000)
+      const startDate = subtractDuration(now, template.daysAgo, 'day')
+      const endDate = addDuration(startDate, template.durationDays, 'day')
       const cycleName = `[${profile.slug}] ${template.name}`
 
       const existingCycle = await prisma.caseCycle.findFirst({
@@ -6624,11 +6633,11 @@ async function seedEntities(tenantId: string, tenantSlug: string): Promise<void>
           value: entity.value,
           displayName: entity.displayName,
           riskScore: entity.riskScore,
-          lastSeen: new Date(),
+          lastSeen: nowDate(),
         },
         update: {
           riskScore: entity.riskScore,
-          lastSeen: new Date(),
+          lastSeen: nowDate(),
           ...(entity.displayName ? { displayName: entity.displayName } : {}),
         },
       })
@@ -6795,8 +6804,8 @@ async function main(): Promise<void> {
     UserSessionClientType.desktop,
     '10.99.0.10',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 Version/17.3 Safari/605.1.15',
-    new Date(Date.now() - 15 * 60 * 1000),
-    new Date(Date.now() - 2 * 60 * 1000)
+    subtractDuration(nowDate(), 15, 'minute'),
+    subtractDuration(nowDate(), 2, 'minute')
   )
 
   logger.info(
@@ -6904,7 +6913,7 @@ async function main(): Promise<void> {
 
       for (const [userIndex, userDef] of userDefs.entries()) {
         const isProtected = userDef.role === UserRole.TENANT_ADMIN
-        const seededLastLoginAt = new Date(Date.now() - (userIndex + 1) * 45 * 60 * 1000)
+        const seededLastLoginAt = subtractDuration(nowDate(), (userIndex + 1) * 45, 'minute')
 
         const createdUser = await prisma.user.upsert({
           where: { email: userDef.email },
@@ -6967,7 +6976,7 @@ async function main(): Promise<void> {
           `10.10.${userIndex + 10}.15`,
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36',
           seededLastLoginAt,
-          new Date(Date.now() - (userIndex + 1) * 6 * 60 * 1000)
+          subtractDuration(nowDate(), (userIndex + 1) * 6, 'minute')
         )
 
         if (userDef.role === UserRole.TENANT_ADMIN || userDef.role === UserRole.SOC_ANALYST_L2) {
@@ -6980,8 +6989,8 @@ async function main(): Promise<void> {
             UserSessionClientType.mobile,
             `10.20.${userIndex + 20}.25`,
             'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/122.0 Mobile Safari/537.36',
-            new Date(seededLastLoginAt.getTime() - 2 * 60 * 60 * 1000),
-            new Date(Date.now() - (userIndex + 1) * 18 * 60 * 1000)
+            subtractDuration(seededLastLoginAt, 2, 'hour'),
+            subtractDuration(nowDate(), (userIndex + 1) * 18, 'minute')
           )
         }
       }
