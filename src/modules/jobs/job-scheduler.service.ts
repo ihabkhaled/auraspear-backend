@@ -58,6 +58,8 @@ export class JobSchedulerService {
   private async scheduleDetectionRules(): Promise<number> {
     this.log.debug('scheduleDetectionRules', '', 'Starting detection rule scheduling')
 
+    // TODO: Extract to DetectionRulesRepository.findActiveRules() — direct Prisma
+    // access in services violates the repository pattern.
     const activeRules = await this.prisma.detectionRule.findMany({
       where: { status: 'active' },
       select: { id: true, tenantId: true, name: true },
@@ -84,6 +86,8 @@ export class JobSchedulerService {
   private async scheduleCorrelationRules(): Promise<number> {
     this.log.debug('scheduleCorrelationRules', '', 'Starting correlation rule scheduling')
 
+    // TODO: Extract to CorrelationRulesRepository.findActiveRules() — direct Prisma
+    // access in services violates the repository pattern.
     const activeRules = await this.prisma.correlationRule.findMany({
       where: { status: 'active' },
       select: { id: true, tenantId: true, title: true },

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { AttackPath, Prisma } from '@prisma/client'
 
@@ -136,19 +137,6 @@ export class AttackPathsRepository {
       select: { pathNumber: true },
     })
 
-    let nextNumber = 1
-
-    if (lastPath?.pathNumber) {
-      const parts = lastPath.pathNumber.split('-')
-      const lastSegment = parts[parts.length - 1]
-      if (lastSegment) {
-        const parsed = Number.parseInt(lastSegment, 10)
-        if (!Number.isNaN(parsed)) {
-          nextNumber = parsed + 1
-        }
-      }
-    }
-
-    return `AP-${year}-${String(nextNumber).padStart(4, '0')}`
+    return buildNextSequenceNumber(lastPath?.pathNumber, prefix, 4)
   }
 }

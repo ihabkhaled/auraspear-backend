@@ -1,5 +1,6 @@
+import { HEALTH_CHECK_SORT_FIELDS, METRIC_SORT_FIELDS } from './system-health.constants'
 import { ServiceStatus } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   HealthCheckRecord,
   MetricRecord,
@@ -35,20 +36,7 @@ export function buildHealthCheckOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SystemHealthCheckOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'serviceName':
-      return { serviceName: order }
-    case 'status':
-      return { status: order }
-    case 'responseTimeMs':
-      return { responseTimeMs: order }
-    case 'serviceType':
-      return { serviceType: order }
-    case 'checkedAt':
-    default:
-      return { lastCheckedAt: order }
-  }
+  return buildOrderBy(HEALTH_CHECK_SORT_FIELDS, 'lastCheckedAt', sortBy, sortOrder)
 }
 
 export function buildMetricListWhere(
@@ -73,16 +61,7 @@ export function buildMetricOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SystemMetricOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'metricName':
-      return { metricName: order }
-    case 'value':
-      return { value: order }
-    case 'recordedAt':
-    default:
-      return { recordedAt: order }
-  }
+  return buildOrderBy(METRIC_SORT_FIELDS, 'recordedAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */

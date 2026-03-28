@@ -131,3 +131,13 @@ export interface AuthorizedTenantContext {
   tenantSlug: string
   role: UserRole
 }
+
+export interface UserWithMembershipSummary {
+  id: string
+  email: string
+  memberships: Array<{
+    tenantId: string
+    role: string
+    tenant: { id: string; name: string; slug: string }
+  }>
+}

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   CaseCommentWithMentions,
@@ -216,15 +217,7 @@ export class CasesRepository {
         orderBy: { caseNumber: 'desc' },
         select: { caseNumber: true },
       })
-      let nextSequence = 1
-      if (latestCase) {
-        const parts = latestCase.caseNumber.split('-')
-        const lastPart = parts[2]
-        if (lastPart) {
-          nextSequence = Number.parseInt(lastPart, 10) + 1
-        }
-      }
-      const caseNumber = `${prefix}${String(nextSequence).padStart(3, '0')}`
+      const caseNumber = buildNextSequenceNumber(latestCase?.caseNumber, prefix, 3)
 
       const newCase = await tx.case.create({
         data: {

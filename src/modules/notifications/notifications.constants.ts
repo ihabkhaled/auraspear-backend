@@ -1,5 +1,16 @@
-import { NotificationPreferenceField, NotificationTitle } from './notifications.enums'
+import {
+  NotificationPreferenceField,
+  NotificationSortField,
+  NotificationTitle,
+} from './notifications.enums'
 import { NotificationType } from '../../common/enums'
+
+export const NOTIFICATION_SORT_FIELDS: Record<string, string> = {
+  [NotificationSortField.TYPE]: 'type',
+  [NotificationSortField.TITLE]: 'title',
+  [NotificationSortField.IS_READ]: 'readAt',
+  createdAt: 'createdAt',
+}
 
 export const NOTIFICATION_TITLE_BY_TYPE = new Map<NotificationType, NotificationTitle>([
   [NotificationType.CASE_ASSIGNED, NotificationTitle.CASE_ASSIGNED],

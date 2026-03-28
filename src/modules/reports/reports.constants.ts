@@ -37,3 +37,13 @@ export const AI_REPORT_TIME_RANGE_DAYS: Record<string, number> = {
   '30d': 30,
   '90d': 90,
 }
+
+export const REPORT_SORT_FIELDS: Record<string, string> = {
+  createdAt: 'createdAt',
+  generatedAt: 'generatedAt',
+  module: 'module',
+  name: 'name',
+  type: 'type',
+  status: 'status',
+  format: 'format',
+}

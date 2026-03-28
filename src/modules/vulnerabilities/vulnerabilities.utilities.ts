@@ -1,5 +1,10 @@
-import { VALID_PATCH_STATUSES, VALID_SEVERITIES } from './vulnerabilities.constants'
-import { PatchStatus, SortOrder } from '../../common/enums'
+import {
+  VALID_PATCH_STATUSES,
+  VALID_SEVERITIES,
+  VULNERABILITY_SORT_FIELDS,
+} from './vulnerabilities.constants'
+import { PatchStatus } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type { VulnerabilityRecord, VulnerabilityStats } from './vulnerabilities.types'
 import type {
@@ -65,20 +70,12 @@ export function buildVulnerabilityOrderBy(
   sortBy: string,
   sortOrder: 'asc' | 'desc'
 ): Prisma.VulnerabilityOrderByWithRelationInput {
-  switch (sortBy) {
-    case 'cvssScore':
-      return { cvssScore: sortOrder }
-    case 'severity':
-      return { severity: sortOrder }
-    case 'affectedHosts':
-      return { affectedHosts: sortOrder }
-    case 'cveId':
-      return { cveId: sortOrder }
-    case 'createdAt':
-      return { createdAt: sortOrder }
-    default:
-      return { cvssScore: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    VULNERABILITY_SORT_FIELDS,
+    'cvssScore',
+    sortBy,
+    sortOrder
+  ) as Prisma.VulnerabilityOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */

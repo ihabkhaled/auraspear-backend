@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { AiChatRepository } from './ai-chat.repository'
 import { AiOutputFormat } from '../../../common/enums'
 import { BusinessException } from '../../../common/exceptions/business.exception'
-import { PrismaService } from '../../../prisma/prisma.service'
 import { ConnectorsService } from '../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../connectors/services/llm-apis.service'
@@ -13,7 +13,7 @@ export class AiChatService {
   private readonly logger = new Logger(AiChatService.name)
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repository: AiChatRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly llmConnectorsService: LlmConnectorsService,
     private readonly llmApisService: LlmApisService,
@@ -32,10 +32,8 @@ export class AiChatService {
       where['lastActivityAt'] = { lt: new Date(cursor) }
     }
 
-    const userSelect = { id: true, name: true, email: true }
-    const threads = await this.prisma.aiChatThread.findMany({
+    const threads = await this.repository.findThreads({
       where,
-      include: { user: { select: userSelect } },
       orderBy: { lastActivityAt: 'desc' },
       take: limit + 1,
     })
@@ -113,18 +111,15 @@ export class AiChatService {
       )
     }
 
-    return this.prisma.aiChatThread.create({
-      data: {
-        tenantId,
-        userId,
-        connectorId,
-        title: null,
-        model,
-        provider,
-        outputFormat: AiOutputFormat.PLAIN_TEXT,
-        systemPrompt: options.systemPrompt ?? null,
-      },
-      include: { user: { select: { id: true, name: true, email: true } } },
+    return this.repository.createThread({
+      tenantId,
+      userId,
+      connectorId,
+      title: null,
+      model,
+      provider,
+      outputFormat: AiOutputFormat.PLAIN_TEXT,
+      systemPrompt: options.systemPrompt ?? null,
     })
   }
 
@@ -147,7 +142,7 @@ export class AiChatService {
 
     const orderDir = direction === 'older' ? 'desc' : 'asc'
 
-    const messages = await this.prisma.aiChatMessage.findMany({
+    const messages = await this.repository.findMessages({
       where,
       orderBy: { createdAt: orderDir as 'asc' | 'desc' },
       take: limit + 1,
@@ -201,26 +196,21 @@ export class AiChatService {
         model: overrides.model,
       })
     } else if (overrides?.model && overrides.model !== thread.model) {
-      await this.prisma.aiChatThread.update({
-        where: { id: threadId },
-        data: { model: overrides.model },
-      })
+      await this.repository.updateThread(threadId, { model: overrides.model })
     }
 
     // Persist user message
-    await this.prisma.aiChatMessage.create({
-      data: {
-        threadId,
-        tenantId,
-        role: 'user',
-        content: content.trim(),
-        sequenceNum: nextSeq,
-        status: 'completed',
-      },
+    await this.repository.createMessage({
+      threadId,
+      tenantId,
+      role: 'user',
+      content: content.trim(),
+      sequenceNum: nextSeq,
+      status: 'completed',
     })
 
     // Build conversation history (last 20 messages)
-    const recentMessages = await this.prisma.aiChatMessage.findMany({
+    const recentMessages = await this.repository.findMessages({
       where: { threadId },
       orderBy: { sequenceNum: 'desc' },
       take: 20,
@@ -320,35 +310,30 @@ export class AiChatService {
     const durationMs = Date.now() - startTime
 
     // Persist assistant response with full model attribution
-    const assistantMessage = await this.prisma.aiChatMessage.create({
-      data: {
-        threadId,
-        tenantId,
-        role: 'assistant',
-        content: responseText,
-        requestedModel,
-        requestedProvider,
-        model: actualModel,
-        provider: actualProvider,
-        fallbackModel,
-        fallbackReason,
-        status: messageStatus,
-        inputTokens,
-        outputTokens,
-        durationMs,
-        sequenceNum: nextSeq + 1,
-      },
+    const assistantMessage = await this.repository.createMessage({
+      threadId,
+      tenantId,
+      role: 'assistant',
+      content: responseText,
+      requestedModel,
+      requestedProvider,
+      model: actualModel,
+      provider: actualProvider,
+      fallbackModel,
+      fallbackReason,
+      status: messageStatus,
+      inputTokens,
+      outputTokens,
+      durationMs,
+      sequenceNum: nextSeq + 1,
     })
 
     // Update thread metadata (do NOT overwrite model/provider — preserve user's connector choice)
-    await this.prisma.aiChatThread.update({
-      where: { id: threadId },
-      data: {
-        messageCount: nextSeq + 1,
-        totalTokensUsed: { increment: inputTokens + outputTokens },
-        lastActivityAt: new Date(),
-        title: thread.title ?? this.generateTitle(content),
-      },
+    await this.repository.updateThread(threadId, {
+      messageCount: nextSeq + 1,
+      totalTokensUsed: { increment: inputTokens + outputTokens },
+      lastActivityAt: new Date(),
+      title: thread.title ?? this.generateTitle(content),
     })
 
     // Trigger async memory extraction
@@ -406,19 +391,12 @@ export class AiChatService {
       data.model = settings.model
     }
 
-    return this.prisma.aiChatThread.update({
-      where: { id: threadId },
-      data,
-      include: { user: { select: { id: true, name: true, email: true } } },
-    })
+    return this.repository.updateThread(threadId, data, { includeUser: true })
   }
 
   async archiveThread(tenantId: string, userId: string, threadId: string): Promise<void> {
     await this.verifyThreadAccess(tenantId, userId, threadId)
-    await this.prisma.aiChatThread.update({
-      where: { id: threadId },
-      data: { isArchived: true },
-    })
+    await this.repository.updateThread(threadId, { isArchived: true })
   }
 
   private async dispatchMemoryExtraction(
@@ -427,14 +405,12 @@ export class AiChatService {
     threadId: string
   ): Promise<void> {
     try {
-      await this.prisma.job.create({
-        data: {
-          tenantId,
-          type: 'memory_extraction' as never,
-          status: 'pending',
-          payload: { tenantId, userId, threadId },
-          maxAttempts: 2,
-        },
+      await this.repository.createJob({
+        tenantId,
+        type: 'memory_extraction' as never,
+        status: 'pending',
+        payload: { tenantId, userId, threadId },
+        maxAttempts: 2,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -512,7 +488,7 @@ export class AiChatService {
     userId: string,
     threadId: string
   ): Promise<AiChatThread> {
-    const thread = await this.prisma.aiChatThread.findUnique({ where: { id: threadId } })
+    const thread = await this.repository.findThreadById(threadId)
     if (!thread) {
       throw new BusinessException(404, 'Chat thread not found', 'errors.chat.threadNotFound')
     }

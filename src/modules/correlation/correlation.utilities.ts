@@ -1,4 +1,5 @@
-import { toSortOrder } from '../../common/utils/query.utility'
+import { RULE_SORT_FIELDS } from './correlation.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   CorrelationEvent,
   CorrelationRuleInput,
@@ -51,27 +52,12 @@ export function buildRuleOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.CorrelationRuleOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-
-  switch (sortBy) {
-    case 'title':
-      return { title: order }
-    case 'severity':
-      return { severity: order }
-    case 'status':
-      return { status: order }
-    case 'ruleNumber':
-      return { ruleNumber: order }
-    case 'hitCount':
-      return { hitCount: order }
-    case 'source':
-      return { source: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'createdAt':
-    default:
-      return { createdAt: order }
-  }
+  return buildOrderBy(
+    RULE_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.CorrelationRuleOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */
@@ -186,9 +172,7 @@ export function buildRuleRecordList(
   })
 }
 
-export function buildCorrelationEvents(
-  events: Record<string, unknown>[]
-): CorrelationEvent[] {
+export function buildCorrelationEvents(events: Record<string, unknown>[]): CorrelationEvent[] {
   return events.map(event => ({
     type:
       typeof Reflect.get(event, 'type') === 'string'

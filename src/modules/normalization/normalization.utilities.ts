@@ -1,5 +1,5 @@
-import { VALID_STEP_TYPES } from './normalization.constants'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { VALID_STEP_TYPES, PIPELINE_SORT_FIELDS } from './normalization.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdatePipelineDto } from './dto/update-pipeline.dto'
 import type {
   NormalizationPipelineRecord,
@@ -39,24 +39,7 @@ export function buildPipelineListWhere(
 }
 
 export function buildPipelineOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'name':
-      return { name: order }
-    case 'sourceType':
-      return { sourceType: order }
-    case 'status':
-      return { status: order }
-    case 'processedCount':
-      return { processedCount: order }
-    case 'errorCount':
-      return { errorCount: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'createdAt':
-    default:
-      return { createdAt: order }
-  }
+  return buildOrderBy(PIPELINE_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */

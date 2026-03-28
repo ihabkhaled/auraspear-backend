@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type {
   Prisma,
@@ -133,19 +134,6 @@ export class DetectionRulesRepository {
       select: { ruleNumber: true },
     })
 
-    let nextSequence = 1
-
-    if (latestRule) {
-      const parts = latestRule.ruleNumber.split('-')
-      const lastSegment = parts[parts.length - 1]
-      if (lastSegment) {
-        const parsed = Number.parseInt(lastSegment, 10)
-        if (!Number.isNaN(parsed)) {
-          nextSequence = parsed + 1
-        }
-      }
-    }
-
-    return `DR-${year}-${String(nextSequence).padStart(4, '0')}`
+    return buildNextSequenceNumber(latestRule?.ruleNumber, prefix, 4)
   }
 }

@@ -4,6 +4,7 @@ import {
   AI_NOTIFICATION_MESSAGE_MAX_LENGTH,
   AI_SUMMARY_MAX_LENGTH,
   SEVERITY_PATTERN,
+  VALID_FINDING_TRANSITIONS,
 } from './ai-writeback.constants'
 import { AiWritebackRepository } from './ai-writeback.repository'
 import {
@@ -11,6 +12,7 @@ import {
   AiFindingType,
   AlertSeverity,
   AppLogFeature,
+  IncidentActorType,
   NotificationEntityType,
   NotificationType,
 } from '../../../common/enums'
@@ -18,7 +20,6 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { UserRole } from '../../../common/interfaces/authenticated-request.interface'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { ServiceLogger } from '../../../common/services/service-logger'
-import { PrismaService } from '../../../prisma/prisma.service'
 import type {
   AiWritebackParameters,
   AiWritebackResponse,
@@ -31,18 +32,11 @@ export class AiWritebackService {
   private readonly log: ServiceLogger
 
   constructor(
-    private readonly prisma: PrismaService,
     private readonly appLogger: AppLoggerService,
     private readonly repository: AiWritebackRepository
   ) {
     this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI, 'AiWritebackService')
   }
-
-  /** Valid status transitions: proposed -> applied, proposed -> dismissed, failed -> dismissed */
-  private static readonly VALID_TRANSITIONS = new Map<string, Set<string>>([
-    [AiFindingStatus.PROPOSED, new Set([AiFindingStatus.APPLIED, AiFindingStatus.DISMISSED])],
-    [AiFindingStatus.FAILED, new Set([AiFindingStatus.DISMISSED])],
-  ])
 
   /**
    * Get a single AI execution finding by ID.
@@ -87,7 +81,7 @@ export class AiWritebackService {
       throw new BusinessException(404, 'AI finding not found', 'errors.ai.findingNotFound')
     }
 
-    const allowedTargets = AiWritebackService.VALID_TRANSITIONS.get(finding.status)
+    const allowedTargets = VALID_FINDING_TRANSITIONS.get(finding.status)
     if (!allowedTargets?.has(newStatus)) {
       throw new BusinessException(
         400,
@@ -221,7 +215,7 @@ export class AiWritebackService {
       status: AiFindingStatus.PROPOSED,
     }))
 
-    await this.prisma.aiExecutionFinding.createMany({ data })
+    await this.repository.createFindings(data)
   }
 
   private async writeBackToSource(params: AiWritebackParameters): Promise<void> {
@@ -265,16 +259,13 @@ export class AiWritebackService {
     response: AiWritebackResponse,
     sessionId: string
   ): Promise<void> {
-    await this.prisma.alert.updateMany({
-      where: { id: alertId, tenantId },
-      data: {
-        aiSummary: response.result.substring(0, AI_SUMMARY_MAX_LENGTH),
-        aiConfidence: response.confidence ?? null,
-        aiSeveritySuggestion: this.extractSeveritySuggestion(response.result),
-        aiLastRunAt: new Date(),
-        aiLastExecutionId: sessionId,
-        aiStatus: 'completed',
-      },
+    await this.repository.updateAlertAiFields(tenantId, alertId, {
+      aiSummary: response.result.substring(0, AI_SUMMARY_MAX_LENGTH),
+      aiConfidence: response.confidence ?? null,
+      aiSeveritySuggestion: this.extractSeveritySuggestion(response.result),
+      aiLastRunAt: new Date(),
+      aiLastExecutionId: sessionId,
+      aiStatus: 'completed',
     })
   }
 
@@ -284,25 +275,21 @@ export class AiWritebackService {
   ): Promise<void> {
     const summaryText = response.result.substring(0, AI_SUMMARY_MAX_LENGTH)
 
-    await this.prisma.incidentTimeline.create({
-      data: {
-        incidentId,
-        event: `AI analysis (${response.model}): ${summaryText}`,
-        actorType: 'system',
-        actorName: `AI/${response.provider}`,
-      },
+    await this.repository.createIncidentTimelineEntry({
+      incidentId,
+      event: `AI analysis (${response.model}): ${summaryText}`,
+      actorType: IncidentActorType.SYSTEM,
+      actorName: `AI/${response.provider}`,
     })
   }
 
   private async writeBackToCase(caseId: string, response: AiWritebackResponse): Promise<void> {
     const summaryText = response.result.substring(0, AI_SUMMARY_MAX_LENGTH)
 
-    await this.prisma.caseNote.create({
-      data: {
-        caseId,
-        author: `AI/${response.provider}`,
-        body: `**AI Analysis (${response.model}):**\n\n${summaryText}`,
-      },
+    await this.repository.createCaseNote({
+      caseId,
+      author: `AI/${response.provider}`,
+      body: `**AI Analysis (${response.model}):**\n\n${summaryText}`,
     })
   }
 
@@ -312,29 +299,26 @@ export class AiWritebackService {
   ): Promise<void> {
     try {
       const scheduleId = params.scheduleId ?? null
-      await this.prisma.aiJobRunSummary.create({
-        data: {
-          tenantId: params.tenantId,
-          jobId: params.sessionId,
-          scheduleId,
-          jobKey: `agent.${params.agentId}`,
-          agentId: params.agentId,
-          triggerType: params.sourceModule.startsWith('scheduler:') ? 'scheduled' : 'manual',
-          status: 'completed',
-          startedAt: new Date(Date.now() - (params.durationMs ?? 0)),
-          completedAt: new Date(),
-          durationMs: params.durationMs ?? null,
-          providerKey: params.aiResponse.provider,
-          modelKey: params.aiResponse.model,
-          tokensUsed:
-            (params.aiResponse.tokensUsed?.input ?? 0) +
-            (params.aiResponse.tokensUsed?.output ?? 0),
-          findingsCount,
-          sourceModule: params.sourceModule,
-          sourceEntityId: params.sourceEntityId ?? null,
-          summaryText: params.aiResponse.result.substring(0, 500),
-          confidenceScore: params.aiResponse.confidence ?? null,
-        },
+      await this.repository.createJobRunSummary({
+        tenantId: params.tenantId,
+        jobId: params.sessionId,
+        scheduleId,
+        jobKey: `agent.${params.agentId}`,
+        agentId: params.agentId,
+        triggerType: params.sourceModule.startsWith('scheduler:') ? 'scheduled' : 'manual',
+        status: 'completed',
+        startedAt: new Date(Date.now() - (params.durationMs ?? 0)),
+        completedAt: new Date(),
+        durationMs: params.durationMs ?? null,
+        providerKey: params.aiResponse.provider,
+        modelKey: params.aiResponse.model,
+        tokensUsed:
+          (params.aiResponse.tokensUsed?.input ?? 0) + (params.aiResponse.tokensUsed?.output ?? 0),
+        findingsCount,
+        sourceModule: params.sourceModule,
+        sourceEntityId: params.sourceEntityId ?? null,
+        summaryText: params.aiResponse.result.substring(0, 500),
+        confidenceScore: params.aiResponse.confidence ?? null,
       })
     } catch (error) {
       this.log.warn(
@@ -347,13 +331,7 @@ export class AiWritebackService {
 
   private async updateSessionCounts(sessionId: string, findingsCount: number): Promise<void> {
     try {
-      await this.prisma.aiAgentSession.update({
-        where: { id: sessionId },
-        data: {
-          findingsCount,
-          writebacksCount: findingsCount > 0 ? 1 : 0,
-        },
-      })
+      await this.repository.updateSessionCounts(sessionId, findingsCount, findingsCount > 0 ? 1 : 0)
     } catch (error) {
       // Session may not exist for config-only agents — log and continue
       this.log.warn(
@@ -377,14 +355,10 @@ export class AiWritebackService {
   }): Promise<void> {
     try {
       // Find the first active TENANT_ADMIN for the tenant
-      const adminMembership = await this.prisma.tenantMembership.findFirst({
-        where: {
-          tenantId: params.tenantId,
-          role: UserRole.TENANT_ADMIN,
-          status: 'active',
-        },
-        select: { userId: true },
-      })
+      const adminMembership = await this.repository.findTenantAdmin(
+        params.tenantId,
+        UserRole.TENANT_ADMIN
+      )
 
       if (!adminMembership) {
         this.log.debug(
@@ -399,17 +373,15 @@ export class AiWritebackService {
       // entityId column is @db.Uuid — only set if sourceEntityId is present
       const entityId = params.sourceEntityId ?? params.tenantId
 
-      await this.prisma.notification.create({
-        data: {
-          tenantId: params.tenantId,
-          type: NotificationType.AI_ANALYSIS_COMPLETE,
-          actorUserId: null,
-          recipientUserId: adminMembership.userId,
-          title: `AI Analysis Complete: ${params.agentId} (${params.sourceModule})`,
-          message: params.summary,
-          entityType,
-          entityId,
-        },
+      await this.repository.createNotification({
+        tenantId: params.tenantId,
+        type: NotificationType.AI_ANALYSIS_COMPLETE,
+        actorUserId: null,
+        recipientUserId: adminMembership.userId,
+        title: `AI Analysis Complete: ${params.agentId} (${params.sourceModule})`,
+        message: params.summary,
+        entityType,
+        entityId,
       })
 
       this.log.debug('createAiNotification', params.tenantId, 'AI notification created', {

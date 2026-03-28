@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_REFRESH_EXPIRY_SECONDS } from './auth.constants'
 import { AuthExpiryUnit } from './auth.enums'
-import type { AuthUserIdentity, MembershipWithTenant, TenantMembershipInfo } from './auth.types'
-import type { JwtPayload, UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { BusinessException } from '../../common/exceptions/business.exception'
+import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import type {
+  AuthUserIdentity,
+  MembershipWithTenant,
+  TenantMembershipInfo,
+  UserWithMembershipSummary,
+} from './auth.types'
+import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
 
 export function mapMembershipsToTenantInfos(
   memberships: MembershipWithTenant[]
@@ -59,6 +66,124 @@ export function buildExpiryDateFromSeconds(ttlSeconds: number): Date {
 
 export function hashTokenIdentifier(identifier: string): string {
   return createHash('sha256').update(identifier).digest('hex')
+}
+
+/* ---------------------------------------------------------------- */
+/* CLAIM ASSERTIONS                                                   */
+/* ---------------------------------------------------------------- */
+
+export function assertRefreshRotationClaimsPresent(
+  payload: JwtPayload
+): asserts payload is JwtPayload & { jti: string; family: string; generation: number } {
+  if (
+    !payload.jti ||
+    typeof payload.family !== 'string' ||
+    typeof payload.generation !== 'number'
+  ) {
+    throw new BusinessException(
+      401,
+      'Refresh token missing rotation claims',
+      'errors.auth.invalidRefreshToken'
+    )
+  }
+}
+
+export function assertAccessClaimsPresent(
+  payload: JwtPayload | undefined
+): asserts payload is JwtPayload & { jti: string; exp: number } {
+  if (!payload?.jti || !payload?.exp) {
+    throw new BusinessException(
+      401,
+      'Access token missing required claims',
+      'errors.auth.invalidAccessToken'
+    )
+  }
+}
+
+export function assertRefreshClaimsPresent(
+  payload: JwtPayload
+): asserts payload is JwtPayload & { jti: string; exp: number } {
+  if (!payload.jti || !payload.exp) {
+    throw new BusinessException(
+      401,
+      'Refresh token missing required claims',
+      'errors.auth.invalidRefreshToken'
+    )
+  }
+}
+
+export function assertRefreshSubjectMatches(
+  refreshPayload: JwtPayload,
+  accessUser: JwtPayload
+): void {
+  if (refreshPayload.sub !== accessUser.sub) {
+    throw new BusinessException(
+      403,
+      'Refresh token does not belong to this user',
+      'errors.auth.tokenMismatch'
+    )
+  }
+}
+
+export function assertTokenTypeValid(
+  decoded: { tokenType?: string },
+  expectedType: string,
+  errorKey = 'errors.auth.invalidAccessToken'
+): void {
+  if (decoded.tokenType !== expectedType) {
+    throw new BusinessException(401, `Invalid token type — expected ${expectedType}`, errorKey)
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* MEMBERSHIP HELPERS                                                 */
+/* ---------------------------------------------------------------- */
+
+export function extractFirstMembershipOrThrow(user: UserWithMembershipSummary): {
+  tenantId: string
+  role: string
+  tenant: { id: string; name: string; slug: string }
+} {
+  if (user.memberships.length === 0) {
+    throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+  }
+
+  const first = user.memberships[0]
+  if (!first) {
+    throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
+  }
+
+  return first
+}
+
+export function hasGlobalAdminMembership(memberships: MembershipWithTenant[]): boolean {
+  return memberships.some(item => item.role === UserRole.GLOBAL_ADMIN)
+}
+
+/* ---------------------------------------------------------------- */
+/* MISC HELPERS                                                       */
+/* ---------------------------------------------------------------- */
+
+export function extractFamilyFromPayload(payload: JwtPayload): string | undefined {
+  return typeof payload.family === 'string' ? payload.family : undefined
+}
+
+export function buildEpochToDate(epochSeconds: number | undefined): Date | undefined {
+  return epochSeconds === undefined ? undefined : new Date(epochSeconds * 1000)
+}
+
+export function stripTokenMetaClaims(
+  payload: JwtPayload
+): Omit<JwtPayload, 'iat' | 'exp' | 'jti' | 'family' | 'generation'> {
+  const {
+    iat: _iat,
+    exp: _exp,
+    jti: _jti,
+    family: _family,
+    generation: _generation,
+    ...clean
+  } = payload
+  return clean
 }
 
 /* ---------------------------------------------------------------- */

@@ -1,4 +1,9 @@
+import { HuntSessionStatus } from '@prisma/client'
 import { AlertSeverity } from '../../common/enums'
+
+export const VALID_HUNT_TRANSITIONS = new Map<HuntSessionStatus, Set<HuntSessionStatus>>([
+  [HuntSessionStatus.running, new Set([HuntSessionStatus.completed, HuntSessionStatus.error])],
+])
 
 export const RANGE_MAP = new Map<string, number>([
   ['1h', 60 * 60 * 1000],

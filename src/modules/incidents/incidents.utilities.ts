@@ -1,5 +1,6 @@
-import { IncidentStatus, SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { INCIDENT_SORT_FIELDS } from './incidents.constants'
+import { IncidentStatus } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdateIncidentDto } from './dto/update-incident.dto'
 import type { Incident, Prisma } from '@prisma/client'
 
@@ -45,25 +46,12 @@ export function buildIncidentOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.IncidentOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'severity':
-      return { severity: order }
-    case 'status':
-      return { status: order }
-    case 'incidentNumber':
-      return { incidentNumber: order }
-    case 'category':
-      return { category: order }
-    case 'title':
-      return { title: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    INCIDENT_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.IncidentOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */
@@ -84,8 +72,16 @@ function collectDefinedFields(dto: UpdateIncidentDto): Record<string, unknown> {
   const dtoMap = new Map<string, unknown>(Object.entries(dto))
   const result = new Map<string, unknown>()
   const fieldNames: Array<keyof UpdateIncidentDto> = [
-    'title', 'description', 'severity', 'status', 'category',
-    'assigneeId', 'linkedAlertIds', 'linkedCaseId', 'mitreTactics', 'mitreTechniques',
+    'title',
+    'description',
+    'severity',
+    'status',
+    'category',
+    'assigneeId',
+    'linkedAlertIds',
+    'linkedCaseId',
+    'mitreTactics',
+    'mitreTechniques',
   ]
 
   for (const field of fieldNames) {

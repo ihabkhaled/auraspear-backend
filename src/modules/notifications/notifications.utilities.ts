@@ -1,14 +1,14 @@
 import {
   NOTIFICATION_PREFERENCE_BY_TYPE,
+  NOTIFICATION_SORT_FIELDS,
   NOTIFICATION_TITLE_BY_TYPE,
 } from './notifications.constants'
 import {
   NotificationPreferenceField,
   NotificationReadFilter,
-  NotificationSortField,
   NotificationTitle,
 } from './notifications.enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   NotificationActorRecord,
   NotificationActorMap,
@@ -116,17 +116,7 @@ export function buildNotificationOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.NotificationOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case NotificationSortField.TYPE:
-      return { type: order }
-    case NotificationSortField.TITLE:
-      return { title: order }
-    case NotificationSortField.IS_READ:
-      return { readAt: order }
-    default:
-      return { createdAt: order }
-  }
+  return buildOrderBy(NOTIFICATION_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 /**

@@ -1,5 +1,6 @@
-import { CaseCycleStatus, CaseStatus, SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { CYCLE_SORT_FIELDS } from './case-cycles.constants'
+import { CaseCycleStatus, CaseStatus } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { CaseCycleRecord } from './case-cycles.types'
 import type { CaseCycleStatus as PrismaCycleStatus, Prisma } from '@prisma/client'
 
@@ -22,21 +23,12 @@ export function buildCycleOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.CaseCycleOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'name':
-      return { name: order }
-    case 'startDate':
-      return { startDate: order }
-    case 'endDate':
-      return { endDate: order }
-    case 'status':
-      return { status: order }
-    case 'createdAt':
-      return { createdAt: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    CYCLE_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.CaseCycleOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */

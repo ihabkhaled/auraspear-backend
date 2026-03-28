@@ -66,7 +66,10 @@ export class ScheduleService {
     }
 
     const updateData = this.buildUpdateData(dto, schedule, actor)
-    const updated = await this.repository.updateSchedule(id, updateData)
+    const updated = await this.repository.updateSchedule(id, tenantId, updateData)
+    if (!updated) {
+      throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
+    }
 
     this.log.success('updateSchedule', tenantId, { scheduleId: id, actor })
 
@@ -90,12 +93,15 @@ export class ScheduleService {
         ? this.computeNextRun(schedule.cronExpression, schedule.timezone)
         : null
 
-    const updated = await this.repository.updateSchedule(id, {
+    const updated = await this.repository.updateSchedule(id, tenantId, {
       isEnabled: enabled,
       nextRunAt,
       disabledReason: enabled ? null : undefined,
       updatedBy: actor,
     })
+    if (!updated) {
+      throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
+    }
 
     this.log.success('toggleEnabled', tenantId, {
       scheduleId: id,
@@ -123,11 +129,14 @@ export class ScheduleService {
         ? this.computeNextRun(schedule.cronExpression, schedule.timezone)
         : null
 
-    const updated = await this.repository.updateSchedule(id, {
+    const updated = await this.repository.updateSchedule(id, tenantId, {
       isPaused: paused,
       nextRunAt,
       updatedBy: actor,
     })
+    if (!updated) {
+      throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
+    }
 
     this.log.success('togglePaused', tenantId, {
       scheduleId: id,
@@ -183,7 +192,7 @@ export class ScheduleService {
       )
     }
 
-    const updated = await this.repository.updateSchedule(id, {
+    const updated = await this.repository.updateSchedule(id, tenantId, {
       isEnabled: false,
       isPaused: false,
       executionMode: 'suggest_only',
@@ -201,6 +210,9 @@ export class ScheduleService {
       nextRunAt: null,
       updatedBy: actor,
     })
+    if (!updated) {
+      throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
+    }
 
     this.log.success('resetToDefault', tenantId, {
       scheduleId: id,
@@ -222,20 +234,37 @@ export class ScheduleService {
   /* MARK RUN STARTED / COMPLETED (for scheduler heartbeat)            */
   /* ---------------------------------------------------------------- */
 
-  async markRunStarted(id: string, cronExpression: string, timezone: string): Promise<void> {
+  async markRunStarted(
+    id: string,
+    tenantId: string | null,
+    cronExpression: string,
+    timezone: string
+  ): Promise<void> {
     const nextRunAt = this.computeNextRun(cronExpression, timezone)
-    await this.repository.markRunStarted(id, nextRunAt)
+    await this.repository.markRunStarted(id, tenantId, nextRunAt)
   }
 
-  async markRunCompleted(id: string, status: string, durationMs: number): Promise<void> {
-    const result = await this.repository.markRunCompleted(id, status, durationMs)
+  async markRunCompleted(
+    id: string,
+    tenantId: string | null,
+    status: string,
+    durationMs: number
+  ): Promise<void> {
+    const result = await this.repository.markRunCompleted(id, tenantId, status, durationMs)
     if (!result) {
       throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
     }
   }
 
-  async setDisabledReason(id: string, reason: string): Promise<void> {
-    await this.repository.updateSchedule(id, { disabledReason: reason })
+  async setDisabledReason(id: string, tenantId: string | null, reason: string): Promise<void> {
+    const schedule = await this.repository.findById(id)
+    if (!schedule) {
+      return
+    }
+    const effectiveTenantId = tenantId ?? schedule.tenantId
+    if (effectiveTenantId) {
+      await this.repository.updateSchedule(id, effectiveTenantId, { disabledReason: reason })
+    }
   }
 
   async bulkToggle(
@@ -338,17 +367,9 @@ export class ScheduleService {
   }
 
   private async findAndVerifyAccess(tenantId: string, id: string): Promise<ScheduleRecord> {
-    const schedule = await this.repository.findById(id)
+    const schedule = await this.repository.findById(id, tenantId)
     if (!schedule) {
       throw new BusinessException(404, 'Schedule not found', 'errors.schedule.notFound')
-    }
-
-    if (schedule.tenantId !== tenantId) {
-      throw new BusinessException(
-        403,
-        'Access denied to this schedule',
-        'errors.schedule.accessDenied'
-      )
     }
 
     return schedule

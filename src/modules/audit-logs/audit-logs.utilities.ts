@@ -1,5 +1,5 @@
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { AUDIT_LOGS_SORT_FIELDS } from './audit-logs.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { CreateAuditLogData } from './audit-logs.types'
 import type { SearchAuditLogsDto } from './dto/search-audit-logs.dto'
 import type { Prisma } from '@prisma/client'
@@ -43,20 +43,7 @@ export function buildAuditLogsOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.AuditLogOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'actor':
-      return { actor: order }
-    case 'action':
-      return { action: order }
-    case 'resource':
-      return { resource: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(AUDIT_LOGS_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 export function buildAuditLogCreateInput(

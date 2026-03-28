@@ -26,6 +26,19 @@ export const USERS_CONTROL_ASSIGNABLE_ROLES = [
   UserRole.TENANT_ADMIN,
 ] as const
 
+export const USERS_CONTROL_USER_SORT_FIELDS: Record<string, string> = {
+  email: 'email',
+  lastLoginAt: 'lastLoginAt',
+  createdAt: 'createdAt',
+  name: 'name',
+}
+
+export const USERS_CONTROL_SESSION_SORT_FIELDS: Record<string, string> = {
+  lastLoginAt: 'lastLoginAt',
+  createdAt: 'createdAt',
+  lastSeenAt: 'lastSeenAt',
+}
+
 export const BROWSER_PATTERNS: ReadonlyArray<readonly [RegExp, UserSessionBrowser]> = [
   [/SamsungBrowser/i, UserSessionBrowser.SAMSUNG_INTERNET],
   [/Edg/i, UserSessionBrowser.EDGE],

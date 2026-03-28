@@ -1,5 +1,5 @@
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { ENTITY_SORT_FIELDS, ANOMALY_SORT_FIELDS, MODEL_SORT_FIELDS } from './ueba.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { Prisma } from '@prisma/client'
 
 /* ---------------------------------------------------------------- */
@@ -36,25 +36,7 @@ export function buildEntityOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.UebaEntityOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'riskScore':
-      return { riskScore: order }
-    case 'entityName':
-      return { entityName: order }
-    case 'lastSeenAt':
-      return { lastSeenAt: order }
-    case 'riskLevel':
-      return { riskLevel: order }
-    case 'entityType':
-      return { entityType: order }
-    default:
-      return { riskScore: SortOrder.DESC }
-  }
+  return buildOrderBy(ENTITY_SORT_FIELDS, 'riskScore', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */
@@ -88,17 +70,7 @@ export function buildAnomalyOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.UebaAnomalyOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'detectedAt':
-      return { detectedAt: order }
-    case 'score':
-      return { score: order }
-    case 'severity':
-      return { severity: order }
-    default:
-      return { detectedAt: SortOrder.DESC }
-  }
+  return buildOrderBy(ANOMALY_SORT_FIELDS, 'detectedAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */
@@ -158,19 +130,5 @@ export function buildModelOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.MlModelOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'accuracy':
-      return { accuracy: order }
-    case 'name':
-      return { name: order }
-    case 'lastTrained':
-      return { lastTrained: order }
-    default:
-      return { updatedAt: SortOrder.DESC }
-  }
+  return buildOrderBy(MODEL_SORT_FIELDS, 'updatedAt', sortBy, sortOrder)
 }

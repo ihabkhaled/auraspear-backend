@@ -1,5 +1,5 @@
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { APP_LOGS_SORT_FIELDS } from './app-logs.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { SearchAppLogsDto } from './dto/search-app-logs.dto'
 import type { Prisma } from '@prisma/client'
 
@@ -97,26 +97,5 @@ export function buildAppLogsOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.ApplicationLogOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'level':
-      return { level: order }
-    case 'feature':
-      return { feature: order }
-    case 'action':
-      return { action: order }
-    case 'functionName':
-      return { functionName: order }
-    case 'actorEmail':
-      return { actorEmail: order }
-    case 'className':
-      return { className: order }
-    case 'outcome':
-      return { outcome: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(APP_LOGS_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }

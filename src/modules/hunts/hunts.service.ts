@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { HuntSessionStatus } from '@prisma/client'
 import { RunHuntDto } from './dto/run-hunt.dto'
+import { VALID_HUNT_TRANSITIONS } from './hunts.constants'
 import { HuntsRepository } from './hunts.repository'
 import {
   buildHuntEsQuery,
@@ -27,10 +28,6 @@ import type { Prisma } from '@prisma/client'
 export class HuntsService {
   private readonly logger = new Logger(HuntsService.name)
   private readonly log: ServiceLogger
-
-  private readonly VALID_TRANSITIONS = new Map<HuntSessionStatus, Set<HuntSessionStatus>>([
-    [HuntSessionStatus.running, new Set([HuntSessionStatus.completed, HuntSessionStatus.error])],
-  ])
 
   constructor(
     private readonly huntsRepository: HuntsRepository,
@@ -359,7 +356,7 @@ export class HuntsService {
   }
 
   private assertValidTransition(from: HuntSessionStatus, to: HuntSessionStatus): void {
-    const allowed = this.VALID_TRANSITIONS.get(from)
+    const allowed = VALID_HUNT_TRANSITIONS.get(from)
     if (!allowed?.has(to)) {
       throw new BusinessException(
         400,

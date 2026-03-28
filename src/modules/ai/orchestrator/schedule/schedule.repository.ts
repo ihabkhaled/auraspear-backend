@@ -56,19 +56,31 @@ export class ScheduleRepository {
   }
 
   /**
-   * Gets a single schedule by ID.
+   * Gets a single schedule by ID, optionally scoped by tenantId.
    */
-  async findById(id: string): Promise<ScheduleRecord | null> {
-    return this.prisma.aiAgentSchedule.findUnique({ where: { id } })
+  async findById(id: string, tenantId?: string): Promise<ScheduleRecord | null> {
+    const where: Prisma.AiAgentScheduleWhereInput = { id }
+    if (tenantId !== undefined) {
+      where.tenantId = tenantId
+    }
+    return this.prisma.aiAgentSchedule.findFirst({ where })
   }
 
   /**
-   * Updates schedule fields.
+   * Updates schedule fields, scoped by tenantId.
+   * Returns null if the schedule is not found for the given tenant.
    */
   async updateSchedule(
     id: string,
+    tenantId: string,
     data: Prisma.AiAgentScheduleUpdateInput
-  ): Promise<ScheduleRecord> {
+  ): Promise<ScheduleRecord | null> {
+    const schedule = await this.prisma.aiAgentSchedule.findFirst({
+      where: { id, tenantId },
+    })
+    if (!schedule) {
+      return null
+    }
     return this.prisma.aiAgentSchedule.update({ where: { id }, data })
   }
 
@@ -76,8 +88,18 @@ export class ScheduleRepository {
    * Marks a schedule as having started a run:
    * - Sets lastRunAt = now
    * - Computes and sets nextRunAt from cron expression
+   * Called by the system scheduler — uses tenantId from the schedule record itself.
    */
-  async markRunStarted(id: string, nextRunAt: Date): Promise<ScheduleRecord> {
+  async markRunStarted(
+    id: string,
+    tenantId: string | null,
+    nextRunAt: Date
+  ): Promise<ScheduleRecord | null> {
+    const where: Prisma.AiAgentScheduleWhereInput = { id, tenantId }
+    const schedule = await this.prisma.aiAgentSchedule.findFirst({ where })
+    if (!schedule) {
+      return null
+    }
     return this.prisma.aiAgentSchedule.update({
       where: { id },
       data: {
@@ -90,13 +112,16 @@ export class ScheduleRepository {
 
   /**
    * Marks a schedule run as completed and updates streaks.
+   * Called by the system scheduler — uses tenantId from the schedule record itself.
    */
   async markRunCompleted(
     id: string,
+    tenantId: string | null,
     status: string,
     durationMs: number
   ): Promise<ScheduleRecord | null> {
-    const schedule = await this.findById(id)
+    const where: Prisma.AiAgentScheduleWhereInput = { id, tenantId }
+    const schedule = await this.prisma.aiAgentSchedule.findFirst({ where })
     if (!schedule) {
       return null
     }
@@ -123,13 +148,20 @@ export class ScheduleRepository {
   }
 
   /**
-   * Resets a schedule to its system default values.
+   * Resets a schedule to its system default values, scoped by tenantId.
    * Only resets configurable fields — preserves ID, seedKey, tenantId, etc.
    */
   async resetToDefault(
     id: string,
+    tenantId: string,
     defaults: Prisma.AiAgentScheduleUpdateInput
-  ): Promise<ScheduleRecord> {
+  ): Promise<ScheduleRecord | null> {
+    const schedule = await this.prisma.aiAgentSchedule.findFirst({
+      where: { id, tenantId },
+    })
+    if (!schedule) {
+      return null
+    }
     return this.prisma.aiAgentSchedule.update({
       where: { id },
       data: defaults,

@@ -1,7 +1,8 @@
+import { TENANT_SORT_FIELDS, USER_SORT_FIELDS } from './tenants.constants'
 import { SortOrder } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { MembershipStatus, UserRole } from '../../common/interfaces/authenticated-request.interface'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { buildOrderBy, toSortOrder } from '../../common/utils/query.utility'
 import type {
   UserRecord,
   TenantWithCounts,
@@ -37,12 +38,8 @@ export function buildTenantOrderBy(
       return { alerts: { _count: order } }
     case 'caseCount':
       return { cases: { _count: order } }
-    case 'slug':
-      return { slug: order }
-    case 'createdAt':
-      return { createdAt: order }
     default:
-      return { name: order }
+      return buildOrderBy(TENANT_SORT_FIELDS, 'name', sortBy, sortOrder)
   }
 }
 
@@ -84,16 +81,14 @@ export function buildUserOrderBy(
       return { user: { name: order } }
     case 'email':
       return { user: { email: order } }
-    case 'role':
-      return { role: order }
-    case 'status':
-      return { status: order }
     case 'lastLoginAt':
       return { user: { lastLoginAt: order } }
-    case 'createdAt':
-      return { createdAt: order }
-    default:
+    default: {
+      if (sortBy && USER_SORT_FIELDS[sortBy]) {
+        return buildOrderBy(USER_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
+      }
       return { user: { name: SortOrder.ASC } }
+    }
   }
 }
 

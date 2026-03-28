@@ -1,5 +1,6 @@
-import { ReportFormat, SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { REPORT_SORT_FIELDS } from './reports.constants'
+import { ReportFormat } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdateReportDto } from './dto/update-report.dto'
 import type {
   GeneratedReportContent,
@@ -58,25 +59,12 @@ export function buildReportOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.ReportOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'generatedAt':
-      return { generatedAt: order }
-    case 'module':
-      return { module: order }
-    case 'name':
-      return { name: order }
-    case 'type':
-      return { type: order }
-    case 'status':
-      return { status: order }
-    case 'format':
-      return { format: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    REPORT_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.ReportOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */

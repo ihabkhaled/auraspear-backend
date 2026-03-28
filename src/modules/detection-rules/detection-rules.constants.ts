@@ -39,6 +39,19 @@ export enum YaraLComparator {
   EXISTS = 'exists',
 }
 
+export const DETECTION_RULE_SORT_FIELDS: Record<string, string> = {
+  name: 'name',
+  severity: 'severity',
+  status: 'status',
+  ruleNumber: 'ruleNumber',
+  ruleType: 'ruleType',
+  hitCount: 'hitCount',
+  falsePositiveCount: 'falsePositiveCount',
+  lastTriggeredAt: 'lastTriggeredAt',
+  updatedAt: 'updatedAt',
+  createdAt: 'createdAt',
+}
+
 export const SIGMA_OBJECT_KEYS = ['sigma', 'sigmaRule'] as const
 export const YARAL_OBJECT_KEYS = ['yaral', 'yaralRule'] as const
 export const SIGMA_DETECTION_KEY = 'detection'

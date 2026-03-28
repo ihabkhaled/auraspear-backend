@@ -1,5 +1,6 @@
 import { AppLogFeature, type AppLogOutcome, AppLogSourceType } from '../../common/enums'
 import type { AppLogContext } from '../../common/services/app-logger.types'
+export { extractErrorMessage, extractErrorStack } from '../../common/utils/error-extraction.utility'
 
 export function buildBlacklistLogContext(
   action: string,
@@ -17,12 +18,4 @@ export function buildBlacklistLogContext(
     ...(metadata ? { metadata } : {}),
     ...(stackTrace ? { stackTrace } : {}),
   }
-}
-
-export function extractErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown error'
-}
-
-export function extractErrorStack(error: unknown): string | undefined {
-  return error instanceof Error ? error.stack : undefined
 }

@@ -1,5 +1,5 @@
-import { ENTITY_TYPE_WEIGHTS } from './entities.constants'
-import { EntitySortField } from '../../common/enums'
+import { ENTITY_SORT_FIELDS, ENTITY_TYPE_WEIGHTS } from './entities.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { ListEntitiesQueryDto } from './dto/list-entities-query.dto'
 import type {
   AlertExtractionInput,
@@ -41,22 +41,12 @@ export function buildEntityOrderBy(
   sortBy: string,
   sortOrder: 'asc' | 'desc'
 ): Prisma.EntityOrderByWithRelationInput {
-  switch (sortBy) {
-    case EntitySortField.VALUE:
-      return { value: sortOrder }
-    case EntitySortField.TYPE:
-      return { type: sortOrder }
-    case EntitySortField.RISK_SCORE:
-      return { riskScore: sortOrder }
-    case EntitySortField.FIRST_SEEN:
-      return { firstSeen: sortOrder }
-    case EntitySortField.LAST_SEEN:
-      return { lastSeen: sortOrder }
-    case EntitySortField.CREATED_AT:
-      return { createdAt: sortOrder }
-    default:
-      return { lastSeen: sortOrder }
-  }
+  return buildOrderBy(
+    ENTITY_SORT_FIELDS,
+    'lastSeen',
+    sortBy,
+    sortOrder
+  ) as Prisma.EntityOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */
@@ -76,9 +66,10 @@ export function collectConnectedIds(
   return connectedIds
 }
 
-export function collectSecondHopData(
-  secondHopResults: EntityRelationRecord[][]
-): { secondHopRelations: EntityRelationRecord[]; secondHopIds: Set<string> } {
+export function collectSecondHopData(secondHopResults: EntityRelationRecord[][]): {
+  secondHopRelations: EntityRelationRecord[]
+  secondHopIds: Set<string>
+} {
   const secondHopRelations: EntityRelationRecord[] = []
   const secondHopIds = new Set<string>()
   for (const relations of secondHopResults) {
@@ -156,10 +147,7 @@ export function computeRecencyScore(lastSeen: Date): number {
 }
 
 export function computeDaysSinceLastSeen(lastSeen: Date): number {
-  return Math.max(
-    0,
-    (Date.now() - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24)
-  )
+  return Math.max(0, (Date.now() - new Date(lastSeen).getTime()) / (1000 * 60 * 60 * 24))
 }
 
 export function buildRiskBreakdownFactors(

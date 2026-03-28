@@ -1,5 +1,5 @@
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { PLAYBOOK_SORT_FIELDS } from './soar.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { UpdatePlaybookDto } from './dto/update-playbook.dto'
 import type {
   SoarPlaybookRecord,
@@ -44,23 +44,12 @@ export function buildPlaybookOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.SoarPlaybookOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'name':
-      return { name: order }
-    case 'status':
-      return { status: order }
-    case 'triggerType':
-      return { triggerType: order }
-    case 'executionCount':
-      return { executionCount: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    PLAYBOOK_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.SoarPlaybookOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */

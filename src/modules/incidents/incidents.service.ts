@@ -14,6 +14,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import type { AddTimelineEntryDto } from './dto/add-timeline-entry.dto'
 import type { CreateIncidentDto } from './dto/create-incident.dto'
@@ -315,8 +316,7 @@ export class IncidentsService {
   async getIncidentStats(tenantId: string): Promise<IncidentStats> {
     this.log.entry('getIncidentStats', tenantId)
 
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const thirtyDaysAgo = daysAgo(30)
 
     const [open, inProgress, contained, resolved30d, avgResolveHours] = await Promise.all([
       this.repository.countByStatus(tenantId, IncidentStatus.OPEN),

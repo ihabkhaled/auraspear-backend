@@ -14,6 +14,7 @@ import { buildPaginationMeta } from '../../common/interfaces/pagination.interfac
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
 import { processInBatches } from '../../common/utils/batch.utility'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import { AgentEventListenerService } from '../ai/orchestrator/agent-event-listener.service'
 import { ConnectorsService } from '../connectors/connectors.service'
 import { WazuhService } from '../connectors/services/wazuh.service'
@@ -197,8 +198,7 @@ export class AlertsService {
     tenantId: string,
     days: number = 30
   ): Promise<Array<{ date: string; count: number }>> {
-    const since = new Date()
-    since.setDate(since.getDate() - days)
+    const since = daysAgo(days)
     const results = await this.alertsRepository.queryTrend(tenantId, since)
     return results.map(r => ({ date: r.date, count: Number(r.count) }))
   }

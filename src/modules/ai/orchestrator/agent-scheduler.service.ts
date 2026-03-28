@@ -79,6 +79,7 @@ export class AgentSchedulerService {
     // Mark run started and compute next run time
     await this.scheduleService.markRunStarted(
       schedule.id,
+      schedule.tenantId,
       schedule.cronExpression,
       schedule.timezone
     )
@@ -101,12 +102,22 @@ export class AgentSchedulerService {
       })
 
       const durationMs = Date.now() - startTime
-      await this.scheduleService.markRunCompleted(schedule.id, 'dispatched', durationMs)
+      await this.scheduleService.markRunCompleted(
+        schedule.id,
+        schedule.tenantId,
+        'dispatched',
+        durationMs
+      )
     } catch (error) {
       const durationMs = Date.now() - startTime
       const reason = error instanceof Error ? error.message : 'Unknown dispatch error'
-      await this.scheduleService.markRunCompleted(schedule.id, 'failed', durationMs)
-      await this.scheduleService.setDisabledReason(schedule.id, reason)
+      await this.scheduleService.markRunCompleted(
+        schedule.id,
+        schedule.tenantId,
+        'failed',
+        durationMs
+      )
+      await this.scheduleService.setDisabledReason(schedule.id, schedule.tenantId, reason)
       throw error
     }
   }

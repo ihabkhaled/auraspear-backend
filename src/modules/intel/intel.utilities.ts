@@ -1,6 +1,5 @@
-import { IOC_TYPE_GROUPS } from './intel.constants'
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { IOC_SORT_FIELDS, IOC_TYPE_GROUPS, MISP_SORT_FIELDS } from './intel.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { IOCMatch } from './intel.types'
 import type { Prisma } from '@prisma/client'
 
@@ -83,46 +82,14 @@ export function buildIOCOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.IntelIOCOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'lastSeen':
-      return { lastSeen: order }
-    case 'firstSeen':
-      return { firstSeen: order }
-    case 'hitCount':
-      return { hitCount: order }
-    case 'severity':
-      return { severity: order }
-    case 'iocType':
-      return { iocType: order }
-    case 'iocValue':
-      return { iocValue: order }
-    case 'source':
-      return { source: order }
-    default:
-      return { lastSeen: SortOrder.DESC }
-  }
+  return buildOrderBy(IOC_SORT_FIELDS, 'lastSeen', sortBy, sortOrder)
 }
 
 export function buildMispOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.IntelMispEventOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'date':
-      return { date: order }
-    case 'organization':
-      return { organization: order }
-    case 'threatLevel':
-      return { threatLevel: order }
-    case 'attributeCount':
-      return { attributeCount: order }
-    case 'published':
-      return { published: order }
-    default:
-      return { date: SortOrder.DESC }
-  }
+  return buildOrderBy(MISP_SORT_FIELDS, 'date', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */
@@ -340,14 +307,16 @@ export function buildIocEnrichContext(ioc: {
   }
 }
 
-export function buildAdvisoryContext(iocs: Array<{
-  iocType: string
-  iocValue: string
-  source: string | null
-  tags: string[]
-  firstSeen: Date | null
-  lastSeen: Date | null
-}>): Record<string, unknown> {
+export function buildAdvisoryContext(
+  iocs: Array<{
+    iocType: string
+    iocValue: string
+    source: string | null
+    tags: string[]
+    firstSeen: Date | null
+    lastSeen: Date | null
+  }>
+): Record<string, unknown> {
   return {
     iocs: iocs.map(ioc => ({
       iocType: ioc.iocType,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
+import { PLAYBOOK_WITH_TENANT_INCLUDE, EXECUTION_WITH_PLAYBOOK_INCLUDE } from './soar.constants'
 import { SoarExecutionStatus } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { PlaybookWithTenantPrisma, ExecutionWithPlaybookPrisma } from './soar.types'
@@ -13,10 +14,6 @@ export class SoarRepository {
   /* PLAYBOOKS                                                         */
   /* ---------------------------------------------------------------- */
 
-  private static readonly PLAYBOOK_WITH_TENANT = {
-    tenant: { select: { name: true } },
-  } as const satisfies Prisma.SoarPlaybookInclude
-
   async findManyPlaybooksWithTenant(params: {
     where: Prisma.SoarPlaybookWhereInput
     skip: number
@@ -25,7 +22,7 @@ export class SoarRepository {
   }): Promise<PlaybookWithTenantPrisma[]> {
     return this.prisma.soarPlaybook.findMany({
       ...params,
-      include: SoarRepository.PLAYBOOK_WITH_TENANT,
+      include: PLAYBOOK_WITH_TENANT_INCLUDE,
     })
   }
 
@@ -38,7 +35,7 @@ export class SoarRepository {
   ): Promise<PlaybookWithTenantPrisma | null> {
     return this.prisma.soarPlaybook.findFirst({
       where,
-      include: SoarRepository.PLAYBOOK_WITH_TENANT,
+      include: PLAYBOOK_WITH_TENANT_INCLUDE,
     })
   }
 
@@ -53,7 +50,7 @@ export class SoarRepository {
   ): Promise<PlaybookWithTenantPrisma> {
     return this.prisma.soarPlaybook.create({
       data,
-      include: SoarRepository.PLAYBOOK_WITH_TENANT,
+      include: PLAYBOOK_WITH_TENANT_INCLUDE,
     })
   }
 
@@ -72,10 +69,6 @@ export class SoarRepository {
   /* EXECUTIONS                                                        */
   /* ---------------------------------------------------------------- */
 
-  private static readonly EXECUTION_WITH_PLAYBOOK = {
-    playbook: { select: { name: true, triggerType: true } },
-  } as const satisfies Prisma.SoarExecutionInclude
-
   async findManyExecutionsWithPlaybook(params: {
     where: Prisma.SoarExecutionWhereInput
     skip: number
@@ -84,7 +77,7 @@ export class SoarRepository {
   }): Promise<ExecutionWithPlaybookPrisma[]> {
     return this.prisma.soarExecution.findMany({
       ...params,
-      include: SoarRepository.EXECUTION_WITH_PLAYBOOK,
+      include: EXECUTION_WITH_PLAYBOOK_INCLUDE,
     })
   }
 
@@ -128,7 +121,7 @@ export class SoarRepository {
           triggeredBy: params.triggeredBy,
           startedAt: new Date(),
         },
-        include: SoarRepository.EXECUTION_WITH_PLAYBOOK,
+        include: EXECUTION_WITH_PLAYBOOK_INCLUDE,
       })
 
       await tx.soarPlaybook.updateMany({

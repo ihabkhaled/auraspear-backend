@@ -1,10 +1,10 @@
 import { Test } from '@nestjs/testing'
 import { BusinessException } from '../../../../common/exceptions/business.exception'
-import { PrismaService } from '../../../../prisma/prisma.service'
 import { ConnectorsService } from '../../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../../connectors/services/llm-apis.service'
 import { MemoryRetrievalService } from '../../memory/memory-retrieval.service'
+import { AiChatRepository } from '../ai-chat.repository'
 import { AiChatService } from '../ai-chat.service'
 import type { AiChatMessage, AiChatThread } from '@prisma/client'
 
@@ -70,18 +70,14 @@ function buildMessage(overrides?: Partial<AiChatMessage>): AiChatMessage {
 /* Mocks                                                             */
 /* ---------------------------------------------------------------- */
 
-const mockPrisma = {
-  aiChatThread: {
-    findMany: jest.fn(),
-    count: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    findUnique: jest.fn(),
-  },
-  aiChatMessage: {
-    findMany: jest.fn(),
-    create: jest.fn(),
-  },
+const mockRepository = {
+  findThreads: jest.fn(),
+  findThreadById: jest.fn(),
+  createThread: jest.fn(),
+  updateThread: jest.fn(),
+  findMessages: jest.fn(),
+  createMessage: jest.fn(),
+  createJob: jest.fn(),
 }
 
 const mockConnectorsService = {
@@ -117,7 +113,7 @@ describe('AiChatService', () => {
     const module = await Test.createTestingModule({
       providers: [
         AiChatService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AiChatRepository, useValue: mockRepository },
         { provide: ConnectorsService, useValue: mockConnectorsService },
         { provide: LlmConnectorsService, useValue: mockLlmConnectorsService },
         { provide: LlmApisService, useValue: mockLlmApisService },
@@ -140,21 +136,19 @@ describe('AiChatService', () => {
         buildThread({ id: 't-3', lastActivityAt: new Date('2025-06-01') }),
       ]
       // Service fetches limit+1 to detect hasMore, so for limit=2 it returns 3
-      mockPrisma.aiChatThread.findMany.mockResolvedValue([...threads])
+      mockRepository.findThreads.mockResolvedValue([...threads])
 
       const result = await service.listThreads(TENANT_ID, USER_ID, 2)
 
       expect(result.hasMore).toBe(true)
       expect(result.data).toHaveLength(2)
       expect(result.nextCursor).toBe(threads.at(1)?.lastActivityAt.toISOString())
-      expect(mockPrisma.aiChatThread.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 3 })
-      )
+      expect(mockRepository.findThreads).toHaveBeenCalledWith(expect.objectContaining({ take: 3 }))
     })
 
     it('returns hasMore=false when no more threads', async () => {
       const threads = [buildThread({ id: 't-1' })]
-      mockPrisma.aiChatThread.findMany.mockResolvedValue(threads)
+      mockRepository.findThreads.mockResolvedValue(threads)
 
       const result = await service.listThreads(TENANT_ID, USER_ID, 5)
 
@@ -164,12 +158,12 @@ describe('AiChatService', () => {
     })
 
     it('applies cursor filter when cursor is provided', async () => {
-      mockPrisma.aiChatThread.findMany.mockResolvedValue([])
+      mockRepository.findThreads.mockResolvedValue([])
       const cursor = '2025-06-01T12:00:00.000Z'
 
       await service.listThreads(TENANT_ID, USER_ID, 10, cursor)
 
-      expect(mockPrisma.aiChatThread.findMany).toHaveBeenCalledWith(
+      expect(mockRepository.findThreads).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             lastActivityAt: { lt: new Date(cursor) },
@@ -191,7 +185,7 @@ describe('AiChatService', () => {
         name: 'My Custom LLM',
         defaultModel: 'claude-3',
       })
-      mockPrisma.aiChatThread.create.mockResolvedValue(
+      mockRepository.createThread.mockResolvedValue(
         buildThread({ connectorId: connectorUuid, provider: 'My Custom LLM', model: 'claude-3' })
       )
 
@@ -200,13 +194,11 @@ describe('AiChatService', () => {
       })
 
       expect(mockLlmConnectorsService.getById).toHaveBeenCalledWith(connectorUuid, TENANT_ID)
-      expect(mockPrisma.aiChatThread.create).toHaveBeenCalledWith(
+      expect(mockRepository.createThread).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: connectorUuid,
-            provider: 'My Custom LLM',
-            model: 'claude-3',
-          }),
+          connectorId: connectorUuid,
+          provider: 'My Custom LLM',
+          model: 'claude-3',
         })
       )
       expect(result.connectorId).toBe(connectorUuid)
@@ -216,19 +208,17 @@ describe('AiChatService', () => {
       mockConnectorsService.getDecryptedConfig.mockResolvedValueOnce({
         defaultModel: 'gpt-4-turbo',
       })
-      mockPrisma.aiChatThread.create.mockResolvedValue(
+      mockRepository.createThread.mockResolvedValue(
         buildThread({ connectorId: null, provider: 'llm_apis', model: 'gpt-4-turbo' })
       )
 
       const result = await service.createThread(TENANT_ID, USER_ID, {})
 
       expect(mockConnectorsService.getDecryptedConfig).toHaveBeenCalledWith(TENANT_ID, 'llm_apis')
-      expect(mockPrisma.aiChatThread.create).toHaveBeenCalledWith(
+      expect(mockRepository.createThread).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: null,
-            provider: 'llm_apis',
-          }),
+          connectorId: null,
+          provider: 'llm_apis',
         })
       )
       expect(result.provider).toBe('llm_apis')
@@ -240,19 +230,17 @@ describe('AiChatService', () => {
       mockLlmConnectorsService.getEnabledConfigs.mockResolvedValue([
         { id: 'custom-1', name: 'Custom LLM', config: { defaultModel: 'llama-3' } },
       ])
-      mockPrisma.aiChatThread.create.mockResolvedValue(
+      mockRepository.createThread.mockResolvedValue(
         buildThread({ connectorId: 'custom-1', provider: 'Custom LLM', model: 'llama-3' })
       )
 
       const result = await service.createThread(TENANT_ID, USER_ID, {})
 
       expect(mockLlmConnectorsService.getEnabledConfigs).toHaveBeenCalledWith(TENANT_ID)
-      expect(mockPrisma.aiChatThread.create).toHaveBeenCalledWith(
+      expect(mockRepository.createThread).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: 'custom-1',
-            provider: 'Custom LLM',
-          }),
+          connectorId: 'custom-1',
+          provider: 'Custom LLM',
         })
       )
       expect(result.connectorId).toBe('custom-1')
@@ -272,7 +260,7 @@ describe('AiChatService', () => {
 
   describe('getMessages', () => {
     beforeEach(() => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(buildThread())
+      mockRepository.findThreadById.mockResolvedValue(buildThread())
     })
 
     it('returns messages in chronological order for older direction', async () => {
@@ -280,7 +268,7 @@ describe('AiChatService', () => {
         buildMessage({ id: 'm-3', createdAt: new Date('2025-06-03') }),
         buildMessage({ id: 'm-2', createdAt: new Date('2025-06-02') }),
       ]
-      mockPrisma.aiChatMessage.findMany.mockResolvedValue(messages)
+      mockRepository.findMessages.mockResolvedValue(messages)
 
       const result = await service.getMessages(TENANT_ID, USER_ID, THREAD_ID, 10)
 
@@ -290,12 +278,12 @@ describe('AiChatService', () => {
     })
 
     it('applies cursor filter when cursor is provided', async () => {
-      mockPrisma.aiChatMessage.findMany.mockResolvedValue([])
+      mockRepository.findMessages.mockResolvedValue([])
       const cursor = '2025-06-01T12:00:00.000Z'
 
       await service.getMessages(TENANT_ID, USER_ID, THREAD_ID, 10, cursor, 'older')
 
-      expect(mockPrisma.aiChatMessage.findMany).toHaveBeenCalledWith(
+      expect(mockRepository.findMessages).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             createdAt: { lt: new Date(cursor) },
@@ -305,12 +293,12 @@ describe('AiChatService', () => {
     })
 
     it('applies gt cursor filter for newer direction', async () => {
-      mockPrisma.aiChatMessage.findMany.mockResolvedValue([])
+      mockRepository.findMessages.mockResolvedValue([])
       const cursor = '2025-06-01T12:00:00.000Z'
 
       await service.getMessages(TENANT_ID, USER_ID, THREAD_ID, 10, cursor, 'newer')
 
-      expect(mockPrisma.aiChatMessage.findMany).toHaveBeenCalledWith(
+      expect(mockRepository.findMessages).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             createdAt: { gt: new Date(cursor) },
@@ -320,9 +308,7 @@ describe('AiChatService', () => {
     })
 
     it('verifies thread access before returning messages', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(
-        buildThread({ tenantId: 'other-tenant' })
-      )
+      mockRepository.findThreadById.mockResolvedValue(buildThread({ tenantId: 'other-tenant' }))
 
       await expect(service.getMessages(TENANT_ID, USER_ID, THREAD_ID, 10)).rejects.toThrow(
         BusinessException
@@ -336,8 +322,8 @@ describe('AiChatService', () => {
 
   describe('updateThreadSettings', () => {
     beforeEach(() => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(buildThread())
-      mockPrisma.aiChatThread.update.mockResolvedValue(buildThread())
+      mockRepository.findThreadById.mockResolvedValue(buildThread())
+      mockRepository.updateThread.mockResolvedValue(buildThread())
     })
 
     it('handles UUID connector', async () => {
@@ -353,14 +339,14 @@ describe('AiChatService', () => {
       })
 
       expect(mockLlmConnectorsService.getById).toHaveBeenCalledWith(connectorUuid, TENANT_ID)
-      expect(mockPrisma.aiChatThread.update).toHaveBeenCalledWith(
+      expect(mockRepository.updateThread).toHaveBeenCalledWith(
+        THREAD_ID,
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: connectorUuid,
-            provider: 'Custom LLM',
-            model: 'claude-3',
-          }),
-        })
+          connectorId: connectorUuid,
+          provider: 'Custom LLM',
+          model: 'claude-3',
+        }),
+        { includeUser: true }
       )
     })
 
@@ -369,13 +355,13 @@ describe('AiChatService', () => {
         connectorId: 'default',
       })
 
-      expect(mockPrisma.aiChatThread.update).toHaveBeenCalledWith(
+      expect(mockRepository.updateThread).toHaveBeenCalledWith(
+        THREAD_ID,
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: null,
-            provider: null,
-          }),
-        })
+          connectorId: null,
+          provider: null,
+        }),
+        { includeUser: true }
       )
     })
 
@@ -387,14 +373,14 @@ describe('AiChatService', () => {
       })
 
       expect(mockConnectorsService.getDecryptedConfig).toHaveBeenCalledWith(TENANT_ID, 'bedrock')
-      expect(mockPrisma.aiChatThread.update).toHaveBeenCalledWith(
+      expect(mockRepository.updateThread).toHaveBeenCalledWith(
+        THREAD_ID,
         expect.objectContaining({
-          data: expect.objectContaining({
-            connectorId: null,
-            provider: 'bedrock',
-            model: 'gpt-4-turbo',
-          }),
-        })
+          connectorId: null,
+          provider: 'bedrock',
+          model: 'gpt-4-turbo',
+        }),
+        { includeUser: true }
       )
     })
 
@@ -411,12 +397,12 @@ describe('AiChatService', () => {
         model: 'claude-3-opus',
       })
 
-      expect(mockPrisma.aiChatThread.update).toHaveBeenCalledWith(
+      expect(mockRepository.updateThread).toHaveBeenCalledWith(
+        THREAD_ID,
         expect.objectContaining({
-          data: expect.objectContaining({
-            model: 'claude-3-opus',
-          }),
-        })
+          model: 'claude-3-opus',
+        }),
+        { includeUser: true }
       )
     })
   })
@@ -427,19 +413,16 @@ describe('AiChatService', () => {
 
   describe('archiveThread', () => {
     it('sets isArchived to true', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(buildThread())
-      mockPrisma.aiChatThread.update.mockResolvedValue(buildThread({ isArchived: true }))
+      mockRepository.findThreadById.mockResolvedValue(buildThread())
+      mockRepository.updateThread.mockResolvedValue(buildThread({ isArchived: true }))
 
       await service.archiveThread(TENANT_ID, USER_ID, THREAD_ID)
 
-      expect(mockPrisma.aiChatThread.update).toHaveBeenCalledWith({
-        where: { id: THREAD_ID },
-        data: { isArchived: true },
-      })
+      expect(mockRepository.updateThread).toHaveBeenCalledWith(THREAD_ID, { isArchived: true })
     })
 
     it('throws when thread not found', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(null)
+      mockRepository.findThreadById.mockResolvedValue(null)
 
       await expect(service.archiveThread(TENANT_ID, USER_ID, THREAD_ID)).rejects.toThrow(
         BusinessException
@@ -453,7 +436,7 @@ describe('AiChatService', () => {
 
   describe('verifyThreadAccess (via archiveThread)', () => {
     it('throws 404 when thread not found', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(null)
+      mockRepository.findThreadById.mockResolvedValue(null)
 
       await expect(service.archiveThread(TENANT_ID, USER_ID, THREAD_ID)).rejects.toThrow(
         expect.objectContaining({ message: 'Chat thread not found' })
@@ -461,9 +444,7 @@ describe('AiChatService', () => {
     })
 
     it('throws 403 when tenant mismatch', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(
-        buildThread({ tenantId: 'other-tenant' })
-      )
+      mockRepository.findThreadById.mockResolvedValue(buildThread({ tenantId: 'other-tenant' }))
 
       await expect(service.archiveThread(TENANT_ID, USER_ID, THREAD_ID)).rejects.toThrow(
         expect.objectContaining({ message: 'Access denied to this chat' })
@@ -471,7 +452,7 @@ describe('AiChatService', () => {
     })
 
     it('throws 403 when user mismatch', async () => {
-      mockPrisma.aiChatThread.findUnique.mockResolvedValue(buildThread({ userId: 'other-user' }))
+      mockRepository.findThreadById.mockResolvedValue(buildThread({ userId: 'other-user' }))
 
       await expect(service.archiveThread(TENANT_ID, USER_ID, THREAD_ID)).rejects.toThrow(
         expect.objectContaining({ message: 'Access denied to this chat' })

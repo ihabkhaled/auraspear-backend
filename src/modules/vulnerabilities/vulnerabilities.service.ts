@@ -13,6 +13,7 @@ import { BusinessException } from '../../common/exceptions/business.exception'
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import type { CreateVulnerabilityDto } from './dto/create-vulnerability.dto'
 import type { UpdateVulnerabilityDto } from './dto/update-vulnerability.dto'
 import type {
@@ -267,8 +268,7 @@ export class VulnerabilitiesService {
     this.log.entry('getVulnerabilityStats', tenantId, {})
 
     try {
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      const thirtyDaysAgo = daysAgo(30)
 
       const [criticalCount, highCount, mediumCount, patched30dCount, exploitCount] =
         await Promise.all([

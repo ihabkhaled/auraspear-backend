@@ -1,9 +1,14 @@
 import { Prisma } from '@prisma/client'
-import { BROWSER_PATTERNS } from './users-control.constants'
-import { UsersControlSessionSortField, UsersControlUserSortField } from './users-control.enums'
+import {
+  BROWSER_PATTERNS,
+  USERS_CONTROL_SESSION_SORT_FIELDS,
+  USERS_CONTROL_USER_SORT_FIELDS,
+} from './users-control.constants'
+import { type UsersControlSessionSortField, UsersControlUserSortField } from './users-control.enums'
 import { type SortOrder, UserSessionBrowser, UserSessionStatus } from '../../common/enums'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { UserRole } from '../../common/interfaces/authenticated-request.interface'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import { isUserSessionOnline } from '../auth/auth-session.utilities'
 import type {
   UsersControlPagination,
@@ -98,17 +103,7 @@ export function buildUsersControlUserOrderBy(
   sortBy: UsersControlUserSortField,
   sortOrder: SortOrder
 ): Prisma.UserOrderByWithRelationInput {
-  switch (sortBy) {
-    case UsersControlUserSortField.EMAIL:
-      return { email: sortOrder }
-    case UsersControlUserSortField.LAST_LOGIN_AT:
-      return { lastLoginAt: sortOrder }
-    case UsersControlUserSortField.CREATED_AT:
-      return { createdAt: sortOrder }
-    case UsersControlUserSortField.NAME:
-    default:
-      return { name: sortOrder }
-  }
+  return buildOrderBy(USERS_CONTROL_USER_SORT_FIELDS, 'name', sortBy, sortOrder)
 }
 
 function compareNullableStrings(
@@ -153,15 +148,7 @@ export function buildUsersControlSessionOrderBy(
   sortBy: UsersControlSessionSortField,
   sortOrder: SortOrder
 ): Prisma.UserSessionOrderByWithRelationInput {
-  switch (sortBy) {
-    case UsersControlSessionSortField.LAST_LOGIN_AT:
-      return { lastLoginAt: sortOrder }
-    case UsersControlSessionSortField.CREATED_AT:
-      return { createdAt: sortOrder }
-    case UsersControlSessionSortField.LAST_SEEN_AT:
-    default:
-      return { lastSeenAt: sortOrder }
-  }
+  return buildOrderBy(USERS_CONTROL_SESSION_SORT_FIELDS, 'lastSeenAt', sortBy, sortOrder)
 }
 
 export function buildPagination(
@@ -189,9 +176,7 @@ export function mapUsersControlSummary(
   }
 }
 
-function getLatestSessionDate(
-  sessions: UsersControlUserRecord['sessions']
-): Date | null {
+function getLatestSessionDate(sessions: UsersControlUserRecord['sessions']): Date | null {
   const sorted = [...sessions].sort(
     (left, right) => right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
   )
@@ -210,9 +195,7 @@ function countOnlineSessions(activeSessions: UsersControlUserRecord['sessions'])
   ).length
 }
 
-function hasGlobalAdminMembership(
-  memberships: UsersControlUserRecord['memberships']
-): boolean {
+function hasGlobalAdminMembership(memberships: UsersControlUserRecord['memberships']): boolean {
   return memberships.some(membership => membership.role === UserRole.GLOBAL_ADMIN)
 }
 
@@ -269,16 +252,28 @@ function getUserSortComparator(
         comparePlatformLists(left.sessionPlatforms, right.sessionPlatforms, sortOrder)
     case UsersControlUserSortField.LAST_SEEN_AT:
       return (left, right): number =>
-        compareNullableDates(toNullableDate(left.lastSeenAt), toNullableDate(right.lastSeenAt), sortOrder)
+        compareNullableDates(
+          toNullableDate(left.lastSeenAt),
+          toNullableDate(right.lastSeenAt),
+          sortOrder
+        )
     case UsersControlUserSortField.LAST_LOGIN_AT:
       return (left, right): number =>
-        compareNullableDates(toNullableDate(left.lastLoginAt), toNullableDate(right.lastLoginAt), sortOrder)
+        compareNullableDates(
+          toNullableDate(left.lastLoginAt),
+          toNullableDate(right.lastLoginAt),
+          sortOrder
+        )
     case UsersControlUserSortField.ACTIVE_SESSION_COUNT:
       return (left, right): number =>
         compareNumbers(left.activeSessionCount, right.activeSessionCount, sortOrder)
     case UsersControlUserSortField.CREATED_AT:
       return (left, right): number =>
-        compareNullableDates(toNullableDate(left.createdAt), toNullableDate(right.createdAt), sortOrder)
+        compareNullableDates(
+          toNullableDate(left.createdAt),
+          toNullableDate(right.createdAt),
+          sortOrder
+        )
     case UsersControlUserSortField.NAME:
     default:
       return (left, right): number => compareNullableStrings(left.name, right.name, sortOrder)

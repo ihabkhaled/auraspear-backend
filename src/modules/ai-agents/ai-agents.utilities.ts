@@ -1,5 +1,5 @@
-import { SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { AGENT_SORT_FIELDS } from './ai-agents.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { AgentWithRelations, AiAgentRecord } from './ai-agents.types'
 import type { UpdateAgentToolDto } from './dto/agent-tool.dto'
 import type { UpdateAgentDto } from './dto/update-agent.dto'
@@ -56,29 +56,7 @@ export function buildAgentOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.AiAgentOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'name':
-      return { name: order }
-    case 'model':
-      return { model: order }
-    case 'status':
-      return { status: order }
-    case 'tier':
-      return { tier: order }
-    case 'totalTasks':
-      return { totalTasks: order }
-    case 'totalTokens':
-      return { totalTokens: order }
-    case 'totalCost':
-      return { totalCost: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(AGENT_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */

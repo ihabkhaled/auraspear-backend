@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { buildNextSequenceNumber } from '../../common/utils/sequence-number.utility'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { IncidentWithTenant, IncidentWithTenantAndTimeline } from './incidents.types'
 import type { Prisma, IncidentTimeline } from '@prisma/client'
@@ -260,19 +261,6 @@ export class IncidentsRepository {
       select: { incidentNumber: true },
     })
 
-    let nextSequence = 1
-
-    if (latestIncident) {
-      const parts = latestIncident.incidentNumber.split('-')
-      const lastSegment = parts[parts.length - 1]
-      if (lastSegment) {
-        const parsed = Number.parseInt(lastSegment, 10)
-        if (!Number.isNaN(parsed)) {
-          nextSequence = parsed + 1
-        }
-      }
-    }
-
-    return `INC-${year}-${String(nextSequence).padStart(4, '0')}`
+    return buildNextSequenceNumber(latestIncident?.incidentNumber, prefix, 4)
   }
 }

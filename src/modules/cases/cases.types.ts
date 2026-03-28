@@ -5,6 +5,8 @@ import type {
   CaseComment,
   CaseCommentMention,
   CaseNote,
+  CaseSeverity,
+  CaseStatus,
   CaseTask,
   CaseTimeline,
   TenantMembership,
@@ -68,6 +70,19 @@ export type CaseWithRelations = Case & {
 
 export type CaseWithTenant = Case & { tenant: { name: string } }
 
+export type CaseListItemInput = Case & {
+  ownerUserId: string | null
+  createdBy: string | null
+  tenant: { name: string }
+}
+
+export type CaseListItemOutput = Case & {
+  ownerName: string | null
+  ownerEmail: string | null
+  createdByName: string | null
+  tenantName: string
+}
+
 export type CaseCommentWithMentions = CaseComment & {
   mentions: CaseCommentMention[]
 }
@@ -107,4 +122,22 @@ export interface CaseStats {
   }
   closedLast30d: number
   avgResolutionHours: number | null
+}
+
+export interface TimelineEntry {
+  type: string
+  actor: string
+  description: string
+}
+
+export interface CreateCasePayload {
+  tenantId: string
+  cycleId?: string | null
+  title: string
+  description: string
+  severity: CaseSeverity
+  status: CaseStatus
+  ownerUserId?: string | null
+  createdBy: string
+  linkedAlerts: string[]
 }

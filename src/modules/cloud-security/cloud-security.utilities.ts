@@ -1,4 +1,5 @@
-import { toSortOrder } from '../../common/utils/query.utility'
+import { ACCOUNT_SORT_FIELDS, FINDING_SORT_FIELDS } from './cloud-security.constants'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   AccountEntity,
   CloudAccountRecord,
@@ -31,28 +32,7 @@ export function buildAccountListWhere(
 }
 
 export function buildAccountOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'provider':
-      return { provider: order }
-    case 'status':
-      return { status: order }
-    case 'accountId':
-      return { accountId: order }
-    case 'alias':
-      return { alias: order }
-    case 'findingsCount':
-      return { findingsCount: order }
-    case 'complianceScore':
-      return { complianceScore: order }
-    case 'lastScanAt':
-      return { lastScanAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'createdAt':
-    default:
-      return { createdAt: order }
-  }
+  return buildOrderBy(ACCOUNT_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 export function buildFindingListWhere(
@@ -79,20 +59,7 @@ export function buildFindingListWhere(
 }
 
 export function buildFindingOrderBy(sortBy?: string, sortOrder?: string): Record<string, string> {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'severity':
-      return { severity: order }
-    case 'status':
-      return { status: order }
-    case 'title':
-      return { title: order }
-    case 'createdAt':
-      return { createdAt: order }
-    case 'detectedAt':
-    default:
-      return { detectedAt: order }
-  }
+  return buildOrderBy(FINDING_SORT_FIELDS, 'detectedAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */

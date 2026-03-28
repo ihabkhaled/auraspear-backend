@@ -9,14 +9,24 @@ import { DUMMY_BCRYPT_HASH, JWT_CLOCK_TOLERANCE_SECONDS } from './auth.constants
 import { RefreshTokenFamilyRevocationReason } from './auth.enums'
 import { AuthRepository } from './auth.repository'
 import {
-  buildPayloadFromMembership,
+  assertAccessClaimsPresent,
+  assertRefreshClaimsPresent,
+  assertRefreshRotationClaimsPresent,
+  assertRefreshSubjectMatches,
+  assertTokenTypeValid,
+  buildEpochToDate,
   buildExpiryDateFromSeconds,
+  buildPayloadFromMembership,
   computeRemainingTtl,
   computeRemainingTtlFromDate,
+  extractFamilyFromPayload,
+  extractFirstMembershipOrThrow,
+  hasGlobalAdminMembership,
   hashTokenIdentifier,
   mapMembershipsToTenantInfos,
   parseExpiryToSeconds,
   preserveImpersonationClaims,
+  stripTokenMetaClaims,
 } from './auth.utilities'
 import { TokenBlacklistService } from './token-blacklist.service'
 import { AppLogFeature, TokenType, UserSessionStatus } from '../../common/enums'
@@ -35,6 +45,7 @@ import type {
   RefreshRotationWithFamily,
   SessionRevocationTarget,
   TenantMembershipInfo,
+  UserWithMembershipSummary,
   UserWithMemberships,
 } from './auth.types'
 import type { JwtPayload } from '../../common/interfaces/authenticated-request.interface'
@@ -290,32 +301,18 @@ export class AuthService {
 
   async performLogout(accessUser: JwtPayload | undefined, refreshToken: string): Promise<void> {
     this.log.entry('performLogout', 'system', { actorUserId: accessUser?.sub })
-
-    if (!accessUser?.jti || !accessUser?.exp) {
-      throw new BusinessException(
-        401,
-        'Access token missing required claims',
-        'errors.auth.invalidAccessToken'
-      )
-    }
+    assertAccessClaimsPresent(accessUser)
 
     const refreshPayload = await this.verifyRefreshToken(refreshToken)
-    this.assertRefreshPayloadValid(refreshPayload, accessUser)
-
-    if (!refreshPayload.jti || !refreshPayload.exp) {
-      throw new BusinessException(
-        401,
-        'Refresh token missing required claims',
-        'errors.auth.invalidRefreshToken'
-      )
-    }
+    assertRefreshSubjectMatches(refreshPayload, accessUser)
+    assertRefreshClaimsPresent(refreshPayload)
 
     await this.logout(
       accessUser.jti,
       refreshPayload.jti,
       accessUser.exp,
       refreshPayload.exp,
-      typeof refreshPayload.family === 'string' ? refreshPayload.family : undefined,
+      extractFamilyFromPayload(refreshPayload),
       accessUser.sub
     )
 
@@ -492,8 +489,7 @@ export class AuthService {
   }
 
   private issueAccessTokenBundle(payload: JwtPayload): IssuedAccessToken {
-    const { iat: _iat, exp: _exp, jti: _jti, generation: _generation, ...clean } = payload
-
+    const clean = stripTokenMetaClaims(payload)
     const tokenJti = randomUUID()
 
     return {
@@ -518,7 +514,7 @@ export class AuthService {
     const tokenFamily = family ?? randomUUID()
     const tokenGeneration = generation ?? 0
     const tokenJti = randomUUID()
-    const cleanPayload = this.stripTokenMetaClaims(payload)
+    const cleanPayload = stripTokenMetaClaims(payload)
 
     const refreshToken = jwt.sign(
       {
@@ -539,20 +535,6 @@ export class AuthService {
       jti: tokenJti,
       expiresAt: buildExpiryDateFromSeconds(parseExpiryToSeconds(String(this.refreshExpiry))),
     }
-  }
-
-  private stripTokenMetaClaims(
-    payload: JwtPayload
-  ): Omit<JwtPayload, 'iat' | 'exp' | 'jti' | 'family' | 'generation'> {
-    const {
-      iat: _iat,
-      exp: _exp,
-      jti: _jti,
-      family: _family,
-      generation: _generation,
-      ...clean
-    } = payload
-    return clean
   }
 
   private async createRefreshSession(
@@ -624,7 +606,7 @@ export class AuthService {
       tenantId,
       touchedAt: new Date(),
       currentAccessJti: payload.jti,
-      currentAccessExpiresAt: payload.exp === undefined ? undefined : new Date(payload.exp * 1000),
+      currentAccessExpiresAt: buildEpochToDate(payload.exp),
       context: sessionContext,
     })
 
@@ -701,17 +683,7 @@ export class AuthService {
   }
 
   private async getRefreshRotationOrThrow(payload: JwtPayload): Promise<RefreshRotationWithFamily> {
-    if (
-      !payload.jti ||
-      typeof payload.family !== 'string' ||
-      typeof payload.generation !== 'number'
-    ) {
-      throw new BusinessException(
-        401,
-        'Refresh token missing rotation claims',
-        'errors.auth.invalidRefreshToken'
-      )
-    }
+    assertRefreshRotationClaimsPresent(payload)
 
     const rotation = await this.authRepository.findRefreshTokenRotationByHash(
       hashTokenIdentifier(payload.jti)
@@ -831,35 +803,18 @@ export class AuthService {
   }
 
   private getFirstMembershipOrThrow(
-    user: {
-      id: string
-      email: string
-      memberships: Array<{
-        tenantId: string
-        role: string
-        tenant: { id: string; name: string; slug: string }
-      }>
-    },
+    user: UserWithMembershipSummary,
     action: string
   ): { tenantId: string; role: string; tenant: { id: string; name: string; slug: string } } {
-    if (user.memberships.length === 0) {
+    try {
+      return extractFirstMembershipOrThrow(user)
+    } catch {
       this.log.warn(action, 'system', 'No memberships found', {
         actorEmail: user.email,
         actorUserId: user.id,
       })
       throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
     }
-
-    const first = user.memberships[0]
-    if (!first) {
-      this.log.warn(action, 'system', 'First membership is undefined', {
-        actorEmail: user.email,
-        actorUserId: user.id,
-      })
-      throw new BusinessException(401, 'User account is not active', 'errors.auth.accountInactive')
-    }
-
-    return first
   }
 
   private async verifyToken(
@@ -875,16 +830,8 @@ export class AuthService {
         clockTolerance: JWT_CLOCK_TOLERANCE_SECONDS,
       }) as JwtPayload & { tokenType?: string }
 
-      if (decoded.tokenType !== expectedType) {
-        throw new Error(`Not a ${expectedType} token`)
-      }
-
-      if (checkBlacklist && decoded.jti) {
-        const revoked = await this.tokenBlacklistService.isBlacklisted(decoded.jti)
-        if (revoked) {
-          throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
-        }
-      }
+      assertTokenTypeValid(decoded, expectedType, errorKey)
+      await this.assertTokenNotBlacklisted(decoded.jti, checkBlacklist)
 
       return decoded
     } catch (error) {
@@ -896,6 +843,20 @@ export class AuthService {
         error: error instanceof Error ? error.message : 'Unknown error',
       })
       throw new BusinessException(401, `Invalid or expired ${expectedType} token`, errorKey)
+    }
+  }
+
+  private async assertTokenNotBlacklisted(
+    jti: string | undefined,
+    checkBlacklist: boolean
+  ): Promise<void> {
+    if (!checkBlacklist || !jti) {
+      return
+    }
+
+    const revoked = await this.tokenBlacklistService.isBlacklisted(jti)
+    if (revoked) {
+      throw new BusinessException(401, 'Token has been revoked', 'errors.auth.tokenRevoked')
     }
   }
 
@@ -940,32 +901,15 @@ export class AuthService {
 
   private async revokeImpersonationTokens(caller: JwtPayload): Promise<void> {
     await this.blacklistTokenIfPresent(caller)
+    const family = extractFamilyFromPayload(caller)
 
-    if (caller.family) {
+    if (family) {
       await this.authRepository.revokeRefreshTokenFamily(
-        caller.family,
+        family,
         RefreshTokenFamilyRevocationReason.IMPERSONATION_ENDED,
         new Date(),
         undefined,
         caller.impersonatorSub
-      )
-    }
-  }
-
-  private assertRefreshPayloadValid(refreshPayload: JwtPayload, accessUser: JwtPayload): void {
-    if (!refreshPayload.jti || !refreshPayload.exp) {
-      throw new BusinessException(
-        401,
-        'Refresh token missing required claims',
-        'errors.auth.invalidRefreshToken'
-      )
-    }
-
-    if (refreshPayload.sub !== accessUser.sub) {
-      throw new BusinessException(
-        403,
-        'Refresh token does not belong to this user',
-        'errors.auth.tokenMismatch'
       )
     }
   }
@@ -1037,8 +981,7 @@ export class AuthService {
     targetTenantId: string,
     userId: string
   ): Promise<AuthorizedTenantContext> {
-    const isGlobalAdmin = memberships.some(item => item.role === UserRole.GLOBAL_ADMIN)
-    if (!isGlobalAdmin) {
+    if (!hasGlobalAdminMembership(memberships)) {
       this.log.warn(
         'resolveAuthorizedTenantContext',
         targetTenantId,

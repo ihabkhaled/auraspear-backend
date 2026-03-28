@@ -9,3 +9,7 @@ export const PLATFORM_ADMIN_NAME = 'Platform Administrator'
 export const TOKEN_BLACKLIST_PREFIX = 'token:blacklist:'
 export const REFRESH_FAMILY_PREFIX = 'rf:'
 export const REFRESH_FAMILY_REVOKED_PREFIX = 'rf:revoked:'
+
+export const TENANT_SELECT = {
+  select: { id: true, name: true, slug: true },
+} as const

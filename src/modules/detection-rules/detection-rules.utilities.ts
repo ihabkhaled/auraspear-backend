@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml'
 import {
+  DETECTION_RULE_SORT_FIELDS,
   DetectionExecutionEngine,
   SIGMA_CONDITION_KEY,
   SIGMA_DETECTION_KEY,
@@ -11,7 +12,7 @@ import {
   YaraLComparator,
   YaraLLogicalOperator,
 } from './detection-rules.constants'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   DetectionProgram,
   DetectionRuleRecord,
@@ -101,31 +102,7 @@ export function buildRuleOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.DetectionRuleOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-
-  switch (sortBy) {
-    case 'name':
-      return { name: order }
-    case 'severity':
-      return { severity: order }
-    case 'status':
-      return { status: order }
-    case 'ruleNumber':
-      return { ruleNumber: order }
-    case 'ruleType':
-      return { ruleType: order }
-    case 'hitCount':
-      return { hitCount: order }
-    case 'falsePositiveCount':
-      return { falsePositiveCount: order }
-    case 'lastTriggeredAt':
-      return { lastTriggeredAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'createdAt':
-    default:
-      return { createdAt: order }
-  }
+  return buildOrderBy(DETECTION_RULE_SORT_FIELDS, 'createdAt', sortBy, sortOrder)
 }
 
 /* ---------------------------------------------------------------- */

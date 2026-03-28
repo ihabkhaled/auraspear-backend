@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common'
 import { EmbeddingService } from './embedding.service'
 import { getUserMemoryDelegate } from './memory.types'
 import { PrismaService } from '../../../prisma/prisma.service'
+import { AiChatRepository } from '../../ai/chat/ai-chat.repository'
 import { ConnectorsService } from '../../connectors/connectors.service'
 import { LlmConnectorsService } from '../../connectors/llm-connectors/llm-connectors.service'
 import { LlmApisService } from '../../connectors/services/llm-apis.service'
@@ -13,6 +14,8 @@ export class MemoryExtractionService {
 
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AiChatRepository))
+    private readonly chatRepository: AiChatRepository,
     private readonly connectorsService: ConnectorsService,
     private readonly llmConnectorsService: LlmConnectorsService,
     private readonly llmApisService: LlmApisService,
@@ -22,8 +25,7 @@ export class MemoryExtractionService {
   async extractFromThread(tenantId: string, userId: string, threadId: string): Promise<void> {
     this.logger.log(`Extracting memories from thread ${threadId} for user ${userId}`)
 
-    // Fetch recent user messages from the thread
-    const messages = await this.prisma.aiChatMessage.findMany({
+    const messages = await this.chatRepository.findMessages({
       where: { threadId, tenantId, role: 'user' },
       orderBy: { sequenceNum: 'asc' },
       take: 50,

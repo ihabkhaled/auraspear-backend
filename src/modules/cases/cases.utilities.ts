@@ -1,6 +1,14 @@
-import { CaseStatus, CaseTaskStatus, CaseTimelineType, SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
-import type { CaseCommentResponse } from './cases.types'
+import { CASE_SORT_FIELDS } from './cases.constants'
+import { CaseStatus, CaseTaskStatus, CaseTimelineType } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
+import type {
+  CaseCommentResponse,
+  CaseListItemInput,
+  CaseListItemOutput,
+  CreateCasePayload,
+  TimelineEntry,
+} from './cases.types'
+import type { CreateCaseDto } from './dto/create-case.dto'
 import type { UpdateCaseDto } from './dto/update-case.dto'
 import type { CaseSeverity, Prisma } from '@prisma/client'
 
@@ -53,23 +61,12 @@ export function buildCaseOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.CaseOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'severity':
-      return { severity: order }
-    case 'status':
-      return { status: order }
-    case 'caseNumber':
-      return { caseNumber: order }
-    case 'title':
-      return { title: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    CASE_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.CaseOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */
@@ -187,14 +184,10 @@ export function mapCommentToResponseShape(
 /* ---------------------------------------------------------------- */
 
 export function mapCaseListItem(
-  caseItem: {
-    ownerUserId: string | null
-    createdBy: string | null
-    tenant: { name: string }
-  } & Record<string, unknown>,
+  caseItem: CaseListItemInput,
   ownersMap: Map<string, { name: string; email: string }>,
   creatorsMap: Map<string, string>
-): Record<string, unknown> {
+): CaseListItemOutput {
   const owner = caseItem.ownerUserId ? ownersMap.get(caseItem.ownerUserId) : undefined
   return {
     ...caseItem,
@@ -402,4 +395,58 @@ export function buildCaseAiContext(caseItem: {
       timestamp: e.timestamp?.toISOString() ?? '',
     })),
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* CREATE CASE PAYLOAD BUILDING                                      */
+/* ---------------------------------------------------------------- */
+
+export function buildCreateCasePayload(
+  dto: CreateCaseDto,
+  linkedAlerts: string[],
+  tenantId: string,
+  email: string
+): CreateCasePayload {
+  return {
+    tenantId,
+    cycleId: dto.cycleId,
+    title: dto.title,
+    description: dto.description,
+    severity: dto.severity as CaseSeverity,
+    status: CaseStatus.OPEN,
+    ownerUserId: dto.ownerUserId ?? null,
+    createdBy: email,
+    linkedAlerts,
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* ALERT LINKED TIMELINE ENTRY                                       */
+/* ---------------------------------------------------------------- */
+
+export function buildAlertLinkedTimelineEntry(
+  linkedAlerts: string[],
+  actor: string
+): TimelineEntry | undefined {
+  if (linkedAlerts.length === 0) return undefined
+  return {
+    type: CaseTimelineType.ALERT_LINKED,
+    actor,
+    description: JSON.stringify({
+      key: 'alertsLinkedAtCreation',
+      params: { count: String(linkedAlerts.length) },
+    }),
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* COMMENT USER ID COLLECTION                                        */
+/* ---------------------------------------------------------------- */
+
+export function collectCommentUserIds(
+  comments: Array<{ authorId: string; mentions: Array<{ userId: string }> }>
+): string[] {
+  const authorIds = comments.map(c => c.authorId)
+  const mentionUserIds = comments.flatMap(c => c.mentions.map(m => m.userId))
+  return [...new Set([...authorIds, ...mentionUserIds])]
 }

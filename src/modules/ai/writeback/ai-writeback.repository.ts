@@ -6,8 +6,18 @@ import {
   type PaginatedResponse,
 } from '../../../common/interfaces/pagination.interface'
 import { PrismaService } from '../../../prisma/prisma.service'
-import type { SearchFindingsOptions, SearchFindingsResult } from './ai-writeback.types'
+import type {
+  AlertAiFieldsData,
+  CreateCaseNoteData,
+  CreateFindingData,
+  CreateIncidentTimelineData,
+  CreateJobRunSummaryData,
+  CreateNotificationData,
+  SearchFindingsOptions,
+  SearchFindingsResult,
+} from './ai-writeback.types'
 import type { ListFindingsQueryDto } from './dto/list-findings-query.dto'
+import type { UserRole } from '../../../common/interfaces/authenticated-request.interface'
 import type { AiExecutionFinding } from '@prisma/client'
 
 @Injectable()
@@ -63,7 +73,9 @@ export class AiWritebackRepository {
       if (trimmed.length < 3) {
         // Short queries: fallback to ILIKE
         const likeParameter = `%${trimmed}%`
-        conditions.push(`(f."title" ILIKE $${parameterIndex} OR f."summary" ILIKE $${parameterIndex})`)
+        conditions.push(
+          `(f."title" ILIKE $${parameterIndex} OR f."summary" ILIKE $${parameterIndex})`
+        )
         params.push(likeParameter)
         parameterIndex++
       } else {
@@ -81,7 +93,9 @@ export class AiWritebackRepository {
           const words = sanitized.split(/\s+/).filter(w => w.length > 0)
           if (words.length === 0) {
             // All special chars — fall back to ILIKE
-            conditions.push(`(f."title" ILIKE $${parameterIndex} OR f."summary" ILIKE $${parameterIndex})`)
+            conditions.push(
+              `(f."title" ILIKE $${parameterIndex} OR f."summary" ILIKE $${parameterIndex})`
+            )
             params.push(`%${trimmed}%`)
           } else {
             const tsqueryText = words.map(w => `${w}:*`).join(' & ')
@@ -360,5 +374,66 @@ export class AiWritebackRepository {
       where: { id },
       data: updateData,
     })
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Writeback persistence methods                                       */
+  /* ------------------------------------------------------------------ */
+
+  /** Bulk-create AI execution findings. */
+  async createFindings(data: CreateFindingData[]): Promise<{ count: number }> {
+    return this.prisma.aiExecutionFinding.createMany({ data })
+  }
+
+  /** Update alert AI-related fields for a given tenant + alert ID. */
+  async updateAlertAiFields(
+    tenantId: string,
+    alertId: string,
+    data: AlertAiFieldsData
+  ): Promise<void> {
+    await this.prisma.alert.updateMany({
+      where: { id: alertId, tenantId },
+      data,
+    })
+  }
+
+  /** Create an incident timeline entry (AI writeback). */
+  async createIncidentTimelineEntry(data: CreateIncidentTimelineData): Promise<void> {
+    await this.prisma.incidentTimeline.create({ data })
+  }
+
+  /** Create a case note (AI writeback). */
+  async createCaseNote(data: CreateCaseNoteData): Promise<void> {
+    await this.prisma.caseNote.create({ data })
+  }
+
+  /** Persist an AI job run summary record. */
+  async createJobRunSummary(data: CreateJobRunSummaryData): Promise<void> {
+    await this.prisma.aiJobRunSummary.create({ data })
+  }
+
+  /** Update finding and writeback counts on an AI agent session. */
+  async updateSessionCounts(
+    sessionId: string,
+    findingsCount: number,
+    writebacksCount: number
+  ): Promise<void> {
+    await this.prisma.aiAgentSession.update({
+      where: { id: sessionId },
+      data: { findingsCount, writebacksCount },
+    })
+  }
+
+  /** Find the first active tenant membership for a given role. */
+  async findTenantAdmin(tenantId: string, role: UserRole): Promise<{ userId: string } | null> {
+    return this.prisma.tenantMembership.findFirst({
+      where: { tenantId, role, status: 'active' },
+      select: { userId: true },
+    })
+  }
+
+  /** Create a notification record. */
+  async createNotification(data: CreateNotificationData): Promise<void> {
+    await this.prisma.notification.create({ data })
   }
 }

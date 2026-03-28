@@ -1,5 +1,7 @@
-import { VALID_SEVERITIES, VALID_STATUSES } from './alerts.constants'
+import { ALERT_SORT_FIELDS, VALID_SEVERITIES, VALID_STATUSES } from './alerts.constants'
 import { AlertStatus, SortOrder } from '../../common/enums'
+import { daysAgo } from '../../common/utils/date-time.utility'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type { WazuhUpsertOp } from './alerts.types'
 import type { SearchAlertsDto } from './dto/search-alerts.dto'
 import type { AlertSeverity, AlertStatus as PrismaAlertStatus, Prisma } from '@prisma/client'
@@ -25,10 +27,7 @@ export function buildAlertSearchWhere(
   return where
 }
 
-function applySeverityFilter(
-  where: Prisma.AlertWhereInput,
-  severity: string | undefined
-): void {
+function applySeverityFilter(where: Prisma.AlertWhereInput, severity: string | undefined): void {
   if (!severity) return
 
   const severities = severity
@@ -64,17 +63,19 @@ function applyBasicFilters(where: Prisma.AlertWhereInput, query: SearchAlertsDto
 
 function applyTimeFilter(where: Prisma.AlertWhereInput, query: SearchAlertsDto): void {
   if (query.timeRange) {
-    const now = new Date()
-    const from = new Date(now)
+    let from: Date
     switch (query.timeRange) {
       case '24h':
-        from.setHours(from.getHours() - 24)
+        from = daysAgo(1)
         break
       case '7d':
-        from.setDate(from.getDate() - 7)
+        from = daysAgo(7)
         break
       case '30d':
-        from.setDate(from.getDate() - 30)
+        from = daysAgo(30)
+        break
+      default:
+        from = new Date()
         break
     }
     where.timestamp = { gte: from }
@@ -97,26 +98,12 @@ export function buildAlertOrderBy(
   sortBy: string,
   sortOrder: 'asc' | 'desc'
 ): Prisma.AlertOrderByWithRelationInput {
-  switch (sortBy) {
-    case 'timestamp':
-      return { timestamp: sortOrder }
-    case 'severity':
-      return { severity: sortOrder }
-    case 'status':
-      return { status: sortOrder }
-    case 'source':
-      return { source: sortOrder }
-    case 'agentName':
-      return { agentName: sortOrder }
-    case 'sourceIp':
-      return { sourceIp: sortOrder }
-    case 'title':
-      return { title: sortOrder }
-    case 'createdAt':
-      return { createdAt: sortOrder }
-    default:
-      return { timestamp: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    ALERT_SORT_FIELDS,
+    'timestamp',
+    sortBy,
+    sortOrder
+  ) as Prisma.AlertOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */
@@ -166,9 +153,10 @@ function mapSingleWazuhHit(rawHit: unknown, fallbackTimestamp: Date): WazuhUpser
   }
 }
 
-function extractMitreFromRule(
-  rule: Record<string, unknown> | undefined
-): { mitreTactics: string[]; mitreTechniques: string[] } {
+function extractMitreFromRule(rule: Record<string, unknown> | undefined): {
+  mitreTactics: string[]
+  mitreTechniques: string[]
+} {
   const mitreTechniques: string[] = []
   const mitreTactics: string[] = []
   const mitreInfo = rule?.mitre as Record<string, unknown> | undefined
@@ -237,8 +225,8 @@ function extractWazuhAlertNetworkFields(op: WazuhUpsertOp): {
 } {
   const dataRecord = op.data as Record<string, unknown> | null
   return {
-    sourceIp: ((dataRecord?.srcip ?? op.source.src_ip ?? null) as string | null),
-    destinationIp: ((dataRecord?.dstip ?? op.source.dst_ip ?? null) as string | null),
+    sourceIp: (dataRecord?.srcip ?? op.source.src_ip ?? null) as string | null,
+    destinationIp: (dataRecord?.dstip ?? op.source.dst_ip ?? null) as string | null,
   }
 }
 

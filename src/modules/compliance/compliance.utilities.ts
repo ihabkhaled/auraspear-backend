@@ -1,5 +1,6 @@
-import { ComplianceControlStatus, SortOrder } from '../../common/enums'
-import { toSortOrder } from '../../common/utils/query.utility'
+import { FRAMEWORK_SORT_FIELDS } from './compliance.constants'
+import { ComplianceControlStatus } from '../../common/enums'
+import { buildOrderBy } from '../../common/utils/query.utility'
 import type {
   ComplianceFrameworkRecord,
   ComplianceControlRecord,
@@ -42,26 +43,12 @@ export function buildFrameworkOrderBy(
   sortBy?: string,
   sortOrder?: string
 ): Prisma.ComplianceFrameworkOrderByWithRelationInput {
-  const order = toSortOrder(sortOrder)
-  switch (sortBy) {
-    case 'createdAt':
-      return { createdAt: order }
-    case 'updatedAt':
-      return { updatedAt: order }
-    case 'name':
-      return { name: order }
-    case 'standard':
-      return { standard: order }
-    case 'overallScore':
-    case 'complianceScore':
-      return { overallScore: order }
-    case 'totalControls':
-      return { totalControls: order }
-    case 'lastAssessedAt':
-      return { lastAssessedAt: order }
-    default:
-      return { createdAt: SortOrder.DESC }
-  }
+  return buildOrderBy(
+    FRAMEWORK_SORT_FIELDS,
+    'createdAt',
+    sortBy,
+    sortOrder
+  ) as Prisma.ComplianceFrameworkOrderByWithRelationInput
 }
 
 /* ---------------------------------------------------------------- */

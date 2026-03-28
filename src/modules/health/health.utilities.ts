@@ -56,9 +56,7 @@ export function buildComponentCheckResult(
   return { status, latencyMs }
 }
 
-export function extractErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown error'
-}
+export { extractErrorMessage } from '../../common/utils/error-extraction.utility'
 
 export function countUnhealthy(results: ServiceHealthResult[]): number {
   return results.filter(r => r.status !== HealthStatus.HEALTHY).length

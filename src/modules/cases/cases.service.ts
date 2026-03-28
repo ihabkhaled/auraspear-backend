@@ -1,20 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { CasesRepository } from './cases.repository'
 import {
+  buildAlertLinkedTimelineEntry,
   buildAssigneeTimelineDescription,
   buildCaseOrderBy,
   buildCaseUpdateData,
   buildCaseWhereClause,
+  buildCreateCasePayload,
   buildCycleNotificationMessage,
   buildCycleTimelineDescription,
   buildFieldChangeDescription,
   buildStatusTimelineDescription,
   buildTaskStatusTimelineDescription,
   buildTaskUpdateData,
+  collectCommentUserIds,
   formatActorLabel,
   formatUserLabel,
   hasFieldChangesOnly,
   isReopeningCase,
+  mapCaseListItem,
   mapCommentToResponseShape,
   resolveTimelineType,
   shouldBlockClosedCaseUpdate,
@@ -32,6 +36,7 @@ import { MembershipStatus, UserRole } from '../../common/interfaces/authenticate
 import { buildPaginationMeta } from '../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../common/services/app-logger.service'
 import { ServiceLogger } from '../../common/services/service-logger'
+import { daysAgo } from '../../common/utils/date-time.utility'
 import { hasRoleAtLeast } from '../../common/utils/role.utility'
 import { AlertsRepository } from '../alerts/alerts.repository'
 import { EntityExtractionService } from '../entities/entity-extraction.service'
@@ -61,7 +66,6 @@ import type {
   CaseArtifact,
   CaseComment,
   CaseNote,
-  CaseSeverity,
   CaseTask,
   CaseTimeline,
 } from '@prisma/client'
@@ -121,7 +125,7 @@ export class CasesService {
       this.resolveCreatorNamesBatch(cases.map(c => c.createdBy)),
     ])
 
-    const data = cases.map(c => this.enrichCaseListItem(c, ownersMap, creatorsMap))
+    const data = cases.map(c => mapCaseListItem(c, ownersMap, creatorsMap))
 
     this.log.success('listCases', tenantId, { total, returnedCount: data.length })
 
@@ -135,8 +139,7 @@ export class CasesService {
   async getCaseStats(tenantId: string): Promise<CaseStats> {
     this.log.entry('getCaseStats', tenantId)
 
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const thirtyDaysAgo = daysAgo(30)
 
     const [statusCounts, severityCounts, closedLast30d, avgResolutionHours] = await Promise.all([
       this.fetchStatusCounts(tenantId),
@@ -739,27 +742,6 @@ export class CasesService {
     return { ...record, ownerName, ownerEmail, createdByName, tenantName: record.tenant.name }
   }
 
-  private enrichCaseListItem(
-    c: Case & { tenant: { name: string } },
-    ownersMap: Map<string, { name: string; email: string }>,
-    creatorsMap: Map<string, string>
-  ): Case & {
-    tenant: { name: string }
-    ownerName: string | null
-    ownerEmail: string | null
-    createdByName: string | null
-    tenantName: string
-  } {
-    const owner = c.ownerUserId ? ownersMap.get(c.ownerUserId) : undefined
-    return {
-      ...c,
-      ownerName: owner?.name ?? null,
-      ownerEmail: owner?.email ?? null,
-      createdByName: c.createdBy ? (creatorsMap.get(c.createdBy) ?? null) : null,
-      tenantName: c.tenant.name,
-    }
-  }
-
   /* ---------------------------------------------------------------- */
   /* PRIVATE: User Resolution                                          */
   /* ---------------------------------------------------------------- */
@@ -1046,8 +1028,8 @@ export class CasesService {
     linkedAlerts: string[],
     user: JwtPayload
   ): Promise<NonNullable<Awaited<ReturnType<CasesRepository['createCaseTransaction']>>>> {
-    const caseData = this.buildCreateCaseData(dto, linkedAlerts, user)
-    const alertTimeline = this.buildAlertLinkedTimeline(linkedAlerts, user.email)
+    const caseData = buildCreateCasePayload(dto, linkedAlerts, user.tenantId, user.email)
+    const alertTimeline = buildAlertLinkedTimelineEntry(linkedAlerts, user.email)
 
     const result = await this.casesRepository.createCaseTransaction(
       caseData,
@@ -1064,49 +1046,6 @@ export class CasesService {
     }
 
     return result
-  }
-
-  private buildCreateCaseData(
-    dto: CreateCaseDto,
-    linkedAlerts: string[],
-    user: JwtPayload
-  ): {
-    tenantId: string
-    cycleId?: string | null
-    title: string
-    description: string
-    severity: CaseSeverity
-    status: CaseStatus
-    ownerUserId?: string | null
-    createdBy: string
-    linkedAlerts: string[]
-  } {
-    return {
-      tenantId: user.tenantId,
-      cycleId: dto.cycleId,
-      title: dto.title,
-      description: dto.description,
-      severity: dto.severity as CaseSeverity,
-      status: CaseStatus.OPEN,
-      ownerUserId: dto.ownerUserId ?? null,
-      createdBy: user.email,
-      linkedAlerts,
-    }
-  }
-
-  private buildAlertLinkedTimeline(
-    linkedAlerts: string[],
-    actor: string
-  ): { type: string; actor: string; description: string } | undefined {
-    if (linkedAlerts.length === 0) return undefined
-    return {
-      type: CaseTimelineType.ALERT_LINKED,
-      actor,
-      description: JSON.stringify({
-        key: 'alertsLinkedAtCreation',
-        params: { count: String(linkedAlerts.length) },
-      }),
-    }
   }
 
   private async executeUpdateCase(
@@ -1599,9 +1538,7 @@ export class CasesService {
   private async buildCommentUserMap(
     comments: Array<{ authorId: string; mentions: Array<{ userId: string }> }>
   ): Promise<Map<string, { id: string; name: string; email: string }>> {
-    const authorIds = comments.map(c => c.authorId)
-    const mentionUserIds = comments.flatMap(c => c.mentions.map(m => m.userId))
-    const allUserIds = [...new Set([...authorIds, ...mentionUserIds])]
+    const allUserIds = collectCommentUserIds(comments)
     if (allUserIds.length === 0) return new Map()
     const users = await this.casesRepository.findUsersByIds(allUserIds)
     return new Map(users.map(u => [u.id, u]))
