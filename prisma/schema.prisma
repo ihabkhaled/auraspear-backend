@@ -2333,6 +2333,7 @@ model AiExecutionFinding {
   status          String    @default("proposed") @db.VarChar(20)
   appliedAt       DateTime? @map("applied_at")
   createdAt       DateTime  @default(now()) @map("created_at")
+  searchVector    Unsupported("tsvector")? @map("search_vector")
 
   tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   outputLinks AiFindingOutputLink[]
@@ -2342,6 +2343,9 @@ model AiExecutionFinding {
   @@index([tenantId, sourceModule, sourceEntityId])
   @@index([tenantId, agentId])
   @@index([tenantId, findingType])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, severity])
+  @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("ai_execution_findings")
 }
 

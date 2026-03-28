@@ -32,3 +32,26 @@ export interface ParsedAiFinding {
   severity: string | null
   recommendedAction: string | null
 }
+
+export interface SearchFindingsOptions {
+  query?: string
+  sourceModule?: string
+  agentId?: string
+  status?: string
+  findingType?: string
+  severity?: string
+  sourceEntityId?: string
+  confidenceMin?: number
+  confidenceMax?: number
+  dateFrom?: string
+  dateTo?: string
+  sortBy?: string
+  sortOrder?: string
+  page?: number
+  limit?: number
+}
+
+export interface SearchFindingsResult {
+  data: unknown[]
+  total: number
+}

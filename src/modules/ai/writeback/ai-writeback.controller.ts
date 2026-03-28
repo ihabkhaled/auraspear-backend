@@ -1,8 +1,18 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { AiWritebackRepository } from './ai-writeback.repository'
 import { AiWritebackService } from './ai-writeback.service'
 import { ListFindingsQuerySchema } from './dto/list-findings-query.dto'
+import { UpdateFindingStatusSchema } from './dto/update-finding-status.dto'
 import { RequirePermission } from '../../../common/decorators/permission.decorator'
 import { TenantId } from '../../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../../common/enums'
@@ -22,7 +32,7 @@ export class AiWritebackController {
 
   /**
    * GET /ai/findings
-   * List AI execution findings with filters, tenant-scoped, paginated.
+   * List AI execution findings with full-text search, filters, tenant-scoped, paginated.
    */
   @Get()
   @RequirePermission(Permission.AI_AGENTS_VIEW)
@@ -32,6 +42,17 @@ export class AiWritebackController {
   ): Promise<PaginatedResponse<AiExecutionFinding>> {
     const query = ListFindingsQuerySchema.parse(rawQuery)
     return this.repository.listFindings(tenantId, query)
+  }
+
+  /**
+   * GET /ai/findings/stats
+   * Get aggregated stats for AI findings, tenant-scoped.
+   * IMPORTANT: This route must be defined BEFORE the :id route.
+   */
+  @Get('stats')
+  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  async getFindingsStats(@TenantId() tenantId: string) {
+    return this.service.getFindingsStats(tenantId)
   }
 
   /**
@@ -45,6 +66,21 @@ export class AiWritebackController {
     @Param('id', ParseUUIDPipe) id: string
   ): Promise<AiExecutionFinding> {
     return this.service.getFindingById(tenantId, id)
+  }
+
+  /**
+   * PATCH /ai/findings/:id/status
+   * Update the status of a finding with transition validation.
+   */
+  @Patch(':id/status')
+  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  async updateFindingStatus(
+    @TenantId() tenantId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>
+  ): Promise<AiExecutionFinding> {
+    const { status } = UpdateFindingStatusSchema.parse(body)
+    return this.service.updateFindingStatus(tenantId, id, status)
   }
 
   /**

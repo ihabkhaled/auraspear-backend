@@ -38,6 +38,12 @@ export class AiWritebackService {
     this.log = new ServiceLogger(this.appLogger, AppLogFeature.AI, 'AiWritebackService')
   }
 
+  /** Valid status transitions: proposed -> applied, proposed -> dismissed, failed -> dismissed */
+  private static readonly VALID_TRANSITIONS = new Map<string, Set<string>>([
+    [AiFindingStatus.PROPOSED, new Set([AiFindingStatus.APPLIED, AiFindingStatus.DISMISSED])],
+    [AiFindingStatus.FAILED, new Set([AiFindingStatus.DISMISSED])],
+  ])
+
   /**
    * Get a single AI execution finding by ID.
    * Throws BusinessException if not found.
@@ -48,6 +54,60 @@ export class AiWritebackService {
       throw new BusinessException(404, 'AI finding not found', 'errors.ai.findingNotFound')
     }
     return finding
+  }
+
+  /**
+   * Get aggregated stats for AI findings.
+   */
+  async getFindingsStats(tenantId: string): Promise<{
+    total: number
+    proposed: number
+    applied: number
+    dismissed: number
+    failed: number
+    highConfidence: number
+    bySeverity: Record<string, number>
+    byAgent: Array<{ agentId: string; count: number }>
+    byModule: Array<{ sourceModule: string; count: number }>
+  }> {
+    return this.repository.getFindingsStats(tenantId)
+  }
+
+  /**
+   * Update the status of a finding with transition validation.
+   * Only allows: proposed -> applied, proposed -> dismissed, failed -> dismissed.
+   */
+  async updateFindingStatus(
+    tenantId: string,
+    id: string,
+    newStatus: string
+  ): Promise<AiExecutionFinding> {
+    const finding = await this.repository.getFindingById(tenantId, id)
+    if (!finding) {
+      throw new BusinessException(404, 'AI finding not found', 'errors.ai.findingNotFound')
+    }
+
+    const allowedTargets = AiWritebackService.VALID_TRANSITIONS.get(finding.status)
+    if (!allowedTargets?.has(newStatus)) {
+      throw new BusinessException(
+        400,
+        `Invalid status transition from '${finding.status}' to '${newStatus}'`,
+        'errors.ai.invalidStatusTransition'
+      )
+    }
+
+    const updated = await this.repository.updateFindingStatus(tenantId, id, newStatus)
+    if (!updated) {
+      throw new BusinessException(404, 'AI finding not found', 'errors.ai.findingNotFound')
+    }
+
+    this.log.success('updateFindingStatus', tenantId, {
+      findingId: id,
+      from: finding.status,
+      to: newStatus,
+    })
+
+    return updated
   }
 
   /**

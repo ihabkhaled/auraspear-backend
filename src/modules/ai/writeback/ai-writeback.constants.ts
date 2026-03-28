@@ -1,5 +1,17 @@
 import { AiFindingType } from '../../../common/enums'
 
+/** Map of allowed sortBy values to their SQL column names */
+export const FINDINGS_SORT_COLUMN_MAP: Record<string, string> = {
+  createdAt: 'created_at',
+  findingType: 'finding_type',
+  severity: 'severity',
+  confidenceScore: 'confidence_score',
+  status: 'status',
+  agentId: 'agent_id',
+  title: 'title',
+  sourceModule: 'source_module',
+}
+
 export const AI_SUMMARY_MAX_LENGTH = 10000
 export const AI_NOTIFICATION_MESSAGE_MAX_LENGTH = 500
 export const SEVERITY_PATTERN = /\b(critical|high|medium|low|info)\b/i
