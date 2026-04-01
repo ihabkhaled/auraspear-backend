@@ -318,7 +318,7 @@ export class AiWritebackService {
         findingsCount,
         sourceModule: params.sourceModule,
         sourceEntityId: params.sourceEntityId ?? null,
-        summaryText: params.aiResponse.result.substring(0, 500),
+        summaryText: params.aiResponse.result.substring(0, AI_SUMMARY_MAX_LENGTH),
         confidenceScore: params.aiResponse.confidence ?? null,
       })
     } catch (error) {

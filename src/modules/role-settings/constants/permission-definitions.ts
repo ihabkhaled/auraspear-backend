@@ -955,4 +955,31 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.aiMemory.edit',
     sortOrder: 2851,
   },
+
+  {
+    key: Permission.AI_MEMORY_ADMIN,
+    module: 'aiMemory',
+    labelKey: 'roleSettings.permissions.aiMemory.admin',
+    sortOrder: 2852,
+  },
+  {
+    key: Permission.AI_MEMORY_EXPORT,
+    module: 'aiMemory',
+    labelKey: 'roleSettings.permissions.aiMemory.export',
+    sortOrder: 2853,
+  },
+
+  // ─── AI FinOps ───
+  {
+    key: Permission.AI_FINOPS_VIEW,
+    module: 'aiFinops',
+    labelKey: 'roleSettings.permissions.aiFinops.view',
+    sortOrder: 2860,
+  },
+  {
+    key: Permission.AI_FINOPS_MANAGE,
+    module: 'aiFinops',
+    labelKey: 'roleSettings.permissions.aiFinops.manage',
+    sortOrder: 2861,
+  },
 ]

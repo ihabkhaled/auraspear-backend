@@ -545,6 +545,9 @@ model Tenant {
   aiChatThreads           AiChatThread[]
   aiChatMessages          AiChatMessage[]
   userMemories            UserMemory[]
+  aiCostRates             AiCostRate[]
+  aiBudgetAlerts          AiBudgetAlert[]
+  memoryRetentionPolicy   MemoryRetentionPolicy?
 
   @@map("tenants")
 }
@@ -2146,7 +2149,53 @@ model AiUsageLedger {
   @@index([tenantId, createdAt])
   @@index([tenantId, featureKey])
   @@index([tenantId, featureKey, createdAt])
+  @@index([tenantId, userId])
+  @@index([tenantId, model])
   @@map("ai_usage_ledger")
+}
+
+// ─── AI Cost Rates ──────────────────────────────────────────
+
+model AiCostRate {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  provider        String   @db.VarChar(100)
+  model           String   @db.VarChar(255)
+  inputCostPer1k  Float    @default(0.003) @map("input_cost_per_1k")
+  outputCostPer1k Float    @default(0.015) @map("output_cost_per_1k")
+  effectiveFrom   DateTime @default(now()) @map("effective_from")
+  createdBy       String   @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, model])
+  @@index([tenantId])
+  @@map("ai_cost_rates")
+}
+
+// ─── AI Budget Alerts ───────────────────────────────────────
+
+model AiBudgetAlert {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  scope           String    @default("tenant") @db.VarChar(30)
+  scopeKey        String?   @map("scope_key") @db.VarChar(100)
+  monthlyBudget   Float     @map("monthly_budget")
+  alertThresholds String    @default("50,75,90,100") @map("alert_thresholds") @db.VarChar(100)
+  lastAlertPct    Int       @default(0) @map("last_alert_pct")
+  lastAlertAt     DateTime? @map("last_alert_at")
+  enabled         Boolean   @default(true)
+  createdBy       String    @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, scope, scopeKey])
+  @@index([tenantId])
+  @@map("ai_budget_alerts")
 }
 
 // ─── Runbooks / Knowledge Base ──────────────────────────────
@@ -2568,5 +2617,25 @@ model UserMemory {
   @@index([tenantId, userId])
   @@index([tenantId, userId, isDeleted])
   @@index([tenantId, userId, updatedAt(sort: Desc)])
+  @@index([tenantId, isDeleted, updatedAt])
   @@map("user_memories")
+}
+
+// ─── Memory Retention Policy ────────────────────────────────
+
+model MemoryRetentionPolicy {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  retentionDays   Int      @default(0) @map("retention_days")
+  autoCleanup     Boolean  @default(false) @map("auto_cleanup")
+  lastCleanupAt   DateTime? @map("last_cleanup_at")
+  lastCleanupCount Int     @default(0) @map("last_cleanup_count")
+  createdBy       String   @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId])
+  @@map("memory_retention_policies")
 }

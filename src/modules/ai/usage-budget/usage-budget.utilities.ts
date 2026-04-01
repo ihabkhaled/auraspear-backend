@@ -1,7 +1,13 @@
 import { toIso } from '../../../common/utils/date-time.utility'
 import type {
+  DailyUsageEntry,
+  DailyUsageRawRow,
   MonthlyUsageRawRow,
   MonthlyUsageResponse,
+  UsageByModelEntry,
+  UsageByModelRawRow,
+  UsageByUserEntry,
+  UsageByUserRawRow,
   UsageSummaryEntry,
   UsageSummaryRawRow,
   UsageSummaryResponse,
@@ -80,4 +86,56 @@ export function buildMonthlyUsageResponse(
     estimatedCost: row ? Number(row.total_cost) : 0,
     requestCount: row ? Number(row.request_count) : 0,
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* USER BREAKDOWN BUILDING                                           */
+/* ---------------------------------------------------------------- */
+
+export function buildUsageByUser(rows: UsageByUserRawRow[]): UsageByUserEntry[] {
+  return rows.map(row => ({
+    userId: row.user_id,
+    totalInputTokens: Number(row.total_input),
+    totalOutputTokens: Number(row.total_output),
+    totalCost: Number(row.total_cost),
+    requestCount: Number(row.request_count),
+  }))
+}
+
+/* ---------------------------------------------------------------- */
+/* MODEL BREAKDOWN BUILDING                                          */
+/* ---------------------------------------------------------------- */
+
+export function buildUsageByModel(rows: UsageByModelRawRow[]): UsageByModelEntry[] {
+  return rows.map(row => ({
+    provider: row.provider,
+    model: row.model,
+    totalInputTokens: Number(row.total_input),
+    totalOutputTokens: Number(row.total_output),
+    totalCost: Number(row.total_cost),
+    requestCount: Number(row.request_count),
+  }))
+}
+
+/* ---------------------------------------------------------------- */
+/* DAILY TREND BUILDING                                              */
+/* ---------------------------------------------------------------- */
+
+export function buildDailyUsage(rows: DailyUsageRawRow[]): DailyUsageEntry[] {
+  return rows.map(row => ({
+    date: toIso(row.day).split('T').at(0) ?? '',
+    inputTokens: Number(row.total_input),
+    outputTokens: Number(row.total_output),
+    cost: Number(row.total_cost),
+    requests: Number(row.request_count),
+  }))
+}
+
+/* ---------------------------------------------------------------- */
+/* PROJECTION UTILITY                                                */
+/* ---------------------------------------------------------------- */
+
+export function projectMonthEndCost(currentCost: number, dayOfMonth: number, daysInMonth: number): number {
+  if (dayOfMonth <= 0) return currentCost
+  return (currentCost / dayOfMonth) * daysInMonth
 }

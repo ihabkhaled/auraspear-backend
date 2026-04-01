@@ -210,3 +210,13 @@ export function elapsedMs(startMs: number): number {
 export function humanizeDuration(ms: number): string {
   return dayjs.duration(ms).humanize()
 }
+
+/** Returns the 1-based day of the month for the given date (or now). */
+export function dayOfMonth(date?: Date | string | number): number {
+  return dayjs(date ?? undefined).date()
+}
+
+/** Returns the total number of days in the month for the given date (or now). */
+export function daysInMonth(date?: Date | string | number): number {
+  return dayjs(date ?? undefined).daysInMonth()
+}

@@ -18,7 +18,7 @@ import { TenantId } from '../../../common/decorators/tenant-id.decorator'
 import { Permission } from '../../../common/enums'
 import { AuthGuard } from '../../../common/guards/auth.guard'
 import { TenantGuard } from '../../../common/guards/tenant.guard'
-import type { UserMemoryRecord } from './memory.types'
+import type { MemoryStatsResponse, RetentionPolicyRecord, UserMemoryRecord } from './memory.types'
 import type { JwtPayload } from '../../../common/interfaces/authenticated-request.interface'
 
 @Controller('user-memory')
@@ -80,6 +80,72 @@ export class UserMemoryController {
     @CurrentUser() user: JwtPayload
   ): Promise<{ deleted: number }> {
     const count = await this.memoryService.deleteAllMemories(tenantId, user.sub)
+    return { deleted: count }
+  }
+
+  /* ── Governance endpoints ──────────────────────────── */
+
+  @Get('governance/stats')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async getMemoryStats(@TenantId() tenantId: string): Promise<MemoryStatsResponse> {
+    return this.memoryService.getMemoryStats(tenantId)
+  }
+
+  @Get('governance/all')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async listAllMemories(
+    @TenantId() tenantId: string,
+    @Query('userId') userId?: string,
+    @Query('category') category?: string,
+    @Query('search') search?: string,
+    @Query('limit') rawLimit?: string,
+    @Query('offset') rawOffset?: string
+  ): Promise<{ data: UserMemoryRecord[]; total: number }> {
+    const limit = Math.min(100, Math.max(1, Number.parseInt(rawLimit ?? '50', 10) || 50))
+    const offset = Math.max(0, Number.parseInt(rawOffset ?? '0', 10) || 0)
+    return this.memoryService.listAllMemories(tenantId, { userId, category, search, limit, offset })
+  }
+
+  @Get('governance/export')
+  @RequirePermission(Permission.AI_MEMORY_EXPORT)
+  async exportMemories(
+    @TenantId() tenantId: string,
+    @Query('userId') userId?: string
+  ): Promise<{ data: UserMemoryRecord[] }> {
+    const data = await this.memoryService.exportMemories(tenantId, userId)
+    return { data }
+  }
+
+  @Get('governance/retention')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async getRetentionPolicy(@TenantId() tenantId: string): Promise<RetentionPolicyRecord | null> {
+    return this.memoryService.getRetentionPolicy(tenantId)
+  }
+
+  @Patch('governance/retention')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async upsertRetentionPolicy(
+    @TenantId() tenantId: string,
+    @CurrentUser('sub') userId: string,
+    @Body() body: { retentionDays: number; autoCleanup: boolean }
+  ): Promise<RetentionPolicyRecord> {
+    return this.memoryService.upsertRetentionPolicy(tenantId, body, userId)
+  }
+
+  @Post('governance/cleanup')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async runCleanup(@TenantId() tenantId: string): Promise<{ cleaned: number }> {
+    const cleaned = await this.memoryService.cleanupExpiredMemories(tenantId)
+    return { cleaned }
+  }
+
+  @Delete('governance/user/:userId')
+  @RequirePermission(Permission.AI_MEMORY_ADMIN)
+  async adminDeleteUserMemories(
+    @TenantId() tenantId: string,
+    @Param('userId', ParseUUIDPipe) userId: string
+  ): Promise<{ deleted: number }> {
+    const count = await this.memoryService.adminDeleteUserMemories(tenantId, userId)
     return { deleted: count }
   }
 }

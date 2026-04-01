@@ -1,13 +1,31 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { USAGE_BUDGET_SERVICE_CLASS_NAME } from './usage-budget.constants'
 import { UsageBudgetRepository } from './usage-budget.repository'
-import { buildMonthlyUsageResponse, buildUsageSummaryResponse } from './usage-budget.utilities'
+import {
+  buildDailyUsage,
+  buildMonthlyUsageResponse,
+  buildUsageByModel,
+  buildUsageByUser,
+  buildUsageSummaryResponse,
+  projectMonthEndCost,
+} from './usage-budget.utilities'
 import { AppLogFeature, AppLogOutcome, AppLogSourceType } from '../../../common/enums'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
-import { addDuration, getYearMonth, startOf } from '../../../common/utils/date-time.utility'
+import {
+  addDuration,
+  dayOfMonth,
+  daysInMonth,
+  getYearMonth,
+  startOf,
+} from '../../../common/utils/date-time.utility'
 import { FeatureCatalogService } from '../feature-catalog/feature-catalog.service'
 import type {
+  BudgetAlertInput,
+  BudgetAlertRecord,
   BudgetCheckResult,
+  CostRateInput,
+  CostRateRecord,
+  FinopsDashboardResponse,
   MonthlyUsageResponse,
   RecordUsageInput,
   UsageSummaryResponse,
@@ -84,5 +102,93 @@ export class UsageBudgetService {
       used,
       budget: config.monthlyTokenBudget,
     }
+  }
+
+  /* ── FinOps dashboard ──────────────────────────────────── */
+
+  async getFinopsDashboard(tenantId: string): Promise<FinopsDashboardResponse> {
+    const monthStart = startOf('month')
+    const monthEnd = addDuration(monthStart, 1, 'month')
+    const { year, month } = getYearMonth()
+    const monthLabel = `${String(year)}-${String(month + 1).padStart(2, '0')}`
+
+    const [summaryRows, userRows, modelRows, dailyRows, budgetAlerts] = await Promise.all([
+      this.repository.getUsageSummary(tenantId, monthStart, monthEnd),
+      this.repository.getUsageByUser(tenantId, monthStart, monthEnd),
+      this.repository.getUsageByModel(tenantId, monthStart, monthEnd),
+      this.repository.getDailyUsage(tenantId, monthStart, monthEnd),
+      this.repository.listBudgetAlerts(tenantId),
+    ])
+
+    const summary = buildUsageSummaryResponse(tenantId, monthStart, monthEnd, summaryRows)
+    const byUser = buildUsageByUser(userRows)
+    const byModel = buildUsageByModel(modelRows)
+    const dailyTrend = buildDailyUsage(dailyRows)
+
+    const tenantBudget = budgetAlerts.find(a => a.scope === 'tenant' && a.enabled)
+    const budgetTotal = tenantBudget?.monthlyBudget ?? null
+    const budgetUsedPct =
+      budgetTotal !== null && budgetTotal > 0
+        ? Math.round((summary.totals.cost / budgetTotal) * 100)
+        : null
+
+    const currentDay = dayOfMonth()
+    const totalDays = daysInMonth()
+    const projectedMonthEnd = projectMonthEndCost(summary.totals.cost, currentDay, totalDays)
+
+    return {
+      tenantId,
+      month: monthLabel,
+      totalCost: summary.totals.cost,
+      totalTokens: summary.totals.inputTokens + summary.totals.outputTokens,
+      totalRequests: summary.totals.requests,
+      budgetTotal,
+      budgetUsedPct,
+      projectedMonthEnd,
+      byFeature: summary.entries,
+      byUser,
+      byModel,
+      dailyTrend,
+    }
+  }
+
+  /* ── Cost rate management ──────────────────────────────── */
+
+  async listCostRates(tenantId: string): Promise<CostRateRecord[]> {
+    return this.repository.listCostRates(tenantId)
+  }
+
+  async upsertCostRate(input: CostRateInput): Promise<CostRateRecord> {
+    return this.repository.upsertCostRate(input)
+  }
+
+  async deleteCostRate(tenantId: string, id: string): Promise<void> {
+    await this.repository.deleteCostRate(tenantId, id)
+  }
+
+  /* ── Budget alert management ───────────────────────────── */
+
+  async listBudgetAlerts(tenantId: string): Promise<BudgetAlertRecord[]> {
+    return this.repository.listBudgetAlerts(tenantId)
+  }
+
+  async upsertBudgetAlert(input: BudgetAlertInput): Promise<BudgetAlertRecord> {
+    return this.repository.upsertBudgetAlert(input)
+  }
+
+  async updateBudgetAlert(
+    tenantId: string,
+    id: string,
+    data: { monthlyBudget?: number; alertThresholds?: string; scope?: string; scopeKey?: string | null }
+  ): Promise<BudgetAlertRecord | null> {
+    return this.repository.updateBudgetAlert(tenantId, id, data)
+  }
+
+  async deleteBudgetAlert(tenantId: string, id: string): Promise<void> {
+    await this.repository.deleteBudgetAlert(tenantId, id)
+  }
+
+  async toggleBudgetAlert(tenantId: string, id: string, enabled: boolean): Promise<void> {
+    await this.repository.toggleBudgetAlert(tenantId, id, enabled)
   }
 }

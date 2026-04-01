@@ -9,6 +9,8 @@ import {
 import {
   AI_BEDROCK_MAX_TOKENS,
   AI_CONNECTOR_PRIORITY,
+  AI_COST_PER_1K_INPUT_TOKENS,
+  AI_COST_PER_1K_OUTPUT_TOKENS,
   AI_DEFAULT_MODEL,
   AI_LLM_APIS_MAX_TOKENS,
   AI_OPENCLAW_MAX_TOKENS,
@@ -530,6 +532,9 @@ export class AiService {
     response: AiResponse
   ): Promise<void> {
     const totalTokens = response.tokensUsed.input + response.tokensUsed.output
+    const estimatedCost =
+      (response.tokensUsed.input / 1000) * AI_COST_PER_1K_INPUT_TOKENS +
+      (response.tokensUsed.output / 1000) * AI_COST_PER_1K_OUTPUT_TOKENS
     await this.usageBudgetService.recordUsage({
       tenantId: params.tenantId,
       featureKey: params.featureKey,
@@ -537,7 +542,7 @@ export class AiService {
       model: response.model,
       inputTokens: response.tokensUsed.input,
       outputTokens: response.tokensUsed.output,
-      estimatedCost: 0,
+      estimatedCost,
       userId: params.userId,
     })
     await this.agentConfigService.incrementUsage(params.tenantId, agentId, totalTokens)

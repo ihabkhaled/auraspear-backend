@@ -223,6 +223,14 @@ export enum Permission {
   // AI Memory
   AI_MEMORY_VIEW = 'ai.memory.view',
   AI_MEMORY_EDIT = 'ai.memory.edit',
+
+  // AI FinOps
+  AI_FINOPS_VIEW = 'ai.finops.view',
+  AI_FINOPS_MANAGE = 'ai.finops.manage',
+
+  // AI Memory Governance
+  AI_MEMORY_ADMIN = 'ai.memory.admin',
+  AI_MEMORY_EXPORT = 'ai.memory.export',
 }
 
 /**

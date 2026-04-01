@@ -53,3 +53,25 @@ export interface RetrievedMemory {
 export function getUserMemoryDelegate(prisma: unknown): UserMemoryDelegate {
   return (prisma as Record<string, unknown>)['userMemory'] as UserMemoryDelegate
 }
+
+/* ── Governance types ────────────────────────────────── */
+
+export interface MemoryStatsResponse {
+  totalActive: number
+  totalDeleted: number
+  byCategory: Array<{ category: string; count: number }>
+  byUser: Array<{ userId: string; count: number }>
+  uniqueUsers: number
+}
+
+export interface RetentionPolicyRecord {
+  id: string
+  tenantId: string
+  retentionDays: number
+  autoCleanup: boolean
+  lastCleanupAt: Date | null
+  lastCleanupCount: number
+  createdBy: string
+  createdAt: Date
+  updatedAt: Date
+}
