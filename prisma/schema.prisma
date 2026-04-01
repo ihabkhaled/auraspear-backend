@@ -548,6 +548,7 @@ model Tenant {
   aiCostRates             AiCostRate[]
   aiBudgetAlerts          AiBudgetAlert[]
   memoryRetentionPolicy   MemoryRetentionPolicy?
+  aiTranscriptPolicy      AiTranscriptPolicy?
 
   @@map("tenants")
 }
@@ -2551,9 +2552,12 @@ model AiChatThread {
   messageCount    Int       @default(0) @map("message_count")
   totalTokensUsed Int       @default(0) @map("total_tokens_used")
   lastActivityAt  DateTime  @default(now()) @map("last_activity_at")
-  isArchived      Boolean   @default(false) @map("is_archived")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  isArchived       Boolean   @default(false) @map("is_archived")
+  legalHold        Boolean   @default(false) @map("legal_hold")
+  complianceStatus String    @default("none") @map("compliance_status") @db.VarChar(30)
+  redactedAt       DateTime? @map("redacted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   messages AiChatMessage[]
   tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2562,6 +2566,7 @@ model AiChatThread {
   @@index([tenantId, userId])
   @@index([tenantId, userId, lastActivityAt(sort: Desc)])
   @@index([tenantId, isArchived])
+  @@index([tenantId, legalHold])
   @@map("ai_chat_threads")
 }
 
@@ -2638,4 +2643,25 @@ model MemoryRetentionPolicy {
 
   @@unique([tenantId])
   @@map("memory_retention_policies")
+}
+
+// ─── AI Transcript Policy ───────────────────────────────
+
+model AiTranscriptPolicy {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
+  chatRetentionDays     Int       @default(0) @map("chat_retention_days")
+  auditRetentionDays    Int       @default(0) @map("audit_retention_days")
+  autoRedactPii         Boolean   @default(false) @map("auto_redact_pii")
+  requireLegalHold      Boolean   @default(false) @map("require_legal_hold")
+  lastCleanupAt         DateTime? @map("last_cleanup_at")
+  lastCleanupCount      Int       @default(0) @map("last_cleanup_count")
+  createdBy             String    @map("created_by") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId])
+  @@map("ai_transcript_policies")
 }

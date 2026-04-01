@@ -969,6 +969,26 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     sortOrder: 2853,
   },
 
+  // ─── AI Transcript & Compliance ───
+  {
+    key: Permission.AI_TRANSCRIPT_VIEW,
+    module: 'aiTranscript',
+    labelKey: 'roleSettings.permissions.aiTranscript.view',
+    sortOrder: 2870,
+  },
+  {
+    key: Permission.AI_TRANSCRIPT_MANAGE,
+    module: 'aiTranscript',
+    labelKey: 'roleSettings.permissions.aiTranscript.manage',
+    sortOrder: 2871,
+  },
+  {
+    key: Permission.AI_TRANSCRIPT_EXPORT,
+    module: 'aiTranscript',
+    labelKey: 'roleSettings.permissions.aiTranscript.export',
+    sortOrder: 2872,
+  },
+
   // ─── AI FinOps ───
   {
     key: Permission.AI_FINOPS_VIEW,

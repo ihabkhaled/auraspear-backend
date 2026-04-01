@@ -65,6 +65,9 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_FINOPS_MANAGE,
     Permission.AI_MEMORY_ADMIN,
     Permission.AI_MEMORY_EXPORT,
+    Permission.AI_TRANSCRIPT_VIEW,
+    Permission.AI_TRANSCRIPT_MANAGE,
+    Permission.AI_TRANSCRIPT_EXPORT,
   ],
 
   [UserRole.TENANT_ADMIN]: [
@@ -213,6 +216,9 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_FINOPS_MANAGE,
     Permission.AI_MEMORY_ADMIN,
     Permission.AI_MEMORY_EXPORT,
+    Permission.AI_TRANSCRIPT_VIEW,
+    Permission.AI_TRANSCRIPT_MANAGE,
+    Permission.AI_TRANSCRIPT_EXPORT,
   ],
 
   [UserRole.DETECTION_ENGINEER]: [
@@ -578,6 +584,8 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_MEMORY_EXPORT,
+    Permission.AI_TRANSCRIPT_VIEW,
+    Permission.AI_TRANSCRIPT_EXPORT,
     Permission.AI_FINOPS_VIEW,
   ],
 }
