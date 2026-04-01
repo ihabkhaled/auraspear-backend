@@ -969,6 +969,14 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     sortOrder: 2853,
   },
 
+  // ─── AI Ops Workspace ───
+  {
+    key: Permission.AI_OPS_VIEW,
+    module: 'aiOps',
+    labelKey: 'roleSettings.permissions.aiOps.view',
+    sortOrder: 2865,
+  },
+
   // ─── AI Transcript & Compliance ───
   {
     key: Permission.AI_TRANSCRIPT_VIEW,

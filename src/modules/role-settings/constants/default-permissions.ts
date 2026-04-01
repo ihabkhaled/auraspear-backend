@@ -68,6 +68,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_TRANSCRIPT_VIEW,
     Permission.AI_TRANSCRIPT_MANAGE,
     Permission.AI_TRANSCRIPT_EXPORT,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.TENANT_ADMIN]: [
@@ -219,6 +220,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_TRANSCRIPT_VIEW,
     Permission.AI_TRANSCRIPT_MANAGE,
     Permission.AI_TRANSCRIPT_EXPORT,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.DETECTION_ENGINEER]: [
@@ -267,6 +269,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.INCIDENT_RESPONDER]: [
@@ -326,6 +329,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.THREAT_INTEL_ANALYST]: [
@@ -364,6 +368,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.SOAR_ENGINEER]: [
@@ -399,6 +404,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.THREAT_HUNTER]: [
@@ -440,6 +446,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.SOC_ANALYST_L2]: [
@@ -495,6 +502,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.SOC_ANALYST_L1]: [
@@ -524,6 +532,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_VIEW,
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 
   [UserRole.EXECUTIVE_READONLY]: [
@@ -587,6 +596,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_TRANSCRIPT_VIEW,
     Permission.AI_TRANSCRIPT_EXPORT,
     Permission.AI_FINOPS_VIEW,
+    Permission.AI_OPS_VIEW,
   ],
 }
 
