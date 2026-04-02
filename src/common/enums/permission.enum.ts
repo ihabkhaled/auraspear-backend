@@ -232,6 +232,9 @@ export enum Permission {
   AI_MEMORY_ADMIN = 'ai.memory.admin',
   AI_MEMORY_EXPORT = 'ai.memory.export',
 
+  // AI Handoff
+  AI_HANDOFF_PROMOTE = 'ai.handoff.promote',
+
   // AI Ops Workspace
   AI_OPS_VIEW = 'ai.ops.view',
 

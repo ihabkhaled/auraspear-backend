@@ -69,6 +69,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_TRANSCRIPT_MANAGE,
     Permission.AI_TRANSCRIPT_EXPORT,
     Permission.AI_OPS_VIEW,
+    Permission.AI_HANDOFF_PROMOTE,
   ],
 
   [UserRole.TENANT_ADMIN]: [
@@ -221,6 +222,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_TRANSCRIPT_MANAGE,
     Permission.AI_TRANSCRIPT_EXPORT,
     Permission.AI_OPS_VIEW,
+    Permission.AI_HANDOFF_PROMOTE,
   ],
 
   [UserRole.DETECTION_ENGINEER]: [
@@ -330,6 +332,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
     Permission.AI_OPS_VIEW,
+    Permission.AI_HANDOFF_PROMOTE,
   ],
 
   [UserRole.THREAT_INTEL_ANALYST]: [
@@ -447,6 +450,7 @@ export const DEFAULT_PERMISSIONS: Record<string, Permission[]> = {
     Permission.AI_MEMORY_EDIT,
     Permission.AI_FINOPS_VIEW,
     Permission.AI_OPS_VIEW,
+    Permission.AI_HANDOFF_PROMOTE,
   ],
 
   [UserRole.SOC_ANALYST_L2]: [

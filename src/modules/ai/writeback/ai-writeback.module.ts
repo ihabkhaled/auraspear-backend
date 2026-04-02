@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common'
+import { AiHandoffController } from './ai-handoff.controller'
+import { AiHandoffService } from './ai-handoff.service'
 import { AiScheduleTemplatesController } from './ai-schedule-templates.controller'
 import { AiWritebackController } from './ai-writeback.controller'
 import { AiWritebackRepository } from './ai-writeback.repository'
@@ -8,8 +10,8 @@ import { AppLogsModule } from '../../app-logs/app-logs.module'
 
 @Module({
   imports: [PrismaModule, AppLogsModule],
-  controllers: [AiWritebackController, AiScheduleTemplatesController],
-  providers: [AiWritebackService, AiWritebackRepository],
-  exports: [AiWritebackService, AiWritebackRepository],
+  controllers: [AiWritebackController, AiScheduleTemplatesController, AiHandoffController],
+  providers: [AiWritebackService, AiWritebackRepository, AiHandoffService],
+  exports: [AiWritebackService, AiWritebackRepository, AiHandoffService],
 })
 export class AiWritebackModule {}

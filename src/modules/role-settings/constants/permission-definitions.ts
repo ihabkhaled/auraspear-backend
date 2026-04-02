@@ -969,6 +969,14 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     sortOrder: 2853,
   },
 
+  // ─── AI Handoff ───
+  {
+    key: Permission.AI_HANDOFF_PROMOTE,
+    module: 'aiHandoff',
+    labelKey: 'roleSettings.permissions.aiHandoff.promote',
+    sortOrder: 2863,
+  },
+
   // ─── AI Ops Workspace ───
   {
     key: Permission.AI_OPS_VIEW,
