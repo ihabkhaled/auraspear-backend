@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   MAX_RETRIES,
   BASE_DELAY_MS,
@@ -17,9 +18,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     const separator = databaseUrl.includes('?') ? '&' : '?'
     const pooledUrl = `${databaseUrl}${separator}connection_limit=${DEFAULT_CONNECTION_LIMIT}&pool_timeout=${DEFAULT_POOL_TIMEOUT_SECONDS}`
 
-    super({
-      datasourceUrl: pooledUrl,
-    })
+    const adapter = new PrismaPg(pooledUrl)
+
+    super({ adapter })
 
     this.logger.log(
       `Prisma connection pool configured: connection_limit=${DEFAULT_CONNECTION_LIMIT}, pool_timeout=${DEFAULT_POOL_TIMEOUT_SECONDS}s`

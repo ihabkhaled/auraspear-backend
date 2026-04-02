@@ -17,7 +17,7 @@ import type { CreateEntityDto } from './dto/create-entity.dto'
 import type { ListEntitiesQueryDto } from './dto/list-entities-query.dto'
 import type { UpdateEntityDto } from './dto/update-entity.dto'
 import type { EntityRecord, EntityGraphResponse, PaginatedEntities } from './entities.types'
-import type { InputJsonValue } from '@prisma/client/runtime/library'
+import type { InputJsonValue } from '@prisma/client/runtime/client'
 
 @Injectable()
 export class EntitiesService {

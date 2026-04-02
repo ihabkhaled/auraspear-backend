@@ -29,7 +29,7 @@ import type { CreateOsintSourceDto } from './dto/create-osint-source.dto'
 import type { ResolveApprovalDto } from './dto/resolve-approval.dto'
 import type { UpdateAgentConfigDto } from './dto/update-agent-config.dto'
 import type { UpdateOsintSourceDto } from './dto/update-osint-source.dto'
-import type { InputJsonValue } from '@prisma/client/runtime/library'
+import type { InputJsonValue } from '@prisma/client/runtime/client'
 
 @Injectable()
 export class AgentConfigService {

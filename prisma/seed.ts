@@ -1,3 +1,4 @@
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   Prisma,
   PrismaClient,
@@ -78,7 +79,8 @@ const logger = pino({
   level: 'info',
 })
 
-const prisma = new PrismaClient()
+const adapter = new PrismaPg(process.env['DATABASE_URL'] ?? '')
+const prisma = new PrismaClient({ adapter })
 
 function requireEnv(name: string): string {
   const value = process.env[name]
