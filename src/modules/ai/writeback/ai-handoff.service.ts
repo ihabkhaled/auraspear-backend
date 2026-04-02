@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { CaseSeverity, CaseStatus, IncidentCategory, IncidentSeverity, IncidentStatus } from '@prisma/client'
 import { BusinessException } from '../../../common/exceptions/business.exception'
+import { buildNextSequenceNumber } from '../../../common/utils/sequence-number.utility'
+import { getYear } from '../../../common/utils/date-time.utility'
 import { PrismaService } from '../../../prisma/prisma.service'
 import type { AiExecutionFinding, AiFindingOutputLink } from '@prisma/client'
 
@@ -64,35 +67,59 @@ export class AiHandoffService {
     let linkedEntityType: string
 
     if (input.targetModule === 'case') {
-      const newCase = await this.prisma.case.create({
-        data: {
-          tenantId: input.tenantId,
-          title: input.title ?? finding.title,
-          description: input.description ?? finding.summary ?? '',
-          severity: this.mapSeverity(finding.severity),
-          status: 'open',
-          priority: this.mapPriority(finding.severity),
-          ownerId: input.actorUserId,
-        },
+      const result = await this.prisma.$transaction(async (tx) => {
+        const year = getYear()
+        const prefix = `SOC-${String(year)}-`
+        const latestCase = await tx.case.findFirst({
+          where: { caseNumber: { startsWith: prefix } },
+          orderBy: { caseNumber: 'desc' },
+          select: { caseNumber: true },
+        })
+        const caseNumber = buildNextSequenceNumber(latestCase?.caseNumber, prefix, 3)
+
+        return tx.case.create({
+          data: {
+            tenantId: input.tenantId,
+            caseNumber,
+            title: input.title ?? finding.title,
+            description: input.description ?? finding.summary ?? '',
+            severity: this.mapCaseSeverity(finding.severity),
+            status: CaseStatus.open,
+            ownerUserId: input.actorUserId,
+            createdBy: input.actorEmail,
+          },
+        })
       })
-      createdEntityId = newCase.id
+      createdEntityId = result.id
       linkedEntityType = 'Case'
-      this.logger.log(`Promoted finding ${finding.id} to Case ${newCase.id}`)
+      this.logger.log(`Promoted finding ${finding.id} to Case ${result.id} (${result.caseNumber})`)
     } else if (input.targetModule === 'incident') {
-      const newIncident = await this.prisma.incident.create({
-        data: {
-          tenantId: input.tenantId,
-          title: input.title ?? finding.title,
-          description: input.description ?? finding.summary ?? '',
-          severity: this.mapIncidentSeverity(finding.severity),
-          status: 'open',
-          category: 'other',
-          reportedBy: input.actorEmail,
-        },
+      const result = await this.prisma.$transaction(async (tx) => {
+        const year = getYear()
+        const prefix = `INC-${String(year)}-`
+        const latestIncident = await tx.incident.findFirst({
+          where: { incidentNumber: { startsWith: prefix } },
+          orderBy: { incidentNumber: 'desc' },
+          select: { incidentNumber: true },
+        })
+        const incidentNumber = buildNextSequenceNumber(latestIncident?.incidentNumber, prefix, 3)
+
+        return tx.incident.create({
+          data: {
+            tenantId: input.tenantId,
+            incidentNumber,
+            title: input.title ?? finding.title,
+            description: input.description ?? finding.summary ?? '',
+            severity: this.mapIncidentSeverity(finding.severity),
+            status: IncidentStatus.open,
+            category: IncidentCategory.other,
+            createdBy: input.actorEmail,
+          },
+        })
       })
-      createdEntityId = newIncident.id
+      createdEntityId = result.id
       linkedEntityType = 'Incident'
-      this.logger.log(`Promoted finding ${finding.id} to Incident ${newIncident.id}`)
+      this.logger.log(`Promoted finding ${finding.id} to Incident ${result.id} (${result.incidentNumber})`)
     } else {
       throw new BusinessException(400, `Unsupported target module: ${input.targetModule}`, 'errors.handoff.unsupportedTarget')
     }
@@ -154,29 +181,24 @@ export class AiHandoffService {
       }),
     ])
 
-    const data: HandoffHistoryItem[] = links.map(link => ({
-      id: link.id,
-      findingId: link.findingId,
-      findingTitle: (link as Record<string, unknown>)['finding']
-        ? ((link as Record<string, unknown>)['finding'] as Record<string, string>)['title'] ?? ''
-        : '',
-      findingType: (link as Record<string, unknown>)['finding']
-        ? ((link as Record<string, unknown>)['finding'] as Record<string, string>)['findingType'] ?? ''
-        : '',
-      severity: (link as Record<string, unknown>)['finding']
-        ? ((link as Record<string, unknown>)['finding'] as Record<string, string | null>)['severity'] ?? null
-        : null,
-      agentId: (link as Record<string, unknown>)['finding']
-        ? ((link as Record<string, unknown>)['finding'] as Record<string, string | null>)['agentId'] ?? null
-        : null,
-      sourceModule: (link as Record<string, unknown>)['finding']
-        ? ((link as Record<string, unknown>)['finding'] as Record<string, string | null>)['sourceModule'] ?? null
-        : null,
-      linkedModule: link.linkedModule,
-      linkedEntityType: link.linkedEntityType,
-      linkedEntityId: link.linkedEntityId,
-      createdAt: link.createdAt,
-    }))
+    const data: HandoffHistoryItem[] = links.map(link => {
+      const f = (link as Record<string, unknown>)['finding'] as
+        | { title: string; findingType: string; severity: string | null; agentId: string | null; sourceModule: string | null }
+        | undefined
+      return {
+        id: link.id,
+        findingId: link.findingId,
+        findingTitle: f?.title ?? '',
+        findingType: f?.findingType ?? '',
+        severity: f?.severity ?? null,
+        agentId: f?.agentId ?? null,
+        sourceModule: f?.sourceModule ?? null,
+        linkedModule: link.linkedModule,
+        linkedEntityType: link.linkedEntityType,
+        linkedEntityId: link.linkedEntityId,
+        createdAt: link.createdAt,
+      }
+    })
 
     return { data, total }
   }
@@ -222,21 +244,27 @@ export class AiHandoffService {
     })
   }
 
-  private mapSeverity(severity: string | null): string {
-    if (!severity) return 'medium'
-    const map: Record<string, string> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'low' }
-    return map[severity] ?? 'medium'
+  private mapCaseSeverity(severity: string | null): CaseSeverity {
+    if (!severity) return CaseSeverity.medium
+    const map: Record<string, CaseSeverity> = {
+      critical: CaseSeverity.critical,
+      high: CaseSeverity.high,
+      medium: CaseSeverity.medium,
+      low: CaseSeverity.low,
+      info: CaseSeverity.low,
+    }
+    return map[severity] ?? CaseSeverity.medium
   }
 
-  private mapPriority(severity: string | null): string {
-    if (!severity) return 'medium'
-    const map: Record<string, string> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'low' }
-    return map[severity] ?? 'medium'
-  }
-
-  private mapIncidentSeverity(severity: string | null): string {
-    if (!severity) return 'medium'
-    const map: Record<string, string> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'info' }
-    return map[severity] ?? 'medium'
+  private mapIncidentSeverity(severity: string | null): IncidentSeverity {
+    if (!severity) return IncidentSeverity.medium
+    const map: Record<string, IncidentSeverity> = {
+      critical: IncidentSeverity.critical,
+      high: IncidentSeverity.high,
+      medium: IncidentSeverity.medium,
+      low: IncidentSeverity.low,
+      info: IncidentSeverity.low,
+    }
+    return map[severity] ?? IncidentSeverity.medium
   }
 }
