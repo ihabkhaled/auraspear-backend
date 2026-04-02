@@ -242,6 +242,14 @@ export enum Permission {
   AI_TRANSCRIPT_VIEW = 'ai.transcript.view',
   AI_TRANSCRIPT_MANAGE = 'ai.transcript.manage',
   AI_TRANSCRIPT_EXPORT = 'ai.transcript.export',
+
+  // AI Eval Lab
+  AI_EVAL_VIEW = 'ai.eval.view',
+  AI_EVAL_MANAGE = 'ai.eval.manage',
+
+  // AI Simulation
+  AI_SIMULATION_VIEW = 'ai.simulation.view',
+  AI_SIMULATION_MANAGE = 'ai.simulation.manage',
 }
 
 /**

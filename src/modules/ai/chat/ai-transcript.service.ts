@@ -74,6 +74,7 @@ export class AiTranscriptService {
     const [data, total] = await Promise.all([
       this.prisma.aiChatThread.findMany({
         where,
+        include: { user: { select: { email: true } } },
         orderBy: { lastActivityAt: 'desc' },
         take: options?.limit ?? 25,
         skip: options?.offset ?? 0,

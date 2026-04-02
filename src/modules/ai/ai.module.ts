@@ -5,9 +5,12 @@ import { AiOpsWorkspaceService } from './ai-ops-workspace.service'
 import { AiRepository } from './ai.repository'
 import { AiService } from './ai.service'
 import { AiChatModule } from './chat/ai-chat.module'
+import { AiEvalModule } from './eval/ai-eval.module'
 import { FeatureCatalogModule } from './feature-catalog/feature-catalog.module'
 import { OrchestratorModule } from './orchestrator/orchestrator.module'
 import { PromptRegistryModule } from './prompt-registry/prompt-registry.module'
+import { SemanticSearchModule } from './semantic-search/semantic-search.module'
+import { AiSimulationModule } from './simulation/ai-simulation.module'
 import { UsageBudgetModule } from './usage-budget/usage-budget.module'
 import { AiWritebackModule } from './writeback/ai-writeback.module'
 import { AgentConfigModule } from '../agent-config/agent-config.module'
@@ -31,6 +34,9 @@ import { PrismaModule } from '../../prisma/prisma.module'
     UsageBudgetModule,
     AiChatModule,
     AiWritebackModule,
+    AiEvalModule,
+    AiSimulationModule,
+    SemanticSearchModule,
   ],
   controllers: [AiController, AiOpsWorkspaceController],
   providers: [AiRepository, AiService, AiOpsWorkspaceService],
@@ -42,6 +48,9 @@ import { PrismaModule } from '../../prisma/prisma.module'
     FeatureCatalogModule,
     UsageBudgetModule,
     AiWritebackModule,
+    AiEvalModule,
+    AiSimulationModule,
+    SemanticSearchModule,
   ],
 })
 export class AiModule {}

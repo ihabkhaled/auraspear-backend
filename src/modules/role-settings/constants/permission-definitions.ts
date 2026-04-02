@@ -1018,4 +1018,32 @@ export const PERMISSION_DEFINITIONS: PermissionDefinitionSeed[] = [
     labelKey: 'roleSettings.permissions.aiFinops.manage',
     sortOrder: 2861,
   },
+
+  // ─── AI Eval Lab ───
+  {
+    key: Permission.AI_EVAL_VIEW,
+    module: 'aiEval',
+    labelKey: 'roleSettings.permissions.aiEval.view',
+    sortOrder: 2880,
+  },
+  {
+    key: Permission.AI_EVAL_MANAGE,
+    module: 'aiEval',
+    labelKey: 'roleSettings.permissions.aiEval.manage',
+    sortOrder: 2881,
+  },
+
+  // ─── AI Simulation ───
+  {
+    key: Permission.AI_SIMULATION_VIEW,
+    module: 'aiSimulation',
+    labelKey: 'roleSettings.permissions.aiSimulation.view',
+    sortOrder: 2900,
+  },
+  {
+    key: Permission.AI_SIMULATION_MANAGE,
+    module: 'aiSimulation',
+    labelKey: 'roleSettings.permissions.aiSimulation.manage',
+    sortOrder: 2901,
+  },
 ]

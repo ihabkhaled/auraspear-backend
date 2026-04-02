@@ -1,5 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common'
 import { AgentEventListenerService } from './agent-event-listener.service'
+import { AgentGraphController } from './agent-graph.controller'
+import { AgentGraphService } from './agent-graph.service'
 import { AgentSchedulerService } from './agent-scheduler.service'
 import { OrchestratorController } from './orchestrator.controller'
 import { OrchestratorRepository } from './orchestrator.repository'
@@ -21,12 +23,13 @@ import { UsageBudgetModule } from '../usage-budget/usage-budget.module'
     AppLogsModule,
     PrismaModule,
   ],
-  controllers: [OrchestratorController, ScheduleController],
+  controllers: [OrchestratorController, ScheduleController, AgentGraphController],
   providers: [
     OrchestratorRepository,
     OrchestratorService,
     AgentEventListenerService,
     AgentSchedulerService,
+    AgentGraphService,
     ScheduleRepository,
     ScheduleService,
   ],
@@ -34,6 +37,7 @@ import { UsageBudgetModule } from '../usage-budget/usage-budget.module'
     OrchestratorService,
     AgentEventListenerService,
     AgentSchedulerService,
+    AgentGraphService,
     ScheduleService,
     ScheduleRepository,
   ],

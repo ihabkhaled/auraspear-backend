@@ -548,6 +548,9 @@ model Tenant {
   aiBudgetAlerts          AiBudgetAlert[]
   memoryRetentionPolicy   MemoryRetentionPolicy?
   aiTranscriptPolicy      AiTranscriptPolicy?
+  aiEvalSuites            AiEvalSuite[]
+  aiEvalRuns              AiEvalRun[]
+  aiSimulations           AiSimulation[]
 
   @@map("tenants")
 }
@@ -2663,4 +2666,80 @@ model AiTranscriptPolicy {
 
   @@unique([tenantId])
   @@map("ai_transcript_policies")
+}
+
+// ─── AI Evaluation Lab ──────────────────────────────────
+
+model AiEvalSuite {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  datasetJson Json     @map("dataset_json")
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  runs   AiEvalRun[]
+
+  @@index([tenantId])
+  @@map("ai_eval_suites")
+}
+
+model AiEvalRun {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  suiteId      String    @map("suite_id") @db.Uuid
+  provider     String    @db.VarChar(100)
+  model        String    @db.VarChar(255)
+  status       String    @default("pending") @db.VarChar(30)
+  totalCases   Int       @default(0) @map("total_cases")
+  passedCases  Int       @default(0) @map("passed_cases")
+  failedCases  Int       @default(0) @map("failed_cases")
+  avgScore     Float?    @map("avg_score")
+  avgLatencyMs Float?    @map("avg_latency_ms")
+  totalTokens  Int       @default(0) @map("total_tokens")
+  resultsJson  Json?     @map("results_json")
+  errorMessage String?   @map("error_message") @db.Text
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  createdBy    String    @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  suite  AiEvalSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([suiteId])
+  @@map("ai_eval_runs")
+}
+
+// ─── AI Simulation & Backtesting ────────────────────────
+
+model AiSimulation {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  name           String    @db.VarChar(255)
+  description    String?   @db.Text
+  agentId        String    @map("agent_id") @db.VarChar(50)
+  datasetJson    Json      @map("dataset_json")
+  status         String    @default("pending") @db.VarChar(30)
+  totalCases     Int       @default(0) @map("total_cases")
+  completedCases Int       @default(0) @map("completed_cases")
+  resultsJson    Json?     @map("results_json")
+  avgScore       Float?    @map("avg_score")
+  avgLatencyMs   Float?    @map("avg_latency_ms")
+  totalTokens    Int       @default(0) @map("total_tokens")
+  errorMessage   String?   @map("error_message") @db.Text
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdBy      String    @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, agentId])
+  @@map("ai_simulations")
 }
