@@ -24,7 +24,11 @@ CREATE TABLE IF NOT EXISTS "ai_transcript_policies" (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "ai_transcript_policies_tenant_id_key" ON "ai_transcript_policies"("tenant_id");
-ALTER TABLE "ai_transcript_policies" ADD CONSTRAINT "ai_transcript_policies_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+DO $$ BEGIN
+  ALTER TABLE "ai_transcript_policies" ADD CONSTRAINT "ai_transcript_policies_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Seed AI Transcript permissions
 INSERT INTO "permission_definitions" ("id", "tenant_id", "key", "module", "label_key", "sort_order", "created_at")
@@ -49,20 +53,28 @@ WHERE NOT EXISTS (
 );
 
 -- Grant transcript view+manage+export to admin/operator
-INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
-SELECT gen_random_uuid(), t.id, r.role::text::"UserRole", p.perm, true, NOW(), NOW()
-FROM "tenants" t
-CROSS JOIN (VALUES ('PLATFORM_OPERATOR'), ('TENANT_ADMIN')) AS r(role)
-CROSS JOIN (VALUES ('ai.transcript.view'), ('ai.transcript.manage'), ('ai.transcript.export')) AS p(perm)
-WHERE NOT EXISTS (
-    SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = r.role AND rp.permission_key = p.perm
-);
+DO $$ BEGIN
+  INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
+  SELECT gen_random_uuid(), t.id, r.role::text::"UserRole", p.perm, true, NOW(), NOW()
+  FROM "tenants" t
+  CROSS JOIN (VALUES ('PLATFORM_OPERATOR'), ('TENANT_ADMIN')) AS r(role)
+  CROSS JOIN (VALUES ('ai.transcript.view'), ('ai.transcript.manage'), ('ai.transcript.export')) AS p(perm)
+  WHERE NOT EXISTS (
+      SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = r.role AND rp.permission_key = p.perm
+  );
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'transcript admin role_permissions insert skipped: %', SQLERRM;
+END $$;
 
 -- Grant transcript view+export to auditor
-INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
-SELECT gen_random_uuid(), t.id, 'AUDITOR_READONLY'::"UserRole", p.perm, true, NOW(), NOW()
-FROM "tenants" t
-CROSS JOIN (VALUES ('ai.transcript.view'), ('ai.transcript.export')) AS p(perm)
-WHERE NOT EXISTS (
-    SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = 'AUDITOR_READONLY' AND rp.permission_key = p.perm
-);
+DO $$ BEGIN
+  INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
+  SELECT gen_random_uuid(), t.id, 'AUDITOR_READONLY'::"UserRole", p.perm, true, NOW(), NOW()
+  FROM "tenants" t
+  CROSS JOIN (VALUES ('ai.transcript.view'), ('ai.transcript.export')) AS p(perm)
+  WHERE NOT EXISTS (
+      SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = 'AUDITOR_READONLY' AND rp.permission_key = p.perm
+  );
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'transcript auditor role_permissions insert skipped: %', SQLERRM;
+END $$;

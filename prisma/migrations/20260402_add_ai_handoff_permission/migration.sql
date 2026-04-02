@@ -7,12 +7,16 @@ WHERE NOT EXISTS (
 );
 
 -- Grant to operational roles
-INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
-SELECT gen_random_uuid(), t.id, r.role::text::"UserRole", 'ai.handoff.promote', true, NOW(), NOW()
-FROM "tenants" t
-CROSS JOIN (VALUES
-    ('PLATFORM_OPERATOR'), ('TENANT_ADMIN'), ('INCIDENT_RESPONDER'), ('SOC_ANALYST_L2'), ('THREAT_HUNTER')
-) AS r(role)
-WHERE NOT EXISTS (
-    SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = r.role AND rp.permission_key = 'ai.handoff.promote'
-);
+DO $$ BEGIN
+  INSERT INTO "role_permissions" ("id", "tenant_id", "role", "permission_key", "allowed", "created_at", "updated_at")
+  SELECT gen_random_uuid(), t.id, r.role::text::"UserRole", 'ai.handoff.promote', true, NOW(), NOW()
+  FROM "tenants" t
+  CROSS JOIN (VALUES
+      ('PLATFORM_OPERATOR'), ('TENANT_ADMIN'), ('INCIDENT_RESPONDER'), ('SOC_ANALYST_L2'), ('THREAT_HUNTER')
+  ) AS r(role)
+  WHERE NOT EXISTS (
+      SELECT 1 FROM "role_permissions" rp WHERE rp.tenant_id = t.id AND rp.role::text = r.role AND rp.permission_key = 'ai.handoff.promote'
+  );
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'ai.handoff.promote role_permissions insert skipped: %', SQLERRM;
+END $$;
