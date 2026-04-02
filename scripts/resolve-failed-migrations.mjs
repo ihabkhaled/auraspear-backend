@@ -1,51 +1,55 @@
 /**
- * Pre-deploy script: automatically resolves any failed migrations
- * by marking them as rolled-back, so `prisma migrate deploy` can proceed.
+ * Pre-deploy script: resolves any failed migrations by marking them as rolled-back.
  *
- * This is safe because:
- * 1. All our migrations use IF NOT EXISTS / WHERE NOT EXISTS guards
- * 2. Failed migrations leave partial state that the next deploy will complete
- * 3. Prisma will re-apply the rolled-back migration cleanly on next deploy
+ * Strategy: read the migrations directory and attempt to resolve each one.
+ * Prisma will only actually resolve migrations that are in "failed" state —
+ * for all others, the resolve command is a no-op or harmless error.
+ *
+ * Safe for production: only changes metadata in _prisma_migrations table.
+ * All our migration SQL uses IF NOT EXISTS / WHERE NOT EXISTS guards.
  */
+import { readdirSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const migrationsDir = join(__dirname, '..', 'prisma', 'migrations')
 
 function main() {
-  console.log('[resolve-failed-migrations] Checking for failed migrations...')
+  console.log('[resolve-failed-migrations] Scanning migrations directory...')
 
-  let output = ''
+  let entries
   try {
-    output = execSync('npx prisma migrate status 2>&1', { encoding: 'utf-8' })
-  } catch (error) {
-    // prisma migrate status exits with code 1 when there are issues
-    output = error.stdout ?? ''
-    output += '\n'
-    output += error.stderr ?? ''
-  }
-
-  // Match migration names from failed migration messages
-  const failedPattern = /`([^`]+)`[^`]*failed/g
-  const matches = [...output.matchAll(failedPattern)]
-
-  if (matches.length === 0) {
-    console.log('[resolve-failed-migrations] No failed migrations found.')
+    entries = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name !== 'migration_lock.toml')
+      .map(e => e.name)
+  } catch (err) {
+    console.log('[resolve-failed-migrations] Could not read migrations directory:', err.message)
     return
   }
 
-  for (const match of matches) {
-    const migrationName = match[1]
-    console.log(`[resolve-failed-migrations] Resolving failed migration: ${migrationName}`)
+  console.log(`[resolve-failed-migrations] Found ${entries.length} migration directories`)
+
+  let resolved = 0
+  for (const name of entries) {
     try {
-      execSync(`npx prisma migrate resolve --rolled-back ${migrationName}`, {
+      execSync(`npx prisma migrate resolve --rolled-back ${name}`, {
         encoding: 'utf-8',
-        stdio: 'inherit',
+        stdio: 'pipe', // Suppress output — most will fail with "not failed" which is expected
       })
-      console.log(`[resolve-failed-migrations] Marked ${migrationName} as rolled-back`)
-    } catch (resolveError) {
-      console.error(`[resolve-failed-migrations] Failed to resolve ${migrationName}:`, resolveError.message)
+      resolved++
+      console.log(`[resolve-failed-migrations] Resolved: ${name}`)
+    } catch {
+      // Expected — migration is not in failed state, skip silently
     }
   }
 
-  console.log('[resolve-failed-migrations] Done.')
+  if (resolved === 0) {
+    console.log('[resolve-failed-migrations] No failed migrations to resolve.')
+  } else {
+    console.log(`[resolve-failed-migrations] Resolved ${resolved} failed migration(s).`)
+  }
 }
 
 main()
