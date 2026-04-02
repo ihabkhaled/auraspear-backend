@@ -14,6 +14,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { buildPaginationMeta } from '../../../common/interfaces/pagination.interface'
 import { AppLoggerService } from '../../../common/services/app-logger.service'
 import { daysAgo, diffMs, toIso } from '../../../common/utils/date-time.utility'
+import { resolveExecutionAgent } from '../../agent-config/agent-config.constants'
 import { AgentConfigService } from '../../agent-config/agent-config.service'
 import { JobType } from '../../jobs/enums/job.enums'
 import { JobService } from '../../jobs/jobs.service'
@@ -54,7 +55,9 @@ export class OrchestratorService {
   /* ---------------------------------------------------------------- */
 
   async dispatchAgentTask(input: DispatchAgentTaskInput): Promise<DispatchAgentTaskResult> {
-    const { tenantId, agentId, actionType } = input
+    const { tenantId, actionType } = input
+    // Resolve specialist agent alias to its core execution agent
+    const agentId = resolveExecutionAgent(input.agentId)
 
     const agentConfig = await this.agentConfigService.getAgentConfig(tenantId, agentId)
 
@@ -71,6 +74,11 @@ export class OrchestratorService {
     const resolved = this.resolveAutomationMode(agentConfig, actionType)
     const job = await this.enqueueAgentJob(input, resolved)
 
+    // Create approval record when approval is required
+    if (resolved.requiresApproval) {
+      await this.createApprovalRecord(input, job.id, agentConfig)
+    }
+
     this.logDispatchSuccess(input, job.id, resolved)
 
     return {
@@ -78,6 +86,36 @@ export class OrchestratorService {
       jobId: job.id,
       automationMode: resolved.mode,
       requiresApproval: resolved.requiresApproval,
+    }
+  }
+
+  private async createApprovalRecord(
+    input: DispatchAgentTaskInput,
+    jobId: string,
+    _agentConfig: AgentConfigWithDefaults
+  ): Promise<void> {
+    try {
+      const expiresAt = new Date()
+      expiresAt.setHours(expiresAt.getHours() + 24)
+
+      await this.agentConfigService.createApproval({
+        tenantId: input.tenantId,
+        agentId: input.agentId,
+        actionType: input.actionType,
+        actionData: {
+          jobId,
+          payload: input.payload ?? {},
+          triggeredBy: input.triggeredBy,
+        },
+        riskLevel: 'medium',
+        requestedBy: input.triggeredBy,
+        expiresAt,
+      })
+
+      this.logger.log(`Approval record created for agent ${input.agentId} (job ${jobId})`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.logger.warn(`Failed to create approval record: ${message}`)
     }
   }
 

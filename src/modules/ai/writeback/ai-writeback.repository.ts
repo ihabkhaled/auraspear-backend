@@ -350,6 +350,23 @@ export class AiWritebackRepository {
     })
   }
 
+  /** Export findings (no pagination, with optional filters). */
+  async exportFindings(
+    tenantId: string,
+    filters?: { status?: string; agentId?: string; sourceModule?: string }
+  ): Promise<AiExecutionFinding[]> {
+    const where: Record<string, unknown> = { tenantId }
+    if (filters?.status) where['status'] = filters.status
+    if (filters?.agentId) where['agentId'] = filters.agentId
+    if (filters?.sourceModule) where['sourceModule'] = filters.sourceModule
+
+    return this.prisma.aiExecutionFinding.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    })
+  }
+
   /**
    * Update the status of a finding. Returns the updated finding or null if not found.
    */
@@ -384,6 +401,18 @@ export class AiWritebackRepository {
   /** Bulk-create AI execution findings. */
   async createFindings(data: CreateFindingData[]): Promise<{ count: number }> {
     return this.prisma.aiExecutionFinding.createMany({ data })
+  }
+
+  /** Bulk update status for multiple findings. */
+  async bulkUpdateStatus(
+    tenantId: string,
+    ids: string[],
+    data: Record<string, unknown>
+  ): Promise<{ count: number }> {
+    return this.prisma.aiExecutionFinding.updateMany({
+      where: { id: { in: ids }, tenantId },
+      data,
+    })
   }
 
   /** Update alert AI-related fields for a given tenant + alert ID. */

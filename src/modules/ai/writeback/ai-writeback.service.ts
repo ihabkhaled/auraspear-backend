@@ -105,6 +105,32 @@ export class AiWritebackService {
     return updated
   }
 
+  /** Bulk update status for multiple findings. */
+  async bulkUpdateStatus(
+    tenantId: string,
+    ids: string[],
+    newStatus: string
+  ): Promise<{ updated: number }> {
+    if (ids.length === 0) return { updated: 0 }
+    if (ids.length > 100) {
+      throw new BusinessException(400, 'Maximum 100 findings per bulk action', 'errors.ai.bulkLimitExceeded')
+    }
+
+    const updateData: Record<string, unknown> = { status: newStatus }
+    if (newStatus === AiFindingStatus.APPLIED) {
+      updateData['appliedAt'] = nowDate()
+    }
+
+    const result = await this.repository.bulkUpdateStatus(tenantId, ids, updateData)
+
+    this.log.success('bulkUpdateStatus', tenantId, {
+      count: result.count,
+      newStatus,
+    })
+
+    return { updated: result.count }
+  }
+
   /**
    * Process and persist results from a completed system-triggered AI run.
    * Called by AiAgentTaskHandler after successful AI execution.
@@ -122,14 +148,17 @@ export class AiWritebackService {
       // 1. Parse structured findings from AI response
       const findings = this.parseFindings(params)
 
-      // 2. Persist findings to ai_execution_findings table
+      // 1.5. Quality gate: suppress placeholder/heartbeat findings
+      const meaningfulFindings = findings.filter(f => this.isMeaningfulFinding(f))
+
+      // 2. Persist only meaningful findings to ai_execution_findings table
       await this.persistFindings(
         params.tenantId,
         params.sessionId,
         params.agentId,
         params.sourceModule,
         params.sourceEntityId,
-        findings
+        meaningfulFindings
       )
 
       // 3. Write back to source entity (alert, case, incident, etc.)
@@ -137,7 +166,7 @@ export class AiWritebackService {
 
       // 4. Update session counts only when a real AiAgentSession record exists
       if (params.hasRealSession !== false) {
-        await this.updateSessionCounts(params.sessionId, findings.length)
+        await this.updateSessionCounts(params.sessionId, meaningfulFindings.length)
       }
 
       // 5. Create notification for tenant admin
@@ -150,13 +179,14 @@ export class AiWritebackService {
       })
 
       // 6. Persist job run summary for the AI Job Runs dashboard
-      await this.persistJobRunSummary(params, findings.length)
+      await this.persistJobRunSummary(params, meaningfulFindings.length)
 
       // 7. Log completion
       this.log.success('processSystemTriggeredResult', params.tenantId, {
         sessionId: params.sessionId,
         agentId: params.agentId,
-        findingsCount: findings.length,
+        findingsCount: meaningfulFindings.length,
+        suppressedCount: findings.length - meaningfulFindings.length,
         sourceModule: params.sourceModule,
       })
     } catch (error) {
@@ -166,6 +196,37 @@ export class AiWritebackService {
         sourceModule: params.sourceModule,
       })
     }
+  }
+
+  /**
+   * Quality gate: determine if a finding is meaningful enough for operator visibility.
+   * Placeholder, heartbeat, and no-context findings are suppressed and only logged
+   * in job run summaries instead of polluting the AI Findings workspace.
+   */
+  private isMeaningfulFinding(finding: ParsedAiFinding): boolean {
+    const minContentLength = 50
+    if (finding.summary.length < minContentLength) return false
+
+    const placeholderPatterns = [
+      'awaiting input',
+      'provide data',
+      'no data available',
+      'unable to analyze without',
+      'no context provided',
+      'waiting for context',
+      'scheduler:heartbeat',
+      'no alerts found',
+      'no incidents found',
+      'no cases found',
+      'nothing to analyze',
+    ]
+
+    const lowerSummary = finding.summary.toLowerCase()
+    for (const pattern of placeholderPatterns) {
+      if (lowerSummary.includes(pattern)) return false
+    }
+
+    return true
   }
 
   /**

@@ -301,6 +301,26 @@ export class AgentConfigService {
 
   // ─── Approvals ─────────────────────────────────────────────
 
+  async createApproval(data: {
+    tenantId: string
+    agentId: string
+    actionType: string
+    actionData: Record<string, unknown>
+    riskLevel: string
+    requestedBy: string
+    expiresAt: Date
+  }): Promise<AiApprovalRequestRecord> {
+    return this.repository.createApproval({
+      tenant: { connect: { id: data.tenantId } },
+      agentId: data.agentId,
+      actionType: data.actionType,
+      actionData: data.actionData as never,
+      riskLevel: data.riskLevel,
+      requestedBy: data.requestedBy,
+      expiresAt: data.expiresAt,
+    })
+  }
+
   async listApprovals(tenantId: string, status?: string): Promise<AiApprovalRequestRecord[]> {
     this.logger.log(`listApprovals called for tenant ${tenantId}`)
     return this.repository.findAllApprovals(tenantId, status)

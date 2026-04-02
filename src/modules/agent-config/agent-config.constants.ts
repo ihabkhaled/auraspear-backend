@@ -309,3 +309,43 @@ export const FEATURE_TO_AGENT_MAP: Record<AiFeatureKey, AiAgentId> = {
   [AiFeatureKey.UEBA_ANOMALY_EXPLAIN]: AiAgentId.L2_ANALYST,
   [AiFeatureKey.ATTACK_PATH_SUMMARIZE]: AiAgentId.THREAT_HUNTER,
 }
+
+/**
+ * Maps orphaned specialist agent IDs to their real execution agent.
+ * These specialist IDs appear in UI agent cards and schedule configs
+ * but have no direct execution handler — they delegate to the core agents.
+ * This allows toggling specialist agents to control feature subsets.
+ */
+export const AGENT_ALIAS_MAP: Record<string, AiAgentId> = {
+  [AiAgentId.ALERT_TRIAGE]: AiAgentId.L1_ANALYST,
+  [AiAgentId.CASE_CREATION]: AiAgentId.L2_ANALYST,
+  [AiAgentId.INCIDENT_ESCALATION]: AiAgentId.L2_ANALYST,
+  [AiAgentId.CORRELATION_SYNTHESIS]: AiAgentId.L2_ANALYST,
+  [AiAgentId.SIGMA_DRAFTING]: AiAgentId.RULES_ANALYST,
+  [AiAgentId.VULN_PRIORITIZATION]: AiAgentId.L2_ANALYST,
+  [AiAgentId.UEBA_NARRATIVE]: AiAgentId.L2_ANALYST,
+  [AiAgentId.ATTACK_PATH_SUMMARY]: AiAgentId.THREAT_HUNTER,
+  [AiAgentId.NORM_VERIFICATION]: AiAgentId.NORM_VERIFIER,
+  [AiAgentId.RULES_HYGIENE]: AiAgentId.RULES_ANALYST,
+  [AiAgentId.REPORTING]: AiAgentId.DASHBOARD_BUILDER,
+  [AiAgentId.ENTITY_LINKING]: AiAgentId.L2_ANALYST,
+  [AiAgentId.JOB_HEALTH]: AiAgentId.ORCHESTRATOR,
+  [AiAgentId.CLOUD_TRIAGE]: AiAgentId.L1_ANALYST,
+  [AiAgentId.SOAR_DRAFTING]: AiAgentId.ORCHESTRATOR,
+  [AiAgentId.THREAT_INTEL_SYNTHESIS]: AiAgentId.L2_ANALYST,
+  [AiAgentId.IOC_ENRICHMENT]: AiAgentId.L2_ANALYST,
+  [AiAgentId.MISP_FEED_REVIEW]: AiAgentId.L2_ANALYST,
+  [AiAgentId.KNOWLEDGE_BASE]: AiAgentId.L1_ANALYST,
+  [AiAgentId.NOTIFICATION_DIGEST]: AiAgentId.ORCHESTRATOR,
+  [AiAgentId.PROVIDER_HEALTH]: AiAgentId.ORCHESTRATOR,
+  [AiAgentId.APPROVAL_ADVISOR]: AiAgentId.ORCHESTRATOR,
+}
+
+/**
+ * Resolves an agent ID to its execution agent.
+ * If the agent has an alias, returns the real execution agent.
+ * If not, returns the original ID (it's already a core agent).
+ */
+export function resolveExecutionAgent(agentId: string): string {
+  return (AGENT_ALIAS_MAP[agentId] as string | undefined) ?? agentId
+}

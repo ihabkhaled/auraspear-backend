@@ -127,14 +127,15 @@ export class ScheduleRepository {
       return null
     }
 
-    const isSuccess = status === 'completed'
+    const isSuccess = status === 'completed' || status === 'dispatched'
+    const isNeutral = status === 'no_context' || status === 'skipped'
 
     return this.prisma.aiAgentSchedule.update({
       where: { id },
       data: {
         lastStatus: status,
         lastDurationMs: durationMs,
-        failureStreak: isSuccess ? 0 : schedule.failureStreak + 1,
+        failureStreak: isSuccess || isNeutral ? 0 : schedule.failureStreak + 1,
         successStreak: isSuccess ? schedule.successStreak + 1 : 0,
       },
     })

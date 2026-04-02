@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common'
@@ -46,8 +47,7 @@ export class AiWritebackController {
 
   /**
    * GET /ai/findings/stats
-   * Get aggregated stats for AI findings, tenant-scoped.
-   * IMPORTANT: This route must be defined BEFORE the :id route.
+   * IMPORTANT: Static routes must be defined BEFORE :id parameter routes.
    */
   @Get('stats')
   @RequirePermission(Permission.AI_AGENTS_VIEW)
@@ -56,8 +56,54 @@ export class AiWritebackController {
   }
 
   /**
+   * GET /ai/findings/export
+   * Export all findings as array (no pagination) for CSV/JSON download.
+   * IMPORTANT: Must be defined BEFORE :id route.
+   */
+  @Get('export')
+  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  async exportFindings(
+    @TenantId() tenantId: string,
+    @Query('status') status?: string,
+    @Query('agentId') agentId?: string,
+    @Query('sourceModule') sourceModule?: string
+  ): Promise<AiExecutionFinding[]> {
+    return this.repository.exportFindings(tenantId, { status, agentId, sourceModule })
+  }
+
+  /**
+   * GET /ai/findings/by-entity/:entityType/:entityId
+   * Get all findings for a specific source entity (alert, case, incident).
+   * IMPORTANT: Must be defined BEFORE :id route.
+   */
+  @Get('by-entity/:entityType/:entityId')
+  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  async findingsByEntity(
+    @TenantId() tenantId: string,
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string
+  ): Promise<AiExecutionFinding[]> {
+    return this.repository.findingsByEntity(tenantId, entityType, entityId)
+  }
+
+  /**
+   * POST /ai/findings/bulk-status
+   * Update status for multiple findings at once.
+   * IMPORTANT: Must be defined BEFORE :id route.
+   */
+  @Post('bulk-status')
+  @RequirePermission(Permission.AI_AGENTS_VIEW)
+  async bulkUpdateStatus(
+    @TenantId() tenantId: string,
+    @Body() body: { ids: string[]; status: string }
+  ): Promise<{ updated: number }> {
+    return this.service.bulkUpdateStatus(tenantId, body.ids, body.status)
+  }
+
+  /**
    * GET /ai/findings/:id
    * Get a single AI execution finding by ID, tenant-scoped.
+   * IMPORTANT: This must come AFTER all static path routes (stats, export, by-entity, bulk-status).
    */
   @Get(':id')
   @RequirePermission(Permission.AI_AGENTS_VIEW)
@@ -81,19 +127,5 @@ export class AiWritebackController {
   ): Promise<AiExecutionFinding> {
     const { status } = UpdateFindingStatusSchema.parse(body)
     return this.service.updateFindingStatus(tenantId, id, status)
-  }
-
-  /**
-   * GET /ai/findings/by-entity/:entityType/:entityId
-   * Get all findings for a specific source entity (alert, case, incident).
-   */
-  @Get('by-entity/:entityType/:entityId')
-  @RequirePermission(Permission.AI_AGENTS_VIEW)
-  async findingsByEntity(
-    @TenantId() tenantId: string,
-    @Param('entityType') entityType: string,
-    @Param('entityId') entityId: string
-  ): Promise<AiExecutionFinding[]> {
-    return this.repository.findingsByEntity(tenantId, entityType, entityId)
   }
 }

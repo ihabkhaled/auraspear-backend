@@ -1,12 +1,18 @@
 import { AiHandoffService } from '../../src/modules/ai/writeback/ai-handoff.service'
 
 function createMockPrisma() {
+  const mockCase = { findFirst: jest.fn(), create: jest.fn() }
+  const mockIncident = { findFirst: jest.fn(), create: jest.fn() }
+
   return {
     $queryRaw: jest.fn(),
+    $transaction: jest.fn((fn: (tx: unknown) => Promise<unknown>) =>
+      fn({ case: mockCase, incident: mockIncident })
+    ),
     aiExecutionFinding: { findFirst: jest.fn(), update: jest.fn() },
     aiFindingOutputLink: { create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
-    case: { create: jest.fn() },
-    incident: { create: jest.fn() },
+    case: mockCase,
+    incident: mockIncident,
   }
 }
 
@@ -40,7 +46,8 @@ describe('AiHandoffService', () => {
   describe('promote', () => {
     it('should create a case from a proposed finding', async () => {
       prisma.aiExecutionFinding.findFirst.mockResolvedValue(buildFinding())
-      prisma.case.create.mockResolvedValue({ id: 'case-001' })
+      prisma.case.findFirst.mockResolvedValue(null)
+      prisma.case.create.mockResolvedValue({ id: 'case-001', caseNumber: 'SOC-2026-001' })
       prisma.aiFindingOutputLink.create.mockResolvedValue({ id: 'link-001', findingId: FINDING_ID, linkedModule: 'case', linkedEntityId: 'case-001' })
       prisma.aiExecutionFinding.update.mockResolvedValue({ ...buildFinding(), status: 'applied' })
 
@@ -63,7 +70,8 @@ describe('AiHandoffService', () => {
 
     it('should create an incident from a proposed finding', async () => {
       prisma.aiExecutionFinding.findFirst.mockResolvedValue(buildFinding())
-      prisma.incident.create.mockResolvedValue({ id: 'inc-001' })
+      prisma.incident.findFirst.mockResolvedValue(null)
+      prisma.incident.create.mockResolvedValue({ id: 'inc-001', incidentNumber: 'INC-2026-001' })
       prisma.aiFindingOutputLink.create.mockResolvedValue({ id: 'link-002', findingId: FINDING_ID, linkedModule: 'incident', linkedEntityId: 'inc-001' })
       prisma.aiExecutionFinding.update.mockResolvedValue({ ...buildFinding(), status: 'applied' })
 
