@@ -41,8 +41,12 @@ CREATE INDEX IF NOT EXISTS "ai_cost_rates_tenant_id_idx" ON "ai_cost_rates"("ten
 CREATE INDEX IF NOT EXISTS "ai_budget_alerts_tenant_id_idx" ON "ai_budget_alerts"("tenant_id");
 
 -- Additional indexes on existing ai_usage_ledger for FinOps queries
-CREATE INDEX IF NOT EXISTS "ai_usage_ledger_tenant_id_user_id_idx" ON "ai_usage_ledger"("tenant_id", "user_id");
-CREATE INDEX IF NOT EXISTS "ai_usage_ledger_tenant_id_model_idx" ON "ai_usage_ledger"("tenant_id", "model");
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ai_usage_ledger') THEN
+    CREATE INDEX IF NOT EXISTS "ai_usage_ledger_tenant_id_user_id_idx" ON "ai_usage_ledger"("tenant_id", "user_id");
+    CREATE INDEX IF NOT EXISTS "ai_usage_ledger_tenant_id_model_idx" ON "ai_usage_ledger"("tenant_id", "model");
+  END IF;
+END $$;
 
 -- Foreign keys (idempotent — skip if already exists)
 DO $$ BEGIN
